@@ -18,10 +18,14 @@ fn main() {
     let mut cpu = Cpu::new();
     cpu.reset(&mut bus);
 
+    // TV dimensions for 90s CRT frame
+    const TV_WIDTH: usize = 800;
+    const TV_HEIGHT: usize = 680;
+    
     let mut window = Window::new(
         "NES Emulator",
-        512,
-        480,
+        TV_WIDTH,
+        TV_HEIGHT,
         WindowOptions {
             scale: Scale::X1,
             ..WindowOptions::default()
@@ -113,6 +117,12 @@ fn main() {
     }
 
     let mut crt_buffer: Vec<u32> = vec![0; 512 * 480];
+    
+    // Build static TV frame once at startup (zero per-frame cost)
+    let mut tv_frame_bg = Vec::new();
+    build_tv_frame(&mut tv_frame_bg);
+    let mut composite_buffer = vec![0u32; TV_WIDTH * TV_HEIGHT];
+    
     // Pre-compute vignette lookup table (same every frame)
     let vignette_table = {
         let dst_w = 512;
@@ -158,9 +168,12 @@ fn main() {
         } else {
             scale_2x(&bus.ppu.frame_data, &mut crt_buffer);
         }
+        
+        // Composite game output into TV frame
+        composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer);
 
         window
-            .update_with_buffer(&crt_buffer, 512, 480)
+            .update_with_buffer(&composite_buffer, TV_WIDTH, TV_HEIGHT)
             .expect("Failed to update window");
 
         handle_input(&window, &mut bus, &mut gilrs);
@@ -260,14 +273,13 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>) {
             if stick_y > deadzone { up_pressed = true; }
             if stick_y < -deadzone { down_pressed = true; }
             
-            // Face buttons - flexible mapping for different preferences
-            // NES A = East (Xbox B) or South (Xbox A)
-            a_pressed |= gamepad.is_pressed(Button::East);
-            a_pressed |= gamepad.is_pressed(Button::South);
+            // Face buttons — clean 1:1 mapping + turbo alternatives
+            // Xbox A (South) = NES B, Xbox B (East) = NES A
+            a_pressed |= gamepad.is_pressed(Button::East);   // Xbox B → NES A
+            a_pressed |= gamepad.is_pressed(Button::North);  // Xbox Y → NES A (turbo alt)
             
-            // NES B = South (Xbox A) or West (Xbox X)
-            b_pressed |= gamepad.is_pressed(Button::South);
-            b_pressed |= gamepad.is_pressed(Button::West);
+            b_pressed |= gamepad.is_pressed(Button::South);  // Xbox A → NES B
+            b_pressed |= gamepad.is_pressed(Button::West);   // Xbox X → NES B (turbo alt)
             
             // Start / Select
             start_pressed |= gamepad.is_pressed(Button::Start);
@@ -356,5 +368,97 @@ fn scale_2x(input: &[u32], output: &mut Vec<u32>) {
             output[(dst_y + 1) * 512 + dst_x] = pixel;
             output[(dst_y + 1) * 512 + dst_x + 1] = pixel;
         }
+    }
+}
+
+fn build_tv_frame(frame: &mut Vec<u32>) {
+    const TV_WIDTH: usize = 800;
+    const TV_HEIGHT: usize = 680;
+    const SCREEN_X: usize = 144;  // (800 - 512) / 2
+    const SCREEN_Y: usize = 60;
+    const SCREEN_W: usize = 512;
+    const SCREEN_H: usize = 480;
+    
+    frame.resize(TV_WIDTH * TV_HEIGHT, 0);
+    
+    for y in 0..TV_HEIGHT {
+        for x in 0..TV_WIDTH {
+            let idx = y * TV_WIDTH + x;
+            
+            // Check if in screen area
+            let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W 
+                         && y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H;
+            
+            if in_screen {
+                // Screen area — will be overwritten with game output
+                frame[idx] = 0x000000;
+            } else {
+                // TV bezel
+                let edge_dist_x = x.min(TV_WIDTH - 1 - x) as f32 / TV_WIDTH as f32;
+                let edge_dist_y = y.min(TV_HEIGHT - 1 - y) as f32 / TV_HEIGHT as f32;
+                let edge_dist = edge_dist_x.min(edge_dist_y);
+                
+                // Base bezel color (dark warm gray, like a 90s TV)
+                let base_r: u32 = 55;
+                let base_g: u32 = 52;
+                let base_b: u32 = 50;
+                
+                // Slight gradient for 3D effect — lighter toward top-left
+                let highlight = if y < TV_HEIGHT / 2 { 
+                    (15.0 * (1.0 - y as f32 / (TV_HEIGHT as f32 / 2.0))) as u32
+                } else { 0 };
+                
+                // Darken at very edges (rounded corner illusion)
+                let corner_dark = if edge_dist < 0.02 {
+                    ((0.02 - edge_dist) / 0.02 * 30.0) as u32
+                } else { 0 };
+                
+                // Inner bevel near screen
+                let screen_dist_x = if x < SCREEN_X { SCREEN_X - x } 
+                                   else if x >= SCREEN_X + SCREEN_W { x - (SCREEN_X + SCREEN_W) + 1 }
+                                   else { 999 };
+                let screen_dist_y = if y < SCREEN_Y { SCREEN_Y - y }
+                                   else if y >= SCREEN_Y + SCREEN_H { y - (SCREEN_Y + SCREEN_H) + 1 }
+                                   else { 999 };
+                let screen_dist = screen_dist_x.min(screen_dist_y);
+                
+                let bevel = if screen_dist < 8 {
+                    (8 - screen_dist) as u32 * 3
+                } else { 0 };
+                
+                let r = (base_r + highlight).saturating_sub(corner_dark).saturating_sub(bevel).min(255);
+                let g = (base_g + highlight).saturating_sub(corner_dark).saturating_sub(bevel).min(255);
+                let b = (base_b + highlight).saturating_sub(corner_dark).saturating_sub(bevel).min(255);
+                
+                frame[idx] = (r << 16) | (g << 8) | b;
+                
+                // Brand label area at bottom center
+                if y >= SCREEN_Y + SCREEN_H + 20 && y < SCREEN_Y + SCREEN_H + 35 
+                   && x >= TV_WIDTH / 2 - 30 && x < TV_WIDTH / 2 + 30 {
+                    // Slight lighter area for "brand" badge
+                    frame[idx] = 0x4A4745;
+                }
+            }
+        }
+    }
+}
+
+fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>) {
+    const TV_WIDTH: usize = 800;
+    const TV_HEIGHT: usize = 680;
+    const SCREEN_X: usize = 144;
+    const SCREEN_Y: usize = 60;
+    const SCREEN_W: usize = 512;
+    const SCREEN_H: usize = 480;
+    
+    result.resize(TV_WIDTH * TV_HEIGHT, 0);
+    result.copy_from_slice(tv_frame);
+    
+    // Copy game output into screen area
+    for y in 0..SCREEN_H {
+        let src_start = y * SCREEN_W;
+        let dst_start = (y + SCREEN_Y) * TV_WIDTH + SCREEN_X;
+        result[dst_start..dst_start + SCREEN_W]
+            .copy_from_slice(&game_output[src_start..src_start + SCREEN_W]);
     }
 }
