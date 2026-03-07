@@ -7,3 +7,8 @@ edition = "2021"
 minifb = "0.27"
 rfd = "0.15"
 cpal = "0.15"
+blip_buf = "0.1"
+ringbuf = "0.4"
+
+[profile.dev]
+opt-level = 2

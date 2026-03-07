@@ -307,6 +307,8 @@ impl NoiseChannel {
     }
 }
 
+use blip_buf::BlipBuf;
+
 pub struct Apu {
     pulse1: PulseChannel,
     pulse2: PulseChannel,
@@ -319,22 +321,53 @@ pub struct Apu {
     frame_cycle: usize,
     
     cycle: usize,
+    
+    // blip_buf for band-limited resampling
+    blip: BlipBuf,
+    
+    // Previous mixed output (to detect transitions)
+    prev_output: i32,
+    
+    // Clock cycle counter (reset each frame)
+    clock_cycle: u32,
+    
+    // Output samples ready for audio callback
     pub sample_buffer: Vec<f32>,
-    sample_rate: f64,
-    sample_timer: f64,
-    sample_period: f64,
-    filter_prev: f32,
-    dc_offset: f32,
+
+    // Pre-computed mixer lookup tables
+    pulse_table: [i32; 31],
+    tnd_table: [[i32; 16]; 16],
+
+    // Reusable read buffer for end_frame
+    read_buf: Vec<i16>,
 }
 
 impl Apu {
     pub fn set_sample_rate(&mut self, sample_rate: u32) {
-        let cpu_freq = 1789773.0;
-        self.sample_period = cpu_freq / sample_rate as f64;
+        self.blip.set_rates(1_789_773.0, sample_rate as f64);
     }
 
     pub fn new(sample_rate: u32) -> Self {
-        let cpu_freq = 1789773.0;
+        let mut blip = BlipBuf::new(sample_rate / 15); // buffer ~1/15 sec
+        blip.set_rates(1_789_773.0, sample_rate as f64);
+
+        // Pre-compute mixer lookup tables
+        let mut pulse_table = [0i32; 31];
+        for i in 1..31u32 {
+            let v = 95.88 / ((8128.0 / i as f64) + 100.0);
+            pulse_table[i as usize] = (v * 32000.0) as i32;
+        }
+
+        let mut tnd_table = [[0i32; 16]; 16];
+        for tri in 0..16u32 {
+            for noise in 0..16u32 {
+                if tri + noise > 0 {
+                    let v = 159.79 / ((1.0 / (tri as f64 / 8227.0 + noise as f64 / 12241.0)) + 100.0);
+                    tnd_table[tri as usize][noise as usize] = (v * 32000.0) as i32;
+                }
+            }
+        }
+
         Apu {
             pulse1: PulseChannel::new(true),
             pulse2: PulseChannel::new(false),
@@ -345,12 +378,13 @@ impl Apu {
             frame_step: 0,
             frame_cycle: 0,
             cycle: 0,
-            sample_buffer: Vec::with_capacity(1024),
-            sample_rate: sample_rate as f64,
-            sample_timer: 0.0,
-            sample_period: cpu_freq / sample_rate as f64,
-            filter_prev: 0.0,
-            dc_offset: 0.0,
+            blip,
+            prev_output: 0,
+            clock_cycle: 0,
+            sample_buffer: Vec::with_capacity(2048),
+            pulse_table,
+            tnd_table,
+            read_buf: Vec::with_capacity(2048),
         }
     }
     
@@ -472,45 +506,42 @@ impl Apu {
             _ => {}
         }
         
-        // Generate samples at the output sample rate
-        self.sample_timer += 1.0;
-        if self.sample_timer >= self.sample_period {
-            self.sample_timer -= self.sample_period;
-            let sample = self.mix();
-            self.sample_buffer.push(sample);
+        // Record transition if output changed
+        let output = self.mix_output();
+        if output != self.prev_output {
+            self.blip.add_delta(self.clock_cycle, output - self.prev_output);
+            self.prev_output = output;
         }
         
+        self.clock_cycle += 1;
         self.cycle += 1;
     }
     
-    fn mix(&mut self) -> f32 {
-        let p1 = self.pulse1.output() as f32;
-        let p2 = self.pulse2.output() as f32;
-        let tri = self.triangle.output() as f32;
-        let noise = self.noise.output() as f32;
+    // Mix channels to an integer amplitude value for blip_buf
+    // blip_buf works with i32 deltas
+    fn mix_output(&self) -> i32 {
+        let p1 = self.pulse1.output() as usize;
+        let p2 = self.pulse2.output() as usize;
+        let tri = self.triangle.output() as usize;
+        let noise = self.noise.output() as usize;
 
-        let pulse_out = if p1 + p2 > 0.0 {
-            95.88 / ((8128.0 / (p1 + p2)) + 100.0)
-        } else {
-            0.0
-        };
+        self.pulse_table[(p1 + p2).min(30)] + self.tnd_table[tri.min(15)][noise.min(15)]
+    }
+    
+    // Called at end of each emulated frame (~29780 CPU cycles)
+    pub fn end_frame(&mut self) {
+        self.blip.end_frame(self.clock_cycle);
+        self.clock_cycle = 0;
 
-        let tnd_out = if tri + noise > 0.0 {
-            159.79 / ((1.0 / (tri / 8227.0 + noise / 12241.0)) + 100.0)
-        } else {
-            0.0
-        };
+        let count = self.blip.samples_avail() as usize;
+        if count > 0 {
+            self.read_buf.resize(count, 0);
+            self.blip.read_samples(&mut self.read_buf, false);
 
-        let raw = pulse_out + tnd_out;
-
-        // First-order high-pass filter (AC coupling)
-        // Cutoff ~14Hz at 48kHz: alpha = 0.998
-        // y[n] = alpha * (y[n-1] + x[n] - x[n-1])
-        let output = 0.998 * (self.filter_prev + raw - self.dc_offset);
-        self.dc_offset = raw;       // store previous input
-        self.filter_prev = output;  // store previous output
-
-        (output * 2.5).clamp(-1.0, 1.0)
+            for &s in &self.read_buf {
+                self.sample_buffer.push(s as f32 / 32768.0);
+            }
+        }
     }
     
     pub fn drain_samples(&mut self) -> Vec<f32> {

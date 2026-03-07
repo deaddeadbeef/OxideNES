@@ -2,69 +2,12 @@ use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
 use std::env;
 use std::fs;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use ringbuf::{traits::*, HeapRb};
 
 use nes_emulator::bus::Bus;
 use nes_emulator::cartridge::Cartridge;
 use nes_emulator::cpu::Cpu;
 use nes_emulator::joypad::JoypadButton;
-
-struct RingBuffer {
-    data: Vec<f32>,
-    capacity: usize,
-    write_pos: AtomicUsize,
-    read_pos: AtomicUsize,
-}
-
-impl RingBuffer {
-    fn new(capacity: usize) -> Self {
-        RingBuffer {
-            data: vec![0.0; capacity],
-            capacity,
-            write_pos: AtomicUsize::new(0),
-            read_pos: AtomicUsize::new(0),
-        }
-    }
-
-    fn available_read(&self) -> usize {
-        let w = self.write_pos.load(Ordering::Acquire);
-        let r = self.read_pos.load(Ordering::Acquire);
-        if w >= r { w - r } else { self.capacity - r + w }
-    }
-
-    fn available_write(&self) -> usize {
-        self.capacity - 1 - self.available_read()
-    }
-
-    fn push(&self, sample: f32) -> bool {
-        if self.available_write() == 0 {
-            return false; // Buffer full, drop sample
-        }
-        let pos = self.write_pos.load(Ordering::Relaxed);
-        // Safety: single producer (main thread only writes)
-        unsafe {
-            let ptr = self.data.as_ptr() as *mut f32;
-            *ptr.add(pos) = sample;
-        }
-        self.write_pos.store((pos + 1) % self.capacity, Ordering::Release);
-        true
-    }
-
-    fn pop(&self) -> Option<f32> {
-        if self.available_read() == 0 {
-            return None;
-        }
-        let pos = self.read_pos.load(Ordering::Relaxed);
-        let sample = self.data[pos];
-        self.read_pos.store((pos + 1) % self.capacity, Ordering::Release);
-        Some(sample)
-    }
-}
-
-// Safety: single producer (main thread), single consumer (audio thread)
-unsafe impl Send for RingBuffer {}
-unsafe impl Sync for RingBuffer {}
 
 fn main() {
     let (rom_path, cartridge) = load_rom();
@@ -85,9 +28,11 @@ fn main() {
     )
     .expect("Failed to create window");
 
+    window.set_target_fps(60);
+
     // Audio ring buffer — lock-free, single producer / single consumer
-    let ring = Arc::new(RingBuffer::new(8192)); // ~170ms at 48kHz
-    let ring_audio = ring.clone();
+    let ring = HeapRb::<f32>::new(8192); // ~170ms at 48kHz
+    let (mut producer, mut consumer) = ring.split();
     let mut actual_sample_rate = 44100u32;
 
     let _stream = {
@@ -108,19 +53,16 @@ fn main() {
                         buffer_size: cpal::BufferSize::Default,
                     };
 
-                    let ring_cb = ring_audio.clone();
                     let mut last_sample: f32 = 0.0;
                     let stream = device.build_output_stream(
                         &config,
                         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                             for frame in data.chunks_mut(channels) {
-                                let sample = if let Some(s) = ring_cb.pop() {
-                                    last_sample = s;
-                                    s
-                                } else {
+                                let sample = consumer.try_pop().unwrap_or_else(|| {
                                     last_sample *= 0.995;
                                     last_sample
-                                };
+                                });
+                                last_sample = sample;
                                 for s in frame.iter_mut() {
                                     *s = sample;
                                 }
@@ -157,12 +99,29 @@ fn main() {
     println!("APU sample rate set to {}Hz", actual_sample_rate);
 
     // Pre-fill ring buffer to absorb timing jitter
-    for _ in 0..2000 {
-        ring.push(0.0);
+    for _ in 0..800 {
+        let _ = producer.try_push(0.0);
     }
 
     let mut crt_buffer: Vec<u32> = vec![0; 512 * 480];
+    // Pre-compute vignette lookup table (same every frame)
+    let vignette_table = {
+        let dst_w = 512;
+        let dst_h = 480;
+        let mut table = vec![0u16; dst_w * dst_h];
+        for dst_y in 0..dst_h {
+            for dst_x in 0..dst_w {
+                let fx = (dst_x as f32 / dst_w as f32) - 0.5;
+                let fy = (dst_y as f32 / dst_h as f32) - 0.5;
+                let v = (1.0 - (fx * fx + fy * fy) * 1.2).clamp(0.3, 1.0);
+                // Store as fixed-point: 0..256 maps to 0.0..1.0
+                table[dst_y * dst_w + dst_x] = (v * 256.0) as u16;
+            }
+        }
+        table
+    };
     let mut crt_enabled = true;
+    let mut audio_diag_printed = false;
 
     while window.is_open() {
         loop {
@@ -175,23 +134,28 @@ fn main() {
             }
         }
 
-        // Push audio samples with backpressure — this syncs frame rate to audio
+        // End APU frame and get band-limited samples
+        bus.apu.end_frame();
+
+        // Push audio samples — drop if buffer is full (never block the game)
         {
             let samples = bus.apu.drain_samples();
+            if !audio_diag_printed {
+                eprintln!("[Audio] First frame: {} samples produced, ring capacity: 8192, sample_rate: {}",
+                    samples.len(), actual_sample_rate);
+                audio_diag_printed = true;
+            }
             for &sample in &samples {
-                // If ring buffer is nearly full, wait for audio callback to consume
-                while ring.available_write() < 2 {
-                    std::thread::sleep(std::time::Duration::from_micros(50));
-                }
-                ring.push(sample);
+                let _ = producer.try_push(sample);
             }
         }
 
         if crt_enabled {
-            crt_filter(&bus.ppu.frame_data, &mut crt_buffer);
+            crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table);
         } else {
             scale_2x(&bus.ppu.frame_data, &mut crt_buffer);
         }
+
         window
             .update_with_buffer(&crt_buffer, 512, 480)
             .expect("Failed to update window");
@@ -275,7 +239,7 @@ fn handle_input(window: &Window, bus: &mut Bus) {
     }
 }
 
-fn crt_filter(input: &[u32], output: &mut Vec<u32>) {
+fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette: &[u16]) {
     let src_w = 256;
     let src_h = 240;
     let dst_w = 512;
@@ -283,74 +247,69 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>) {
 
     output.resize(dst_w * dst_h, 0);
 
+    // Phosphor pattern lookup: [sub_pixel][channel] = multiplier (fixed-point >>8)
+    // sub=0: R*1.15, G*0.85, B*0.85
+    // sub=1: R*0.85, G*1.15, B*0.85
+    // sub=2: R*0.85, G*0.85, B*1.15
+    const PHOSPHOR: [[u16; 3]; 3] = [
+        [294, 217, 217],  // 1.15*256, 0.85*256, 0.85*256
+        [217, 294, 217],
+        [217, 217, 294],
+    ];
+
+    // Scanline multiplier: normal=0.55*256=141, bright=1.0*256=256 (but we apply brightness 1.2 first)
+    // Combined brightness + scanline: normal_line=1.2*256=307, scanline=1.2*0.55*256=169
+    const BRIGHT: u16 = 307;  // 1.2 * 256
+    const SCANLINE: u16 = 169;  // 1.2 * 0.55 * 256
+
     for dst_y in 0..dst_h {
         let src_y = dst_y / 2;
-        let is_scanline = dst_y % 2 == 1;
+        let line_mul = if dst_y % 2 == 1 { SCANLINE } else { BRIGHT };
+        let row_offset = src_y * src_w;
+        let dst_row = dst_y * dst_w;
 
         for dst_x in 0..dst_w {
             let src_x = dst_x / 2;
 
             let pixel = if src_y < src_h && src_x < src_w {
-                input[src_y * src_w + src_x]
+                input[row_offset + src_x]
             } else {
                 0
             };
 
-            let mut r = ((pixel >> 16) & 0xFF) as f32;
-            let mut g = ((pixel >> 8) & 0xFF) as f32;
-            let mut b = (pixel & 0xFF) as f32;
+            let mut r = ((pixel >> 16) & 0xFF) as u32;
+            let mut g = ((pixel >> 8) & 0xFF) as u32;
+            let mut b = (pixel & 0xFF) as u32;
 
-            // Brightness boost to compensate for scanline darkening
-            r = (r * 1.2).min(255.0);
-            g = (g * 1.2).min(255.0);
-            b = (b * 1.2).min(255.0);
-
-            // Horizontal color bleed: blend slightly with neighbor pixel
+            // Color bleed with neighbors (integer approximation)
+            // Original: r = r*0.85 + (lr+rr)*0.075
+            // Fixed-point: r = (r*217 + (lr+rr)*19) >> 8
             if src_x > 0 && src_x < src_w - 1 {
-                let left = input[src_y * src_w + src_x - 1];
-                let right = input[src_y * src_w + src_x + 1];
-                let lr = ((left >> 16) & 0xFF) as f32;
-                let lg = ((left >> 8) & 0xFF) as f32;
-                let lb = (left & 0xFF) as f32;
-                let rr = ((right >> 16) & 0xFF) as f32;
-                let rg = ((right >> 8) & 0xFF) as f32;
-                let rb = (right & 0xFF) as f32;
+                let left = input[row_offset + src_x - 1];
+                let right = input[row_offset + src_x + 1];
+                let lr = ((left >> 16) & 0xFF) as u32;
+                let lg = ((left >> 8) & 0xFF) as u32;
+                let lb = (left & 0xFF) as u32;
+                let rr = ((right >> 16) & 0xFF) as u32;
+                let rg = ((right >> 8) & 0xFF) as u32;
+                let rb = (right & 0xFF) as u32;
 
-                r = r * 0.85 + (lr + rr) * 0.075;
-                g = g * 0.85 + (lg + rg) * 0.075;
-                b = b * 0.85 + (lb + rb) * 0.075;
+                r = (r * 217 + (lr + rr) * 19) >> 8;
+                g = (g * 217 + (lg + rg) * 19) >> 8;
+                b = (b * 217 + (lb + rb) * 19) >> 8;
             }
 
-            // RGB phosphor pattern: emphasize one color channel per subpixel
-            let sub = dst_x % 3;
-            match sub {
-                0 => { r *= 1.15; g *= 0.85; b *= 0.85; }
-                1 => { r *= 0.85; g *= 1.15; b *= 0.85; }
-                _ => { r *= 0.85; g *= 0.85; b *= 1.15; }
-            }
+            // Combined: brightness * scanline * phosphor * vignette
+            // All are fixed-point >>8, so we need to shift appropriately
+            let phos = &PHOSPHOR[dst_x % 3];
+            let vig = vignette[dst_row + dst_x] as u32;
 
-            // Scanline effect: darken every other row
-            if is_scanline {
-                r *= 0.55;
-                g *= 0.55;
-                b *= 0.55;
-            }
+            // Split shifts to avoid u32 overflow: (channel * line_mul * phosphor) >> 16, then * vig >> 8
+            let ri = (((r * line_mul as u32 * phos[0] as u32) >> 16) * vig >> 8).min(255);
+            let gi = (((g * line_mul as u32 * phos[1] as u32) >> 16) * vig >> 8).min(255);
+            let bi = (((b * line_mul as u32 * phos[2] as u32) >> 16) * vig >> 8).min(255);
 
-            // Vignette: darken edges
-            let fx = (dst_x as f32 / dst_w as f32) - 0.5;
-            let fy = (dst_y as f32 / dst_h as f32) - 0.5;
-            let vignette = (1.0 - (fx * fx + fy * fy) * 1.2).clamp(0.3, 1.0);
-
-            r *= vignette;
-            g *= vignette;
-            b *= vignette;
-
-            // Clamp and pack
-            let ri = (r as u32).min(255);
-            let gi = (g as u32).min(255);
-            let bi = (b as u32).min(255);
-
-            output[dst_y * dst_w + dst_x] = (ri << 16) | (gi << 8) | bi;
+            output[dst_row + dst_x] = (ri << 16) | (gi << 8) | bi;
         }
     }
 }
