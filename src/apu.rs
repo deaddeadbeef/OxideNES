@@ -84,7 +84,7 @@ impl Sweep {
     }
     
     fn muting(&self, current: u16) -> bool {
-        current < 8 || self.target_period(current) > 0x7FF
+        current < 8 || (self.shift > 0 && self.target_period(current) > 0x7FF)
     }
     
     fn clock(&mut self, timer_period: &mut u16) {
@@ -525,6 +525,7 @@ impl Apu {
         }
         
         self.clock_cycle += 1;
+
         self.cycle += 1;
     }
     
