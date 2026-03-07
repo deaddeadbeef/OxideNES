@@ -21,6 +21,9 @@ fn main() {
     // TV dimensions for Sony Trinitron CRT frame (1080p scale for 4K monitors)
     const TV_WIDTH: usize = 1280;
     const TV_HEIGHT: usize = 960;
+    const CONSOLE_HEIGHT: usize = 200; // Console overlay below TV
+    const WINDOW_WIDTH: usize = TV_WIDTH;
+    const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT; // 1160 total
     const SCREEN_W: usize = 960;   // Exact 4:3 (960/720 = 4/3)
     const SCREEN_H: usize = 720;   // 3x NES height (240*3)
     const SCREEN_X: usize = 160;   // (1280 - 960) / 2
@@ -28,8 +31,8 @@ fn main() {
     
     let mut window = Window::new(
         "NES Emulator",
-        TV_WIDTH,
-        TV_HEIGHT,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
         WindowOptions {
             scale: Scale::X1,
             ..WindowOptions::default()
@@ -125,7 +128,8 @@ fn main() {
     // Build static TV frame once at startup (zero per-frame cost)
     let mut tv_frame_bg = Vec::new();
     build_tv_frame(&mut tv_frame_bg);
-    let mut composite_buffer = vec![0u32; TV_WIDTH * TV_HEIGHT];
+    build_console_overlay(&mut tv_frame_bg, TV_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT);
+    let mut composite_buffer = vec![0u32; WINDOW_WIDTH * WINDOW_HEIGHT];
     
     // Pre-compute vignette lookup table (same every frame)
     let vignette_table = {
@@ -141,6 +145,7 @@ fn main() {
         table
     };
     let mut crt_enabled = true;
+    let mut mouse_was_down = false;
 
     while window.is_open() {
         loop {
@@ -171,11 +176,67 @@ fn main() {
         }
         
         // Composite game output into TV frame
-        composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer);
+        composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         window
-            .update_with_buffer(&composite_buffer, TV_WIDTH, TV_HEIGHT)
+            .update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT)
             .expect("Failed to update window");
+
+        // Mouse click handling for console interactions
+        if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Discard) {
+            let mx = mx as usize;
+            let my = my as usize;
+            
+            let mouse_down = window.get_mouse_down(minifb::MouseButton::Left);
+            let mouse_clicked = mouse_down && !mouse_was_down;
+            mouse_was_down = mouse_down;
+            
+            if mouse_clicked && mx < WINDOW_WIDTH && my < WINDOW_HEIGHT {
+                let console_x = (WINDOW_WIDTH - 800) / 2;
+                let body_y = TV_HEIGHT + 20;
+                
+                // RESET button hit test
+                let rst_x = console_x + 150;
+                let rst_y = body_y + 48;
+                if mx >= rst_x && mx < rst_x + 50 && my >= rst_y && my < rst_y + 14 {
+                    cpu.reset(&mut bus);
+                    println!("CPU Reset");
+                }
+                
+                // Cartridge slot hit test
+                let slot_x = console_x + 800 / 2 - 100;
+                let slot_y = body_y + 4;
+                if mx >= slot_x && mx < slot_x + 200 && my >= slot_y && my < slot_y + 26 {
+                    let file = rfd::FileDialog::new()
+                        .set_title("Insert Cartridge")
+                        .add_filter("NES ROMs", &["nes"])
+                        .add_filter("All Files", &["*"])
+                        .pick_file();
+                    
+                    if let Some(path) = file {
+                        let rom_data = std::fs::read(&path);
+                        if let Ok(data) = rom_data {
+                            match Cartridge::new(&data) {
+                                Ok(cart) => {
+                                    bus = Bus::new(cart);
+                                    bus.set_apu_sample_rate(actual_sample_rate);
+                                    cpu = Cpu::new();
+                                    cpu.reset(&mut bus);
+                                    println!("Loaded: {}", path.display());
+                                }
+                                Err(e) => {
+                                    rfd::MessageDialog::new()
+                                        .set_title("ROM Error")
+                                        .set_description(&format!("{}", e))
+                                        .set_level(rfd::MessageLevel::Error)
+                                        .show();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         handle_input(&window, &mut bus, &mut gilrs);
 
@@ -401,6 +462,9 @@ fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
 fn build_tv_frame(frame: &mut Vec<u32>) {
     const TV_WIDTH: usize = 1280;
     const TV_HEIGHT: usize = 960;
+    const CONSOLE_HEIGHT: usize = 200;
+    const WINDOW_WIDTH: usize = TV_WIDTH;
+    const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT;
     const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
     const SCREEN_X: usize = 160;
@@ -417,11 +481,11 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     const BUTTON_FACE: u32    = 0x3A3A3A;
     const LED_GREEN: u32      = 0x00CC44;  // Power on
     
-    frame.resize(TV_WIDTH * TV_HEIGHT, 0);
+    frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
     
     for y in 0..TV_HEIGHT {
         for x in 0..TV_WIDTH {
-            let idx = y * TV_WIDTH + x;
+            let idx = y * WINDOW_WIDTH + x;
             
             // Screen area — will be overwritten with game
             let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W 
@@ -565,22 +629,174 @@ fn sq_dist(x1: usize, y1: usize, x2: usize, y2: usize) -> usize {
     dx * dx + dy * dy
 }
 
-fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>) {
-    const TV_WIDTH: usize = 1280;
-    const TV_HEIGHT: usize = 960;
+fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>, window_width: usize, window_height: usize) {
     const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
     const SCREEN_X: usize = 160;
     const SCREEN_Y: usize = 70;
     
-    result.resize(TV_WIDTH * TV_HEIGHT, 0);
+    result.resize(window_width * window_height, 0);
     result.copy_from_slice(tv_frame);
     
     // Copy game output into screen area
     for y in 0..SCREEN_H {
         let src_start = y * SCREEN_W;
-        let dst_start = (y + SCREEN_Y) * TV_WIDTH + SCREEN_X;
+        let dst_start = (y + SCREEN_Y) * window_width + SCREEN_X;
         result[dst_start..dst_start + SCREEN_W]
             .copy_from_slice(&game_output[src_start..src_start + SCREEN_W]);
+    }
+}
+
+fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: usize, window_height: usize) {
+    let console_y = tv_height; // starts right below TV
+    let console_w = 800;       // console is 800px wide, centered
+    let console_h = 160;
+    let console_x = (window_width - console_w) / 2; // centered
+    
+    // "Shelf" / surface the console sits on
+    for y in console_y..window_height {
+        for x in 0..window_width {
+            let idx = y * window_width + x;
+            // Wood shelf texture (warm brown)
+            let grain = ((x * 7 + y * 3) % 20) as u32;
+            let r = 90 + grain;
+            let g = 65 + grain;
+            let b = 45 + grain / 2;
+            frame[idx] = (r << 16) | (g << 8) | b;
+        }
+    }
+    
+    // Console body — main rectangle
+    let body_y = console_y + 20; // 20px from top of console area
+    let body_h = 120;
+    
+    for y in body_y..body_y + body_h {
+        for x in console_x..console_x + console_w {
+            let idx = y * window_width + x;
+            let local_y = y - body_y;
+            
+            // Top dark stripe (first 30px) 
+            if local_y < 30 {
+                // Dark charcoal stripe
+                let shade = if local_y < 2 { 0x353535u32 } // top edge shadow
+                    else if local_y >= 28 { 0x353535u32 }   // bottom edge
+                    else { 0x484848u32 };                    // stripe body
+                frame[idx] = shade;
+                
+                // Cartridge slot — dark recessed rectangle in center
+                let slot_x = console_x + console_w / 2 - 100;
+                let slot_w = 200;
+                if x >= slot_x && x < slot_x + slot_w && local_y >= 4 && local_y < 26 {
+                    frame[idx] = 0x1A1A1A; // deep dark slot
+                    // Slot inner edge highlight
+                    if local_y == 4 || local_y == 25 || x == slot_x || x == slot_x + slot_w - 1 {
+                        frame[idx] = 0x0E0E0E;
+                    }
+                    // Cartridge visible inside (lighter rectangle if ROM loaded)
+                    if x >= slot_x + 20 && x < slot_x + slot_w - 20 && local_y >= 6 && local_y < 24 {
+                        frame[idx] = 0x808080; // grey cartridge top
+                        // Label on cartridge
+                        if x >= slot_x + 50 && x < slot_x + slot_w - 50 && local_y >= 10 && local_y < 20 {
+                            frame[idx] = 0xD4AA00; // gold label
+                        }
+                    }
+                }
+            } else {
+                // Light grey body
+                let local_x = x - console_x;
+                let mut color = 0xC8C8C8u32;
+                
+                // Subtle top-to-bottom gradient
+                let dim = (local_y - 30) as u32 / 4;
+                let r = 200u32.saturating_sub(dim);
+                let g = 200u32.saturating_sub(dim);
+                let b = 200u32.saturating_sub(dim);
+                color = (r << 16) | (g << 8) | b;
+                
+                // Top edge of body — highlight
+                if local_y == 30 { color = 0xE0E0E0; }
+                // Bottom edge — shadow
+                if local_y >= body_h - 3 { color = 0x909090; }
+                // Left/right edges
+                if local_x < 3 || local_x >= console_w - 3 { 
+                    color = 0xA0A0A0;
+                }
+                
+                // POWER button — far left
+                let pwr_x = console_x + 40;
+                let pwr_y = body_y + 45;
+                if x >= pwr_x && x < pwr_x + 40 && y >= pwr_y && y < pwr_y + 18 {
+                    let bx = x - pwr_x;
+                    let by = y - pwr_y;
+                    color = 0x606060; // button face
+                    if by == 0 { color = 0x808080; } // top highlight
+                    if by == 17 { color = 0x404040; } // bottom shadow
+                    if bx == 0 || bx == 39 { color = 0x505050; }
+                }
+                
+                // Power LED — left of power button
+                let led_x = console_x + 25;
+                let led_y = body_y + 50;
+                if x >= led_x && x < led_x + 6 && y >= led_y && y < led_y + 6 {
+                    let dx = x - led_x;
+                    let dy = y - led_y;
+                    if dx >= 1 && dx < 5 && dy >= 1 && dy < 5 {
+                        color = 0x00CC44; // green LED
+                    } else {
+                        color = 0x004D1A; // glow
+                    }
+                }
+                
+                // RESET button — center-left area
+                let rst_x = console_x + 150;
+                let rst_y = body_y + 48;
+                if x >= rst_x && x < rst_x + 50 && y >= rst_y && y < rst_y + 14 {
+                    let bx = x - rst_x;
+                    let by = y - rst_y;
+                    color = 0x707070;
+                    if by == 0 { color = 0x909090; }
+                    if by == 13 { color = 0x505050; }
+                    if bx == 0 || bx == 49 { color = 0x606060; }
+                }
+                
+                // Labels — "POWER" text area
+                if x >= pwr_x && x < pwr_x + 40 && y >= pwr_y + 20 && y < pwr_y + 26 {
+                    // Tiny dot pattern suggesting text
+                    if (x - pwr_x) % 4 < 2 && (y - pwr_y - 20) % 3 < 2 {
+                        color = 0x888888;
+                    }
+                }
+                
+                // "RESET" text area  
+                if x >= rst_x && x < rst_x + 50 && y >= rst_y + 16 && y < rst_y + 22 {
+                    if (x - rst_x) % 4 < 2 && (y - rst_y - 16) % 3 < 2 {
+                        color = 0x888888;
+                    }
+                }
+                
+                // Controller ports — two dark rectangles at bottom
+                let port1_x = console_x + 250;
+                let port2_x = console_x + 480;
+                let port_y = body_y + 90;
+                let port_w = 70;
+                let port_h = 20;
+                
+                for (px, _label) in [(port1_x, "1"), (port2_x, "2")] {
+                    if x >= px && x < px + port_w && y >= port_y && y < port_y + port_h {
+                        color = 0x2A2A2A; // dark port
+                        let bx = x - px;
+                        let by = y - port_y;
+                        if by == 0 { color = 0x1A1A1A; } // top shadow
+                        if by == port_h - 1 { color = 0x3A3A3A; } // bottom lip
+                        // Inner pins
+                        if bx >= 10 && bx < port_w - 10 && by >= 5 && by < port_h - 5 {
+                            if bx % 6 < 3 { color = 0x555555; } // pins
+                        }
+                    }
+                }
+                
+                frame[idx] = color;
+            }
+        }
     }
 }
