@@ -192,21 +192,18 @@ fn main() {
             mouse_was_down = mouse_down;
             
             if mouse_clicked && mx < WINDOW_WIDTH && my < WINDOW_HEIGHT {
-                let console_x = (WINDOW_WIDTH - 800) / 2;
-                let body_y = TV_HEIGHT + 18;
+                // Console layout for hit-testing (matches new design)
+                let console_w = 900;
+                let console_x = (WINDOW_WIDTH - console_w) / 2;
+                let body_y = TV_HEIGHT + 20;
                 
-                // RESET button hit test
-                let rst_x = console_x + 170;
-                let rst_y = body_y + 55;
-                if mx >= rst_x && mx < rst_x + 65 && my >= rst_y && my < rst_y + 18 {
-                    cpu.reset(&mut bus);
-                    println!("CPU Reset");
-                }
-                
-                // Cartridge slot hit test
-                let slot_x = console_x + 800 / 2 - 100;
-                let slot_y = body_y + 5;
-                if mx >= slot_x && mx < slot_x + 200 && my >= slot_y && my < slot_y + 28 {
+                // Cartridge slot: centered in top stripe
+                let slot_lx = console_w / 2 - 160;
+                let slot_x = console_x + slot_lx;
+                let slot_y = body_y + 8;
+                let slot_w = 320;
+                let slot_h = 34;
+                if mx >= slot_x && mx < slot_x + slot_w && my >= slot_y && my < slot_y + slot_h {
                     let file = rfd::FileDialog::new()
                         .set_title("Insert Cartridge")
                         .add_filter("NES ROMs", &["nes"])
@@ -234,6 +231,17 @@ fn main() {
                             }
                         }
                     }
+                }
+                
+                // Reset button hit test
+                let rst_lx = console_w - 170 + 30;
+                let rst_x = console_x + rst_lx;
+                let rst_y = body_y + 68;
+                let rst_w = 80;
+                let rst_h = 22;
+                if mx >= rst_x && mx < rst_x + rst_w && my >= rst_y && my < rst_y + rst_h {
+                    cpu.reset(&mut bus);
+                    println!("CPU Reset");
                 }
             }
         }
@@ -728,278 +736,233 @@ fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, c
 
 fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: usize, window_height: usize) {
     let console_y = tv_height;
-    let console_w = 800;
-    let console_h = 150;
+    let console_w = 900;
+    let console_h = 160;
     let console_x = (window_width - console_w) / 2;
-
-    // Shelf/surface — rich wood grain
+    let body_y = console_y + 20;
+    let body_b = body_y + console_h;
+    
+    // Surface/shelf — dark matte surface (not wood grain)
     for y in console_y..window_height {
         for x in 0..window_width {
             let idx = y * window_width + x;
-            let ry = (y - console_y) as f32;
-            // Slight vertical gradient for depth on shelf
-            let depth = (1.0 - ry / (window_height - console_y) as f32 * 0.25).max(0.7);
-            let base_r = (90.0 * depth) as u32;
-            let base_g = (65.0 * depth) as u32;
-            let base_b = (42.0 * depth) as u32;
-            let grain1 = ((x.wrapping_mul(13) + y.wrapping_mul(7)) % 12) as u32;
-            let grain2 = ((x.wrapping_mul(3) + y.wrapping_mul(11)) % 8) as u32;
-            let grain3 = ((x.wrapping_mul(97) ^ y.wrapping_mul(53)) % 6) as u32;
-            frame[idx] = ((base_r + grain1 + grain3).min(130) << 16) | ((base_g + grain2).min(90) << 8) | (base_b + grain1 / 2 + grain3 / 3).min(70);
+            frame[idx] = 0x1C1C1C; // dark surface
         }
     }
-
-    // Shelf front edge highlight
-    for x in 0..window_width {
-        let idx = console_y * window_width + x;
-        let existing = frame[idx];
-        let er = (((existing >> 16) & 0xFF) + 20).min(255);
-        let eg = (((existing >> 8) & 0xFF) + 15).min(255);
-        let eb = ((existing & 0xFF) + 10).min(255);
-        frame[idx] = (er << 16) | (eg << 8) | eb;
-    }
-
-    let body_y = console_y + 18;
-    let body_r = console_x + console_w;
-    let body_b = body_y + console_h;
-
-    // Console shadow on shelf (drawn before console body)
-    for y in body_b..(body_b + 10).min(window_height) {
-        for x in (console_x + 8)..(body_r - 8) {
-            let idx = y * window_width + x;
-            let shadow_alpha = ((body_b + 10 - y) as u32 * 6).min(50);
-            let existing = frame[idx];
-            let er = ((existing >> 16) & 0xFF).saturating_sub(shadow_alpha);
-            let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow_alpha);
-            let eb = (existing & 0xFF).saturating_sub(shadow_alpha);
-            frame[idx] = (er << 16) | (eg << 8) | eb;
-        }
-    }
-    // Side shadows
+    
+    // Console body — two-tone: dark top bar + light bottom
     for y in body_y..body_b {
-        for dx in 0..6usize {
-            let shadow = ((6 - dx) as u32 * 5).min(25);
-            // Left side shadow
-            let xl = console_x.saturating_sub(dx + 1);
-            if xl < window_width && y < window_height {
-                let idx = y * window_width + xl;
-                let existing = frame[idx];
-                let er = ((existing >> 16) & 0xFF).saturating_sub(shadow);
-                let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow);
-                let eb = (existing & 0xFF).saturating_sub(shadow);
-                frame[idx] = (er << 16) | (eg << 8) | eb;
-            }
-            // Right side shadow
-            let xr = body_r + dx;
-            if xr < window_width && y < window_height {
-                let idx = y * window_width + xr;
-                let existing = frame[idx];
-                let er = ((existing >> 16) & 0xFF).saturating_sub(shadow);
-                let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow);
-                let eb = (existing & 0xFF).saturating_sub(shadow);
-                frame[idx] = (er << 16) | (eg << 8) | eb;
-            }
-        }
-    }
-
-    for y in body_y..body_b {
-        for x in console_x..body_r {
+        for x in console_x..console_x + console_w {
             let idx = y * window_width + x;
             let lx = x - console_x;
             let ly = y - body_y;
-
-            // Rounded corners for console body
-            let cr = 12usize;
-            let skip =
-                (lx < cr && ly < cr && sq_dist(lx, ly, cr, cr) > cr * cr)
-                || (lx >= console_w - cr && ly < cr && sq_dist(lx, ly, console_w - cr - 1, cr) > cr * cr)
-                || (lx < cr && ly >= console_h - cr && sq_dist(lx, ly, cr, console_h - cr - 1) > cr * cr)
-                || (lx >= console_w - cr && ly >= console_h - cr && sq_dist(lx, ly, console_w - cr - 1, console_h - cr - 1) > cr * cr);
-            if skip { continue; }
-
-            // Top dark stripe (cartridge area) — first 40px
-            if ly < 40 {
-                let stripe_grad = ly as f32 / 40.0;
-                let mut c_r = (0x38 as f32 + stripe_grad * 8.0) as u32;
-                let mut c_g = c_r;
-                let mut c_b = c_r;
-
-                // Top bevel
-                if ly < 3 { c_r += 18; c_g += 18; c_b += 18; }
-                if ly >= 37 { c_r = c_r.saturating_sub(12); c_g = c_g.saturating_sub(12); c_b = c_b.saturating_sub(12); }
-
-                // Side bevels
-                if lx < 4 { c_r += 8; c_g += 8; c_b += 8; }
-                if lx >= console_w - 4 { c_r = c_r.saturating_sub(8); c_g = c_g.saturating_sub(8); c_b = c_b.saturating_sub(8); }
-
-                // Cartridge slot — centered dark rectangle with depth
-                let slot_x = console_w / 2 - 100;
-                let slot_w = 200;
-                if lx >= slot_x && lx < slot_x + slot_w && ly >= 5 && ly < 33 {
-                    let bx = lx - slot_x;
-                    let by = ly - 5;
-                    c_r = 0x10; c_g = 0x10; c_b = 0x10;
-                    // Slot beveled edges (inset look)
-                    if by < 2 { c_r = 0x08; c_g = 0x08; c_b = 0x08; }
-                    if by >= 26 { c_r = 0x1A; c_g = 0x1A; c_b = 0x1A; }
-                    if bx < 2 { c_r = 0x08; c_g = 0x08; c_b = 0x08; }
-                    if bx >= slot_w - 2 { c_r = 0x1A; c_g = 0x1A; c_b = 0x1A; }
-                    // Cartridge visible inside slot
-                    if bx >= 15 && bx < slot_w - 15 && by >= 4 && by < 25 {
-                        let cart_by = by - 4;
-                        c_r = 0x6A; c_g = 0x6A; c_b = 0x6A;
-                        // Cart top highlight
-                        if cart_by < 2 { c_r = 0x78; c_g = 0x78; c_b = 0x78; }
-                        // Cart label area
-                        if bx >= 35 && bx < slot_w - 35 && by >= 8 && by < 22 {
-                            c_r = 0xCC; c_g = 0x99; c_b = 0x22;
-                            let lbl_bx = bx - 35;
-                            let lbl_by = by - 8;
+            
+            // Rounded corners (8px)
+            let cr = 8usize;
+            let in_body_w = console_w;
+            let in_body_h = console_h;
+            if (lx < cr && ly < cr && sq_dist(lx, ly, cr, cr) > cr * cr) ||
+               (lx >= in_body_w - cr && ly < cr && sq_dist(lx, ly, in_body_w - cr, cr) > cr * cr) ||
+               (lx < cr && ly >= in_body_h - cr && sq_dist(lx, ly, cr, in_body_h - cr) > cr * cr) ||
+               (lx >= in_body_w - cr && ly >= in_body_h - cr && sq_dist(lx, ly, in_body_w - cr, in_body_h - cr) > cr * cr) {
+                continue;
+            }
+            
+            if ly < 50 {
+                // === TOP DARK STRIPE — cartridge area ===
+                let mut c: u32 = 0x2E2E2E;
+                
+                // Top edge highlight
+                if ly == 0 { c = 0x404040; }
+                // Bottom edge of stripe
+                if ly == 49 { c = 0x222222; }
+                
+                // Cartridge slot — wide centered area
+                let slot_x = console_w / 2 - 160;
+                let slot_w = 320;
+                if lx >= slot_x && lx < slot_x + slot_w && ly >= 8 && ly < 42 {
+                    c = 0x0C0C0C; // deep black slot
+                    
+                    // Slot border
+                    if ly == 8 || ly == 41 { c = 0x050505; }
+                    if lx == slot_x || lx == slot_x + slot_w - 1 { c = 0x050505; }
+                    
+                    // Cartridge body visible inside
+                    if lx >= slot_x + 25 && lx < slot_x + slot_w - 25 && ly >= 10 && ly < 40 {
+                        // Cartridge shell
+                        let cart_grad = ((ly - 10) as f32 / 30.0 * 15.0) as u32;
+                        c = (0x65 - cart_grad) << 16 | (0x65 - cart_grad) << 8 | (0x68 - cart_grad);
+                        
+                        // Gold label on cartridge
+                        if lx >= slot_x + 65 && lx < slot_x + slot_w - 65 && ly >= 15 && ly < 35 {
+                            let label_grad = ((ly - 15) as u32 * 2).min(20);
+                            c = (0xCC - label_grad) << 16 | (0x99 - label_grad) << 8 | (0x22);
                             // Label border
-                            if lbl_by == 0 || lbl_by == 13 || lbl_bx == 0 || lbl_bx == slot_w - 71 {
-                                c_r = 0xAA; c_g = 0x80; c_b = 0x18;
+                            if ly == 15 || ly == 34 || lx == slot_x + 65 || lx == slot_x + slot_w - 66 {
+                                c = 0x886611;
                             }
                         }
                     }
                 }
-
-                // Plastic texture
-                let tex = ((x.wrapping_mul(3571) ^ y.wrapping_mul(2311)) % 4) as u32;
-                c_r = c_r.saturating_sub(tex / 2);
-
-                frame[idx] = (c_r.min(255) << 16) | (c_g.min(255) << 8) | c_b.min(255);
+                
+                frame[idx] = c;
             } else {
-                // Light body — smooth gradient with warm tint
-                let grad = (ly - 40) as f32 / (console_h - 40) as f32;
-                let base = (200.0 - grad * 35.0) as u32;
+                // === BOTTOM LIGHT BODY ===
+                let grad = ((ly - 50) as f32 / (console_h - 50) as f32 * 12.0) as u32;
+                let base = 0xBE - grad;
                 let mut r = base;
                 let mut g = base;
-                let mut b = (base as f32 * 0.96) as u32; // slight warm tint
-
-                // Horizontal curvature — lighter at center
-                let hx = (lx as f32 / console_w as f32 - 0.5).abs();
-                let hboost = ((1.0 - hx * 1.8).max(0.0) * 6.0) as u32;
-                r += hboost; g += hboost; b += hboost;
-
-                // Top highlight of body
-                if ly == 40 { r += 25; g += 25; b += 25; }
-                if ly == 41 { r += 12; g += 12; b += 12; }
-                // Bottom shadow
-                if ly >= console_h - 4 {
-                    let sd = (ly - (console_h - 4)) as u32 * 10;
-                    r = r.saturating_sub(sd); g = g.saturating_sub(sd); b = b.saturating_sub(sd);
-                }
-                // Side shadows
-                if lx < 6 { let sd = (6 - lx) as u32 * 4; r = r.saturating_sub(sd); g = g.saturating_sub(sd); b = b.saturating_sub(sd); }
-                if lx >= console_w - 6 { let sd = (lx - (console_w - 6)) as u32 * 5; r = r.saturating_sub(sd); g = g.saturating_sub(sd); b = b.saturating_sub(sd); }
-
-                // POWER button — larger, raised with 3D effect
-                let pwr_x = 55usize;
-                let pwr_y = 52usize;
-                let pwr_w = 60usize;
-                let pwr_h = 22usize;
-                if lx >= pwr_x && lx < pwr_x + pwr_w && ly >= pwr_y && ly < pwr_y + pwr_h {
-                    let bx = lx - pwr_x;
-                    let by = ly - pwr_y;
-                    let btn_grad = by as f32 / pwr_h as f32;
-                    r = (95.0 - btn_grad * 20.0) as u32;
-                    g = r; b = r;
-                    if by < 2 { r = 115; g = 115; b = 115; }
-                    if by >= pwr_h - 2 { r = 48; g = 48; b = 48; }
-                    if bx < 2 { r = 105; g = 105; b = 105; }
-                    if bx >= pwr_w - 2 { r = 52; g = 52; b = 52; }
-                }
-
-                // Power LED — circular with glow
-                let led_cx = 38usize;
-                let led_cy = 60usize;
-                if lx < led_cx + 12 && ly < led_cy + 12 && lx + 12 > led_cx && ly + 12 > led_cy {
+                let mut b = (base as f32 * 0.97) as u32;
+                
+                // Top edge of light body — bright line
+                if ly == 50 { r = 0xD5; g = 0xD5; b = 0xD3; }
+                // Bottom edge
+                if ly >= console_h - 2 { r = 0x88; g = 0x88; b = 0x86; }
+                // Side edges
+                if lx < 3 || lx >= console_w - 3 { r -= 15; g -= 15; b -= 15; }
+                
+                // === POWER SECTION — left side ===
+                let pwr_section_x = 30;
+                let pwr_section_w = 120;
+                
+                // Power LED (circular, 6px radius)
+                let led_cx = pwr_section_x + 20;
+                let led_cy = 75;
+                if ly >= led_cy - 5 && ly <= led_cy + 5 && lx >= led_cx - 5 && lx <= led_cx + 5 {
                     let dx = lx as i32 - led_cx as i32;
                     let dy = ly as i32 - led_cy as i32;
                     let dist = dx * dx + dy * dy;
-                    if dist <= 9 {
-                        r = 0; g = 230; b = 72;
-                    } else if dist <= 20 {
-                        r = 0; g = 100; b = 30;
-                    } else if dist <= 50 {
-                        let gf = (50 - dist) as u32;
-                        g = (g + gf / 2).min(255);
+                    if dist <= 16 {
+                        frame[idx] = 0x00DD55; continue;
+                    } else if dist <= 36 {
+                        frame[idx] = 0x003D15; continue;
                     }
                 }
-
-                // RESET button — recessed with proper depth
-                let rst_x = 170usize;
-                let rst_y = 55usize;
-                let rst_w = 65usize;
-                let rst_h = 18usize;
+                
+                // Power button — raised pill shape
+                let btn_x = pwr_section_x + 35;
+                let btn_y = 68;
+                let btn_w = 70;
+                let btn_h = 22;
+                if lx >= btn_x && lx < btn_x + btn_w && ly >= btn_y && ly < btn_y + btn_h {
+                    let bx = lx - btn_x;
+                    let by = ly - btn_y;
+                    // Pill shape rounded ends
+                    let pill_r = btn_h / 2;
+                    let in_pill = if bx < pill_r {
+                        sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r
+                    } else if bx >= btn_w - pill_r {
+                        sq_dist(bx, by, btn_w - pill_r, pill_r) <= pill_r * pill_r
+                    } else {
+                        true
+                    };
+                    if in_pill {
+                        r = 0x5A; g = 0x5A; b = 0x5A;
+                        if by < 3 { r = 0x70; g = 0x70; b = 0x70; }
+                        if by >= btn_h - 3 { r = 0x42; g = 0x42; b = 0x42; }
+                    }
+                }
+                
+                // Divider line after power section
+                if lx == pwr_section_x + pwr_section_w && ly >= 55 && ly < console_h - 10 {
+                    r = 0x99; g = 0x99; b = 0x97;
+                }
+                
+                // === RESET SECTION — right of center ===
+                let rst_section_x = console_w - 170;
+                
+                // Reset button — pill shape
+                let rst_x = rst_section_x + 30;
+                let rst_y = 68;
+                let rst_w = 80;
+                let rst_h = 22;
                 if lx >= rst_x && lx < rst_x + rst_w && ly >= rst_y && ly < rst_y + rst_h {
                     let bx = lx - rst_x;
                     let by = ly - rst_y;
-                    r = 105; g = 105; b = 105;
-                    // Recessed: top/left shadow, bottom/right highlight
-                    if by < 2 { r = 72; g = 72; b = 72; }
-                    if by >= rst_h - 2 { r = 125; g = 125; b = 125; }
-                    if bx < 2 { r = 78; g = 78; b = 78; }
-                    if bx >= rst_w - 2 { r = 118; g = 118; b = 118; }
+                    let pill_r = rst_h / 2;
+                    let in_pill = if bx < pill_r {
+                        sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r
+                    } else if bx >= rst_w - pill_r {
+                        sq_dist(bx, by, rst_w - pill_r, pill_r) <= pill_r * pill_r
+                    } else {
+                        true
+                    };
+                    if in_pill {
+                        r = 0x6E; g = 0x6E; b = 0x6E;
+                        if by < 3 { r = 0x85; g = 0x85; b = 0x85; }
+                        if by >= rst_h - 3 { r = 0x52; g = 0x52; b = 0x52; }
+                    }
                 }
-
-                // Controller ports — two with proper depth
-                let port_y = 90usize;
-                let port_h = 26usize;
-                let port_w = 72usize;
-                let port1_x = console_w / 2 - 110;
-                let port2_x = console_w / 2 + 38;
-
-                for port_x in [port1_x, port2_x] {
-                    if lx >= port_x && lx < port_x + port_w && ly >= port_y && ly < port_y + port_h {
-                        let bx = lx - port_x;
-                        let by = ly - port_y;
-                        r = 35; g = 35; b = 35;
-                        // Outer bezel of port
-                        if by < 2 { r = 25; g = 25; b = 25; }
-                        if by >= port_h - 2 { r = 55; g = 55; b = 55; }
-                        if bx < 2 { r = 28; g = 28; b = 28; }
-                        if bx >= port_w - 2 { r = 48; g = 48; b = 48; }
-                        // Inner cavity
-                        if bx >= 6 && bx < port_w - 6 && by >= 4 && by < port_h - 4 {
-                            r = 15; g = 15; b = 15;
-                            // Connector pins
-                            if by >= 8 && by < port_h - 8 && bx >= 14 && bx < port_w - 14 {
-                                if (bx - 14) % 5 < 3 {
-                                    r = 85; g = 78; b = 55; // brass pins
+                
+                // Divider line before reset
+                if lx == rst_section_x && ly >= 55 && ly < console_h - 10 {
+                    r = 0x99; g = 0x99; b = 0x97;
+                }
+                
+                // === CONTROLLER PORTS — center bottom ===
+                let port_y_start = 105;
+                let port_h = 28;
+                let port_w = 80;
+                let port_gap = 40;
+                let ports_total = port_w * 2 + port_gap;
+                let port1_x = (console_w - ports_total) / 2;
+                let port2_x = port1_x + port_w + port_gap;
+                
+                for px in [port1_x, port2_x] {
+                    if lx >= px && lx < px + port_w && ly >= port_y_start && ly < port_y_start + port_h {
+                        let bx = lx - px;
+                        let by = ly - port_y_start;
+                        
+                        // Port housing — dark rounded rectangle
+                        let pr = 5usize;
+                        let in_port = if bx < pr && by < pr { sq_dist(bx, by, pr, pr) <= pr * pr }
+                            else if bx >= port_w - pr && by < pr { sq_dist(bx, by, port_w - pr, pr) <= pr * pr }
+                            else if bx < pr && by >= port_h - pr { sq_dist(bx, by, pr, port_h - pr) <= pr * pr }
+                            else if bx >= port_w - pr && by >= port_h - pr { sq_dist(bx, by, port_w - pr, port_h - pr) <= pr * pr }
+                            else { true };
+                        
+                        if in_port {
+                            r = 0x22; g = 0x22; b = 0x22;
+                            // Inner area with pins
+                            if bx >= 8 && bx < port_w - 8 && by >= 6 && by < port_h - 6 {
+                                r = 0x15; g = 0x15; b = 0x15;
+                                // Gold pins
+                                if by >= 10 && by < port_h - 10 && (bx - 8) % 6 < 3 {
+                                    r = 0x8A; g = 0x7A; b = 0x4A;
                                 }
                             }
                         }
                     }
                 }
-
-                // Decorative ridge line
-                if ly == 82 && lx >= 25 && lx < console_w - 25 {
-                    r = r.saturating_sub(25); g = g.saturating_sub(25); b = b.saturating_sub(25);
-                }
-                if ly == 83 && lx >= 25 && lx < console_w - 25 {
-                    r = (r + 12).min(255); g = (g + 12).min(255); b = (b + 12).min(255);
-                }
-
-                // Plastic texture
-                let tex = ((x.wrapping_mul(5813) ^ y.wrapping_mul(3947)) % 4) as u32;
-                r = r.saturating_sub(tex / 2);
-
+                
                 frame[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
             }
         }
     }
-
-    // Labels — adjust positions to match new console layout
-    let console_x_text = console_x;
-    let body_y_text = body_y;
-
-    draw_text(frame, "POWER", console_x_text + 50, body_y_text + 76, 0x808080, window_width);
-    draw_text(frame, "RESET", console_x_text + 172, body_y_text + 76, 0x808080, window_width);
-    draw_text(frame, "INSERT CARTRIDGE", console_x_text + console_w / 2 - 32, body_y_text + 35, 0x555555, window_width);
-
-    let port1_x = console_x_text + console_w / 2 - 110;
-    let port2_x = console_x_text + console_w / 2 + 38;
-    draw_text(frame, "1", port1_x + 33, body_y_text + 120, 0x808080, window_width);
-    draw_text(frame, "2", port2_x + 33, body_y_text + 120, 0x808080, window_width);
+    
+    // Drop shadow under console body
+    for y in body_b..body_b + 8 {
+        if y >= window_height { break; }
+        for x in console_x + 5..console_x + console_w - 5 {
+            let idx = y * window_width + x;
+            let shadow = ((body_b + 8 - y) as u32 * 3).min(20);
+            let existing = frame[idx];
+            let er = ((existing >> 16) & 0xFF).saturating_sub(shadow);
+            let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow);
+            let eb = (existing & 0xFF).saturating_sub(shadow);
+            frame[idx] = (er << 16) | (eg << 8) | eb;
+        }
+    }
+    
+    // Text labels — using draw_text function
+    let body_y_offset = body_y;
+    draw_text(frame, "POWER", console_x + 45, body_y_offset + 95, 0x707070, window_width);
+    draw_text(frame, "RESET", console_x + console_w - 130, body_y_offset + 95, 0x707070, window_width);
+    draw_text(frame, "CLICK TO INSERT CARTRIDGE", console_x + console_w / 2 - 50, body_y_offset + 45, 0x444444, window_width);
+    
+    let ports_total_w = 80 * 2 + 40;
+    let port1_lx = (console_w - ports_total_w) / 2;
+    let port2_lx = port1_lx + 80 + 40;
+    draw_text(frame, "1P", console_x + port1_lx + 35, body_y_offset + 137, 0x707070, window_width);
+    draw_text(frame, "2P", console_x + port2_lx + 35, body_y_offset + 137, 0x707070, window_width);
 }
