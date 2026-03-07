@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 minifb = "0.27"
+rfd = "0.15"
+cpal = "0.15"

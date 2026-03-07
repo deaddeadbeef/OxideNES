@@ -1,12 +1,14 @@
 use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 use crate::joypad::Joypad;
+use crate::apu::Apu;
 
 pub struct Bus {
     cpu_ram: [u8; 2048],
     pub ppu: Ppu,
     pub cartridge: Cartridge,
     pub joypad1: Joypad,
+    pub apu: Apu,
     cycles: usize,
     dma_page: u8,
     dma_addr: u8,
@@ -17,12 +19,12 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(cartridge: Cartridge) -> Self {
-        let mirroring = cartridge.mapper.mirroring();
         Bus {
             cpu_ram: [0; 2048],
-            ppu: Ppu::new(mirroring),
+            ppu: Ppu::new(),
             cartridge,
             joypad1: Joypad::new(),
+            apu: Apu::new(44100),
             cycles: 0,
             dma_page: 0,
             dma_addr: 0,
@@ -38,7 +40,7 @@ impl Bus {
             0x2000..=0x3FFF => self.ppu.cpu_read(addr & 0x2007, &self.cartridge),
             0x4016 => self.joypad1.read(),
             0x4017 => 0, // joypad 2 stub
-            0x4000..=0x4015 => 0, // APU stub
+            0x4000..=0x4015 => self.apu.read(addr), // APU
             0x4018..=0x401F => 0, // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.read_prg(addr),
             _ => 0,
@@ -56,7 +58,7 @@ impl Bus {
                 self.dma_dummy = true;
             }
             0x4016 => self.joypad1.write(data),
-            0x4000..=0x4013 | 0x4015 | 0x4017 => {} // APU stub
+            0x4000..=0x4013 | 0x4015 | 0x4017 => self.apu.write(addr, data), // APU
             0x4018..=0x401F => {} // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.write_prg(addr, data),
             _ => {}
@@ -100,5 +102,13 @@ impl Bus {
                 self.dma_dummy = true;
             }
         }
+    }
+
+    pub fn set_apu_sample_rate(&mut self, sample_rate: u32) {
+        self.apu.set_sample_rate(sample_rate);
+    }
+
+    pub fn tick_apu(&mut self) {
+        self.apu.tick();
     }
 }

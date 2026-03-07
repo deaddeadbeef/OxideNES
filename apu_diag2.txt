@@ -1,0 +1,968 @@
+warning: unreachable pattern
+  --> src\bus.rs:46:13
+   |
+46 |             _ => 0,
+   |             ^ no value can reach this
+   |
+note: multiple earlier patterns match some of the same values
+  --> src\bus.rs:46:13
+   |
+39 |             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize],
+   |             --------------- matches some of the same values
+40 |             0x2000..=0x3FFF => self.ppu.cpu_read(addr & 0x2007, &self.cartridge),
+   |             --------------- matches some of the same values
+41 |             0x4016 => self.joypad1.read(),
+   |             ------ matches some of the same values
+42 |             0x4017 => 0, // joypad 2 stub
+   |             ------ matches some of the same values
+...
+46 |             _ => 0,
+   |             ^ ...and 3 other patterns collectively make this unreachable
+   = note: `#[warn(unreachable_patterns)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable pattern
+  --> src\bus.rs:64:13
+   |
+64 |             _ => {}
+   |             ^ no value can reach this
+   |
+note: multiple earlier patterns match some of the same values
+  --> src\bus.rs:64:13
+   |
+52 |             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize] = data,
+   |             --------------- matches some of the same values
+53 |             0x2000..=0x3FFF => self.ppu.cpu_write(addr & 0x2007, data, &mut self.cartridge),
+   |             --------------- matches some of the same values
+54 |             0x4014 => {
+   |             ------ matches some of the same values
+...
+60 |             0x4016 => self.joypad1.write(data),
+   |             ------ matches some of the same values
+...
+64 |             _ => {}
+   |             ^ ...and 3 other patterns collectively make this unreachable
+
+warning: field `cycles` is never read
+  --> src\bus.rs:12:5
+   |
+ 6 | pub struct Bus {
+   |            --- field in this struct
+...
+12 |     cycles: usize,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `chr_ram` is never read
+  --> src\mapper.rs:12:5
+   |
+ 9 | pub struct Mapper000 {
+   |            --------- field in this struct
+...
+12 |     chr_ram: Vec<u8>,
+   |     ^^^^^^^
+
+warning: field `mirroring` is never read
+  --> src\mapper.rs:75:5
+   |
+71 | pub struct Mapper004 {
+   |            --------- field in this struct
+...
+75 |     mirroring: crate::cartridge::Mirroring,
+   |     ^^^^^^^^^
+
+warning: fields `scroll_x`, `scroll_y`, `addr_latch`, and `ppu_addr` are never read
+  --> src\ppu.rs:13:5
+   |
+ 3 | pub struct Ppu {
+   |            --- fields in this struct
+...
+13 |     scroll_x: u8,
+   |     ^^^^^^^^
+14 |     scroll_y: u8,
+   |     ^^^^^^^^
+15 |     addr_latch: bool,
+   |     ^^^^^^^^^^
+16 |     ppu_addr: u16,
+   |     ^^^^^^^^
+
+warning: fields `frame_step` and `sample_rate` are never read
+   --> src\apu.rs:318:5
+    |
+310 | pub struct Apu {
+    |            --- fields in this struct
+...
+318 |     frame_step: u8,
+    |     ^^^^^^^^^^
+...
+323 |     sample_rate: f64,
+    |     ^^^^^^^^^^^
+
+warning: `nes-emulator` (lib) generated 7 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target\debug\nes-emulator.exe example.nes`
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x47FD env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5FD3 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x066F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x365A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x51C1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1E57 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x651E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x279C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x157B env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5A03 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1F36 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x366F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7EB5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x29DC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3E03 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x53A5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x13A8 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1DC5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7FCE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x451F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x233C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0534 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3BEE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x28AF env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x27BD env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4D31 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6B0A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x62F5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0700 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0AAF env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4A7C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0826 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x080E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x646A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x696E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7576 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7FDB env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x52D4 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1A18 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x43BB env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x120C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0FF2 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3F74 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0F74 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0CE9 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x74F4 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6B45 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5DFE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x676D env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6FD3 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x146E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4E47 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x536D env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x28EC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x398E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2F22 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5EB3 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x002A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x50D5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4DEE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x16E3 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3F70 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3EF4 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0D3C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4329 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x00FE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x72F0 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6C8C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6328 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x36FC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x62BF env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6B78 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x54B1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x534D env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x513B env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3721 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0847 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0368 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x483C env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0FDA env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7FAF env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0270 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0F6A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7E59 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3137 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1532 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7A03 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3E64 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1986 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7EC1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x72F1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2B71 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5C8E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3093 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0E0B env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3AB9 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x681E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3653 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1E03 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x225A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3C41 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1C5E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x24E3 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x716F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2C17 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3C73 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2820 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6DF1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0ABC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6AFC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x703D env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1D58 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x13EE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x452F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x23AE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0CCC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x46EC env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5B99 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4BE1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x3DB9 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7D41 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7C2F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0E4F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2A54 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7494 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7530 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4E0E env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x0EB4 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x09BE env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x266B env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2F56 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7FFD env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1558 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x5588 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6ED5 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x11B1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x7A07 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x2E6A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x1853 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6BA1 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x194A env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x4FF7 env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x576F env=0
+[APU]  writes_4015=1
+[APU] p1=0 p2=0 tri=0 noise=0 | pulse_out=0.0000 tnd_out=0.0000 raw=0.0000
+[APU]  p1: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  p2: en=false lc=0 tp=0 env=0 duty=0 mute=true
+[APU]  tri: en=false lc=0 lin=0 tp=0 seq=0
+[APU]  noise: en=false lc=0 tp=0 sr=0x6ED4 env=0
+[APU]  writes_4015=1
+error: process didn't exit successfully: `target\debug\nes-emulator.exe example.nes` (exit code: 0xc000013a, STATUS_CONTROL_C_EXIT)

@@ -5,7 +5,6 @@ pub struct Ppu {
     vram: [u8; 2048],
     palette_table: [u8; 32],
     pub frame_data: Vec<u32>,
-    mirroring: Mirroring,
     // Internal registers
     ctrl: u8,
     mask: u8,
@@ -72,13 +71,12 @@ const NES_PALETTE: [u32; 64] = [
 ];
 
 impl Ppu {
-    pub fn new(mirroring: Mirroring) -> Self {
+    pub fn new() -> Self {
         Ppu {
             oam_data: [0; 256],
             vram: [0; 2048],
             palette_table: [0; 32],
             frame_data: vec![0; 256 * 240],
-            mirroring,
             ctrl: 0,
             mask: 0,
             status: 0,
@@ -115,11 +113,11 @@ impl Ppu {
         }
     }
 
-    fn mirror_vram_addr(&self, addr: u16) -> u16 {
+    fn mirror_vram_addr(mirroring: &Mirroring, addr: u16) -> u16 {
         let mirrored = addr & 0x2FFF;
         let vram_index = mirrored - 0x2000;
         let nametable = vram_index / 0x0400;
-        match (&self.mirroring, nametable) {
+        match (mirroring, nametable) {
             (Mirroring::Vertical, 2) | (Mirroring::Vertical, 3) => vram_index - 0x800,
             (Mirroring::Horizontal, 1) | (Mirroring::Horizontal, 2) => vram_index - 0x400,
             (Mirroring::Horizontal, 3) => vram_index - 0x800,
@@ -140,7 +138,8 @@ impl Ppu {
         match addr {
             0x0000..=0x1FFF => cart.mapper.read_chr(addr),
             0x2000..=0x3EFF => {
-                let idx = self.mirror_vram_addr(addr) as usize;
+                let mirroring = cart.mapper.mirroring();
+                let idx = Self::mirror_vram_addr(&mirroring, addr) as usize;
                 self.vram[idx]
             }
             0x3F00..=0x3FFF => {
@@ -155,7 +154,8 @@ impl Ppu {
         match addr {
             0x0000..=0x1FFF => cart.mapper.write_chr(addr, data),
             0x2000..=0x3EFF => {
-                let idx = self.mirror_vram_addr(addr) as usize;
+                let mirroring = cart.mapper.mirroring();
+                let idx = Self::mirror_vram_addr(&mirroring, addr) as usize;
                 self.vram[idx] = data;
             }
             0x3F00..=0x3FFF => {
@@ -408,7 +408,7 @@ impl Ppu {
                 }
             }
 
-            if self.cycle == 340 {
+            if self.cycle == 340 && self.scanline >= 0 {
                 for i in 0..self.sprite_count as usize {
                     let sprite = &self.sprite_scanline[i];
                     let sprite_pattern_addr: u16;
