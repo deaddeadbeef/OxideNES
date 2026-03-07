@@ -192,21 +192,21 @@ fn main() {
             mouse_was_down = mouse_down;
             
             if mouse_clicked && mx < WINDOW_WIDTH && my < WINDOW_HEIGHT {
-                let console_x = (WINDOW_WIDTH - 800) / 2;
-                let body_y = TV_HEIGHT + 20;
+                let console_x = (WINDOW_WIDTH - 700) / 2;
+                let body_y = TV_HEIGHT + 15;
                 
                 // RESET button hit test
-                let rst_x = console_x + 150;
-                let rst_y = body_y + 48;
-                if mx >= rst_x && mx < rst_x + 50 && my >= rst_y && my < rst_y + 14 {
+                let rst_x = console_x + 160;
+                let rst_y = body_y + 52;
+                if mx >= rst_x && mx < rst_x + 55 && my >= rst_y && my < rst_y + 14 {
                     cpu.reset(&mut bus);
                     println!("CPU Reset");
                 }
                 
                 // Cartridge slot hit test
-                let slot_x = console_x + 800 / 2 - 100;
-                let slot_y = body_y + 4;
-                if mx >= slot_x && mx < slot_x + 200 && my >= slot_y && my < slot_y + 26 {
+                let slot_x = console_x + 700 / 2 - 90;
+                let slot_y = body_y + 5;
+                if mx >= slot_x && mx < slot_x + 180 && my >= slot_y && my < slot_y + 25 {
                     let file = rfd::FileDialog::new()
                         .set_title("Insert Cartridge")
                         .add_filter("NES ROMs", &["nes"])
@@ -470,155 +470,138 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     const SCREEN_X: usize = 160;
     const SCREEN_Y: usize = 70;
     
-    // Sony Trinitron color palette
-    const BEZEL_BASE: u32     = 0x505050;  // Charcoal grey front face
-    const BEZEL_HIGHLIGHT: u32 = 0x686868;  // Top/left bevel
-    const BEZEL_SHADOW: u32   = 0x383838;  // Bottom/right shadow
-    const BEZEL_INNER_RIM: u32 = 0x1A1A1A; // Dark lip around screen
-    const SPEAKER_SLOT: u32   = 0x1E1E1E;  // Grille holes
-    const BADGE_PLATE: u32    = 0x3A3A3A;  // Brand badge bg
-    const BADGE_TEXT: u32     = 0xAAAAAA;  // Silver lettering
-    const BUTTON_FACE: u32    = 0x3A3A3A;
-    const LED_GREEN: u32      = 0x00CC44;  // Power on
-    
     frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
     
+    // Background — dark room/wall color
+    for i in 0..WINDOW_WIDTH * TV_HEIGHT {
+        frame[i] = 0x1A1A22; // dark bluish-grey wall
+    }
+    
+    // TV outer shell dimensions — slightly larger than bezel
+    let tv_outer_x = SCREEN_X - 50;
+    let tv_outer_y = SCREEN_Y - 45;
+    let tv_outer_w = SCREEN_W + 100;
+    let tv_outer_h = SCREEN_H + 145; // extra bottom for controls
+    let tv_outer_r = tv_outer_x + tv_outer_w;
+    let tv_outer_b = tv_outer_y + tv_outer_h;
+    
     for y in 0..TV_HEIGHT {
-        for x in 0..TV_WIDTH {
+        for x in 0..WINDOW_WIDTH {
             let idx = y * WINDOW_WIDTH + x;
             
-            // Screen area — will be overwritten with game
-            let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W 
-                         && y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H;
-            
-            if in_screen {
-                // Check for rounded corners (radius ~10px)
-                let corner_r = 10usize;
-                let sx = x - SCREEN_X;
-                let sy = y - SCREEN_Y;
-                let in_corner = 
-                    (sx < corner_r && sy < corner_r && sq_dist(sx, sy, corner_r, corner_r) > corner_r * corner_r) ||
-                    (sx >= SCREEN_W - corner_r && sy < corner_r && sq_dist(sx, sy, SCREEN_W - corner_r - 1, corner_r) > corner_r * corner_r) ||
-                    (sx < corner_r && sy >= SCREEN_H - corner_r && sq_dist(sx, sy, corner_r, SCREEN_H - corner_r - 1) > corner_r * corner_r) ||
-                    (sx >= SCREEN_W - corner_r && sy >= SCREEN_H - corner_r && sq_dist(sx, sy, SCREEN_W - corner_r - 1, SCREEN_H - corner_r - 1) > corner_r * corner_r);
+            // Inside TV outer shell?
+            if x >= tv_outer_x && x < tv_outer_r && y >= tv_outer_y && y < tv_outer_b {
+                let lx = x - tv_outer_x;
+                let ly = y - tv_outer_y;
                 
-                if in_corner {
-                    frame[idx] = BEZEL_INNER_RIM;
-                } else {
-                    frame[idx] = 0x000000; // screen area
-                }
-            } else {
-                // === BEZEL ===
-                let mut color = BEZEL_BASE;
+                // Rounded corners — skip pixels outside radius
+                let corner_r = 20usize;
+                let in_corner_tl = lx < corner_r && ly < corner_r && sq_dist(lx, ly, corner_r, corner_r) > corner_r * corner_r;
+                let in_corner_tr = lx >= tv_outer_w - corner_r && ly < corner_r && sq_dist(lx, ly, tv_outer_w - corner_r - 1, corner_r) > corner_r * corner_r;
+                let in_corner_bl = lx < corner_r && ly >= tv_outer_h - corner_r && sq_dist(lx, ly, corner_r, tv_outer_h - corner_r - 1) > corner_r * corner_r;
+                let in_corner_br = lx >= tv_outer_w - corner_r && ly >= tv_outer_h - corner_r && sq_dist(lx, ly, tv_outer_w - corner_r - 1, tv_outer_h - corner_r - 1) > corner_r * corner_r;
                 
-                // Outer bevel — top and left edges lighter
-                if y < 4 || x < 4 {
-                    color = BEZEL_HIGHLIGHT;
-                }
-                // Outer shadow — bottom and right edges darker
-                if y >= TV_HEIGHT - 4 || x >= TV_WIDTH - 4 {
-                    color = BEZEL_SHADOW;
+                if in_corner_tl || in_corner_tr || in_corner_bl || in_corner_br {
+                    continue; // Leave as wall color — rounded corner
                 }
                 
-                // 3D gradient — top half slightly lighter
-                if y < TV_HEIGHT / 3 {
-                    let factor = (TV_HEIGHT / 3 - y) as u32;
-                    let boost = (factor * 12 / (TV_HEIGHT / 3) as u32).min(12);
-                    let r = ((color >> 16) & 0xFF) + boost;
-                    let g = ((color >> 8) & 0xFF) + boost;
-                    let b = (color & 0xFF) + boost;
-                    color = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+                // Main bezel color with smooth gradient
+                let grad_y = (ly as f32 / tv_outer_h as f32);
+                let base = 72.0 - grad_y * 20.0; // darker toward bottom
+                let mut r = base as u32;
+                let mut g = base as u32;
+                let mut b = (base + 2.0) as u32; // very slight blue tint
+                
+                // Outer edge bevel — 4px lighter on top/left, darker on bottom/right
+                if ly < 4 { r += 25; g += 25; b += 25; }
+                if lx < 4 && ly >= 4 { r += 15; g += 15; b += 15; }
+                if ly >= tv_outer_h - 4 { r = r.saturating_sub(15); g = g.saturating_sub(15); b = b.saturating_sub(15); }
+                if lx >= tv_outer_w - 4 && ly < tv_outer_h - 4 { r = r.saturating_sub(10); g = g.saturating_sub(10); b = b.saturating_sub(10); }
+                
+                // Inner bezel around screen — 8px beveled inset
+                let dist_to_screen = {
+                    let dx = if x < SCREEN_X { SCREEN_X - x } else if x >= SCREEN_X + SCREEN_W { x - (SCREEN_X + SCREEN_W) + 1 } else { 999 };
+                    let dy = if y < SCREEN_Y { SCREEN_Y - y } else if y >= SCREEN_Y + SCREEN_H { y - (SCREEN_Y + SCREEN_H) + 1 } else { 999 };
+                    dx.min(dy)
+                };
+                
+                if dist_to_screen <= 8 && dist_to_screen > 0 {
+                    let shadow = (8 - dist_to_screen) as u32 * 6;
+                    r = r.saturating_sub(shadow);
+                    g = g.saturating_sub(shadow);
+                    b = b.saturating_sub(shadow);
                 }
                 
-                // Inner rim — dark recessed lip around screen (5px wide)
-                let dist_to_screen_x = if x < SCREEN_X { SCREEN_X - x } 
-                    else if x >= SCREEN_X + SCREEN_W { x - (SCREEN_X + SCREEN_W) + 1 } 
-                    else { 999 };
-                let dist_to_screen_y = if y < SCREEN_Y { SCREEN_Y - y }
-                    else if y >= SCREEN_Y + SCREEN_H { y - (SCREEN_Y + SCREEN_H) + 1 }
-                    else { 999 };
-                let dist_to_screen = dist_to_screen_x.min(dist_to_screen_y);
-                
-                if dist_to_screen <= 5 {
-                    let t = dist_to_screen as u32;
-                    // Blend from BEZEL_INNER_RIM to current color
-                    let rim_r = ((BEZEL_INNER_RIM >> 16) & 0xFF);
-                    let rim_g = ((BEZEL_INNER_RIM >> 8) & 0xFF);
-                    let rim_b = (BEZEL_INNER_RIM & 0xFF);
-                    let cur_r = ((color >> 16) & 0xFF);
-                    let cur_g = ((color >> 8) & 0xFF);
-                    let cur_b = (color & 0xFF);
-                    let r = rim_r + (cur_r - rim_r) * t / 5;
-                    let g = rim_g + (cur_g - rim_g) * t / 5;
-                    let b = rim_b + (cur_b - rim_b) * t / 5;
-                    color = (r << 16) | (g << 8) | b;
-                }
-                
-                // === BOTTOM BEZEL DETAILS ===
-                let bottom_start = SCREEN_Y + SCREEN_H;
-                
-                // Speaker grille — horizontal slots below screen
-                if y >= bottom_start + 25 && y < bottom_start + 65 
-                   && x >= SCREEN_X + 200 && x < SCREEN_X + SCREEN_W - 200 {
-                    if (y - bottom_start - 25) % 4 < 2 {
-                        color = SPEAKER_SLOT;
+                // Screen area itself
+                let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W 
+                             && y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H;
+                if in_screen {
+                    // Rounded screen corners
+                    let scr_r = 8usize;
+                    let sx = x - SCREEN_X;
+                    let sy = y - SCREEN_Y;
+                    let scr_corner = 
+                        (sx < scr_r && sy < scr_r && sq_dist(sx, sy, scr_r, scr_r) > scr_r * scr_r) ||
+                        (sx >= SCREEN_W - scr_r && sy < scr_r && sq_dist(sx, sy, SCREEN_W - scr_r - 1, scr_r) > scr_r * scr_r) ||
+                        (sx < scr_r && sy >= SCREEN_H - scr_r && sq_dist(sx, sy, scr_r, SCREEN_H - scr_r - 1) > scr_r * scr_r) ||
+                        (sx >= SCREEN_W - scr_r && sy >= SCREEN_H - scr_r && sq_dist(sx, sy, SCREEN_W - scr_r - 1, SCREEN_H - scr_r - 1) > scr_r * scr_r);
+                    
+                    if scr_corner {
+                        // Dark bezel in screen corners
+                        frame[idx] = 0x0A0A0A;
+                    } else {
+                        frame[idx] = 0x000000;
                     }
+                    continue;
                 }
                 
-                // Brand badge — centered below speaker
-                if y >= bottom_start + 80 && y < bottom_start + 100
-                   && x >= TV_WIDTH / 2 - 60 && x < TV_WIDTH / 2 + 60 {
-                    // Badge background
-                    color = BADGE_PLATE;
-                    // "NES" text approximation — 3 letter blocks
-                    let bx = x - (TV_WIDTH / 2 - 60);
-                    let by = y - (bottom_start + 80);
-                    // Simple pixel text: N, E, S
-                    if by >= 4 && by < 16 {
-                        let lx = bx % 35;
-                        if lx >= 8 && lx < 28 {
-                            // Thin horizontal bars to suggest embossed text
-                            if by == 5 || by == 10 || by == 15 {
-                                color = BADGE_TEXT;
-                            }
+                // Bottom panel — below screen, has speaker + controls
+                if y >= SCREEN_Y + SCREEN_H + 10 {
+                    // Speaker grille — centered horizontal slots
+                    let speaker_x_start = SCREEN_X + SCREEN_W / 2 - 150;
+                    let speaker_x_end = SCREEN_X + SCREEN_W / 2 + 150;
+                    let speaker_y_start = SCREEN_Y + SCREEN_H + 20;
+                    let speaker_y_end = speaker_y_start + 50;
+                    
+                    if x >= speaker_x_start && x < speaker_x_end && y >= speaker_y_start && y < speaker_y_end {
+                        let slot_y = (y - speaker_y_start) % 5;
+                        if slot_y < 2 {
+                            // Slot holes — very dark with subtle depth
+                            let slot_depth = if slot_y == 0 { 0x0E0E0Eu32 } else { 0x181818u32 };
+                            frame[idx] = slot_depth;
+                            continue;
                         }
                     }
-                }
-                
-                // Control buttons — right side of bottom bezel
-                let btn_x = SCREEN_X + SCREEN_W - 60;
-                if x >= btn_x && x < btn_x + 20 && y >= bottom_start + 30 && y < bottom_start + 100 {
-                    let btn_local_y = y - (bottom_start + 30);
-                    let btn_index = btn_local_y / 16;
-                    let btn_offset = btn_local_y % 16;
-                    if btn_index < 4 && btn_offset >= 2 && btn_offset < 12 {
-                        let bx = x - btn_x;
-                        if bx >= 4 && bx < 16 {
-                            color = BUTTON_FACE;
-                            // Top highlight
-                            if btn_offset == 2 { color = 0x6A6A6A; }
-                            // Bottom shadow
-                            if btn_offset == 11 { color = 0x222222; }
-                        }
+                    
+                    // Power LED — small green dot, bottom left
+                    let led_cx = tv_outer_x + 50;
+                    let led_cy = SCREEN_Y + SCREEN_H + 45;
+                    let led_dx = if x > led_cx { x - led_cx } else { led_cx - x };
+                    let led_dy = if y > led_cy { y - led_cy } else { led_cy - y };
+                    if led_dx * led_dx + led_dy * led_dy <= 12 {
+                        frame[idx] = 0x00DD55; // bright green
+                        continue;
+                    } else if led_dx * led_dx + led_dy * led_dy <= 30 {
+                        frame[idx] = 0x004418; // green glow
+                        continue;
+                    }
+                    
+                    // Brand badge — subtle embossed rectangle
+                    let badge_x = SCREEN_X + SCREEN_W / 2 - 50;
+                    let badge_y = SCREEN_Y + SCREEN_H + 78;
+                    if x >= badge_x && x < badge_x + 100 && y >= badge_y && y < badge_y + 16 {
+                        let bx = x - badge_x;
+                        let by = y - badge_y;
+                        if by == 0 || bx == 0 { frame[idx] = 0x555555; continue; }
+                        if by == 15 || bx == 99 { frame[idx] = 0x3A3A3A; continue; }
+                        frame[idx] = 0x454545;
+                        continue;
                     }
                 }
                 
-                // Power LED — bottom left
-                if y >= bottom_start + 40 && y < bottom_start + 48
-                   && x >= SCREEN_X + 30 && x < SCREEN_X + 38 {
-                    let lx = x - (SCREEN_X + 30);
-                    let ly = y - (bottom_start + 40);
-                    // Circular LED (rough)
-                    if (lx >= 2 && lx < 6) && (ly >= 2 && ly < 6) {
-                        color = LED_GREEN;
-                    } else if (lx >= 1 && lx < 7) && (ly >= 1 && ly < 7) {
-                        // Glow halo
-                        color = 0x004D1A; // dim green glow
-                    }
-                }
-                
-                frame[idx] = color;
+                frame[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
             }
+            // else: stays as wall color
         }
     }
 }
@@ -701,159 +684,197 @@ fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, c
 }
 
 fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: usize, window_height: usize) {
-    let console_y = tv_height; // starts right below TV
-    let console_w = 800;       // console is 800px wide, centered
-    let console_h = 160;
-    let console_x = (window_width - console_w) / 2; // centered
+    let console_y = tv_height;
+    let console_w = 700;
+    let console_h = 140;
+    let console_x = (window_width - console_w) / 2;
     
-    // "Shelf" / surface the console sits on
+    // Shelf/surface
     for y in console_y..window_height {
         for x in 0..window_width {
             let idx = y * window_width + x;
-            // Wood shelf texture (warm brown)
-            let grain = ((x * 7 + y * 3) % 20) as u32;
-            let r = 90 + grain;
-            let g = 65 + grain;
-            let b = 45 + grain / 2;
-            frame[idx] = (r << 16) | (g << 8) | b;
+            // Wood grain — warm oak
+            let base_r = 85u32;
+            let base_g = 62u32;
+            let base_b = 40u32;
+            let grain1 = ((x.wrapping_mul(13) + y.wrapping_mul(7)) % 15) as u32;
+            let grain2 = ((x.wrapping_mul(3) + y.wrapping_mul(11)) % 8) as u32;
+            frame[idx] = ((base_r + grain1).min(120) << 16) | ((base_g + grain2).min(85) << 8) | (base_b + grain1 / 2).min(65);
         }
     }
     
-    // Console body — main rectangle
-    let body_y = console_y + 20; // 20px from top of console area
-    let body_h = 120;
+    let body_y = console_y + 15;
+    let body_r = console_x + console_w;
+    let body_b = body_y + console_h;
     
-    for y in body_y..body_y + body_h {
-        for x in console_x..console_x + console_w {
+    for y in body_y..body_b {
+        for x in console_x..body_r {
             let idx = y * window_width + x;
-            let local_y = y - body_y;
+            let lx = x - console_x;
+            let ly = y - body_y;
             
-            // Top dark stripe (first 30px) 
-            if local_y < 30 {
-                // Dark charcoal stripe
-                let shade = if local_y < 2 { 0x353535u32 } // top edge shadow
-                    else if local_y >= 28 { 0x353535u32 }   // bottom edge
-                    else { 0x484848u32 };                    // stripe body
-                frame[idx] = shade;
+            // Rounded corners for console body
+            let cr = 10usize;
+            let skip = 
+                (lx < cr && ly < cr && sq_dist(lx, ly, cr, cr) > cr * cr) ||
+                (lx >= console_w - cr && ly < cr && sq_dist(lx, ly, console_w - cr - 1, cr) > cr * cr) ||
+                (lx < cr && ly >= console_h - cr && sq_dist(lx, ly, cr, console_h - cr - 1) > cr * cr) ||
+                (lx >= console_w - cr && ly >= console_h - cr && sq_dist(lx, ly, console_w - cr - 1, console_h - cr - 1) > cr * cr);
+            if skip { continue; }
+            
+            // Top dark stripe (cartridge area) — first 35px
+            if ly < 35 {
+                let mut c = 0x3C3C3Cu32;
+                // Top bevel
+                if ly < 2 { c = 0x505050; }
+                if ly >= 33 { c = 0x2A2A2A; }
                 
-                // Cartridge slot — dark recessed rectangle in center
-                let slot_x = console_x + console_w / 2 - 100;
-                let slot_w = 200;
-                if x >= slot_x && x < slot_x + slot_w && local_y >= 4 && local_y < 26 {
-                    frame[idx] = 0x1A1A1A; // deep dark slot
-                    // Slot inner edge highlight
-                    if local_y == 4 || local_y == 25 || x == slot_x || x == slot_x + slot_w - 1 {
-                        frame[idx] = 0x0E0E0E;
+                // Cartridge slot — centered dark rectangle
+                let slot_x = console_w / 2 - 90;
+                let slot_w = 180;
+                if lx >= slot_x && lx < slot_x + slot_w && ly >= 5 && ly < 30 {
+                    c = 0x111111;
+                    // Slot edges
+                    if ly == 5 || ly == 29 || lx == slot_x || lx == slot_x + slot_w - 1 {
+                        c = 0x080808;
                     }
-                    // Cartridge visible inside (lighter rectangle if ROM loaded)
-                    if x >= slot_x + 20 && x < slot_x + slot_w - 20 && local_y >= 6 && local_y < 24 {
-                        frame[idx] = 0x808080; // grey cartridge top
-                        // Label on cartridge
-                        if x >= slot_x + 50 && x < slot_x + slot_w - 50 && local_y >= 10 && local_y < 20 {
-                            frame[idx] = 0xD4AA00; // gold label
+                    // Cartridge inside slot
+                    if lx >= slot_x + 15 && lx < slot_x + slot_w - 15 && ly >= 7 && ly < 28 {
+                        c = 0x6E6E6E; // grey cart top
+                        // Cart label
+                        if lx >= slot_x + 40 && lx < slot_x + slot_w - 40 && ly >= 11 && ly < 24 {
+                            c = 0xCC9922; // gold label
+                            // Label border
+                            if ly == 11 || ly == 23 || lx == slot_x + 40 || lx == slot_x + slot_w - 41 {
+                                c = 0x997711;
+                            }
                         }
                     }
                 }
+                
+                frame[idx] = c;
             } else {
-                // Light grey body
-                let local_x = x - console_x;
-                let mut color = 0xC8C8C8u32;
+                // Light body — smooth gradient
+                let grad = ly as f32 / console_h as f32;
+                let base = (195.0 - grad * 30.0) as u32;
+                let mut r = base;
+                let mut g = base;
+                let mut b = (base as f32 * 0.97) as u32; // very slight warm tint
                 
-                // Subtle top-to-bottom gradient
-                let dim = (local_y - 30) as u32 / 4;
-                let r = 200u32.saturating_sub(dim);
-                let g = 200u32.saturating_sub(dim);
-                let b = 200u32.saturating_sub(dim);
-                color = (r << 16) | (g << 8) | b;
+                // Top highlight of body
+                if ly == 35 { r += 20; g += 20; b += 20; }
+                // Bottom shadow
+                if ly >= console_h - 3 { r = r.saturating_sub(30); g = g.saturating_sub(30); b = b.saturating_sub(30); }
+                // Side shadows
+                if lx < 5 { r = r.saturating_sub(15); g = g.saturating_sub(15); b = b.saturating_sub(15); }
+                if lx >= console_w - 5 { r = r.saturating_sub(20); g = g.saturating_sub(20); b = b.saturating_sub(20); }
                 
-                // Top edge of body — highlight
-                if local_y == 30 { color = 0xE0E0E0; }
-                // Bottom edge — shadow
-                if local_y >= body_h - 3 { color = 0x909090; }
-                // Left/right edges
-                if local_x < 3 || local_x >= console_w - 3 { 
-                    color = 0xA0A0A0;
+                // POWER button — raised rectangle with 3D effect
+                let pwr_x = 60usize;
+                let pwr_y = 50usize;
+                let pwr_w = 45usize;
+                let pwr_h = 18usize;
+                if lx >= pwr_x && lx < pwr_x + pwr_w && ly >= pwr_y && ly < pwr_y + pwr_h {
+                    let bx = lx - pwr_x;
+                    let by = ly - pwr_y;
+                    r = 85; g = 85; b = 85;
+                    if by == 0 { r = 110; g = 110; b = 110; } // top highlight
+                    if by == pwr_h - 1 { r = 50; g = 50; b = 50; } // bottom shadow
+                    if bx == 0 { r = 100; g = 100; b = 100; }
+                    if bx == pwr_w - 1 { r = 55; g = 55; b = 55; }
                 }
                 
-                // POWER button — far left
-                let pwr_x = console_x + 40;
-                let pwr_y = body_y + 45;
-                if x >= pwr_x && x < pwr_x + 40 && y >= pwr_y && y < pwr_y + 18 {
-                    let bx = x - pwr_x;
-                    let by = y - pwr_y;
-                    color = 0x606060; // button face
-                    if by == 0 { color = 0x808080; } // top highlight
-                    if by == 17 { color = 0x404040; } // bottom shadow
-                    if bx == 0 || bx == 39 { color = 0x505050; }
-                }
-                
-                // Power LED — left of power button
-                let led_x = console_x + 25;
-                let led_y = body_y + 50;
-                if x >= led_x && x < led_x + 6 && y >= led_y && y < led_y + 6 {
-                    let dx = x - led_x;
-                    let dy = y - led_y;
-                    if dx >= 1 && dx < 5 && dy >= 1 && dy < 5 {
-                        color = 0x00CC44; // green LED
-                    } else {
-                        color = 0x004D1A; // glow
+                // Power LED — circular
+                let led_x = 45usize;
+                let led_y = 56usize;
+                if lx >= led_x && lx < led_x + 8 && ly >= led_y && ly < led_y + 8 {
+                    let dx = (lx - led_x) as i32 - 3;
+                    let dy = (ly - led_y) as i32 - 3;
+                    if dx * dx + dy * dy <= 6 {
+                        r = 0; g = 220; b = 68;
+                    } else if dx * dx + dy * dy <= 14 {
+                        r = 0; g = 80; b = 25;
                     }
                 }
                 
-                // RESET button — center-left area
-                let rst_x = console_x + 150;
-                let rst_y = body_y + 48;
-                if x >= rst_x && x < rst_x + 50 && y >= rst_y && y < rst_y + 14 {
-                    let bx = x - rst_x;
-                    let by = y - rst_y;
-                    color = 0x707070;
-                    if by == 0 { color = 0x909090; }
-                    if by == 13 { color = 0x505050; }
-                    if bx == 0 || bx == 49 { color = 0x606060; }
+                // RESET button — smaller, recessed look
+                let rst_x = 160usize;
+                let rst_y = 52usize;
+                let rst_w = 55usize;
+                let rst_h = 14usize;
+                if lx >= rst_x && lx < rst_x + rst_w && ly >= rst_y && ly < rst_y + rst_h {
+                    let by = ly - rst_y;
+                    r = 100; g = 100; b = 100;
+                    if by == 0 { r = 70; g = 70; b = 70; } // top shadow (recessed)
+                    if by == rst_h - 1 { r = 120; g = 120; b = 120; } // bottom highlight
                 }
                 
-                // Controller ports — two dark rectangles at bottom
-                let port1_x = console_x + 250;
-                let port2_x = console_x + 480;
-                let port_y = body_y + 90;
-                let port_w = 70;
-                let port_h = 20;
+                // Controller ports — two trapezoidal ports
+                let port_y = 85usize;
+                let port_h = 22usize;
+                let port_w = 65usize;
+                let port1_x = console_w / 2 - 100;
+                let port2_x = console_w / 2 + 35;
                 
-                for (px, _label) in [(port1_x, "1"), (port2_x, "2")] {
-                    if x >= px && x < px + port_w && y >= port_y && y < port_y + port_h {
-                        color = 0x2A2A2A; // dark port
-                        let bx = x - px;
-                        let by = y - port_y;
-                        if by == 0 { color = 0x1A1A1A; } // top shadow
-                        if by == port_h - 1 { color = 0x3A3A3A; } // bottom lip
-                        // Inner pins
-                        if bx >= 10 && bx < port_w - 10 && by >= 5 && by < port_h - 5 {
-                            if bx % 6 < 3 { color = 0x555555; } // pins
+                for port_x in [port1_x, port2_x] {
+                    if lx >= port_x && lx < port_x + port_w && ly >= port_y && ly < port_y + port_h {
+                        let bx = lx - port_x;
+                        let by = ly - port_y;
+                        r = 30; g = 30; b = 30;
+                        // Inner cavity
+                        if bx >= 5 && bx < port_w - 5 && by >= 3 && by < port_h - 3 {
+                            r = 18; g = 18; b = 18;
+                            // Connector pins
+                            if by >= 7 && by < port_h - 7 && bx >= 12 && bx < port_w - 12 {
+                                if (bx - 12) % 5 < 3 {
+                                    r = 80; g = 75; b = 60; // brass pins
+                                }
+                            }
                         }
+                        // Port border
+                        if by == 0 { r = 20; g = 20; b = 20; }
+                        if by == port_h - 1 { r = 50; g = 50; b = 50; }
                     }
                 }
                 
-                frame[idx] = color;
+                // Decorative lines/ridges on body
+                if ly == 75 && lx >= 30 && lx < console_w - 30 {
+                    r = r.saturating_sub(20); g = g.saturating_sub(20); b = b.saturating_sub(20);
+                }
+                if ly == 76 && lx >= 30 && lx < console_w - 30 {
+                    r = (r + 10).min(255); g = (g + 10).min(255); b = (b + 10).min(255);
+                }
+                
+                frame[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
             }
         }
     }
     
-    // Text labels using pixel font
-    let pwr_x = console_x + 40;
-    let pwr_y = body_y + 45;
-    draw_text(frame, "POWER", pwr_x + 10, pwr_y + 20, 0x888888, window_width);
+    // Shadow under console
+    for y in body_b..body_b.min(body_b + 6) {
+        for x in console_x + 10..body_r - 10 {
+            if y < window_height {
+                let idx = y * window_width + x;
+                let shadow_alpha = (body_b + 6 - y) as u32 * 8;
+                let existing = frame[idx];
+                let er = ((existing >> 16) & 0xFF).saturating_sub(shadow_alpha);
+                let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow_alpha);
+                let eb = (existing & 0xFF).saturating_sub(shadow_alpha);
+                frame[idx] = (er << 16) | (eg << 8) | eb;
+            }
+        }
+    }
     
-    let rst_x = console_x + 150;
-    let rst_y = body_y + 48;
-    draw_text(frame, "RESET", rst_x + 15, rst_y + 16, 0x888888, window_width);
-    
-    let slot_x = console_x + console_w / 2 - 100;
-    draw_text(frame, "INSERT CARTRIDGE", slot_x + 68, body_y + 13, 0x666666, window_width);
-    
-    let port1_x = console_x + 250;
-    let port2_x = console_x + 480;
-    let port_y = body_y + 90;
-    let port_h: usize = 20;
-    draw_text(frame, "1", port1_x + 33, port_y + port_h + 2, 0x888888, window_width);
-    draw_text(frame, "2", port2_x + 33, port_y + port_h + 2, 0x888888, window_width);
+    // Labels — adjust positions to match new console layout
+    let console_x_text = (window_width - 700) / 2;
+    let body_y_text = tv_height + 15;
+
+    draw_text(frame, "POWER", console_x_text + 55, body_y_text + 70, 0x808080, window_width);
+    draw_text(frame, "RESET", console_x_text + 160, body_y_text + 68, 0x808080, window_width);
+    draw_text(frame, "INSERT CARTRIDGE", console_x_text + 700/2 - 32, body_y_text + 32, 0x555555, window_width);
+
+    let port1_x = console_x_text + 700/2 - 100;
+    let port2_x = console_x_text + 700/2 + 35;
+    draw_text(frame, "1", port1_x + 30, body_y_text + 110, 0x808080, window_width);
+    draw_text(frame, "2", port2_x + 30, body_y_text + 110, 0x808080, window_width);
 }
