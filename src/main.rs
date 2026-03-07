@@ -647,6 +647,59 @@ fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>
     }
 }
 
+fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, color: u32, stride: usize) {
+    let font: std::collections::HashMap<char, [u8; 5]> = [
+        ('A', [0b111, 0b101, 0b111, 0b101, 0b101]),
+        ('B', [0b110, 0b101, 0b110, 0b101, 0b110]),
+        ('C', [0b111, 0b100, 0b100, 0b100, 0b111]),
+        ('D', [0b110, 0b101, 0b101, 0b101, 0b110]),
+        ('E', [0b111, 0b100, 0b110, 0b100, 0b111]),
+        ('F', [0b111, 0b100, 0b110, 0b100, 0b100]),
+        ('G', [0b111, 0b100, 0b101, 0b101, 0b111]),
+        ('H', [0b101, 0b101, 0b111, 0b101, 0b101]),
+        ('I', [0b111, 0b010, 0b010, 0b010, 0b111]),
+        ('J', [0b001, 0b001, 0b001, 0b101, 0b111]),
+        ('K', [0b101, 0b110, 0b100, 0b110, 0b101]),
+        ('L', [0b100, 0b100, 0b100, 0b100, 0b111]),
+        ('M', [0b101, 0b111, 0b111, 0b101, 0b101]),
+        ('N', [0b101, 0b111, 0b111, 0b101, 0b101]),
+        ('O', [0b111, 0b101, 0b101, 0b101, 0b111]),
+        ('P', [0b111, 0b101, 0b111, 0b100, 0b100]),
+        ('Q', [0b111, 0b101, 0b101, 0b111, 0b001]),
+        ('R', [0b111, 0b101, 0b111, 0b110, 0b101]),
+        ('S', [0b111, 0b100, 0b111, 0b001, 0b111]),
+        ('T', [0b111, 0b010, 0b010, 0b010, 0b010]),
+        ('U', [0b101, 0b101, 0b101, 0b101, 0b111]),
+        ('V', [0b101, 0b101, 0b101, 0b101, 0b010]),
+        ('W', [0b101, 0b101, 0b111, 0b111, 0b101]),
+        ('X', [0b101, 0b101, 0b010, 0b101, 0b101]),
+        ('Y', [0b101, 0b101, 0b010, 0b010, 0b010]),
+        ('Z', [0b111, 0b001, 0b010, 0b100, 0b111]),
+        ('0', [0b111, 0b101, 0b101, 0b101, 0b111]),
+        ('1', [0b010, 0b110, 0b010, 0b010, 0b111]),
+        ('2', [0b111, 0b001, 0b111, 0b100, 0b111]),
+        (' ', [0b000, 0b000, 0b000, 0b000, 0b000]),
+    ].iter().cloned().collect();
+
+    let mut cursor_x = start_x;
+    for ch in text.chars() {
+        if let Some(glyph) = font.get(&ch) {
+            for (row, &bits) in glyph.iter().enumerate() {
+                for col in 0..3 {
+                    if bits & (0b100 >> col) != 0 {
+                        let px = cursor_x + col;
+                        let py = start_y + row;
+                        if px < stride && py * stride + px < frame.len() {
+                            frame[py * stride + px] = color;
+                        }
+                    }
+                }
+            }
+        }
+        cursor_x += 4; // 3px char + 1px gap
+    }
+}
+
 fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: usize, window_height: usize) {
     let console_y = tv_height; // starts right below TV
     let console_w = 800;       // console is 800px wide, centered
@@ -759,21 +812,6 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: u
                     if bx == 0 || bx == 49 { color = 0x606060; }
                 }
                 
-                // Labels — "POWER" text area
-                if x >= pwr_x && x < pwr_x + 40 && y >= pwr_y + 20 && y < pwr_y + 26 {
-                    // Tiny dot pattern suggesting text
-                    if (x - pwr_x) % 4 < 2 && (y - pwr_y - 20) % 3 < 2 {
-                        color = 0x888888;
-                    }
-                }
-                
-                // "RESET" text area  
-                if x >= rst_x && x < rst_x + 50 && y >= rst_y + 16 && y < rst_y + 22 {
-                    if (x - rst_x) % 4 < 2 && (y - rst_y - 16) % 3 < 2 {
-                        color = 0x888888;
-                    }
-                }
-                
                 // Controller ports — two dark rectangles at bottom
                 let port1_x = console_x + 250;
                 let port2_x = console_x + 480;
@@ -799,4 +837,23 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: u
             }
         }
     }
+    
+    // Text labels using pixel font
+    let pwr_x = console_x + 40;
+    let pwr_y = body_y + 45;
+    draw_text(frame, "POWER", pwr_x + 10, pwr_y + 20, 0x888888, window_width);
+    
+    let rst_x = console_x + 150;
+    let rst_y = body_y + 48;
+    draw_text(frame, "RESET", rst_x + 15, rst_y + 16, 0x888888, window_width);
+    
+    let slot_x = console_x + console_w / 2 - 100;
+    draw_text(frame, "INSERT CARTRIDGE", slot_x + 68, body_y + 13, 0x666666, window_width);
+    
+    let port1_x = console_x + 250;
+    let port2_x = console_x + 480;
+    let port_y = body_y + 90;
+    let port_h: usize = 20;
+    draw_text(frame, "1", port1_x + 33, port_y + port_h + 2, 0x888888, window_width);
+    draw_text(frame, "2", port2_x + 33, port_y + port_h + 2, 0x888888, window_width);
 }
