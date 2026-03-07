@@ -9,6 +9,7 @@ rfd = "0.15"
 cpal = "0.15"
 blip_buf = "0.1"
 ringbuf = "0.4"
+gilrs = "0.11"
 
 [profile.dev]
 opt-level = 2

@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::{traits::*, HeapRb};
+use gilrs::{Gilrs, Button, Axis};
 
 use nes_emulator::bus::Bus;
 use nes_emulator::cartridge::Cartridge;
@@ -29,6 +30,14 @@ fn main() {
     .expect("Failed to create window");
 
     window.set_target_fps(60);
+
+    // Initialize gamepad support
+    let mut gilrs = Gilrs::new().ok();
+    if let Some(ref g) = gilrs {
+        for (_id, gamepad) in g.gamepads() {
+            println!("Controller: {} (connected: {})", gamepad.name(), gamepad.is_connected());
+        }
+    }
 
     // Audio ring buffer — lock-free, single producer / single consumer
     let ring = HeapRb::<f32>::new(8192); // ~170ms at 48kHz
@@ -154,7 +163,7 @@ fn main() {
             .update_with_buffer(&crt_buffer, 512, 480)
             .expect("Failed to update window");
 
-        handle_input(&window, &mut bus);
+        handle_input(&window, &mut bus, &mut gilrs);
 
         if window.is_key_pressed(Key::F1, KeyRepeat::No) {
             crt_enabled = !crt_enabled;
@@ -215,22 +224,67 @@ fn load_rom() -> (String, Cartridge) {
     }
 }
 
-fn handle_input(window: &Window, bus: &mut Bus) {
-    let key_map: [(Key, JoypadButton); 8] = [
-        (Key::Z, JoypadButton::A),
-        (Key::X, JoypadButton::B),
-        (Key::Space, JoypadButton::Select),
-        (Key::Enter, JoypadButton::Start),
-        (Key::Up, JoypadButton::Up),
-        (Key::Down, JoypadButton::Down),
-        (Key::Left, JoypadButton::Left),
-        (Key::Right, JoypadButton::Right),
-    ];
-
+fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>) {
     let keys = window.get_keys();
-    for (key, button) in &key_map {
-        bus.joypad1.set_button_pressed(*button, keys.contains(key));
+    
+    // Start with keyboard state
+    let mut a_pressed = keys.contains(&Key::Z);
+    let mut b_pressed = keys.contains(&Key::X);
+    let mut select_pressed = keys.contains(&Key::Space);
+    let mut start_pressed = keys.contains(&Key::Enter);
+    let mut up_pressed = keys.contains(&Key::Up);
+    let mut down_pressed = keys.contains(&Key::Down);
+    let mut left_pressed = keys.contains(&Key::Left);
+    let mut right_pressed = keys.contains(&Key::Right);
+    
+    // Poll gamepad events and read state
+    if let Some(ref mut g) = gilrs {
+        // Process pending events (required by gilrs)
+        while let Some(_event) = g.next_event() {}
+        
+        // Read first connected gamepad
+        if let Some((_id, gamepad)) = g.gamepads().find(|(_, gp)| gp.is_connected()) {
+            // D-pad buttons
+            up_pressed |= gamepad.is_pressed(Button::DPadUp);
+            down_pressed |= gamepad.is_pressed(Button::DPadDown);
+            left_pressed |= gamepad.is_pressed(Button::DPadLeft);
+            right_pressed |= gamepad.is_pressed(Button::DPadRight);
+            
+            // Left analog stick (with deadzone)
+            let stick_x = gamepad.value(Axis::LeftStickX);
+            let stick_y = gamepad.value(Axis::LeftStickY);
+            let deadzone = 0.3;
+            
+            if stick_x < -deadzone { left_pressed = true; }
+            if stick_x > deadzone { right_pressed = true; }
+            if stick_y > deadzone { up_pressed = true; }
+            if stick_y < -deadzone { down_pressed = true; }
+            
+            // Face buttons - flexible mapping for different preferences
+            // NES A = East (Xbox B) or South (Xbox A)
+            a_pressed |= gamepad.is_pressed(Button::East);
+            a_pressed |= gamepad.is_pressed(Button::South);
+            
+            // NES B = South (Xbox A) or West (Xbox X)
+            b_pressed |= gamepad.is_pressed(Button::South);
+            b_pressed |= gamepad.is_pressed(Button::West);
+            
+            // Start / Select
+            start_pressed |= gamepad.is_pressed(Button::Start);
+            select_pressed |= gamepad.is_pressed(Button::Select);
+            select_pressed |= gamepad.is_pressed(Button::Mode);
+        }
     }
+    
+    // Apply all input to joypad
+    bus.joypad1.set_button_pressed(JoypadButton::A, a_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::B, b_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Select, select_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Start, start_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Up, up_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Down, down_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Left, left_pressed);
+    bus.joypad1.set_button_pressed(JoypadButton::Right, right_pressed);
 }
 
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette: &[u16]) {
