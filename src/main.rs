@@ -121,7 +121,6 @@ fn main() {
         table
     };
     let mut crt_enabled = true;
-    let mut audio_diag_printed = false;
 
     while window.is_open() {
         loop {
@@ -140,11 +139,6 @@ fn main() {
         // Push audio samples — drop if buffer is full (never block the game)
         {
             let samples = bus.apu.drain_samples();
-            if !audio_diag_printed {
-                eprintln!("[Audio] First frame: {} samples produced, ring capacity: 8192, sample_rate: {}",
-                    samples.len(), actual_sample_rate);
-                audio_diag_printed = true;
-            }
             for &sample in &samples {
                 let _ = producer.try_push(sample);
             }
@@ -277,27 +271,9 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette: &[u16]) {
                 0
             };
 
-            let mut r = ((pixel >> 16) & 0xFF) as u32;
-            let mut g = ((pixel >> 8) & 0xFF) as u32;
-            let mut b = (pixel & 0xFF) as u32;
-
-            // Color bleed with neighbors (integer approximation)
-            // Original: r = r*0.85 + (lr+rr)*0.075
-            // Fixed-point: r = (r*217 + (lr+rr)*19) >> 8
-            if src_x > 0 && src_x < src_w - 1 {
-                let left = input[row_offset + src_x - 1];
-                let right = input[row_offset + src_x + 1];
-                let lr = ((left >> 16) & 0xFF) as u32;
-                let lg = ((left >> 8) & 0xFF) as u32;
-                let lb = (left & 0xFF) as u32;
-                let rr = ((right >> 16) & 0xFF) as u32;
-                let rg = ((right >> 8) & 0xFF) as u32;
-                let rb = (right & 0xFF) as u32;
-
-                r = (r * 217 + (lr + rr) * 19) >> 8;
-                g = (g * 217 + (lg + rg) * 19) >> 8;
-                b = (b * 217 + (lb + rb) * 19) >> 8;
-            }
+            let r = ((pixel >> 16) & 0xFF) as u32;
+            let g = ((pixel >> 8) & 0xFF) as u32;
+            let b = (pixel & 0xFF) as u32;
 
             // Combined: brightness * scanline * phosphor * vignette
             // All are fixed-point >>8, so we need to shift appropriately
