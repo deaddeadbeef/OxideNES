@@ -320,6 +320,8 @@ pub struct Apu {
     frame_step: u8,
     frame_cycle: usize,
     
+    pub irq_pending: bool,
+    
     cycle: usize,
     
     // blip_buf for band-limited resampling
@@ -377,6 +379,7 @@ impl Apu {
             frame_irq_inhibit: true,
             frame_step: 0,
             frame_cycle: 0,
+            irq_pending: false,
             cycle: 0,
             blip,
             prev_output: 0,
@@ -413,6 +416,9 @@ impl Apu {
             0x4017 => {
                 self.frame_counter_mode = (data >> 7) & 1;
                 self.frame_irq_inhibit = data & 0x40 != 0;
+                if self.frame_irq_inhibit {
+                    self.irq_pending = false;
+                }
                 self.frame_cycle = 0;
                 if self.frame_counter_mode == 1 {
                     self.clock_quarter_frame();
@@ -423,7 +429,7 @@ impl Apu {
         }
     }
     
-    pub fn read(&self, addr: u16) -> u8 {
+    pub fn read(&mut self, addr: u16) -> u8 {
         match addr {
             0x4015 => {
                 let mut status = 0u8;
@@ -431,6 +437,8 @@ impl Apu {
                 if self.pulse2.length_counter > 0 { status |= 0x02; }
                 if self.triangle.length_counter > 0 { status |= 0x04; }
                 if self.noise.length_counter > 0 { status |= 0x08; }
+                if self.irq_pending { status |= 0x40; }
+                self.irq_pending = false; // reading clears it
                 status
             }
             _ => 0,
@@ -485,6 +493,9 @@ impl Apu {
                     14915 => {
                         self.clock_quarter_frame();
                         self.clock_half_frame();
+                        if !self.frame_irq_inhibit {
+                            self.irq_pending = true;
+                        }
                         self.frame_cycle = 0;
                     }
                     _ => {}

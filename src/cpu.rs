@@ -238,6 +238,8 @@ impl Cpu {
         if self.cycles == 0 {
             if bus.poll_nmi() {
                 self.nmi(bus);
+            } else if bus.poll_apu_irq() && !self.get_flag(INTERRUPT_DISABLE) {
+                self.irq(bus);
             }
 
             let opcode = bus.cpu_read(self.pc);

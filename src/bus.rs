@@ -79,6 +79,10 @@ impl Bus {
         self.ppu.poll_nmi()
     }
 
+    pub fn poll_apu_irq(&self) -> bool {
+        self.apu.irq_pending
+    }
+
     // DMA transfer handling
     pub fn dma_active(&self) -> bool {
         self.dma_transfer
