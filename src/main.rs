@@ -21,9 +21,9 @@ fn main() {
     // TV dimensions for Sony Trinitron CRT frame (1080p scale for 4K monitors)
     const TV_WIDTH: usize = 1280;
     const TV_HEIGHT: usize = 960;
-    const SCREEN_W: usize = 1024;  // 4x NES width (256*4)
-    const SCREEN_H: usize = 720;   // 3x NES height (240*3) — slight 4:3 stretch
-    const SCREEN_X: usize = 128;   // (1280 - 1024) / 2
+    const SCREEN_W: usize = 960;   // Exact 4:3 (960/720 = 4/3)
+    const SCREEN_H: usize = 720;   // 3x NES height (240*3)
+    const SCREEN_X: usize = 160;   // (1280 - 960) / 2
     const SCREEN_Y: usize = 70;    // Top bezel thinner than bottom
     
     let mut window = Window::new(
@@ -301,38 +301,71 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>) {
 }
 
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
-    const SCREEN_W: usize = 1024;
+    const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
     
     output.resize(SCREEN_W * SCREEN_H, 0);
     
     for dst_y in 0..SCREEN_H {
-        let src_y = dst_y * 240 / SCREEN_H;
-        let is_scanline = dst_y % 3 == 2; // Every 3rd line (since 3x scale)
-        let scan_mul: u16 = if is_scanline { 160 } else { 256 }; // Lighter scanlines at 3x
+        // Map to source with sub-pixel precision (fixed point 8.8)
+        let src_yf = (dst_y as u32 * 240 * 256) / SCREEN_H as u32; // 8.8 fixed
+        let src_y0 = (src_yf >> 8) as usize;
+        let src_y1 = (src_y0 + 1).min(239);
+        let frac_y = (src_yf & 0xFF) as u32;
         
-        let row_offset = src_y * 256;
+        // Scanline effect — based on position within the 3-pixel group
+        let scan_pos = dst_y % 3;
+        let scan_mul: u32 = match scan_pos {
+            0 => 256,   // Full brightness
+            1 => 230,   // Slight dim
+            2 => 120,   // Dark gap between scanlines
+            _ => 256,
+        };
+        
         let dst_row = dst_y * SCREEN_W;
         
         for dst_x in 0..SCREEN_W {
-            let src_x = dst_x * 256 / SCREEN_W;
+            let src_xf = (dst_x as u32 * 256 * 256) / SCREEN_W as u32; // 8.8 fixed
+            let src_x0 = (src_xf >> 8) as usize;
+            let src_x1 = (src_x0 + 1).min(255);
+            let frac_x = (src_xf & 0xFF) as u32;
             
-            let pixel = input[row_offset + src_x.min(255)];
-            let mut r = ((pixel >> 16) & 0xFF) as u16;
-            let mut g = ((pixel >> 8) & 0xFF) as u16;
-            let mut b = (pixel & 0xFF) as u16;
+            // Bilinear interpolation — 4 source pixels
+            let p00 = input[src_y0 * 256 + src_x0];
+            let p10 = input[src_y0 * 256 + src_x1];
+            let p01 = input[src_y1 * 256 + src_x0];
+            let p11 = input[src_y1 * 256 + src_x1];
             
-            // Brightness boost
-            r = (r * 307) >> 8;
-            g = (g * 307) >> 8;
-            b = (b * 307) >> 8;
+            let inv_fx = 256 - frac_x;
+            let inv_fy = 256 - frac_y;
             
-            // RGB phosphor
+            // Interpolate each channel
+            let r00 = (p00 >> 16) & 0xFF; let r10 = (p10 >> 16) & 0xFF;
+            let r01 = (p01 >> 16) & 0xFF; let r11 = (p11 >> 16) & 0xFF;
+            let mut r = (r00 * inv_fx * inv_fy + r10 * frac_x * inv_fy 
+                       + r01 * inv_fx * frac_y + r11 * frac_x * frac_y) >> 16;
+            
+            let g00 = (p00 >> 8) & 0xFF; let g10 = (p10 >> 8) & 0xFF;
+            let g01 = (p01 >> 8) & 0xFF; let g11 = (p11 >> 8) & 0xFF;
+            let mut g = (g00 * inv_fx * inv_fy + g10 * frac_x * inv_fy 
+                       + g01 * inv_fx * frac_y + g11 * frac_x * frac_y) >> 16;
+            
+            let b00 = p00 & 0xFF; let b10 = p10 & 0xFF;
+            let b01 = p01 & 0xFF; let b11 = p11 & 0xFF;
+            let mut b = (b00 * inv_fx * inv_fy + b10 * frac_x * inv_fy 
+                       + b01 * inv_fx * frac_y + b11 * frac_x * frac_y) >> 16;
+            
+            // Brightness boost to compensate for scanline darkening
+            r = (r * 290) >> 8;
+            g = (g * 290) >> 8;
+            b = (b * 290) >> 8;
+            
+            // Subtle RGB phosphor tint (less aggressive than before)
             let sub = dst_x % 3;
             match sub {
-                0 => { r = (r * 294) >> 8; g = (g * 218) >> 8; b = (b * 218) >> 8; }
-                1 => { r = (r * 218) >> 8; g = (g * 294) >> 8; b = (b * 218) >> 8; }
-                _ => { r = (r * 218) >> 8; g = (g * 218) >> 8; b = (b * 294) >> 8; }
+                0 => { r = (r * 270) >> 8; g = (g * 240) >> 8; b = (b * 240) >> 8; }
+                1 => { r = (r * 240) >> 8; g = (g * 270) >> 8; b = (b * 240) >> 8; }
+                _ => { r = (r * 240) >> 8; g = (g * 240) >> 8; b = (b * 270) >> 8; }
             }
             
             // Scanline
@@ -342,17 +375,17 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
             
             // Vignette
             let vig = vignette_table[dst_y * SCREEN_W + dst_x] as u32;
-            r = ((r as u32 * vig) >> 8) as u16;
-            g = ((g as u32 * vig) >> 8) as u16;
-            b = ((b as u32 * vig) >> 8) as u16;
+            r = (r * vig) >> 8;
+            g = (g * vig) >> 8;
+            b = (b * vig) >> 8;
             
-            output[dst_row + dst_x] = (r.min(255) as u32) << 16 | (g.min(255) as u32) << 8 | b.min(255) as u32;
+            output[dst_row + dst_x] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
         }
     }
 }
 
 fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
-    const SCREEN_W: usize = 1024;
+    const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
     
     output.resize(SCREEN_W * SCREEN_H, 0);
@@ -368,9 +401,9 @@ fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
 fn build_tv_frame(frame: &mut Vec<u32>) {
     const TV_WIDTH: usize = 1280;
     const TV_HEIGHT: usize = 960;
-    const SCREEN_W: usize = 1024;
+    const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
-    const SCREEN_X: usize = 128;
+    const SCREEN_X: usize = 160;
     const SCREEN_Y: usize = 70;
     
     // Sony Trinitron color palette
@@ -535,9 +568,9 @@ fn sq_dist(x1: usize, y1: usize, x2: usize, y2: usize) -> usize {
 fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>) {
     const TV_WIDTH: usize = 1280;
     const TV_HEIGHT: usize = 960;
-    const SCREEN_W: usize = 1024;
+    const SCREEN_W: usize = 960;
     const SCREEN_H: usize = 720;
-    const SCREEN_X: usize = 128;
+    const SCREEN_X: usize = 160;
     const SCREEN_Y: usize = 70;
     
     result.resize(TV_WIDTH * TV_HEIGHT, 0);
