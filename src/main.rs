@@ -10,6 +10,17 @@ use nes_emulator::cartridge::Cartridge;
 use nes_emulator::cpu::Cpu;
 use nes_emulator::joypad::JoypadButton;
 
+// Single source of truth for all screen/window dimensions
+const TV_WIDTH: usize = 1280;
+const TV_HEIGHT: usize = 960;
+const CONSOLE_HEIGHT: usize = 200;
+const WINDOW_WIDTH: usize = TV_WIDTH;
+const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT; // 1160
+const SCREEN_W: usize = 860;
+const SCREEN_H: usize = 645;
+const SCREEN_X: usize = 210;
+const SCREEN_Y: usize = 85;
+
 fn main() {
     let (rom_path, cartridge) = load_rom();
     println!("Loaded: {}", rom_path);
@@ -19,13 +30,6 @@ fn main() {
     cpu.reset(&mut bus);
 
     // TV dimensions — chunky CRT with thick bezels for premium look
-    const TV_WIDTH: usize = 1280;
-    const TV_HEIGHT: usize = 960;
-    const CONSOLE_HEIGHT: usize = 200;
-    const WINDOW_WIDTH: usize = TV_WIDTH;
-    const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT; // 1160 total
-    const SCREEN_W: usize = 860;   // Slightly smaller screen = thicker bezels
-    const SCREEN_H: usize = 645;   // 4:3 ratio maintained
     
     let mut window = Window::new(
         "NES Emulator",
@@ -373,8 +377,6 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>) {
 }
 
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
     
     output.resize(SCREEN_W * SCREEN_H, 0);
     
@@ -468,8 +470,6 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
 }
 
 fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
     
     output.resize(SCREEN_W * SCREEN_H, 0);
     for y in 0..SCREEN_H {
@@ -482,15 +482,6 @@ fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
 }
 
 fn build_tv_frame(frame: &mut Vec<u32>) {
-    const TV_WIDTH: usize = 1280;
-    const TV_HEIGHT: usize = 960;
-    const CONSOLE_HEIGHT: usize = 200;
-    const WINDOW_WIDTH: usize = TV_WIDTH;
-    const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT;
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
-    const SCREEN_X: usize = 210;
-    const SCREEN_Y: usize = 85;
 
     frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
 
@@ -727,10 +718,6 @@ fn sq_dist(x1: usize, y1: usize, x2: usize, y2: usize) -> usize {
 }
 
 fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>, window_width: usize, window_height: usize) {
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
-    const SCREEN_X: usize = 210;
-    const SCREEN_Y: usize = 85;
     
     result.resize(window_width * window_height, 0);
     result.copy_from_slice(tv_frame);
@@ -745,8 +732,6 @@ fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>
 }
 
 fn build_glare_table() -> Vec<u8> {
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
 
     let mut table = vec![0u8; SCREEN_W * SCREEN_H];
 
@@ -789,10 +774,6 @@ fn build_glare_table() -> Vec<u8> {
 }
 
 fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usize) {
-    const SCREEN_W: usize = 860;
-    const SCREEN_H: usize = 645;
-    const SCREEN_X: usize = 210;
-    const SCREEN_Y: usize = 85;
 
     for y in 0..SCREEN_H {
         let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
