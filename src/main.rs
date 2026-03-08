@@ -121,7 +121,6 @@ impl MenuState {
 }
 
 enum SubMenu {
-    RecentGames { selected: usize },
     Settings { selected: usize },
     FileBrowser(FileBrowser),
 }
@@ -130,6 +129,7 @@ struct FileBrowserEntry {
     name: String,
     is_dir: bool,
     full_path: PathBuf,
+    size_kb: u32,
 }
 
 struct FileBrowser {
@@ -199,12 +199,17 @@ fn scan_directory_result(dir: &Path) -> Result<Vec<FileBrowserEntry>, std::io::E
                 name,
                 is_dir: true,
                 full_path: path,
+                size_kb: 0,
             });
         } else if name.to_lowercase().ends_with(".nes") {
+            let size_kb = if path.is_file() {
+                (fs::metadata(&path).map(|m| m.len()).unwrap_or(0) / 1024) as u32
+            } else { 0 };
             files.push(FileBrowserEntry {
                 name,
                 is_dir: false,
                 full_path: path,
+                size_kb,
             });
         }
     }
@@ -387,81 +392,120 @@ fn draw_side_borders(fb: &mut [u32]) {
     }
 }
 
-fn render_main_menu(fb: &mut [u32], menu: &MenuState) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cursor_visible: bool) {
+    for pixel in fb.iter_mut() { *pixel = MENU_BG; }
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
-    // Title
-    draw_text_centered_8x8(fb, "\x11 NES EMULATOR \x11", 4, MENU_GOLD);
-    draw_separator_line(fb, 5);
+    draw_text_centered_8x8(fb, "\x11 NES EMULATOR \x11", 2, MENU_GOLD);
+    draw_separator_line(fb, 3);
 
-    // Menu options
-    let options = ["LOAD CARTRIDGE", "RECENT GAMES", "SETTINGS"];
-    let option_rows = [8, 10, 12];
+    let recent_count = cfg.recent_games.len().min(10);
+    let browse_idx = recent_count;
+    let settings_idx = recent_count + 1;
 
-    for (i, (opt, &row)) in options.iter().zip(option_rows.iter()).enumerate() {
-        let color = if i == menu.selected { MENU_WHITE } else { MENU_GRAY };
-        if i == menu.selected && menu.cursor_visible {
-            draw_char_8x8(fb, '\x10', 4, row, MENU_WHITE);
-        }
-        draw_text_8x8(fb, opt, 6, row, color);
-    }
+    let mut current_row: usize = 4;
 
-    draw_separator_line(fb, 16);
+    if recent_count > 0 {
+        draw_text_8x8(fb, "RECENT GAMES", 3, current_row, MENU_DARK_GRAY);
+        current_row += 1;
 
-    draw_text_centered_8x8(fb, "USE UP/DOWN TO SELECT", 20, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "PRESS START TO CONFIRM", 21, MENU_DARK_GRAY);
-}
+        for i in 0..recent_count {
+            let row = current_row + i;
+            if row >= 26 { break; }
 
-fn render_recent_games(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
-
-    draw_double_border_top(fb, 1);
-    draw_double_border_bottom(fb, 28);
-    draw_side_borders(fb);
-
-    draw_text_centered_8x8(fb, "\x11 RECENT GAMES \x11", 4, MENU_GOLD);
-    draw_separator_line(fb, 5);
-
-    if cfg.recent_games.is_empty() {
-        draw_text_centered_8x8(fb, "NO RECENT GAMES", 12, MENU_DARK_GRAY);
-    } else {
-        for (i, path_str) in cfg.recent_games.iter().enumerate() {
-            if i >= 10 { break; }
-            let row = 7 + i * 2;
-            if row >= 27 { break; }
+            let path_str = &cfg.recent_games[i];
             let filename = Path::new(path_str)
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| path_str.clone());
 
             let exists = Path::new(path_str).exists();
+            let is_selected = i == menu.selected;
+
+            if is_selected {
+                for x in 20..236 {
+                    let y_base = row * 8;
+                    for dy in 0..8 {
+                        if y_base + dy < 240 {
+                            fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                        }
+                    }
+                }
+            }
+
             let color = if !exists {
                 MENU_DARK_GRAY
-            } else if i == selected {
+            } else if is_selected {
                 MENU_WHITE
             } else {
                 MENU_GRAY
             };
 
-            if i == selected && cursor_visible {
-                draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
+            if is_selected && cursor_visible {
+                draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
             }
 
-            let display: String = filename.chars().take(25).collect();
-            draw_text_8x8(fb, &display, 5, row, color);
+            let display_name = filename.to_uppercase();
+            let display_name = display_name.strip_suffix(".NES").unwrap_or(&display_name);
+            let display: String = display_name.chars().take(26).collect();
+            draw_text_8x8(fb, &display, 3, row, color);
         }
+
+        current_row += recent_count + 1;
+    }
+
+    draw_separator_line(fb, current_row);
+    current_row += 1;
+
+    // BROWSE FILES option
+    {
+        let row = current_row;
+        let is_selected = menu.selected == browse_idx;
+        if is_selected {
+            for x in 20..236 {
+                let y_base = row * 8;
+                for dy in 0..8 {
+                    if y_base + dy < 240 {
+                        fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                    }
+                }
+            }
+        }
+        let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
+        if is_selected && cursor_visible {
+            draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
+        }
+        draw_text_8x8(fb, "BROWSE FILES", 3, row, color);
+        current_row += 1;
+    }
+
+    // SETTINGS option
+    {
+        let row = current_row;
+        let is_selected = menu.selected == settings_idx;
+        if is_selected {
+            for x in 20..236 {
+                let y_base = row * 8;
+                for dy in 0..8 {
+                    if y_base + dy < 240 {
+                        fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                    }
+                }
+            }
+        }
+        let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
+        if is_selected && cursor_visible {
+            draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
+        }
+        draw_text_8x8(fb, "SETTINGS", 3, row, color);
     }
 
     draw_separator_line(fb, 27);
-    draw_text_centered_8x8(fb, "ESC TO GO BACK", 29, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "UP/DN:SELECT  A:OPEN", 28, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "L/R:PAGE  ESC:QUIT", 29, MENU_DARK_GRAY);
 }
 
 fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
@@ -522,7 +566,7 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
 
     draw_text_centered_8x8(fb, "\x11 LOAD CARTRIDGE \x11", 2, MENU_GOLD);
 
-    let path_str = truncate_path_display(&browser.current_dir, 28);
+    let path_str = truncate_path_display(&browser.current_dir, 26);
     draw_text_8x8(fb, &path_str, 3, 3, MENU_DARK_GRAY);
 
     draw_separator_line(fb, 4);
@@ -533,30 +577,22 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
         let start = browser.scroll_offset;
         let end = (start + VISIBLE_ROWS).min(browser.entries.len());
 
-        // Scroll indicators
-        if start > 0 {
-            draw_text_8x8(fb, "...", 28, FIRST_ROW, MENU_DARK_GRAY);
-        }
-        if end < browser.entries.len() {
-            draw_text_8x8(fb, "...", 28, FIRST_ROW + VISIBLE_ROWS - 1, MENU_DARK_GRAY);
-        }
-
         for i in start..end {
             let row = FIRST_ROW + (i - start);
             let entry = &browser.entries[i];
             let is_selected = i == browser.selected;
 
             let name_upper = entry.name.to_uppercase();
-            let display_name = if name_upper.len() > 20 {
-                format!("{}..", &name_upper[..18])
+            let display_name = if name_upper.len() > 26 {
+                format!("{}..", &name_upper[..24])
             } else {
                 name_upper
             };
 
             let display = if entry.is_dir {
-                format!("[DIR] {}", display_name)
+                format!("> {}", display_name)
             } else {
-                format!("      {}", display_name)
+                format!("  {}", display_name)
             };
 
             if is_selected {
@@ -574,10 +610,23 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 }
                 let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_WHITE };
                 draw_text_8x8(fb, &display, 3, row, color);
+                // File size for selected .nes files
+                if !entry.is_dir {
+                    let size_str = format!("{}K", entry.size_kb);
+                    let size_x = 30 - size_str.len();
+                    draw_text_8x8(fb, &size_str, size_x, row, MENU_DARK_GRAY);
+                }
             } else {
                 let color = if entry.is_dir { DIR_COLOR } else { MENU_GRAY };
                 draw_text_8x8(fb, &display, 3, row, color);
             }
+        }
+
+        // Scroll position indicator
+        if browser.entries.len() > VISIBLE_ROWS {
+            let pos_str = format!("{}/{}", browser.selected + 1, browser.entries.len());
+            let pos_x = 30 - pos_str.len();
+            draw_text_8x8(fb, &pos_str, pos_x, 26, MENU_DARK_GRAY);
         }
     }
 
@@ -622,6 +671,37 @@ fn build_flat_distortion_table() -> Vec<(u32, u32)> {
 // Menu input handling
 // =====================================================================
 
+struct RepeatTracker {
+    up_held: u32,
+    down_held: u32,
+    left_held: u32,
+    right_held: u32,
+}
+
+impl RepeatTracker {
+    fn new() -> Self {
+        Self { up_held: 0, down_held: 0, left_held: 0, right_held: 0 }
+    }
+
+    fn update_axis(raw_held: bool, counter: &mut u32) -> bool {
+        if raw_held {
+            *counter += 1;
+            *counter == 1 || (*counter > 18 && (*counter - 18) % 7 == 0)
+        } else {
+            *counter = 0;
+            false
+        }
+    }
+
+    fn process(&mut self, raw_up: bool, raw_down: bool, raw_left: bool, raw_right: bool) -> (bool, bool, bool, bool) {
+        let up = Self::update_axis(raw_up, &mut self.up_held);
+        let down = Self::update_axis(raw_down, &mut self.down_held);
+        let left = Self::update_axis(raw_left, &mut self.left_held);
+        let right = Self::update_axis(raw_right, &mut self.right_held);
+        (up, down, left, right)
+    }
+}
+
 struct MenuInput {
     up: bool,
     down: bool,
@@ -630,36 +710,95 @@ struct MenuInput {
     confirm: bool,
     back: bool,
     backspace: bool,
+    page_up: bool,
+    page_down: bool,
 }
 
-fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>) -> MenuInput {
-    let up = window.is_key_pressed(Key::Up, KeyRepeat::No);
-    let down = window.is_key_pressed(Key::Down, KeyRepeat::No);
-    let left = window.is_key_pressed(Key::Left, KeyRepeat::No);
-    let right = window.is_key_pressed(Key::Right, KeyRepeat::No);
+fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut RepeatTracker) -> MenuInput {
     let confirm = window.is_key_pressed(Key::Enter, KeyRepeat::No);
     let back = window.is_key_pressed(Key::Escape, KeyRepeat::No);
     let backspace = window.is_key_pressed(Key::Backspace, KeyRepeat::No);
+    let page_up = window.is_key_pressed(Key::PageUp, KeyRepeat::No);
+    let page_down = window.is_key_pressed(Key::PageDown, KeyRepeat::No);
 
-    let mut mi = MenuInput { up, down, left, right, confirm, back, backspace };
+    // Raw held state for directional inputs (auto-repeat via RepeatTracker)
+    let mut raw_up = window.is_key_down(Key::Up);
+    let mut raw_down = window.is_key_down(Key::Down);
+    let mut raw_left = window.is_key_down(Key::Left);
+    let mut raw_right = window.is_key_down(Key::Right);
+
+    let mut mi = MenuInput {
+        up: false, down: false, left: false, right: false,
+        confirm, back, backspace, page_up, page_down,
+    };
 
     if let Some(ref mut g) = gilrs {
+        // Event-driven for one-shot buttons
         while let Some(event) = g.next_event() {
             if let gilrs::EventType::ButtonPressed(btn, _) = event.event {
                 match btn {
-                    Button::DPadUp => mi.up = true,
-                    Button::DPadDown => mi.down = true,
-                    Button::DPadLeft => mi.left = true,
-                    Button::DPadRight => mi.right = true,
                     Button::Start | Button::South => mi.confirm = true,
                     Button::East => mi.back = true,
+                    Button::LeftTrigger | Button::LeftTrigger2 => mi.page_up = true,
+                    Button::RightTrigger | Button::RightTrigger2 => mi.page_down = true,
                     _ => {}
                 }
             }
         }
+        // State-polled for held directions
+        if let Some((_id, gamepad)) = g.gamepads().find(|(_, gp)| gp.is_connected()) {
+            raw_up |= gamepad.is_pressed(Button::DPadUp);
+            raw_down |= gamepad.is_pressed(Button::DPadDown);
+            raw_left |= gamepad.is_pressed(Button::DPadLeft);
+            raw_right |= gamepad.is_pressed(Button::DPadRight);
+            let stick_x = gamepad.value(Axis::LeftStickX);
+            let stick_y = gamepad.value(Axis::LeftStickY);
+            let deadzone = 0.3;
+            if stick_y > deadzone { raw_up = true; }
+            if stick_y < -deadzone { raw_down = true; }
+            if stick_x < -deadzone { raw_left = true; }
+            if stick_x > deadzone { raw_right = true; }
+        }
     }
 
+    let (up, down, left, right) = repeat.process(raw_up, raw_down, raw_left, raw_right);
+    mi.up = mi.up || up;
+    mi.down = mi.down || down;
+    mi.left = mi.left || left;
+    mi.right = mi.right || right;
+
     mi
+}
+
+fn generate_menu_tone<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, frequency: f32, duration_ms: u32, volume: f32, sample_rate: u32) {
+    let num_samples = (sample_rate as f32 * duration_ms as f32 / 1000.0) as usize;
+    for i in 0..num_samples {
+        let t = i as f32 / sample_rate as f32;
+        let envelope = if i < num_samples / 10 {
+            i as f32 / (num_samples as f32 / 10.0)
+        } else {
+            1.0 - (i as f32 - num_samples as f32 / 10.0) / (num_samples as f32 * 9.0 / 10.0)
+        };
+        let sample = if (t * frequency * 2.0 * std::f32::consts::PI).sin() > 0.0 { volume } else { -volume };
+        let _ = producer.try_push(sample * envelope);
+    }
+}
+
+enum MenuSound {
+    Cursor,
+    Confirm,
+    Back,
+    Error,
+}
+
+fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, sound: MenuSound, sample_rate: u32, volume: f32) {
+    let vol = volume * 0.15;
+    match sound {
+        MenuSound::Cursor => generate_menu_tone(producer, 880.0, 30, vol, sample_rate),
+        MenuSound::Confirm => generate_menu_tone(producer, 440.0, 60, vol, sample_rate),
+        MenuSound::Back => generate_menu_tone(producer, 330.0, 40, vol, sample_rate),
+        MenuSound::Error => generate_menu_tone(producer, 220.0, 100, vol, sample_rate),
+    }
 }
 
 // =====================================================================
@@ -821,6 +960,7 @@ fn main() {
     let mut game_cpu: Option<Cpu> = None;
     let mut frame_counter: u32 = 0;
     let mut quit_hold_frames: u32 = 0;
+    let mut repeat_tracker = RepeatTracker::new();
 
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
@@ -853,70 +993,52 @@ fn main() {
                     menu.cursor_visible = !menu.cursor_visible;
                 }
 
-                let input = poll_menu_input(&window, &mut gilrs);
+                let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
 
                 let mut action: Option<MenuAction> = None;
 
                 match menu.submenu {
                     None => {
+                        let recent_count = config.recent_games.len().min(10);
+                        let browse_idx = recent_count;
+                        let settings_idx = recent_count + 1;
+                        let total_items = recent_count + 2;
+
                         if input.up && menu.selected > 0 {
                             menu.selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
-                        if input.down && menu.selected < 2 {
+                        if input.down && menu.selected < total_items - 1 {
                             menu.selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                         if input.confirm {
-                            match menu.selected {
-                                0 => {
-                                    menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
-                                    menu.cursor_timer = 0;
-                                    menu.cursor_visible = true;
+                            if menu.selected < recent_count {
+                                let path = config.recent_games[menu.selected].clone();
+                                if Path::new(&path).exists() {
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    action = Some(MenuAction::LoadRom(path));
+                                } else {
+                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
-                                1 => {
-                                    menu.submenu = Some(SubMenu::RecentGames { selected: 0 });
-                                    menu.cursor_timer = 0;
-                                    menu.cursor_visible = true;
-                                }
-                                2 => {
-                                    menu.submenu = Some(SubMenu::Settings { selected: 0 });
-                                    menu.cursor_timer = 0;
-                                    menu.cursor_visible = true;
-                                }
-                                _ => {}
+                            } else if menu.selected == browse_idx {
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                            } else if menu.selected == settings_idx {
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                menu.submenu = Some(SubMenu::Settings { selected: 0 });
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
                             }
                         }
                         if input.back {
                             break;
-                        }
-                    }
-                    Some(SubMenu::RecentGames { ref mut selected }) => {
-                        let count = config.recent_games.len();
-                        if count > 0 {
-                            if input.up && *selected > 0 {
-                                *selected -= 1;
-                                menu.cursor_timer = 0;
-                                menu.cursor_visible = true;
-                            }
-                            if input.down && *selected < count - 1 {
-                                *selected += 1;
-                                menu.cursor_timer = 0;
-                                menu.cursor_visible = true;
-                            }
-                            if input.confirm {
-                                let path = config.recent_games[*selected].clone();
-                                if Path::new(&path).exists() {
-                                    action = Some(MenuAction::LoadRom(path));
-                                }
-                            }
-                        }
-                        if input.back {
-                            menu.submenu = None;
-                            menu.cursor_timer = 0;
-                            menu.cursor_visible = true;
                         }
                     }
                     Some(SubMenu::Settings { ref mut selected }) => {
@@ -924,11 +1046,13 @@ fn main() {
                             *selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                         if input.down && *selected < 2 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                         if input.confirm || input.left || input.right {
                             match *selected {
@@ -956,8 +1080,10 @@ fn main() {
                                 }
                                 _ => {}
                             }
+                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                         if input.back {
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             menu.submenu = None;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -978,6 +1104,7 @@ fn main() {
                                 browser.selected -= 1;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                                 if browser.selected < browser.scroll_offset {
                                     browser.scroll_offset = browser.selected;
                                 }
@@ -986,18 +1113,39 @@ fn main() {
                                 browser.selected += 1;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                                 if browser.selected >= browser.scroll_offset + 20 {
                                     browser.scroll_offset = browser.selected - 19;
+                                }
+                            }
+                            if input.page_up && browser.selected > 0 {
+                                browser.selected = browser.selected.saturating_sub(10);
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                if browser.selected < browser.scroll_offset {
+                                    browser.scroll_offset = browser.selected;
+                                }
+                            }
+                            if input.page_down && count > 0 {
+                                browser.selected = (browser.selected + 10).min(count - 1);
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                if browser.selected >= browser.scroll_offset + 20 {
+                                    browser.scroll_offset = browser.selected.saturating_sub(19);
                                 }
                             }
                             if input.confirm {
                                 let entry_is_dir = browser.entries[browser.selected].is_dir;
                                 let entry_path = browser.entries[browser.selected].full_path.clone();
                                 if entry_is_dir {
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     browser.navigate_to(&entry_path);
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
                                 } else {
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     action = Some(MenuAction::LoadRom(
                                         entry_path.to_string_lossy().to_string(),
                                     ));
@@ -1005,6 +1153,7 @@ fn main() {
                             }
                         }
                         if input.back || input.backspace {
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             let parent = browser.current_dir.parent().map(|p| p.to_path_buf());
                             if let Some(parent) = parent {
                                 if !parent.as_os_str().is_empty() {
@@ -1044,6 +1193,7 @@ fn main() {
                                         println!("Loaded: {}", path_str);
                                     }
                                     Err(e) => {
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                         let msg = format!("{}", e);
                                         if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                             browser.error_message = Some(msg.clone());
@@ -1054,6 +1204,7 @@ fn main() {
                                 }
                             }
                             Err(e) => {
+                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                 let msg = format!("READ ERROR: {}", e);
                                 if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                     browser.error_message = Some(msg.clone());
@@ -1074,10 +1225,7 @@ fn main() {
 
                 // Render menu to 256x240 framebuffer
                 match menu.submenu {
-                    None => render_main_menu(&mut menu_framebuffer, menu),
-                    Some(SubMenu::RecentGames { selected }) => {
-                        render_recent_games(&mut menu_framebuffer, &config, selected, menu.cursor_visible);
-                    }
+                    None => render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible),
                     Some(SubMenu::Settings { selected }) => {
                         render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume);
                     }
@@ -1222,6 +1370,7 @@ fn main() {
                             game_bus = None;
                             game_cpu = None;
                             quit_hold_frames = 0;
+                            repeat_tracker = RepeatTracker::new();
                             emulator_state = EmulatorState::Menu(MenuState::new());
                             continue;
                         }
@@ -1240,6 +1389,7 @@ fn main() {
                         game_bus = None;
                         game_cpu = None;
                         quit_hold_frames = 0;
+                        repeat_tracker = RepeatTracker::new();
                         emulator_state = EmulatorState::Menu(MenuState::new());
                         continue;
                     }
