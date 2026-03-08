@@ -376,30 +376,30 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
     output.resize(SCREEN_W * SCREEN_H, 0);
     
     for dst_y in 0..SCREEN_H {
-        // Map to source with sub-pixel precision (fixed point 8.8)
-        let src_yf = (dst_y as u32 * 240 * 256) / SCREEN_H as u32; // 8.8 fixed
+        // Source Y with sub-pixel precision (fixed point 16.8)
+        let src_yf = (dst_y as u32 * 240 * 256) / SCREEN_H as u32;
         let src_y0 = (src_yf >> 8) as usize;
         let src_y1 = (src_y0 + 1).min(239);
         let frac_y = (src_yf & 0xFF) as u32;
         
-        // Scanline effect — based on position within the 3-pixel group
-        let scan_pos = dst_y % 3;
-        let scan_mul: u32 = match scan_pos {
-            0 => 256,   // Full brightness
-            1 => 230,   // Slight dim
-            2 => 120,   // Dark gap between scanlines
-            _ => 256,
+        // Scanline effect — gentle brightness variation
+        // On a 32" flat CRT, scanlines were visible but soft
+        let scan_mul: u32 = match dst_y % 3 {
+            0 => 255,  // Full brightness
+            1 => 245,  // Very slight dim
+            2 => 195,  // Gentle scanline gap (not harsh)
+            _ => 255,
         };
         
         let dst_row = dst_y * SCREEN_W;
         
         for dst_x in 0..SCREEN_W {
-            let src_xf = (dst_x as u32 * 256 * 256) / SCREEN_W as u32; // 8.8 fixed
+            let src_xf = (dst_x as u32 * 256 * 256) / SCREEN_W as u32;
             let src_x0 = (src_xf >> 8) as usize;
             let src_x1 = (src_x0 + 1).min(255);
             let frac_x = (src_xf & 0xFF) as u32;
             
-            // Bilinear interpolation — 4 source pixels
+            // Bilinear interpolation — the key to soft CRT look
             let p00 = input[src_y0 * 256 + src_x0];
             let p10 = input[src_y0 * 256 + src_x1];
             let p01 = input[src_y1 * 256 + src_x0];
@@ -408,7 +408,6 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
             let inv_fx = 256 - frac_x;
             let inv_fy = 256 - frac_y;
             
-            // Interpolate each channel
             let r00 = (p00 >> 16) & 0xFF; let r10 = (p10 >> 16) & 0xFF;
             let r01 = (p01 >> 16) & 0xFF; let r11 = (p11 >> 16) & 0xFF;
             let mut r = (r00 * inv_fx * inv_fy + r10 * frac_x * inv_fy 
@@ -424,20 +423,32 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]) {
             let mut b = (b00 * inv_fx * inv_fy + b10 * frac_x * inv_fy 
                        + b01 * inv_fx * frac_y + b11 * frac_x * frac_y) >> 16;
             
-            // Brightness boost to compensate for scanline darkening
-            r = (r * 290) >> 8;
-            g = (g * 290) >> 8;
-            b = (b * 290) >> 8;
-            
-            // Subtle RGB phosphor tint (less aggressive than before)
-            let sub = dst_x % 3;
-            match sub {
-                0 => { r = (r * 270) >> 8; g = (g * 240) >> 8; b = (b * 240) >> 8; }
-                1 => { r = (r * 240) >> 8; g = (g * 270) >> 8; b = (b * 240) >> 8; }
-                _ => { r = (r * 240) >> 8; g = (g * 240) >> 8; b = (b * 270) >> 8; }
+            // Horizontal blur — blend with left and right neighbors for CRT bloom
+            // This is what makes it look soft like a CRT, not sharp like LCD
+            if src_x0 > 0 && src_x0 < 255 {
+                let left = input[src_y0 * 256 + src_x0 - 1];
+                let right = input[src_y0 * 256 + src_x1.min(255)];
+                let lr = (left >> 16) & 0xFF; let rr = (right >> 16) & 0xFF;
+                let lg = (left >> 8) & 0xFF;  let rg = (right >> 8) & 0xFF;
+                let lb = left & 0xFF;          let rb = right & 0xFF;
+                // 80% center + 10% each neighbor
+                r = (r * 205 + lr * 25 + rr * 25) >> 8;
+                g = (g * 205 + lg * 25 + rg * 25) >> 8;
+                b = (b * 205 + lb * 25 + rb * 25) >> 8;
             }
             
-            // Scanline
+            // Brightness boost to compensate for scanline dimming
+            r = (r * 275) >> 8;
+            g = (g * 275) >> 8;
+            b = (b * 275) >> 8;
+            
+            // Warm color temperature — slight warm shift like a real CRT
+            // CRTs had slightly warm whites, not blue-white like LCDs
+            r = (r * 262) >> 8;  // boost red slightly
+            g = (g * 256) >> 8;  // green neutral
+            b = (b * 242) >> 8;  // reduce blue slightly
+            
+            // Scanline — gentle variation, not harsh bands
             r = (r * scan_mul) >> 8;
             g = (g * scan_mul) >> 8;
             b = (b * scan_mul) >> 8;
