@@ -176,7 +176,7 @@ impl FileBrowser {
             }
             Err(_) => {
                 self.error_message = Some("ACCESS DENIED".to_string());
-                self.error_timer = 120;
+                self.error_timer = 180;
             }
         }
     }
@@ -431,7 +431,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
                     let y_base = row * 8;
                     for dy in 0..8 {
                         if y_base + dy < 240 {
-                            fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                            fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
                         }
                     }
                 }
@@ -456,6 +456,10 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
         }
 
         current_row += recent_count + 1;
+    } else {
+        draw_text_centered_8x8(fb, "NO RECENT GAMES YET", current_row + 1, MENU_DARK_GRAY);
+        draw_text_centered_8x8(fb, "BROWSE TO PLAY!", current_row + 2, MENU_DARK_GRAY);
+        current_row += 4;
     }
 
     draw_separator_line(fb, current_row);
@@ -470,7 +474,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
                 let y_base = row * 8;
                 for dy in 0..8 {
                     if y_base + dy < 240 {
-                        fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                        fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
                     }
                 }
             }
@@ -492,7 +496,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
                 let y_base = row * 8;
                 for dy in 0..8 {
                     if y_base + dy < 240 {
-                        fb[(y_base + dy) * 256 + x] = 0x2C2C6C;
+                        fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
                     }
                 }
             }
@@ -505,8 +509,8 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     }
 
     draw_separator_line(fb, 25);
-    draw_text_centered_8x8(fb, "UP/DN:SELECT  A:OPEN", 26, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "L/R:PAGE  ESC:QUIT", 27, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "A:OPEN  ESC:QUIT", 26, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 27, MENU_DARK_GRAY);
 }
 
 fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
@@ -555,7 +559,7 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
     const FIRST_ROW: usize = 5;
     const DIR_COLOR: u32 = 0x5C94FC;
     const DIR_COLOR_SEL: u32 = 0x7CB4FC;
-    const HIGHLIGHT_BG: u32 = 0x2C2C6C;
+    const HIGHLIGHT_BG: u32 = 0x3C3C8C;
 
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
@@ -642,11 +646,11 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             for dy in 0..24 {
                 let y = box_row * 8 + dy;
                 if y < 240 {
-                    fb[y * 256 + x] = 0x600000;
+                    fb[y * 256 + x] = 0x442200;
                 }
             }
         }
-        draw_text_centered_8x8(fb, &msg_upper, box_row + 1, 0xFC4444);
+        draw_text_centered_8x8(fb, &msg_upper, box_row + 1, 0xFFCC44);
     }
 }
 
@@ -687,7 +691,7 @@ impl RepeatTracker {
     fn update_axis(raw_held: bool, counter: &mut u32) -> bool {
         if raw_held {
             *counter += 1;
-            *counter == 1 || (*counter > 18 && (*counter - 18) % 7 == 0)
+            *counter == 1 || (*counter > 18 && (*counter - 18) % 4 == 0)
         } else {
             *counter = 0;
             false
@@ -793,7 +797,7 @@ enum MenuSound {
 }
 
 fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, sound: MenuSound, sample_rate: u32, volume: f32) {
-    let vol = volume * 0.15;
+    let vol = volume.max(0.3) * 0.15; // minimum 30% so menu is always audible
     match sound {
         MenuSound::Cursor => generate_menu_tone(producer, 880.0, 30, vol, sample_rate),
         MenuSound::Confirm => generate_menu_tone(producer, 440.0, 60, vol, sample_rate),
@@ -962,6 +966,9 @@ fn main() {
     let mut frame_counter: u32 = 0;
     let mut quit_hold_frames: u32 = 0;
     let mut repeat_tracker = RepeatTracker::new();
+    let mut overlay_message: Option<String> = None;
+    let mut overlay_timer: u32 = 0;
+    let mut sound_cooldown: u32 = 0;
 
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
@@ -984,6 +991,8 @@ fn main() {
 
     while window.is_open() {
         let mut next_state: Option<EmulatorState> = None;
+        
+        if sound_cooldown > 0 { sound_cooldown -= 1; }
 
         match emulator_state {
             EmulatorState::Menu(ref mut menu) => {
@@ -1009,13 +1018,19 @@ fn main() {
                             menu.selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
-                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3; // skip 3 frames between beeps
+                            }
                         }
                         if input.down && menu.selected < total_items - 1 {
                             menu.selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
-                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3; // skip 3 frames between beeps
+                            }
                         }
                         if input.confirm {
                             if menu.selected < recent_count {
@@ -1047,13 +1062,19 @@ fn main() {
                             *selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
-                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3; // skip 3 frames between beeps
+                            }
                         }
                         if input.down && *selected < 2 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
-                            play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3; // skip 3 frames between beeps
+                            }
                         }
                         if input.confirm || input.left || input.right {
                             match *selected {
@@ -1114,7 +1135,10 @@ fn main() {
                                 browser.selected += 1;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3; // skip 3 frames between beeps
+                                }
                                 if browser.selected >= browser.scroll_offset + 20 {
                                     browser.scroll_offset = browser.selected - 19;
                                 }
@@ -1123,7 +1147,10 @@ fn main() {
                                 browser.selected = browser.selected.saturating_sub(10);
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3; // skip 3 frames between beeps
+                                }
                                 if browser.selected < browser.scroll_offset {
                                     browser.scroll_offset = browser.selected;
                                 }
@@ -1132,7 +1159,10 @@ fn main() {
                                 browser.selected = (browser.selected + 10).min(count - 1);
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3; // skip 3 frames between beeps
+                                }
                                 if browser.selected >= browser.scroll_offset + 20 {
                                     browser.scroll_offset = browser.selected.saturating_sub(19);
                                 }
@@ -1198,7 +1228,7 @@ fn main() {
                                         let msg = format!("{}", e);
                                         if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                             browser.error_message = Some(msg.clone());
-                                            browser.error_timer = 120;
+                                            browser.error_timer = 180;
                                         }
                                         eprintln!("ROM Error: {}", msg);
                                     }
@@ -1209,7 +1239,7 @@ fn main() {
                                 let msg = format!("READ ERROR: {}", e);
                                 if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                     browser.error_message = Some(msg.clone());
-                                    browser.error_timer = 120;
+                                    browser.error_timer = 180;
                                 }
                                 eprintln!("{}", msg);
                             }
@@ -1290,6 +1320,31 @@ fn main() {
 
                     if crt_enabled {
                         apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
+                    }
+
+                    // Overlay message display
+                    if overlay_timer > 0 {
+                        overlay_timer -= 1;
+                        if let Some(ref msg) = overlay_message {
+                            let text_w = msg.len() * 4; // approximate pixel width at small scale
+                            let ox = SCREEN_X + SCREEN_W / 2 - text_w;
+                            let oy = SCREEN_Y + 20;
+                            // Dark background bar
+                            for y in oy.saturating_sub(2)..=(oy + 8) {
+                                for x in (ox.saturating_sub(4))..=(ox + text_w * 2 + 4) {
+                                    if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                        let idx = y * WINDOW_WIDTH + x;
+                                        if idx < composite_buffer.len() {
+                                            composite_buffer[idx] = 0x222222;
+                                        }
+                                    }
+                                }
+                            }
+                            draw_text(&mut composite_buffer, msg, ox, oy, 0x44FF44, WINDOW_WIDTH);
+                        }
+                        if overlay_timer == 0 {
+                            overlay_message = None;
+                        }
                     }
 
                     // Draw quit combo progress overlay (uses previous frame's counter)
@@ -1384,6 +1439,8 @@ fn main() {
                         crt_enabled = !crt_enabled;
                         config.crt_enabled = crt_enabled;
                         save_config(&config);
+                        overlay_message = Some(if crt_enabled { "CRT FILTER: ON".to_string() } else { "CRT FILTER: OFF".to_string() });
+                        overlay_timer = 90; // 1.5 seconds
                     }
 
                     // Escape returns to menu immediately (destroys game state)
