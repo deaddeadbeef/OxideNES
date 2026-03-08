@@ -143,11 +143,12 @@ struct FileBrowser {
 
 impl FileBrowser {
     fn new() -> Self {
-        let downloads = PathBuf::from(
-            env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()),
-        )
-        .join("Downloads");
-        let dir = if downloads.is_dir() {
+        let home = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+        let roms_dir = PathBuf::from(&home).join(".nes-emulator").join("roms");
+        let downloads = PathBuf::from(&home).join("Downloads");
+        let dir = if roms_dir.is_dir() {
+            roms_dir
+        } else if downloads.is_dir() {
             downloads
         } else {
             PathBuf::from(".")
@@ -503,9 +504,9 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
         draw_text_8x8(fb, "SETTINGS", 3, row, color);
     }
 
-    draw_separator_line(fb, 27);
-    draw_text_centered_8x8(fb, "UP/DN:SELECT  A:OPEN", 28, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "L/R:PAGE  ESC:QUIT", 29, MENU_DARK_GRAY);
+    draw_separator_line(fb, 25);
+    draw_text_centered_8x8(fb, "UP/DN:SELECT  A:OPEN", 26, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "L/R:PAGE  ESC:QUIT", 27, MENU_DARK_GRAY);
 }
 
 fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
@@ -626,12 +627,12 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
         if browser.entries.len() > VISIBLE_ROWS {
             let pos_str = format!("{}/{}", browser.selected + 1, browser.entries.len());
             let pos_x = 30 - pos_str.len();
-            draw_text_8x8(fb, &pos_str, pos_x, 26, MENU_DARK_GRAY);
+            draw_text_8x8(fb, &pos_str, pos_x, 25, MENU_DARK_GRAY);
         }
     }
 
     draw_separator_line(fb, 25);
-    draw_text_centered_8x8(fb, "UP/DN:SELECT A:OPEN B:BACK", 26, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "A:OPEN B:BACK L/R:PAGE", 26, MENU_DARK_GRAY);
 
     // Error overlay
     if let Some(ref msg) = browser.error_message {
