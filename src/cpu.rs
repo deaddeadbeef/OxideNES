@@ -262,7 +262,8 @@ impl Cpu {
             if bus.poll_nmi() {
                 self.nmi_pending = true;
             }
-            if bus.poll_apu_irq() && !self.get_flag(INTERRUPT_DISABLE) {
+            let irq = bus.poll_apu_irq() || bus.poll_mapper_irq();
+            if irq && !self.get_flag(INTERRUPT_DISABLE) {
                 self.irq_pending = true;
             }
         }

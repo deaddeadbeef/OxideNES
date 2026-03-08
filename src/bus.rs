@@ -68,7 +68,7 @@ impl Bus {
     pub fn tick(&mut self, cpu_cycles: u8) -> bool {
         let mut nmi = false;
         for _ in 0..(cpu_cycles as usize * 3) {
-            if self.ppu.tick(&self.cartridge) {
+            if self.ppu.tick(&mut self.cartridge) {
                 nmi = true;
             }
         }
@@ -81,6 +81,14 @@ impl Bus {
 
     pub fn poll_apu_irq(&self) -> bool {
         self.apu.irq_pending
+    }
+
+    pub fn poll_mapper_irq(&mut self) -> bool {
+        let pending = self.cartridge.mapper.irq_pending();
+        if pending {
+            self.cartridge.mapper.irq_clear();
+        }
+        pending
     }
 
     // DMA transfer handling

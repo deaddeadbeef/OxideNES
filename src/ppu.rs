@@ -314,7 +314,7 @@ impl Ppu {
         }
     }
 
-    pub fn tick(&mut self, cart: &Cartridge) -> bool {
+    pub fn tick(&mut self, cart: &mut Cartridge) -> bool {
         let mut trigger_nmi = false;
 
         if self.scanline >= -1 && self.scanline < 240 {
@@ -378,6 +378,11 @@ impl Ppu {
             if self.cycle == 257 {
                 self.load_background_shifters();
                 self.transfer_address_x();
+            }
+
+            // Clock MMC3 scanline counter at cycle 260 of visible scanlines
+            if self.cycle == 260 && self.rendering_enabled() {
+                cart.mapper.clock_scanline();
             }
 
             if self.scanline == -1 && self.cycle >= 280 && self.cycle < 305 {

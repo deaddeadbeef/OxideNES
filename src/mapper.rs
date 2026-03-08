@@ -4,6 +4,9 @@ pub trait Mapper {
     fn read_chr(&self, addr: u16) -> u8;
     fn write_chr(&mut self, addr: u16, data: u8);
     fn mirroring(&self) -> crate::cartridge::Mirroring;
+    fn clock_scanline(&mut self) {}  // NEW - default no-op
+    fn irq_pending(&self) -> bool { false }  // NEW - default false
+    fn irq_clear(&mut self) {}  // NEW - default no-op
 }
 
 pub struct Mapper000 {
@@ -262,6 +265,27 @@ impl Mapper for Mapper004 {
         } else {
             crate::cartridge::Mirroring::Horizontal
         }
+    }
+
+    fn clock_scanline(&mut self) {
+        if self.irq_counter == 0 || self.irq_reload_flag {
+            self.irq_counter = self.irq_reload;
+            self.irq_reload_flag = false;
+        } else {
+            self.irq_counter -= 1;
+        }
+        
+        if self.irq_counter == 0 && self.irq_enabled {
+            self.irq_pending = true;
+        }
+    }
+
+    fn irq_pending(&self) -> bool {
+        self.irq_pending
+    }
+
+    fn irq_clear(&mut self) {
+        self.irq_pending = false;
     }
 }
 
