@@ -48,7 +48,7 @@ impl Default for EmulatorConfig {
         Self {
             recent_games: Vec::new(),
             crt_enabled: true,
-            barrel_distortion: true,
+            barrel_distortion: false,
             audio_volume: 100,
         }
     }
@@ -209,11 +209,11 @@ fn scan_directory_result(dir: &Path) -> Result<Vec<FileBrowserEntry>, std::io::E
         }
     }
 
-    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-    dirs.extend(files);
-    Ok(dirs)
+    files.extend(dirs);
+    Ok(files)
 }
 
 enum MenuAction {
@@ -1911,51 +1911,52 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usiz
     }
 }
 
-fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, color: u32, stride: usize) {
-    let font: std::collections::HashMap<char, [u8; 5]> = [
-        ('A', [0b111, 0b101, 0b111, 0b101, 0b101]),
-        ('B', [0b110, 0b101, 0b110, 0b101, 0b110]),
-        ('C', [0b111, 0b100, 0b100, 0b100, 0b111]),
-        ('D', [0b110, 0b101, 0b101, 0b101, 0b110]),
-        ('E', [0b111, 0b100, 0b110, 0b100, 0b111]),
-        ('F', [0b111, 0b100, 0b110, 0b100, 0b100]),
-        ('G', [0b111, 0b100, 0b101, 0b101, 0b111]),
-        ('H', [0b101, 0b101, 0b111, 0b101, 0b101]),
-        ('I', [0b111, 0b010, 0b010, 0b010, 0b111]),
-        ('J', [0b001, 0b001, 0b001, 0b101, 0b111]),
-        ('K', [0b101, 0b110, 0b100, 0b110, 0b101]),
-        ('L', [0b100, 0b100, 0b100, 0b100, 0b111]),
-        ('M', [0b101, 0b111, 0b111, 0b101, 0b101]),
-        ('N', [0b101, 0b111, 0b111, 0b101, 0b101]),
-        ('O', [0b111, 0b101, 0b101, 0b101, 0b111]),
-        ('P', [0b111, 0b101, 0b111, 0b100, 0b100]),
-        ('Q', [0b111, 0b101, 0b101, 0b111, 0b001]),
-        ('R', [0b111, 0b101, 0b111, 0b110, 0b101]),
-        ('S', [0b111, 0b100, 0b111, 0b001, 0b111]),
-        ('T', [0b111, 0b010, 0b010, 0b010, 0b010]),
-        ('U', [0b101, 0b101, 0b101, 0b101, 0b111]),
-        ('V', [0b101, 0b101, 0b101, 0b101, 0b010]),
-        ('W', [0b101, 0b101, 0b111, 0b111, 0b101]),
-        ('X', [0b101, 0b101, 0b010, 0b101, 0b101]),
-        ('Y', [0b101, 0b101, 0b010, 0b010, 0b010]),
-        ('Z', [0b111, 0b001, 0b010, 0b100, 0b111]),
-        ('0', [0b111, 0b101, 0b101, 0b101, 0b111]),
-        ('1', [0b010, 0b110, 0b010, 0b010, 0b111]),
-        ('2', [0b111, 0b001, 0b111, 0b100, 0b111]),
-        (' ', [0b000, 0b000, 0b000, 0b000, 0b000]),
-    ].iter().cloned().collect();
+fn get_small_glyph(ch: char) -> [u8; 5] {
+    match ch {
+        'A' => [0b111, 0b101, 0b111, 0b101, 0b101],
+        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+        'C' => [0b111, 0b100, 0b100, 0b100, 0b111],
+        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
+        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
+        'F' => [0b111, 0b100, 0b110, 0b100, 0b100],
+        'G' => [0b111, 0b100, 0b101, 0b101, 0b111],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'J' => [0b001, 0b001, 0b001, 0b101, 0b111],
+        'K' => [0b101, 0b110, 0b100, 0b110, 0b101],
+        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'N' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'O' => [0b111, 0b101, 0b101, 0b101, 0b111],
+        'P' => [0b111, 0b101, 0b111, 0b100, 0b100],
+        'Q' => [0b111, 0b101, 0b101, 0b111, 0b001],
+        'R' => [0b111, 0b101, 0b111, 0b110, 0b101],
+        'S' => [0b111, 0b100, 0b111, 0b001, 0b111],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
+        'W' => [0b101, 0b101, 0b111, 0b111, 0b101],
+        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
+        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        'Z' => [0b111, 0b001, 0b010, 0b100, 0b111],
+        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
+        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
+        '2' => [0b111, 0b001, 0b111, 0b100, 0b111],
+        _ => [0b000, 0b000, 0b000, 0b000, 0b000],
+    }
+}
 
+fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, color: u32, stride: usize) {
     let mut cursor_x = start_x;
     for ch in text.chars() {
-        if let Some(glyph) = font.get(&ch) {
-            for (row, &bits) in glyph.iter().enumerate() {
-                for col in 0..3 {
-                    if bits & (0b100 >> col) != 0 {
-                        let px = cursor_x + col;
-                        let py = start_y + row;
-                        if px < stride && py * stride + px < frame.len() {
-                            frame[py * stride + px] = color;
-                        }
+        let glyph = get_small_glyph(ch);
+        for (row, &bits) in glyph.iter().enumerate() {
+            for col in 0..3 {
+                if bits & (0b100 >> col) != 0 {
+                    let px = cursor_x + col;
+                    let py = start_y + row;
+                    if px < stride && py * stride + px < frame.len() {
+                        frame[py * stride + px] = color;
                     }
                 }
             }
