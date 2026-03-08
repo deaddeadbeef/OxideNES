@@ -26,8 +26,6 @@ fn main() {
     const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT; // 1160 total
     const SCREEN_W: usize = 860;   // Slightly smaller screen = thicker bezels
     const SCREEN_H: usize = 645;   // 4:3 ratio maintained
-    const SCREEN_X: usize = 210;   // Centered with thick side bezels
-    const SCREEN_Y: usize = 85;    // Thick top bezel
     
     let mut window = Window::new(
         "NES Emulator",
@@ -144,6 +142,7 @@ fn main() {
         }
         table
     };
+    let glare_table = build_glare_table();
     let mut crt_enabled = true;
     let mut mouse_was_down = false;
 
@@ -177,6 +176,10 @@ fn main() {
         
         // Composite game output into TV frame
         composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+        if crt_enabled {
+            apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
+        }
 
         window
             .update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -491,24 +494,39 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
 
     frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
 
-    // Wall background — warm dark with subtle texture
-    for y in 0..TV_HEIGHT {
-        for x in 0..WINDOW_WIDTH {
-            let idx = y * WINDOW_WIDTH + x;
-            let noise = ((x * 17 + y * 31) % 7) as u32;
-            frame[idx] = ((0x22 + noise) << 16) | ((0x20 + noise) << 8) | (0x1E + noise);
-        }
-    }
-
     // TV body outer bounds
-    let tv_x1 = 30usize;
-    let tv_y1 = 15usize;
+    let tv_x1: usize = 30;
+    let tv_y1: usize = 15;
     let tv_x2 = WINDOW_WIDTH - 30;
     let tv_y2 = TV_HEIGHT - 15;
     let tv_w = tv_x2 - tv_x1;
     let tv_h = tv_y2 - tv_y1;
-    let corner_r = 25usize;
+    let corner_r: usize = 25;
 
+    // Pre-compute layout positions
+    let chrome_y = SCREEN_Y + SCREEN_H + 12;
+    let chrome_h: usize = 3;
+    let chrome_x1 = SCREEN_X - 20;
+    let chrome_x2 = SCREEN_X + SCREEN_W + 20;
+
+    let spk_x1 = WINDOW_WIDTH / 2 - 160;
+    let spk_x2 = WINDOW_WIDTH / 2 + 160;
+    let spk_y1 = chrome_y + chrome_h + 18;
+    let spk_y2 = spk_y1 + 70;
+
+    let led_cx = tv_x1 + 65;
+    let led_cy = (spk_y1 + spk_y2) / 2;
+
+    // ===== WALL BACKGROUND — warm dark with very subtle noise =====
+    for y in 0..TV_HEIGHT {
+        for x in 0..WINDOW_WIDTH {
+            let idx = y * WINDOW_WIDTH + x;
+            let noise = ((x.wrapping_mul(7) ^ y.wrapping_mul(13)) % 5) as u32;
+            frame[idx] = ((0x22 + noise) << 16) | ((0x22 + noise) << 8) | (0x20 + noise);
+        }
+    }
+
+    // ===== TV BODY (rounded rectangle with charcoal gradient) =====
     for y in tv_y1..tv_y2 {
         for x in tv_x1..tv_x2 {
             let idx = y * WINDOW_WIDTH + x;
@@ -524,19 +542,31 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
                 continue;
             }
 
-            // Base color with vertical gradient (lighter top, darker bottom)
+            // Base charcoal gradient: #2A2A2E top → #1E1E22 bottom
             let gy = ly as f32 / tv_h as f32;
-            let base_val = 78.0 - gy * 22.0;
+            let r_base = (0x2Au32 as f32 * (1.0 - gy) + 0x1Eu32 as f32 * gy) as u32;
+            let g_base = (0x2Au32 as f32 * (1.0 - gy) + 0x1Eu32 as f32 * gy) as u32;
+            let b_base = (0x2Eu32 as f32 * (1.0 - gy) + 0x22u32 as f32 * gy) as u32;
+
+            // Subtle highlight band across top 30% (simulates overhead light)
+            let highlight = if gy < 0.30 {
+                ((1.0 - gy / 0.30) * 10.0) as u32
+            } else {
+                0
+            };
+
             // Horizontal curvature: slightly lighter in center
             let gx = (lx as f32 / tv_w as f32 - 0.5).abs();
-            let center_boost = (1.0 - gx * 1.5).max(0.0) * 8.0;
-            let val = (base_val + center_boost) as u32;
+            let center_boost = ((1.0 - gx * 1.8).max(0.0) * 5.0) as u32;
 
-            let mut r = val;
-            let mut g = val;
-            let mut b = val + 1; // very slight cool tint
+            // Plastic grain texture: XOR noise with 2-3 value variance
+            let grain = ((x ^ y ^ (x >> 1) ^ (y >> 2)) % 5) as i32 - 2;
 
-            // Outer rim — 6px bevel
+            let mut r = (r_base as i32 + highlight as i32 + center_boost as i32 + grain).max(0) as u32;
+            let mut g = (g_base as i32 + highlight as i32 + center_boost as i32 + grain).max(0) as u32;
+            let mut b = (b_base as i32 + highlight as i32 + center_boost as i32 + grain).max(0) as u32;
+
+            // Outer rim — 6px bevel (light top-left, dark bottom-right)
             if ly < 6 {
                 let boost = (6 - ly) as u32 * 4;
                 r += boost; g += boost; b += boost;
@@ -554,35 +584,12 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
                 r = r.saturating_sub(dim); g = g.saturating_sub(dim); b = b.saturating_sub(dim);
             }
 
-            // Subtle plastic texture
-            let tex = ((x.wrapping_mul(7919) ^ y.wrapping_mul(6271)) % 5) as u32;
-            r = r.saturating_sub(tex).saturating_add(tex / 2);
-
-            // Screen area check
-            let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W && y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H;
-
-            // Inner shadow ring around screen (15px gradient from dark to bezel)
-            if !in_screen {
-                let dx = if x < SCREEN_X { SCREEN_X - x } else if x >= SCREEN_X + SCREEN_W { x - (SCREEN_X + SCREEN_W) + 1 } else { 999 };
-                let dy = if y < SCREEN_Y { SCREEN_Y - y } else if y >= SCREEN_Y + SCREEN_H { y - (SCREEN_Y + SCREEN_H) + 1 } else { 999 };
-                let d = dx.min(dy);
-                if d <= 15 {
-                    let shadow_strength = ((15 - d) as f32 / 15.0 * 45.0) as u32;
-                    r = r.saturating_sub(shadow_strength);
-                    g = g.saturating_sub(shadow_strength);
-                    b = b.saturating_sub(shadow_strength);
-                    // Innermost 3px are very dark
-                    if d <= 3 {
-                        r = r.saturating_sub(20);
-                        g = g.saturating_sub(20);
-                        b = b.saturating_sub(20);
-                    }
-                }
-            }
+            // ===== SCREEN AREA =====
+            let in_screen = x >= SCREEN_X && x < SCREEN_X + SCREEN_W
+                         && y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H;
 
             if in_screen {
-                // Screen corners rounded
-                let scr_r = 12usize;
+                let scr_r: usize = 10;
                 let sx = x - SCREEN_X;
                 let sy = y - SCREEN_Y;
                 let scr_corner =
@@ -590,63 +597,107 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
                     || (sx >= SCREEN_W - scr_r && sy < scr_r && sq_dist(sx, sy, SCREEN_W - scr_r, scr_r) > scr_r * scr_r)
                     || (sx < scr_r && sy >= SCREEN_H - scr_r && sq_dist(sx, sy, scr_r, SCREEN_H - scr_r) > scr_r * scr_r)
                     || (sx >= SCREEN_W - scr_r && sy >= SCREEN_H - scr_r && sq_dist(sx, sy, SCREEN_W - scr_r, SCREEN_H - scr_r) > scr_r * scr_r);
-                if scr_corner {
-                    frame[idx] = 0x080808;
-                } else {
-                    frame[idx] = 0x000000;
-                }
+                frame[idx] = if scr_corner { 0x060606 } else { 0x000000 };
                 continue;
             }
 
-            // Bottom panel details (below screen)
-            let bottom_start = SCREEN_Y + SCREEN_H + 20;
+            // ===== SCREEN RECESS (8px dark inset around screen opening) =====
+            let dx_to_scr = if x < SCREEN_X { SCREEN_X - x }
+                           else if x >= SCREEN_X + SCREEN_W { x - (SCREEN_X + SCREEN_W) + 1 }
+                           else { usize::MAX };
+            let dy_to_scr = if y < SCREEN_Y { SCREEN_Y - y }
+                           else if y >= SCREEN_Y + SCREEN_H { y - (SCREEN_Y + SCREEN_H) + 1 }
+                           else { usize::MAX };
+            let d = dx_to_scr.min(dy_to_scr);
 
-            // Speaker: dot grid pattern
-            let spk_x1 = WINDOW_WIDTH / 2 - 180;
-            let spk_x2 = WINDOW_WIDTH / 2 + 180;
-            let spk_y1 = bottom_start + 5;
-            let spk_y2 = spk_y1 + 55;
-            if x >= spk_x1 && x < spk_x2 && y >= spk_y1 && y < spk_y2 {
-                let dot_x = (x - spk_x1) % 8;
-                let dot_y = (y - spk_y1) % 8;
-                // Circular dot holes
-                let dcx = dot_x as i32 - 3;
-                let dcy = dot_y as i32 - 3;
-                if dcx * dcx + dcy * dcy <= 4 {
-                    frame[idx] = 0x151515;
+            if d <= 12 {
+                if d <= 2 {
+                    // Innermost 2px: near-black deep shadow
+                    frame[idx] = 0x080808;
                     continue;
-                } else if dcx * dcx + dcy * dcy <= 7 {
-                    r = r.saturating_sub(15);
-                    g = g.saturating_sub(15);
-                    b = b.saturating_sub(15);
+                } else if d <= 8 {
+                    if d == 8 {
+                        // Outermost recess pixel: bright catch-light
+                        frame[idx] = 0x555555;
+                        continue;
+                    }
+                    // Middle recess: dark gradient
+                    let t = (d - 2) as f32 / 5.0;
+                    let v = (0x08 as f32 + t * (0x38 - 0x08) as f32) as u32;
+                    frame[idx] = (v << 16) | (v << 8) | v;
+                    continue;
+                } else {
+                    // Chamfer (9-12px): bright edge transitioning to bezel color
+                    let t = (d - 8) as f32 / 4.0;
+                    let v = (0x48 as f32 * (1.0 - t) + r_base as f32 * t) as u32;
+                    r = v; g = v; b = v;
                 }
             }
 
-            // Power LED
-            let led_cx = tv_x1 + 65;
-            let led_cy = bottom_start + 30;
+            // ===== CHROME ACCENT STRIP =====
+            if y >= chrome_y && y < chrome_y + chrome_h && x >= chrome_x1 && x < chrome_x2 {
+                let strip_w = (chrome_x2 - chrome_x1) as f32;
+                let strip_pos = (x - chrome_x1) as f32 / strip_w;
+                let brightness = 1.0 - (strip_pos - 0.5).abs() * 2.0;
+                let v = (0x66 as f32 + brightness.max(0.0) * (0xBB - 0x66) as f32) as u32;
+                frame[idx] = (v << 16) | (v << 8) | v;
+                continue;
+            }
+
+            // ===== SPEAKER GRILLE (honeycomb perforated pattern) =====
+            if x >= spk_x1 && x < spk_x2 && y >= spk_y1 && y < spk_y2 {
+                let bx = x - spk_x1;
+                let by = y - spk_y1;
+                let bw = spk_x2 - spk_x1;
+                let bh = spk_y2 - spk_y1;
+
+                // Recessed border (2px inset)
+                if bx < 2 || bx >= bw - 2 || by < 2 || by >= bh - 2 {
+                    frame[idx] = (r.saturating_sub(18).min(255) << 16) | (g.saturating_sub(18).min(255) << 8) | b.saturating_sub(18).min(255);
+                    continue;
+                }
+
+                // Hex grid: offset every other row
+                let cell: i32 = 8;
+                let ly_local = (y as i32) - (spk_y1 as i32);
+                let lx_local = (x as i32) - (spk_x1 as i32);
+                let row = ly_local / cell;
+                let x_off = if row & 1 == 1 { cell / 2 } else { 0 };
+                let cy_mod = ly_local - row * cell;
+                let adjusted_lx = lx_local + x_off;
+                let col = if adjusted_lx >= 0 { adjusted_lx / cell } else { (adjusted_lx - cell + 1) / cell };
+                let cx_mod = adjusted_lx - col * cell;
+                let dcx = cx_mod - cell / 2;
+                let dcy = cy_mod - cell / 2;
+                let dist_sq = dcx * dcx + dcy * dcy;
+
+                if dist_sq <= 4 {
+                    frame[idx] = 0x0A0A0A;
+                    continue;
+                } else if dist_sq <= 8 {
+                    frame[idx] = 0x3A3A3A;
+                    continue;
+                }
+
+                // Recessed background
+                frame[idx] = (r.saturating_sub(10).min(255) << 16) | (g.saturating_sub(10).min(255) << 8) | b.saturating_sub(10).min(255);
+                continue;
+            }
+
+            // ===== POWER LED =====
             let ldx = x as i32 - led_cx as i32;
             let ldy = y as i32 - led_cy as i32;
             let led_dist = ldx * ldx + ldy * ldy;
-            if led_dist <= 16 {
-                frame[idx] = 0x00EE55;
+            if led_dist <= 9 {
+                frame[idx] = 0x00DD44;
                 continue;
-            } else if led_dist <= 80 {
-                let glow = (80 - led_dist) as u32;
-                frame[idx] = (r.saturating_sub(glow / 3) << 16) | ((g + glow / 2).min(255) << 8) | b.saturating_sub(glow / 4);
-                continue;
-            }
-
-            // Brand badge
-            let badge_cx = WINDOW_WIDTH / 2;
-            let badge_y1 = bottom_start + 68;
-            let badge_y2 = badge_y1 + 18;
-            let badge_hw = 55;
-            if x >= badge_cx - badge_hw && x < badge_cx + badge_hw && y >= badge_y1 && y < badge_y2 {
-                let by = y - badge_y1;
-                if by == 0 { frame[idx] = 0x5A5A5A; continue; }
-                if by == 17 { frame[idx] = 0x353535; continue; }
-                frame[idx] = 0x444444;
+            } else if led_dist <= 64 {
+                let t = (64 - led_dist) as f32 / 64.0;
+                let glow = (t * 25.0) as u32;
+                let gr = r.saturating_sub(glow / 3);
+                let gg = (g + glow / 2).min(255);
+                let gb = b.saturating_sub(glow / 4);
+                frame[idx] = (gr.min(255) << 16) | (gg.min(255) << 8) | gb.min(255);
                 continue;
             }
 
@@ -654,11 +705,12 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
         }
     }
 
-    // Drop shadow under TV on wall
-    for y in tv_y2..(tv_y2 + 12).min(TV_HEIGHT) {
-        for x in tv_x1 + 15..tv_x2 - 15 {
+    // ===== DROP SHADOW (soft gradient below TV on wall) =====
+    for y in tv_y2..(tv_y2 + 20).min(TV_HEIGHT) {
+        for x in tv_x1 + 20..tv_x2 - 20 {
             let idx = y * WINDOW_WIDTH + x;
-            let shadow = ((tv_y2 + 12 - y) as u32 * 3).min(30);
+            let t = (y - tv_y2) as f32 / 20.0;
+            let shadow = ((1.0 - t) * 22.0) as u32;
             let existing = frame[idx];
             let er = ((existing >> 16) & 0xFF).saturating_sub(shadow);
             let eg = ((existing >> 8) & 0xFF).saturating_sub(shadow);
@@ -689,6 +741,73 @@ fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>
         let dst_start = (y + SCREEN_Y) * window_width + SCREEN_X;
         result[dst_start..dst_start + SCREEN_W]
             .copy_from_slice(&game_output[src_start..src_start + SCREEN_W]);
+    }
+}
+
+fn build_glare_table() -> Vec<u8> {
+    const SCREEN_W: usize = 860;
+    const SCREEN_H: usize = 645;
+
+    let mut table = vec![0u8; SCREEN_W * SCREEN_H];
+
+    // Diagonal glare band: line from (0, 0.1*H) to (W, 0.7*H)
+    let a = 0.6 * SCREEN_H as f32;
+    let b = -(SCREEN_W as f32);
+    let c = 0.1 * SCREEN_H as f32 * SCREEN_W as f32;
+    let norm = (a * a + b * b).sqrt();
+    let band_sigma = 180.0_f32;
+    let band_peak = 28.0_f32; // ~11% of 255
+
+    // Specular highlight: small bright spot upper-left
+    let spec_x = 150.0_f32;
+    let spec_y = 120.0_f32;
+    let spec_sigma_sq = 35.0_f32 * 35.0;
+    let spec_peak = 50.0_f32; // ~20% of 255
+
+    for y in 0..SCREEN_H {
+        for x in 0..SCREEN_W {
+            let fx = x as f32;
+            let fy = y as f32;
+
+            // Perpendicular distance to diagonal line
+            let dist = (a * fx + b * fy + c).abs() / norm;
+            let band = band_peak * (-dist * dist / (2.0 * band_sigma * band_sigma)).exp();
+
+            // Fade: strongest upper-left, fades toward lower-right
+            let fade = 1.0 - 0.5 * (fx / SCREEN_W as f32 + fy / SCREEN_H as f32);
+            let band = band * fade.max(0.0);
+
+            // Specular highlight (radial Gaussian)
+            let dx = fx - spec_x;
+            let dy = fy - spec_y;
+            let spec = spec_peak * (-(dx * dx + dy * dy) / (2.0 * spec_sigma_sq)).exp();
+
+            table[y * SCREEN_W + x] = (band + spec).min(30.0) as u8;
+        }
+    }
+    table
+}
+
+fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usize) {
+    const SCREEN_W: usize = 860;
+    const SCREEN_H: usize = 645;
+    const SCREEN_X: usize = 210;
+    const SCREEN_Y: usize = 85;
+
+    for y in 0..SCREEN_H {
+        let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
+        let glare_row = y * SCREEN_W;
+        for x in 0..SCREEN_W {
+            let glare = glare_table[glare_row + x] as u32;
+            if glare == 0 { continue; }
+
+            let pixel = buffer[buf_row + x];
+            let r = ((pixel >> 16) & 0xFF) + glare;
+            let g = ((pixel >> 8) & 0xFF) + glare;
+            let b = (pixel & 0xFF) + glare;
+
+            buffer[buf_row + x] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+        }
     }
 }
 
@@ -747,211 +866,159 @@ fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, c
 
 fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: usize, window_height: usize) {
     let console_y = tv_height;
-    let console_w = 900;
-    let console_h = 160;
+    let console_w: usize = 900;
+    let console_h: usize = 160;
     let console_x = (window_width - console_w) / 2;
     let body_y = console_y + 20;
     let body_b = body_y + console_h;
-    
-    // Surface/shelf — dark matte surface (not wood grain)
+
+    // Surface/shelf — dark matte
     for y in console_y..window_height {
         for x in 0..window_width {
-            let idx = y * window_width + x;
-            frame[idx] = 0x1C1C1C; // dark surface
+            frame[y * window_width + x] = 0x1A1A1A;
         }
     }
-    
-    // Console body — two-tone: dark top bar + light bottom
+
+    // Console body — sleek two-tone design
+    let top_h: usize = 50;
     for y in body_y..body_b {
         for x in console_x..console_x + console_w {
             let idx = y * window_width + x;
             let lx = x - console_x;
             let ly = y - body_y;
-            
+
             // Rounded corners (8px)
-            let cr = 8usize;
-            let in_body_w = console_w;
-            let in_body_h = console_h;
-            if (lx < cr && ly < cr && sq_dist(lx, ly, cr, cr) > cr * cr) ||
-               (lx >= in_body_w - cr && ly < cr && sq_dist(lx, ly, in_body_w - cr, cr) > cr * cr) ||
-               (lx < cr && ly >= in_body_h - cr && sq_dist(lx, ly, cr, in_body_h - cr) > cr * cr) ||
-               (lx >= in_body_w - cr && ly >= in_body_h - cr && sq_dist(lx, ly, in_body_w - cr, in_body_h - cr) > cr * cr) {
+            let cr: usize = 8;
+            if (lx < cr && ly < cr && sq_dist(lx, ly, cr, cr) > cr * cr)
+                || (lx >= console_w - cr && ly < cr && sq_dist(lx, ly, console_w - cr, cr) > cr * cr)
+                || (lx < cr && ly >= console_h - cr && sq_dist(lx, ly, cr, console_h - cr) > cr * cr)
+                || (lx >= console_w - cr && ly >= console_h - cr && sq_dist(lx, ly, console_w - cr, console_h - cr) > cr * cr)
+            {
                 continue;
             }
-            
-            if ly < 50 {
-                // === TOP DARK STRIPE — cartridge area ===
-                let mut c: u32 = 0x2E2E2E;
-                
-                // Top edge highlight
-                if ly == 0 { c = 0x404040; }
-                // Bottom edge of stripe
-                if ly == 49 { c = 0x222222; }
-                
-                // Cartridge slot — wide centered area
-                let slot_x = console_w / 2 - 160;
-                let slot_w = 320;
+
+            if ly < top_h {
+                // === DARK TOP STRIPE (cartridge area) ===
+                let grad = (ly as f32 / top_h as f32 * 6.0) as u32;
+                let mut c: u32 = 0x2C + grad;
+                if ly == 0 { c = 0x3C; }
+                if ly == top_h - 1 { c = 0x20; }
+
+                // Cartridge slot — centered recessed rectangle
+                let slot_w: usize = 320;
+                let slot_x = console_w / 2 - slot_w / 2;
                 if lx >= slot_x && lx < slot_x + slot_w && ly >= 8 && ly < 42 {
-                    c = 0x0C0C0C; // deep black slot
-                    
+                    c = 0x0A;
                     // Slot border
-                    if ly == 8 || ly == 41 { c = 0x050505; }
-                    if lx == slot_x || lx == slot_x + slot_w - 1 { c = 0x050505; }
-                    
+                    if ly == 8 || ly == 41 || lx == slot_x || lx == slot_x + slot_w - 1 { c = 0x04; }
                     // Cartridge body visible inside
                     if lx >= slot_x + 25 && lx < slot_x + slot_w - 25 && ly >= 10 && ly < 40 {
-                        // Cartridge shell
-                        let cart_grad = ((ly - 10) as f32 / 30.0 * 15.0) as u32;
-                        c = (0x65 - cart_grad) << 16 | (0x65 - cart_grad) << 8 | (0x68 - cart_grad);
-                        
-                        // Gold label on cartridge
+                        let cart_grad = ((ly - 10) as f32 / 30.0 * 12.0) as u32;
+                        c = 0x60u32.saturating_sub(cart_grad);
+                        // Label stripe on cartridge
                         if lx >= slot_x + 65 && lx < slot_x + slot_w - 65 && ly >= 15 && ly < 35 {
-                            let label_grad = ((ly - 15) as u32 * 2).min(20);
-                            c = (0xCC - label_grad) << 16 | (0x99 - label_grad) << 8 | (0x22);
-                            // Label border
+                            let lg = ((ly - 15) as u32 * 2).min(20);
+                            let cr = 0xC8u32.saturating_sub(lg);
+                            let cg = 0x96u32.saturating_sub(lg);
+                            let cb = 0x22u32;
                             if ly == 15 || ly == 34 || lx == slot_x + 65 || lx == slot_x + slot_w - 66 {
-                                c = 0x886611;
+                                frame[idx] = 0x886611;
+                            } else {
+                                frame[idx] = (cr << 16) | (cg << 8) | cb;
                             }
+                            continue;
                         }
                     }
                 }
-                
-                frame[idx] = c;
+
+                frame[idx] = (c << 16) | (c << 8) | c;
             } else {
-                // === BOTTOM LIGHT BODY ===
-                let grad = ((ly - 50) as f32 / (console_h - 50) as f32 * 12.0) as u32;
-                let base = 0xBE - grad;
+                // === LIGHT BOTTOM BODY ===
+                let grad = ((ly - top_h) as f32 / (console_h - top_h) as f32 * 10.0) as u32;
+                let base = 0xB8u32.saturating_sub(grad);
                 let mut r = base;
                 let mut g = base;
                 let mut b = (base as f32 * 0.97) as u32;
-                
-                // Top edge of light body — bright line
-                if ly == 50 { r = 0xD5; g = 0xD5; b = 0xD3; }
-                // Bottom edge
-                if ly >= console_h - 2 { r = 0x88; g = 0x88; b = 0x86; }
-                // Side edges
-                if lx < 3 || lx >= console_w - 3 { r -= 15; g -= 15; b -= 15; }
-                
-                // === POWER SECTION — left side ===
-                let pwr_section_x = 30;
-                let pwr_section_w = 120;
-                
-                // Power LED (circular, 6px radius)
-                let led_cx = pwr_section_x + 20;
-                let led_cy = 75;
-                if ly >= led_cy - 5 && ly <= led_cy + 5 && lx >= led_cx - 5 && lx <= led_cx + 5 {
+
+                if ly == top_h { r = 0xCE; g = 0xCE; b = 0xCC; }
+                if ly >= console_h - 2 { r = 0x85; g = 0x85; b = 0x83; }
+                if lx < 3 || lx >= console_w - 3 {
+                    r = r.saturating_sub(12);
+                    g = g.saturating_sub(12);
+                    b = b.saturating_sub(12);
+                }
+
+                // === POWER LED (left side) ===
+                let led_cx: usize = 48;
+                let led_cy: usize = 75;
+                if lx >= led_cx.saturating_sub(5) && lx <= led_cx + 5 && ly >= led_cy.saturating_sub(5) && ly <= led_cy + 5 {
                     let dx = lx as i32 - led_cx as i32;
                     let dy = ly as i32 - led_cy as i32;
-                    let dist = dx * dx + dy * dy;
-                    if dist <= 16 {
-                        frame[idx] = 0x00DD55; continue;
-                    } else if dist <= 36 {
-                        frame[idx] = 0x003D15; continue;
-                    }
+                    let d = dx * dx + dy * dy;
+                    if d <= 12 { frame[idx] = 0x00DD55; continue; }
+                    if d <= 32 { frame[idx] = 0x003D15; continue; }
                 }
-                
-                // Power button — raised pill shape
-                let btn_x = pwr_section_x + 35;
-                let btn_y = 68;
-                let btn_w = 70;
-                let btn_h = 22;
-                if lx >= btn_x && lx < btn_x + btn_w && ly >= btn_y && ly < btn_y + btn_h {
-                    let bx = lx - btn_x;
+
+                // === POWER BUTTON (pill, left) ===
+                let btn_x: usize = 35;
+                let btn_y: usize = 68;
+                let btn_w: usize = 65;
+                let btn_h: usize = 20;
+                if lx >= btn_x + 20 && lx < btn_x + 20 + btn_w && ly >= btn_y && ly < btn_y + btn_h {
+                    let bx = lx - (btn_x + 20);
                     let by = ly - btn_y;
-                    // Pill shape rounded ends
                     let pill_r = btn_h / 2;
-                    let in_pill = if bx < pill_r {
-                        sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r
-                    } else if bx >= btn_w - pill_r {
-                        sq_dist(bx, by, btn_w - pill_r, pill_r) <= pill_r * pill_r
-                    } else {
-                        true
-                    };
+                    let in_pill = if bx < pill_r { sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r }
+                        else if bx >= btn_w - pill_r { sq_dist(bx, by, btn_w - pill_r, pill_r) <= pill_r * pill_r }
+                        else { true };
                     if in_pill {
-                        r = 0x5A; g = 0x5A; b = 0x5A;
-                        if by < 3 { r = 0x70; g = 0x70; b = 0x70; }
-                        if by >= btn_h - 3 { r = 0x42; g = 0x42; b = 0x42; }
+                        let mut bc = 0x58u32;
+                        if by < 2 { bc = 0x6C; }
+                        if by >= btn_h - 2 { bc = 0x40; }
+                        frame[idx] = (bc << 16) | (bc << 8) | bc;
+                        continue;
                     }
                 }
-                
-                // Divider line after power section
-                if lx == pwr_section_x + pwr_section_w && ly >= 55 && ly < console_h - 10 {
-                    r = 0x99; g = 0x99; b = 0x97;
+
+                // Divider after power section
+                let pwr_div_x: usize = 150;
+                if lx == pwr_div_x && ly >= 55 && ly < console_h - 8 {
+                    r = 0x96; g = 0x96; b = 0x94;
                 }
-                
-                // === RESET SECTION — right of center ===
+
+                // === RESET BUTTON (pill, right side) ===
                 let rst_section_x = console_w - 170;
-                
-                // Reset button — pill shape
                 let rst_x = rst_section_x + 30;
-                let rst_y = 68;
-                let rst_w = 80;
-                let rst_h = 22;
+                let rst_y: usize = 68;
+                let rst_w: usize = 80;
+                let rst_h: usize = 22;
                 if lx >= rst_x && lx < rst_x + rst_w && ly >= rst_y && ly < rst_y + rst_h {
                     let bx = lx - rst_x;
                     let by = ly - rst_y;
                     let pill_r = rst_h / 2;
-                    let in_pill = if bx < pill_r {
-                        sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r
-                    } else if bx >= rst_w - pill_r {
-                        sq_dist(bx, by, rst_w - pill_r, pill_r) <= pill_r * pill_r
-                    } else {
-                        true
-                    };
+                    let in_pill = if bx < pill_r { sq_dist(bx, by, pill_r, pill_r) <= pill_r * pill_r }
+                        else if bx >= rst_w - pill_r { sq_dist(bx, by, rst_w - pill_r, pill_r) <= pill_r * pill_r }
+                        else { true };
                     if in_pill {
-                        r = 0x6E; g = 0x6E; b = 0x6E;
-                        if by < 3 { r = 0x85; g = 0x85; b = 0x85; }
-                        if by >= rst_h - 3 { r = 0x52; g = 0x52; b = 0x52; }
+                        let mut bc = 0x66u32;
+                        if by < 2 { bc = 0x7C; }
+                        if by >= rst_h - 2 { bc = 0x4E; }
+                        frame[idx] = (bc << 16) | (bc << 8) | bc;
+                        continue;
                     }
                 }
-                
-                // Divider line before reset
-                if lx == rst_section_x && ly >= 55 && ly < console_h - 10 {
-                    r = 0x99; g = 0x99; b = 0x97;
+
+                // Divider before reset
+                if lx == rst_section_x && ly >= 55 && ly < console_h - 8 {
+                    r = 0x96; g = 0x96; b = 0x94;
                 }
-                
-                // === CONTROLLER PORTS — center bottom ===
-                let port_y_start = 105;
-                let port_h = 28;
-                let port_w = 80;
-                let port_gap = 40;
-                let ports_total = port_w * 2 + port_gap;
-                let port1_x = (console_w - ports_total) / 2;
-                let port2_x = port1_x + port_w + port_gap;
-                
-                for px in [port1_x, port2_x] {
-                    if lx >= px && lx < px + port_w && ly >= port_y_start && ly < port_y_start + port_h {
-                        let bx = lx - px;
-                        let by = ly - port_y_start;
-                        
-                        // Port housing — dark rounded rectangle
-                        let pr = 5usize;
-                        let in_port = if bx < pr && by < pr { sq_dist(bx, by, pr, pr) <= pr * pr }
-                            else if bx >= port_w - pr && by < pr { sq_dist(bx, by, port_w - pr, pr) <= pr * pr }
-                            else if bx < pr && by >= port_h - pr { sq_dist(bx, by, pr, port_h - pr) <= pr * pr }
-                            else if bx >= port_w - pr && by >= port_h - pr { sq_dist(bx, by, port_w - pr, port_h - pr) <= pr * pr }
-                            else { true };
-                        
-                        if in_port {
-                            r = 0x22; g = 0x22; b = 0x22;
-                            // Inner area with pins
-                            if bx >= 8 && bx < port_w - 8 && by >= 6 && by < port_h - 6 {
-                                r = 0x15; g = 0x15; b = 0x15;
-                                // Gold pins
-                                if by >= 10 && by < port_h - 10 && (bx - 8) % 6 < 3 {
-                                    r = 0x8A; g = 0x7A; b = 0x4A;
-                                }
-                            }
-                        }
-                    }
-                }
-                
+
                 frame[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
             }
         }
     }
-    
-    // Drop shadow under console body
+
+    // Drop shadow under console
     for y in body_b..body_b + 8 {
         if y >= window_height { break; }
         for x in console_x + 5..console_x + console_w - 5 {
@@ -964,16 +1031,17 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_height: usize, window_width: u
             frame[idx] = (er << 16) | (eg << 8) | eb;
         }
     }
-    
-    // Text labels — using draw_text function
+
+    // Text labels
     let body_y_offset = body_y;
-    draw_text(frame, "POWER", console_x + 45, body_y_offset + 95, 0x707070, window_width);
-    draw_text(frame, "RESET", console_x + console_w - 130, body_y_offset + 95, 0x707070, window_width);
-    draw_text(frame, "CLICK TO INSERT CARTRIDGE", console_x + console_w / 2 - 50, body_y_offset + 45, 0x444444, window_width);
-    
+    draw_text(frame, "POWER", console_x + 45, body_y_offset + 93, 0x686868, window_width);
+    draw_text(frame, "RESET", console_x + console_w - 130, body_y_offset + 93, 0x686868, window_width);
+    draw_text(frame, "CLICK TO INSERT CARTRIDGE", console_x + console_w / 2 - 50, body_y_offset + 45, 0x3E3E3E, window_width);
+
+    // Controller port labels
     let ports_total_w = 80 * 2 + 40;
     let port1_lx = (console_w - ports_total_w) / 2;
     let port2_lx = port1_lx + 80 + 40;
-    draw_text(frame, "1P", console_x + port1_lx + 35, body_y_offset + 137, 0x707070, window_width);
-    draw_text(frame, "2P", console_x + port2_lx + 35, body_y_offset + 137, 0x707070, window_width);
+    draw_text(frame, "1P", console_x + port1_lx + 35, body_y_offset + 137, 0x686868, window_width);
+    draw_text(frame, "2P", console_x + port2_lx + 35, body_y_offset + 137, 0x686868, window_width);
 }
