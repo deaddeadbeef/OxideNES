@@ -5,11 +5,12 @@ edition = "2021"
 
 [dependencies]
 minifb = "0.27"
-rfd = "0.15"
 cpal = "0.15"
 blip_buf = "0.1"
 ringbuf = "0.4"
 gilrs = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.dev]
 opt-level = 2
