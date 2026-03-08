@@ -117,11 +117,19 @@ impl Ppu {
         let mirrored = addr & 0x2FFF;
         let vram_index = mirrored - 0x2000;
         let nametable = vram_index / 0x0400;
-        match (mirroring, nametable) {
-            (Mirroring::Vertical, 2) | (Mirroring::Vertical, 3) => vram_index - 0x800,
-            (Mirroring::Horizontal, 1) | (Mirroring::Horizontal, 2) => vram_index - 0x400,
-            (Mirroring::Horizontal, 3) => vram_index - 0x800,
-            _ => vram_index,
+        match mirroring {
+            Mirroring::Vertical => match nametable {
+                2 | 3 => vram_index - 0x800,
+                _ => vram_index,
+            },
+            Mirroring::Horizontal => match nametable {
+                1 | 2 => vram_index - 0x400,
+                3 => vram_index - 0x800,
+                _ => vram_index,
+            },
+            Mirroring::SingleScreenLower => vram_index % 0x0400,
+            Mirroring::SingleScreenUpper => (vram_index % 0x0400) + 0x0400,
+            _ => vram_index, // FourScreen
         }
     }
 

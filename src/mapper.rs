@@ -488,9 +488,11 @@ impl Mapper for Mapper001 {
     
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.control & 3 {
+            0 => crate::cartridge::Mirroring::SingleScreenLower,
+            1 => crate::cartridge::Mirroring::SingleScreenUpper,
             2 => crate::cartridge::Mirroring::Vertical,
             3 => crate::cartridge::Mirroring::Horizontal,
-            _ => self.mirroring, // single-screen modes (use cart default)
+            _ => unreachable!(),
         }
     }
 }

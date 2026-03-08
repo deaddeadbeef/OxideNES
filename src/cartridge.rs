@@ -7,6 +7,8 @@ pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
+    SingleScreenLower,
+    SingleScreenUpper,
 }
 
 pub struct Cartridge {
