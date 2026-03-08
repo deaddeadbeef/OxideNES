@@ -26,6 +26,8 @@ pub struct Cpu {
     pub status: u8,
     pub cycles: u8,
     total_cycles: usize,
+    nmi_pending: bool,
+    irq_pending: bool,
 }
 
 // Status flags
@@ -49,6 +51,8 @@ impl Cpu {
             status: 0x24,
             cycles: 0,
             total_cycles: 0,
+            nmi_pending: false,
+            irq_pending: false,
         }
     }
 
@@ -236,9 +240,14 @@ impl Cpu {
         }
 
         if self.cycles == 0 {
-            if bus.poll_nmi() {
+            // Service interrupts that were detected at the end of the previous instruction.
+            // On a real 6502, interrupts are sampled during the instruction and serviced
+            // between instructions — after the current one completes.
+            if self.nmi_pending {
+                self.nmi_pending = false;
                 self.nmi(bus);
-            } else if bus.poll_apu_irq() && !self.get_flag(INTERRUPT_DISABLE) {
+            } else if self.irq_pending {
+                self.irq_pending = false;
                 self.irq(bus);
             }
 
@@ -247,6 +256,15 @@ impl Cpu {
             self.set_flag(UNUSED, true);
 
             self.execute(bus, opcode);
+
+            // Sample interrupt lines at the end of the instruction.
+            // These will be serviced at the next instruction boundary.
+            if bus.poll_nmi() {
+                self.nmi_pending = true;
+            }
+            if bus.poll_apu_irq() && !self.get_flag(INTERRUPT_DISABLE) {
+                self.irq_pending = true;
+            }
         }
 
         self.cycles = self.cycles.saturating_sub(1);
