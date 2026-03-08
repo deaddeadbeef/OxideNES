@@ -8,6 +8,7 @@ pub struct Bus {
     pub ppu: Ppu,
     pub cartridge: Cartridge,
     pub joypad1: Joypad,
+    pub joypad2: Joypad,
     pub apu: Apu,
     cycles: usize,
     dma_page: u8,
@@ -24,6 +25,7 @@ impl Bus {
             ppu: Ppu::new(),
             cartridge,
             joypad1: Joypad::new(),
+            joypad2: Joypad::new(),
             apu: Apu::new(44100),
             cycles: 0,
             dma_page: 0,
@@ -39,7 +41,7 @@ impl Bus {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize],
             0x2000..=0x3FFF => self.ppu.cpu_read(addr & 0x2007, &self.cartridge),
             0x4016 => self.joypad1.read(),
-            0x4017 => 0, // joypad 2 stub
+            0x4017 => self.joypad2.read(),
             0x4000..=0x4015 => self.apu.read(addr), // APU
             0x4018..=0x401F => 0, // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.read_prg(addr),
@@ -57,7 +59,10 @@ impl Bus {
                 self.dma_transfer = true;
                 self.dma_dummy = true;
             }
-            0x4016 => self.joypad1.write(data),
+            0x4016 => {
+                self.joypad1.write(data);
+                self.joypad2.write(data);
+            }
             0x4000..=0x4013 | 0x4015 | 0x4017 => self.apu.write(addr, data), // APU
             0x4018..=0x401F => {} // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.write_prg(addr, data),

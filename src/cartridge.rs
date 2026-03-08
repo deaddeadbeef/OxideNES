@@ -1,4 +1,4 @@
-use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper004};
+use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper007};
 
 const INES_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // "NES\x1a"
 
@@ -57,8 +57,10 @@ impl Cartridge {
             0 => Box::new(Mapper000::new(prg_rom, chr_rom, mirroring)),
             1 => Box::new(Mapper001::new(prg_rom, chr_rom, mirroring)),
             2 => Box::new(Mapper002::new(prg_rom, chr_rom, mirroring)),
+            3 => Box::new(Mapper003::new(prg_rom, chr_rom, mirroring)),
             4 => Box::new(Mapper004::new(prg_rom, chr_rom, mirroring)),
-            _ => return Err(format!("Unsupported mapper: {}. Supported: 0 (NROM), 1 (MMC1), 2 (UxROM), 4 (MMC3)", mapper_id)),
+            7 => Box::new(Mapper007::new(prg_rom, chr_rom, mirroring)),
+            _ => return Err(format!("Unsupported mapper: {}. Supported: 0,1,2,3,4,7", mapper_id)),
         };
 
         Ok(Cartridge { mapper })

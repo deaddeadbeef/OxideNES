@@ -520,3 +520,130 @@ impl Mapper for Mapper001 {
         }
     }
 }
+
+pub struct Mapper003 {
+    prg_rom: Vec<u8>,
+    chr_rom: Vec<u8>,
+    mirroring: crate::cartridge::Mirroring,
+    chr_bank: u8,
+    prg_banks: usize,
+}
+
+impl Mapper003 {
+    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
+        let prg_banks = prg_rom.len() / 0x4000;
+        Mapper003 {
+            prg_rom,
+            chr_rom,
+            mirroring,
+            chr_bank: 0,
+            prg_banks,
+        }
+    }
+}
+
+impl Mapper for Mapper003 {
+    fn read_prg(&self, addr: u16) -> u8 {
+        match addr {
+            0x8000..=0xBFFF => {
+                self.prg_rom[(addr - 0x8000) as usize % self.prg_rom.len()]
+            }
+            0xC000..=0xFFFF => {
+                if self.prg_banks > 1 {
+                    self.prg_rom[(addr - 0x8000) as usize]
+                } else {
+                    // Mirror 16KB
+                    self.prg_rom[(addr - 0xC000) as usize]
+                }
+            }
+            _ => 0,
+        }
+    }
+    
+    fn write_prg(&mut self, addr: u16, data: u8) {
+        if addr >= 0x8000 {
+            self.chr_bank = data & 0x03; // Usually 2 bits, supporting up to 4 banks
+        }
+    }
+    
+    fn read_chr(&self, addr: u16) -> u8 {
+        if self.chr_rom.is_empty() {
+            return 0;
+        }
+        let chr_banks = self.chr_rom.len() / 0x2000;
+        let bank = (self.chr_bank as usize) % chr_banks;
+        let offset = bank * 0x2000 + (addr as usize);
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
+    }
+    
+    fn write_chr(&mut self, _addr: u16, _data: u8) {
+        // CHR ROM is read-only for CNROM
+    }
+    
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
+}
+
+pub struct Mapper007 {
+    prg_rom: Vec<u8>,
+    chr_ram: Vec<u8>,
+    prg_bank: u8,
+    mirroring_bit: bool, // false = lower, true = upper
+}
+
+impl Mapper007 {
+    pub fn new(prg_rom: Vec<u8>, _chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+        Mapper007 {
+            prg_rom,
+            chr_ram: vec![0; 0x2000],
+            prg_bank: 0,
+            mirroring_bit: false,
+        }
+    }
+}
+
+impl Mapper for Mapper007 {
+    fn read_prg(&self, addr: u16) -> u8 {
+        if addr >= 0x8000 {
+            let bank = self.prg_bank as usize;
+            let prg_banks = self.prg_rom.len() / 0x8000; // 32KB banks
+            let bank = bank % prg_banks;
+            let offset = bank * 0x8000 + (addr - 0x8000) as usize;
+            if offset < self.prg_rom.len() {
+                self.prg_rom[offset]
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
+    
+    fn write_prg(&mut self, addr: u16, data: u8) {
+        if addr >= 0x8000 {
+            self.prg_bank = data & 0x07; // bits 0-2: PRG bank
+            self.mirroring_bit = data & 0x10 != 0; // bit 4: mirroring
+        }
+    }
+    
+    fn read_chr(&self, addr: u16) -> u8 {
+        self.chr_ram[addr as usize & 0x1FFF]
+    }
+    
+    fn write_chr(&mut self, addr: u16, data: u8) {
+        self.chr_ram[addr as usize & 0x1FFF] = data;
+    }
+    
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        if self.mirroring_bit {
+            crate::cartridge::Mirroring::SingleScreenUpper
+        } else {
+            crate::cartridge::Mirroring::SingleScreenLower
+        }
+    }
+}

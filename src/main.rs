@@ -1484,6 +1484,52 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     bus.joypad1.set_button_pressed(JoypadButton::Left, left_pressed);
     bus.joypad1.set_button_pressed(JoypadButton::Right, right_pressed);
 
+    // Player 2 - second gamepad
+    let mut p2_a = false;
+    let mut p2_b = false;
+    let mut p2_select = false;
+    let mut p2_start = false;
+    let mut p2_up = false;
+    let mut p2_down = false;
+    let mut p2_left = false;
+    let mut p2_right = false;
+
+    if let Some(ref mut g) = gilrs {
+        // Find second connected gamepad
+        let gamepads: Vec<_> = g.gamepads().filter(|(_, gp)| gp.is_connected()).collect();
+        if gamepads.len() >= 2 {
+            let (_, gamepad) = &gamepads[1];
+            p2_up |= gamepad.is_pressed(Button::DPadUp);
+            p2_down |= gamepad.is_pressed(Button::DPadDown);
+            p2_left |= gamepad.is_pressed(Button::DPadLeft);
+            p2_right |= gamepad.is_pressed(Button::DPadRight);
+            
+            let stick_x = gamepad.value(Axis::LeftStickX);
+            let stick_y = gamepad.value(Axis::LeftStickY);
+            let deadzone = 0.3;
+            if stick_x < -deadzone { p2_left = true; }
+            if stick_x > deadzone { p2_right = true; }
+            if stick_y > deadzone { p2_up = true; }
+            if stick_y < -deadzone { p2_down = true; }
+            
+            p2_a |= gamepad.is_pressed(Button::South);
+            p2_b |= gamepad.is_pressed(Button::West);
+            if gamepad.is_pressed(Button::East) && turbo_active { p2_a = true; }
+            if gamepad.is_pressed(Button::North) && turbo_active { p2_b = true; }
+            p2_start |= gamepad.is_pressed(Button::Start);
+            p2_select |= gamepad.is_pressed(Button::Select);
+        }
+    }
+
+    bus.joypad2.set_button_pressed(JoypadButton::A, p2_a);
+    bus.joypad2.set_button_pressed(JoypadButton::B, p2_b);
+    bus.joypad2.set_button_pressed(JoypadButton::Select, p2_select);
+    bus.joypad2.set_button_pressed(JoypadButton::Start, p2_start);
+    bus.joypad2.set_button_pressed(JoypadButton::Up, p2_up);
+    bus.joypad2.set_button_pressed(JoypadButton::Down, p2_down);
+    bus.joypad2.set_button_pressed(JoypadButton::Left, p2_left);
+    bus.joypad2.set_button_pressed(JoypadButton::Right, p2_right);
+
     (start_pressed, select_pressed)
 }
 
