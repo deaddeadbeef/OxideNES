@@ -1259,6 +1259,7 @@ fn main() {
                         cpu.clock(bus);
                         bus.tick(1);
                         bus.tick_apu();
+                        bus.service_dmc_dma();
 
                         if bus.ppu.frame_complete() {
                             break;

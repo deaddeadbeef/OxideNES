@@ -80,7 +80,7 @@ impl Bus {
     }
 
     pub fn poll_apu_irq(&self) -> bool {
-        self.apu.irq_pending
+        self.apu.irq_pending || self.apu.dmc.irq_pending
     }
 
     pub fn poll_mapper_irq(&mut self) -> bool {
@@ -122,5 +122,13 @@ impl Bus {
 
     pub fn tick_apu(&mut self) {
         self.apu.tick();
+    }
+    
+    pub fn service_dmc_dma(&mut self) {
+        if self.apu.dmc.dma_request {
+            let addr = self.apu.dmc.dma_address;
+            let data = self.cpu_read(addr);
+            self.apu.dmc.receive_sample(data);
+        }
     }
 }
