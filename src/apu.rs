@@ -661,39 +661,41 @@ impl Apu {
             self.noise.clock_timer();
         }
         
-        // Frame counter (approximately 240Hz steps)
-        self.frame_cycle += 1;
-        match self.frame_counter_mode {
-            0 => { // 4-step
-                match self.frame_cycle {
-                    3729 => self.clock_quarter_frame(),
-                    7457 => { self.clock_quarter_frame(); self.clock_half_frame(); }
-                    11186 => self.clock_quarter_frame(),
-                    14915 => {
-                        self.clock_quarter_frame();
-                        self.clock_half_frame();
-                        if !self.frame_irq_inhibit {
-                            self.irq_pending = true;
+        // Frame counter runs at APU rate (half CPU rate)
+        if self.cycle % 2 == 0 {
+            self.frame_cycle += 1;
+            match self.frame_counter_mode {
+                0 => { // 4-step
+                    match self.frame_cycle {
+                        3729 => self.clock_quarter_frame(),
+                        7457 => { self.clock_quarter_frame(); self.clock_half_frame(); }
+                        11186 => self.clock_quarter_frame(),
+                        14915 => {
+                            self.clock_quarter_frame();
+                            self.clock_half_frame();
+                            if !self.frame_irq_inhibit {
+                                self.irq_pending = true;
+                            }
+                            self.frame_cycle = 0;
                         }
-                        self.frame_cycle = 0;
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
-            1 => { // 5-step
-                match self.frame_cycle {
-                    3729 => self.clock_quarter_frame(),
-                    7457 => { self.clock_quarter_frame(); self.clock_half_frame(); }
-                    11186 => self.clock_quarter_frame(),
-                    18641 => {
-                        self.clock_quarter_frame();
-                        self.clock_half_frame();
-                        self.frame_cycle = 0;
+                1 => { // 5-step
+                    match self.frame_cycle {
+                        3729 => self.clock_quarter_frame(),
+                        7457 => { self.clock_quarter_frame(); self.clock_half_frame(); }
+                        11186 => self.clock_quarter_frame(),
+                        18641 => {
+                            self.clock_quarter_frame();
+                            self.clock_half_frame();
+                            self.frame_cycle = 0;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-            _ => {}
         }
         
         // Record transition if output changed
