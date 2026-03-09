@@ -11,6 +11,10 @@ pub trait Mapper {
     // Save state support - SRAM/PRG RAM access
     fn get_sram(&self) -> Vec<u8> { Vec::new() }
     fn set_sram(&mut self, _data: &[u8]) {}
+    
+    // Save state support - mapper state
+    fn save_state(&self) -> Vec<u8> { Vec::new() }
+    fn load_state(&mut self, _data: &[u8]) {}
 }
 
 pub struct Mapper000 {
@@ -309,6 +313,38 @@ impl Mapper for Mapper004 {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
+    
+    fn save_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.push(self.bank_select);
+        data.push(if self.prg_bank_mode { 1 } else { 0 });
+        data.push(if self.chr_inversion { 1 } else { 0 });
+        data.extend_from_slice(&self.registers);
+        data.push(self.irq_counter);
+        data.push(self.irq_reload);
+        data.push(if self.irq_enabled { 1 } else { 0 });
+        data.push(if self.irq_pending { 1 } else { 0 });
+        data.push(if self.irq_reload_flag { 1 } else { 0 });
+        data.push(self.mirror_mode);
+        data
+    }
+    
+    fn load_state(&mut self, data: &[u8]) {
+        if data.len() >= 16 {
+            self.bank_select = data[0];
+            self.prg_bank_mode = data[1] != 0;
+            self.chr_inversion = data[2] != 0;
+            self.registers.copy_from_slice(&data[3..11]);
+            self.irq_counter = data[11];
+            self.irq_reload = data[12];
+            self.irq_enabled = data[13] != 0;
+            self.irq_pending = data[14] != 0;
+            self.irq_reload_flag = data[15] != 0;
+            if data.len() >= 17 {
+                self.mirror_mode = data[16];
+            }
+        }
+    }
 }
 
 pub struct Mapper002 {
@@ -381,6 +417,16 @@ impl Mapper for Mapper002 {
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
+    }
+    
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.bank_select]
+    }
+    
+    fn load_state(&mut self, data: &[u8]) {
+        if !data.is_empty() {
+            self.bank_select = data[0];
+        }
     }
 }
 
@@ -559,6 +605,28 @@ impl Mapper for Mapper001 {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
+    
+    fn save_state(&self) -> Vec<u8> {
+        vec![
+            self.shift_register,
+            self.write_count,
+            self.control,
+            self.chr_bank_0,
+            self.chr_bank_1,
+            self.prg_bank,
+        ]
+    }
+    
+    fn load_state(&mut self, data: &[u8]) {
+        if data.len() >= 6 {
+            self.shift_register = data[0];
+            self.write_count = data[1];
+            self.control = data[2];
+            self.chr_bank_0 = data[3];
+            self.chr_bank_1 = data[4];
+            self.prg_bank = data[5];
+        }
+    }
 }
 
 pub struct Mapper003 {
@@ -627,6 +695,16 @@ impl Mapper for Mapper003 {
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
+    
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.chr_bank]
+    }
+    
+    fn load_state(&mut self, data: &[u8]) {
+        if !data.is_empty() {
+            self.chr_bank = data[0];
+        }
+    }
 }
 
 pub struct Mapper007 {
@@ -684,6 +762,17 @@ impl Mapper for Mapper007 {
             crate::cartridge::Mirroring::SingleScreenUpper
         } else {
             crate::cartridge::Mirroring::SingleScreenLower
+        }
+    }
+    
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.prg_bank, if self.mirroring_bit { 1 } else { 0 }]
+    }
+    
+    fn load_state(&mut self, data: &[u8]) {
+        if data.len() >= 2 {
+            self.prg_bank = data[0];
+            self.mirroring_bit = data[1] != 0;
         }
     }
 }

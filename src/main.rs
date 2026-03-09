@@ -107,21 +107,52 @@ fn save_state_path(config: &EmulatorConfig) -> Option<PathBuf> {
     Some(save_state_dir().join(format!("{}.sav", filename)))
 }
 
-fn save_state(bus: &Bus, _cpu: &Cpu, config: &EmulatorConfig) -> bool {
+fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig) -> bool {
     let Some(path) = save_state_path(config) else { return false; };
     let _ = fs::create_dir_all(save_state_dir());
-    let sram = bus.get_sram();
-    if sram.is_empty() { return false; }
-    fs::write(&path, &sram).is_ok()
+    
+    let mut data = Vec::new();
+    // Magic header + version
+    data.extend_from_slice(b"NESSAV02");
+    
+    // CPU state
+    let cpu_state = cpu.save_state();
+    data.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
+    data.extend(cpu_state);
+    
+    // Bus state (RAM + PPU + mapper)
+    let bus_state = bus.save_state();
+    data.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
+    data.extend(bus_state);
+    
+    fs::write(&path, &data).is_ok()
 }
 
-fn load_state(bus: &mut Bus, _cpu: &mut Cpu, config: &EmulatorConfig) -> bool {
+fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig) -> bool {
     let Some(path) = save_state_path(config) else { return false; };
     if !path.exists() { return false; }
-    match fs::read(&path) {
-        Ok(data) => { bus.set_sram(&data); true }
-        Err(_) => false,
-    }
+    let Ok(data) = fs::read(&path) else { return false; };
+    
+    // Check magic header
+    if data.len() < 8 || &data[0..8] != b"NESSAV02" { return false; }
+    let mut pos = 8;
+    
+    // CPU state
+    if pos + 4 > data.len() { return false; }
+    let cpu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+    pos += 4;
+    if pos + cpu_len > data.len() { return false; }
+    if !cpu.load_state(&data[pos..pos+cpu_len]) { return false; }
+    pos += cpu_len;
+    
+    // Bus state
+    if pos + 4 > data.len() { return false; }
+    let bus_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+    pos += 4;
+    if pos + bus_len > data.len() { return false; }
+    if !bus.load_state(&data[pos..pos+bus_len]) { return false; }
+    
+    true
 }
 
 // =====================================================================
@@ -1433,7 +1464,7 @@ fn main() {
                                 overlay_message = Some("STATE SAVED".to_string());
                                 overlay_timer = 90;
                             } else {
-                                overlay_message = Some("NO SRAM FOUND".to_string());
+                                overlay_message = Some("SAVE FAILED".to_string());
                                 overlay_timer = 90;
                             }
                         }

@@ -580,4 +580,123 @@ impl Ppu {
         self.frame_complete = false;
         complete
     }
+    
+    // ── Save state support ──────────────────────────────────────────
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        
+        // VRAM (2048 bytes)
+        data.extend_from_slice(&self.vram);
+        
+        // Palette table (32 bytes)
+        data.extend_from_slice(&self.palette_table);
+        
+        // OAM data (256 bytes)  
+        data.extend_from_slice(&self.oam_data);
+        
+        // Registers and state
+        data.push(self.ctrl);
+        data.push(self.mask);
+        data.push(self.status);
+        data.push(self.oam_addr);
+        data.push(self.scroll_x);
+        data.push(self.scroll_y);
+        data.push(if self.addr_latch { 1 } else { 0 });
+        data.extend_from_slice(&self.ppu_addr.to_le_bytes());
+        data.push(self.ppu_data_buffer);
+        
+        // Rendering state
+        data.extend_from_slice(&self.scanline.to_le_bytes());
+        data.extend_from_slice(&self.cycle.to_le_bytes());
+        data.push(if self.frame_complete { 1 } else { 0 });
+        data.push(if self.nmi_occurred { 1 } else { 0 });
+        data.push(if self.nmi_output { 1 } else { 0 });
+        
+        // Background rendering
+        data.extend_from_slice(&self.v.to_le_bytes());
+        data.extend_from_slice(&self.t.to_le_bytes());
+        data.push(self.x);
+        data.push(if self.w { 1 } else { 0 });
+        data.push(self.bg_next_tile_id);
+        data.push(self.bg_next_tile_attrib);
+        data.push(self.bg_next_tile_lsb);
+        data.push(self.bg_next_tile_msb);
+        data.extend_from_slice(&self.bg_shifter_pattern_lo.to_le_bytes());
+        data.extend_from_slice(&self.bg_shifter_pattern_hi.to_le_bytes());
+        data.extend_from_slice(&self.bg_shifter_attrib_lo.to_le_bytes());
+        data.extend_from_slice(&self.bg_shifter_attrib_hi.to_le_bytes());
+        
+        // Sprite rendering
+        data.push(self.sprite_count);
+        data.extend_from_slice(&self.sprite_shifter_pattern_lo);
+        data.extend_from_slice(&self.sprite_shifter_pattern_hi);
+        data.push(if self.sprite_zero_hit_possible { 1 } else { 0 });
+        data.push(if self.sprite_zero_being_rendered { 1 } else { 0 });
+        data.push(if self.odd_frame { 1 } else { 0 });
+        
+        data
+    }
+
+    pub fn load_state(&mut self, data: &[u8]) -> bool {
+        // Calculate expected size: 2048 + 32 + 256 + registers + state
+        let min_size = 2048 + 32 + 256 + 30; // Approximate minimum
+        if data.len() < min_size { return false; }
+        
+        let mut pos = 0;
+        
+        // VRAM
+        self.vram.copy_from_slice(&data[pos..pos+2048]);
+        pos += 2048;
+        
+        // Palette table
+        self.palette_table.copy_from_slice(&data[pos..pos+32]);
+        pos += 32;
+        
+        // OAM data
+        self.oam_data.copy_from_slice(&data[pos..pos+256]);
+        pos += 256;
+        
+        // Registers and state
+        self.ctrl = data[pos]; pos += 1;
+        self.mask = data[pos]; pos += 1;
+        self.status = data[pos]; pos += 1;
+        self.oam_addr = data[pos]; pos += 1;
+        self.scroll_x = data[pos]; pos += 1;
+        self.scroll_y = data[pos]; pos += 1;
+        self.addr_latch = data[pos] != 0; pos += 1;
+        self.ppu_addr = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.ppu_data_buffer = data[pos]; pos += 1;
+        
+        // Rendering state
+        self.scanline = i16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.cycle = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.frame_complete = data[pos] != 0; pos += 1;
+        self.nmi_occurred = data[pos] != 0; pos += 1;
+        self.nmi_output = data[pos] != 0; pos += 1;
+        
+        // Background rendering
+        self.v = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.t = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.x = data[pos]; pos += 1;
+        self.w = data[pos] != 0; pos += 1;
+        self.bg_next_tile_id = data[pos]; pos += 1;
+        self.bg_next_tile_attrib = data[pos]; pos += 1;
+        self.bg_next_tile_lsb = data[pos]; pos += 1;
+        self.bg_next_tile_msb = data[pos]; pos += 1;
+        self.bg_shifter_pattern_lo = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.bg_shifter_pattern_hi = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.bg_shifter_attrib_lo = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.bg_shifter_attrib_hi = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        
+        // Sprite rendering
+        if pos + 18 > data.len() { return false; }
+        self.sprite_count = data[pos]; pos += 1;
+        self.sprite_shifter_pattern_lo.copy_from_slice(&data[pos..pos+8]); pos += 8;
+        self.sprite_shifter_pattern_hi.copy_from_slice(&data[pos..pos+8]); pos += 8;
+        self.sprite_zero_hit_possible = data[pos] != 0; pos += 1;
+        self.sprite_zero_being_rendered = data[pos] != 0; pos += 1;
+        self.odd_frame = data[pos] != 0;
+        
+        true
+    }
 }

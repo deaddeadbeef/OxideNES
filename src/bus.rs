@@ -145,4 +145,88 @@ impl Bus {
             self.apu.dmc.receive_sample(data);
         }
     }
+    
+    // ── Save state support ──────────────────────────────────────────
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        
+        // CPU RAM (2048 bytes)
+        data.extend_from_slice(&self.cpu_ram);
+        
+        // PPU state
+        let ppu_state = self.ppu.save_state();
+        data.extend_from_slice(&(ppu_state.len() as u32).to_le_bytes());
+        data.extend(ppu_state);
+        
+        // Mapper SRAM
+        let sram = self.cartridge.mapper.get_sram();
+        data.extend_from_slice(&(sram.len() as u32).to_le_bytes());
+        data.extend(sram);
+        
+        // Mapper state
+        let mapper_state = self.cartridge.mapper.save_state();
+        data.extend_from_slice(&(mapper_state.len() as u32).to_le_bytes());
+        data.extend(mapper_state);
+        
+        // Bus state
+        data.extend_from_slice(&self.cycles.to_le_bytes());
+        data.push(self.dma_page);
+        data.push(self.dma_addr);
+        data.push(self.dma_data);
+        data.push(if self.dma_transfer { 1 } else { 0 });
+        data.push(if self.dma_dummy { 1 } else { 0 });
+        
+        data
+    }
+
+    pub fn load_state(&mut self, data: &[u8]) -> bool {
+        if data.len() < 2048 { return false; }
+        let mut pos = 0;
+        
+        // CPU RAM
+        self.cpu_ram.copy_from_slice(&data[pos..pos+2048]);
+        pos += 2048;
+        
+        // PPU state
+        if pos + 4 > data.len() { return false; }
+        let ppu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        pos += 4;
+        if pos + ppu_len > data.len() { return false; }
+        if !self.ppu.load_state(&data[pos..pos+ppu_len]) { return false; }
+        pos += ppu_len;
+        
+        // Mapper SRAM
+        if pos + 4 > data.len() { return true; } // Optional sections
+        let sram_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        pos += 4;
+        if pos + sram_len <= data.len() {
+            self.cartridge.mapper.set_sram(&data[pos..pos+sram_len]);
+            pos += sram_len;
+        }
+        
+        // Mapper state
+        if pos + 4 > data.len() { return true; }
+        let mapper_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        pos += 4;
+        if pos + mapper_len <= data.len() {
+            self.cartridge.mapper.load_state(&data[pos..pos+mapper_len]);
+            pos += mapper_len;
+        }
+        
+        // Bus state  
+        if pos + 13 <= data.len() {
+            self.cycles = usize::from_le_bytes([
+                data[pos], data[pos+1], data[pos+2], data[pos+3],
+                data[pos+4], data[pos+5], data[pos+6], data[pos+7]
+            ]);
+            pos += 8;
+            self.dma_page = data[pos]; pos += 1;
+            self.dma_addr = data[pos]; pos += 1;
+            self.dma_data = data[pos]; pos += 1;
+            self.dma_transfer = data[pos] != 0; pos += 1;
+            self.dma_dummy = data[pos] != 0;
+        }
+        
+        true
+    }
 }

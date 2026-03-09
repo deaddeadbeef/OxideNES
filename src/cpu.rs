@@ -1640,4 +1640,39 @@ impl Cpu {
             }
         }
     }
+    
+    // ── Save state support ──────────────────────────────────────────
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&self.pc.to_le_bytes());
+        data.push(self.sp);
+        data.push(self.a);
+        data.push(self.x);
+        data.push(self.y);
+        data.push(self.status);
+        data.push(self.cycles);
+        data.extend_from_slice(&self.total_cycles.to_le_bytes());
+        data.push(if self.nmi_pending { 1 } else { 0 });
+        data.push(if self.irq_pending { 1 } else { 0 });
+        data
+    }
+
+    pub fn load_state(&mut self, data: &[u8]) -> bool {
+        if data.len() < 19 { return false; } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
+        let mut pos = 0;
+        self.pc = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.sp = data[pos]; pos += 1;
+        self.a = data[pos]; pos += 1;
+        self.x = data[pos]; pos += 1;
+        self.y = data[pos]; pos += 1;
+        self.status = data[pos]; pos += 1;
+        self.cycles = data[pos]; pos += 1;
+        self.total_cycles = usize::from_le_bytes([
+            data[pos], data[pos+1], data[pos+2], data[pos+3],
+            data[pos+4], data[pos+5], data[pos+6], data[pos+7]
+        ]); pos += 8;
+        self.nmi_pending = data[pos] != 0; pos += 1;
+        self.irq_pending = data[pos] != 0;
+        true
+    }
 }
