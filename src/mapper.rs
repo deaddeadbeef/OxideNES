@@ -7,6 +7,10 @@ pub trait Mapper {
     fn clock_scanline(&mut self) {}  // NEW - default no-op
     fn irq_pending(&self) -> bool { false }  // NEW - default false
     fn irq_clear(&mut self) {}  // NEW - default no-op
+    
+    // Save state support - SRAM/PRG RAM access
+    fn get_sram(&self) -> Vec<u8> { Vec::new() }
+    fn set_sram(&mut self, _data: &[u8]) {}
 }
 
 pub struct Mapper000 {
@@ -68,6 +72,15 @@ impl Mapper for Mapper000 {
 
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
+    }
+    
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
+    
+    fn set_sram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.prg_ram.len());
+        self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
 }
 
@@ -287,6 +300,15 @@ impl Mapper for Mapper004 {
     fn irq_clear(&mut self) {
         self.irq_pending = false;
     }
+    
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
+    
+    fn set_sram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.prg_ram.len());
+        self.prg_ram[..len].copy_from_slice(&data[..len]);
+    }
 }
 
 pub struct Mapper002 {
@@ -350,6 +372,15 @@ impl Mapper for Mapper002 {
 
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
+    }
+    
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
+    
+    fn set_sram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.prg_ram.len());
+        self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
 }
 
@@ -518,6 +549,15 @@ impl Mapper for Mapper001 {
             3 => crate::cartridge::Mirroring::Horizontal,
             _ => unreachable!(),
         }
+    }
+    
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
+    
+    fn set_sram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.prg_ram.len());
+        self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
 }
 

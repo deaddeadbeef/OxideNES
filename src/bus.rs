@@ -49,6 +49,15 @@ impl Bus {
         }
     }
 
+    // Save state support - access methods for private fields
+    pub fn get_sram(&self) -> Vec<u8> {
+        self.cartridge.mapper.get_sram()
+    }
+
+    pub fn set_sram(&mut self, data: &[u8]) {
+        self.cartridge.mapper.set_sram(data);
+    }
+
     pub fn cpu_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize] = data,

@@ -94,6 +94,37 @@ fn add_recent_game(cfg: &mut EmulatorConfig, path: &str) {
 }
 
 // =====================================================================
+// Save state support (SRAM battery backup emulation)
+// =====================================================================
+
+fn save_state_dir() -> PathBuf {
+    config_dir().join("saves")
+}
+
+fn save_state_path(config: &EmulatorConfig) -> Option<PathBuf> {
+    let recent = config.recent_games.first()?;
+    let filename = Path::new(recent).file_stem()?.to_string_lossy().to_string();
+    Some(save_state_dir().join(format!("{}.sav", filename)))
+}
+
+fn save_state(bus: &Bus, _cpu: &Cpu, config: &EmulatorConfig) -> bool {
+    let Some(path) = save_state_path(config) else { return false; };
+    let _ = fs::create_dir_all(save_state_dir());
+    let sram = bus.get_sram();
+    if sram.is_empty() { return false; }
+    fs::write(&path, &sram).is_ok()
+}
+
+fn load_state(bus: &mut Bus, _cpu: &mut Cpu, config: &EmulatorConfig) -> bool {
+    let Some(path) = save_state_path(config) else { return false; };
+    if !path.exists() { return false; }
+    match fs::read(&path) {
+        Ok(data) => { bus.set_sram(&data); true }
+        Err(_) => false,
+    }
+}
+
+// =====================================================================
 // Emulator state machine
 // =====================================================================
 
@@ -969,6 +1000,10 @@ fn main() {
     let mut overlay_message: Option<String> = None;
     let mut overlay_timer: u32 = 0;
     let mut sound_cooldown: u32 = 0;
+    
+    // Pause menu state
+    let mut paused: bool = false;
+    let mut pause_selected: usize = 0;
 
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
@@ -1284,30 +1319,150 @@ fn main() {
 
             EmulatorState::Game => {
                 if let (Some(ref mut bus), Some(ref mut cpu)) = (&mut game_bus, &mut game_cpu) {
-                    // Run one frame of emulation
-                    loop {
-                        cpu.clock(bus);
-                        bus.tick(1);
-                        bus.tick_apu();
-                        bus.service_dmc_dma();
+                    // Handle pause menu input
+                    if paused {
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        if input.up && pause_selected > 0 {
+                            pause_selected -= 1;
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3;
+                            }
+                        }
+                        if input.down && pause_selected < 3 {
+                            pause_selected += 1;
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3;
+                            }
+                        }
+                        if input.confirm {
+                            match pause_selected {
+                                0 => { // Resume
+                                    paused = false;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                                1 => { // Save state
+                                    if save_state(bus, cpu, &config) {
+                                        overlay_message = Some("STATE SAVED".to_string());
+                                        overlay_timer = 90;
+                                        paused = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    } else {
+                                        overlay_message = Some("NO SRAM FOUND".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                }
+                                2 => { // Load state
+                                    if load_state(bus, cpu, &config) {
+                                        overlay_message = Some("STATE LOADED".to_string());
+                                        overlay_timer = 90;
+                                        paused = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    } else {
+                                        overlay_message = Some("NO SAVE FOUND".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                }
+                                3 => { // Return to menu
+                                    game_bus = None;
+                                    game_cpu = None;
+                                    paused = false;
+                                    quit_hold_frames = 0;
+                                    emulator_state = EmulatorState::Menu(MenuState::new());
+                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if input.back {
+                            paused = false; // ESC again resumes
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                        }
+                    } else {
+                        // Normal game emulation when not paused
+                        // Run one frame of emulation
+                        loop {
+                            cpu.clock(bus);
+                            bus.tick(1);
+                            bus.tick_apu();
+                            bus.service_dmc_dma();
 
-                        if bus.ppu.frame_complete() {
-                            break;
+                            if bus.ppu.frame_complete() {
+                                break;
+                            }
+                        }
+
+                        // End APU frame and get band-limited samples
+                        bus.apu.end_frame();
+
+                        // Push audio samples with volume control
+                        {
+                            let samples = bus.apu.drain_samples();
+                            let vol = audio_volume as f32 / 100.0;
+                            for &sample in &samples {
+                                let _ = producer.try_push(sample * vol);
+                            }
+                        }
+                        
+                        // Handle input when not paused
+                        frame_counter = frame_counter.wrapping_add(1);
+                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter);
+
+                        // Gamepad quit combo: hold Start+Select for ~1 second (60 frames)
+                        if start_held && select_held {
+                            quit_hold_frames += 1;
+                            if quit_hold_frames >= 60 {
+                                game_bus = None;
+                                game_cpu = None;
+                                quit_hold_frames = 0;
+                                repeat_tracker = RepeatTracker::new();
+                                emulator_state = EmulatorState::Menu(MenuState::new());
+                                continue;
+                            }
+                        } else {
+                            quit_hold_frames = 0;
+                        }
+
+                        // F5 quick save, F9 quick load
+                        if window.is_key_pressed(Key::F5, KeyRepeat::No) {
+                            if save_state(bus, cpu, &config) {
+                                overlay_message = Some("STATE SAVED".to_string());
+                                overlay_timer = 90;
+                            } else {
+                                overlay_message = Some("NO SRAM FOUND".to_string());
+                                overlay_timer = 90;
+                            }
+                        }
+                        if window.is_key_pressed(Key::F9, KeyRepeat::No) {
+                            if load_state(bus, cpu, &config) {
+                                overlay_message = Some("STATE LOADED".to_string());
+                                overlay_timer = 90;
+                            } else {
+                                overlay_message = Some("NO SAVE FOUND".to_string());
+                                overlay_timer = 90;
+                            }
+                        }
+
+                        if window.is_key_pressed(Key::F1, KeyRepeat::No) {
+                            crt_enabled = !crt_enabled;
+                            config.crt_enabled = crt_enabled;
+                            save_config(&config);
+                            overlay_message = Some(if crt_enabled { "CRT FILTER: ON".to_string() } else { "CRT FILTER: OFF".to_string() });
+                            overlay_timer = 90; // 1.5 seconds
+                        }
+
+                        // Escape toggles pause menu
+                        if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
+                            paused = true;
+                            pause_selected = 0;
                         }
                     }
 
-                    // End APU frame and get band-limited samples
-                    bus.apu.end_frame();
-
-                    // Push audio samples with volume control
-                    {
-                        let samples = bus.apu.drain_samples();
-                        let vol = audio_volume as f32 / 100.0;
-                        for &sample in &samples {
-                            let _ = producer.try_push(sample * vol);
-                        }
-                    }
-
+                    // ALWAYS render (even when paused - shows frozen frame)
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt);
@@ -1373,84 +1528,118 @@ fn main() {
                             }
                         }
                     }
+                    
+                    // Pause menu overlay
+                    if paused {
+                        // Darken the screen
+                        for y in SCREEN_Y..(SCREEN_Y + SCREEN_H) {
+                            for x in SCREEN_X..(SCREEN_X + SCREEN_W) {
+                                let idx = y * WINDOW_WIDTH + x;
+                                if idx < composite_buffer.len() {
+                                    let p = composite_buffer[idx];
+                                    let r = ((p >> 16) & 0xFF) / 3;
+                                    let g = ((p >> 8) & 0xFF) / 3;
+                                    let b = (p & 0xFF) / 3;
+                                    composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                }
+                            }
+                        }
+                        
+                        // Draw pause menu box
+                        let box_x = SCREEN_X + SCREEN_W / 2 - 120;
+                        let box_y = SCREEN_Y + SCREEN_H / 2 - 60;
+                        let box_w = 240;
+                        let box_h = 120;
+                        
+                        // Box background
+                        for y in box_y..box_y + box_h {
+                            for x in box_x..box_x + box_w {
+                                if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                    composite_buffer[y * WINDOW_WIDTH + x] = 0x1A1A4A;
+                                }
+                            }
+                        }
+                        // Box border
+                        for x in box_x..box_x + box_w {
+                            if box_y < WINDOW_HEIGHT { composite_buffer[box_y * WINDOW_WIDTH + x] = 0x6888FC; }
+                            if box_y + box_h - 1 < WINDOW_HEIGHT { composite_buffer[(box_y + box_h - 1) * WINDOW_WIDTH + x] = 0x6888FC; }
+                        }
+                        for y in box_y..box_y + box_h {
+                            if y < WINDOW_HEIGHT {
+                                composite_buffer[y * WINDOW_WIDTH + box_x] = 0x6888FC;
+                                composite_buffer[y * WINDOW_WIDTH + box_x + box_w - 1] = 0x6888FC;
+                            }
+                        }
+                        
+                        // Title
+                        let title = "PAUSED";
+                        let tx = box_x + (box_w - title.len() * 8) / 2;
+                        draw_text(&mut composite_buffer, title, tx, box_y + 10, 0xF8D878, WINDOW_WIDTH);
+                        
+                        // Menu items
+                        let items = ["RESUME GAME", "SAVE STATE (F5)", "LOAD STATE (F9)", "RETURN TO MENU"];
+                        for (i, item) in items.iter().enumerate() {
+                            let iy = box_y + 35 + i * 20;
+                            let ix = box_x + 30;
+                            let color = if i == pause_selected { 0xFCFCFC } else { 0x9C9C9C };
+                            if i == pause_selected {
+                                // Highlight bar
+                                for x in (box_x + 2)..(box_x + box_w - 2) {
+                                    for dy in 0..16 {
+                                        if iy + dy < WINDOW_HEIGHT {
+                                            composite_buffer[(iy + dy) * WINDOW_WIDTH + x] = 0x3C3C8C;
+                                        }
+                                    }
+                                }
+                                draw_text(&mut composite_buffer, ">", ix - 12, iy + 4, 0xFCFCFC, WINDOW_WIDTH);
+                            }
+                            draw_text(&mut composite_buffer, item, ix, iy + 4, color, WINDOW_WIDTH);
+                        }
+                    }
 
                     window
                         .update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT)
                         .expect("Failed to update window");
 
-                    // Mouse click handling for console interactions
-                    if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Discard) {
-                        let mx = mx as usize;
-                        let my = my as usize;
+                    // Mouse click handling for console interactions (only when not paused)
+                    if !paused {
+                        if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Discard) {
+                            let mx = mx as usize;
+                            let my = my as usize;
 
-                        let mouse_down = window.get_mouse_down(minifb::MouseButton::Left);
-                        let mouse_clicked = mouse_down && !mouse_was_down;
-                        mouse_was_down = mouse_down;
+                            let mouse_down = window.get_mouse_down(minifb::MouseButton::Left);
+                            let mouse_clicked = mouse_down && !mouse_was_down;
+                            mouse_was_down = mouse_down;
 
-                        if mouse_clicked && mx < WINDOW_WIDTH && my < WINDOW_HEIGHT {
-                            let console_w = 1000;
-                            let console_x = (WINDOW_WIDTH - console_w) / 2;
-                            let body_y = TV_HEIGHT + 20;
+                            if mouse_clicked && mx < WINDOW_WIDTH && my < WINDOW_HEIGHT {
+                                let console_w = 1000;
+                                let console_x = (WINDOW_WIDTH - console_w) / 2;
+                                let body_y = TV_HEIGHT + 20;
 
-                            // Cartridge slot
-                            let slot_lx = console_w / 2 - 160;
-                            let slot_x = console_x + slot_lx;
-                            let slot_y = body_y + 8;
-                            let slot_w = 320;
-                            let slot_h = 34;
-                            if mx >= slot_x && mx < slot_x + slot_w && my >= slot_y && my < slot_y + slot_h {
-                                let mut ms = MenuState::new();
-                                ms.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
-                                next_state = Some(EmulatorState::Menu(ms));
-                            }
+                                // Cartridge slot
+                                let slot_lx = console_w / 2 - 160;
+                                let slot_x = console_x + slot_lx;
+                                let slot_y = body_y + 8;
+                                let slot_w = 320;
+                                let slot_h = 34;
+                                if mx >= slot_x && mx < slot_x + slot_w && my >= slot_y && my < slot_y + slot_h {
+                                    let mut ms = MenuState::new();
+                                    ms.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
+                                    next_state = Some(EmulatorState::Menu(ms));
+                                }
 
-                            // Reset button hit test
-                            let rst_lx = console_w - 170 + 30;
-                            let rst_x = console_x + rst_lx;
-                            let rst_y = body_y + 68;
-                            let rst_w = 80;
-                            let rst_h = 22;
-                            if mx >= rst_x && mx < rst_x + rst_w && my >= rst_y && my < rst_y + rst_h {
-                                cpu.reset(bus);
-                                println!("CPU Reset");
+                                // Reset button hit test
+                                let rst_lx = console_w - 170 + 30;
+                                let rst_x = console_x + rst_lx;
+                                let rst_y = body_y + 68;
+                                let rst_w = 80;
+                                let rst_h = 22;
+                                if mx >= rst_x && mx < rst_x + rst_w && my >= rst_y && my < rst_y + rst_h {
+                                    cpu.reset(bus);
+                                    println!("CPU Reset");
+                                }
                             }
                         }
-                    }
-
-                    frame_counter = frame_counter.wrapping_add(1);
-                    let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter);
-
-                    // Gamepad quit combo: hold Start+Select for ~1 second (60 frames)
-                    if start_held && select_held {
-                        quit_hold_frames += 1;
-                        if quit_hold_frames >= 60 {
-                            game_bus = None;
-                            game_cpu = None;
-                            quit_hold_frames = 0;
-                            repeat_tracker = RepeatTracker::new();
-                            emulator_state = EmulatorState::Menu(MenuState::new());
-                            continue;
-                        }
-                    } else {
-                        quit_hold_frames = 0;
-                    }
-
-                    if window.is_key_pressed(Key::F1, KeyRepeat::No) {
-                        crt_enabled = !crt_enabled;
-                        config.crt_enabled = crt_enabled;
-                        save_config(&config);
-                        overlay_message = Some(if crt_enabled { "CRT FILTER: ON".to_string() } else { "CRT FILTER: OFF".to_string() });
-                        overlay_timer = 90; // 1.5 seconds
-                    }
-
-                    // Escape returns to menu immediately (destroys game state)
-                    if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
-                        game_bus = None;
-                        game_cpu = None;
-                        quit_hold_frames = 0;
-                        repeat_tracker = RepeatTracker::new();
-                        emulator_state = EmulatorState::Menu(MenuState::new());
-                        continue;
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
