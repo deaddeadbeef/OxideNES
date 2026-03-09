@@ -11,6 +11,7 @@ use nes_emulator::bus::Bus;
 use nes_emulator::cartridge::Cartridge;
 use nes_emulator::cpu::Cpu;
 use nes_emulator::joypad::JoypadButton;
+use nes_emulator::ppu::Region;
 
 // Single source of truth for all screen/window dimensions
 const TV_WIDTH: usize = 1200;
@@ -36,11 +37,71 @@ const MENU_LIGHT_BLUE: u32 = 0x6888FC;
 // =====================================================================
 
 #[derive(Serialize, Deserialize, Clone)]
+struct KeyBindings {
+    up: String,
+    down: String,
+    left: String,
+    right: String,
+    a: String,
+    b: String,
+    start: String,
+    select: String,
+    turbo_a: String,
+    turbo_b: String,
+}
+
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self {
+            up: "W".to_string(),
+            down: "S".to_string(),
+            left: "A".to_string(),
+            right: "D".to_string(),
+            a: "K".to_string(),
+            b: "J".to_string(),
+            start: "Enter".to_string(),
+            select: "RightShift".to_string(),
+            turbo_a: "Z".to_string(),
+            turbo_b: "X".to_string(),
+        }
+    }
+}
+
+fn string_to_key(s: &str) -> Option<Key> {
+    match s {
+        "A" => Some(Key::A), "B" => Some(Key::B), "C" => Some(Key::C), "D" => Some(Key::D),
+        "E" => Some(Key::E), "F" => Some(Key::F), "G" => Some(Key::G), "H" => Some(Key::H),
+        "I" => Some(Key::I), "J" => Some(Key::J), "K" => Some(Key::K), "L" => Some(Key::L),
+        "M" => Some(Key::M), "N" => Some(Key::N), "O" => Some(Key::O), "P" => Some(Key::P),
+        "Q" => Some(Key::Q), "R" => Some(Key::R), "S" => Some(Key::S), "T" => Some(Key::T),
+        "U" => Some(Key::U), "V" => Some(Key::V), "W" => Some(Key::W), "X" => Some(Key::X),
+        "Y" => Some(Key::Y), "Z" => Some(Key::Z),
+        "Up" => Some(Key::Up), "Down" => Some(Key::Down), "Left" => Some(Key::Left), "Right" => Some(Key::Right),
+        "Enter" => Some(Key::Enter), "Space" => Some(Key::Space),
+        "LeftShift" => Some(Key::LeftShift), "RightShift" => Some(Key::RightShift),
+        "LeftCtrl" => Some(Key::LeftCtrl), "RightCtrl" => Some(Key::RightCtrl),
+        "Comma" => Some(Key::Comma), "Period" => Some(Key::Period),
+        "Slash" => Some(Key::Slash), "Semicolon" => Some(Key::Semicolon),
+        "Apostrophe" => Some(Key::Apostrophe),
+        "1" => Some(Key::Key1), "2" => Some(Key::Key2), "3" => Some(Key::Key3),
+        "4" => Some(Key::Key4), "5" => Some(Key::Key5), "6" => Some(Key::Key6),
+        "7" => Some(Key::Key7), "8" => Some(Key::Key8), "9" => Some(Key::Key9), "0" => Some(Key::Key0),
+        _ => None,
+    }
+}
+
+fn default_region() -> String { "ntsc".to_string() }
+
+#[derive(Serialize, Deserialize, Clone)]
 struct EmulatorConfig {
     recent_games: Vec<String>,
     crt_enabled: bool,
     barrel_distortion: bool,
     audio_volume: u32,
+    #[serde(default)]
+    key_bindings: KeyBindings,
+    #[serde(default = "default_region")]
+    region: String,
 }
 
 impl Default for EmulatorConfig {
@@ -50,6 +111,8 @@ impl Default for EmulatorConfig {
             crt_enabled: true,
             barrel_distortion: false,
             audio_volume: 100,
+            key_bindings: KeyBindings::default(),
+            region: "ntsc".to_string(),
         }
     }
 }
@@ -101,14 +164,18 @@ fn save_state_dir() -> PathBuf {
     config_dir().join("saves")
 }
 
-fn save_state_path(config: &EmulatorConfig) -> Option<PathBuf> {
+fn save_state_path(config: &EmulatorConfig, slot: u8) -> Option<PathBuf> {
     let recent = config.recent_games.first()?;
     let filename = Path::new(recent).file_stem()?.to_string_lossy().to_string();
-    Some(save_state_dir().join(format!("{}.sav", filename)))
+    if slot <= 1 {
+        Some(save_state_dir().join(format!("{}.sav", filename)))
+    } else {
+        Some(save_state_dir().join(format!("{}.sav{}", filename, slot)))
+    }
 }
 
-fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig) -> bool {
-    let Some(path) = save_state_path(config) else { return false; };
+fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
+    let Some(path) = save_state_path(config, slot) else { return false; };
     let _ = fs::create_dir_all(save_state_dir());
     
     let mut data = Vec::new();
@@ -128,8 +195,8 @@ fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig) -> bool {
     fs::write(&path, &data).is_ok()
 }
 
-fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig) -> bool {
-    let Some(path) = save_state_path(config) else { return false; };
+fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -> bool {
+    let Some(path) = save_state_path(config, slot) else { return false; };
     if !path.exists() { return false; }
     let Ok(data) = fs::read(&path) else { return false; };
     
@@ -153,6 +220,132 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig) -> bool {
     if !bus.load_state(&data[pos..pos+bus_len]) { return false; }
     
     true
+}
+
+// =====================================================================
+// Rewind support (hold Backspace to rewind)
+// =====================================================================
+
+struct RewindBuffer {
+    snapshots: Vec<Vec<u8>>,
+    max_snapshots: usize,
+    frame_skip: u32,
+    frame_counter: u32,
+}
+
+impl RewindBuffer {
+    fn new() -> Self {
+        RewindBuffer {
+            snapshots: Vec::new(),
+            max_snapshots: 300, // ~5 seconds at 60fps (saving every frame would be ~10 seconds)
+            frame_skip: 2,     // save every 2nd frame to extend buffer
+            frame_counter: 0,
+        }
+    }
+
+    fn push_frame(&mut self, bus: &Bus, cpu: &Cpu) {
+        self.frame_counter += 1;
+        if self.frame_counter % self.frame_skip != 0 {
+            return;
+        }
+        
+        let mut snapshot = Vec::new();
+        let cpu_state = cpu.save_state();
+        snapshot.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
+        snapshot.extend(cpu_state);
+        let bus_state = bus.save_state();
+        snapshot.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
+        snapshot.extend(bus_state);
+        
+        self.snapshots.push(snapshot);
+        if self.snapshots.len() > self.max_snapshots {
+            self.snapshots.remove(0);
+        }
+    }
+
+    fn pop_frame(&mut self, bus: &mut Bus, cpu: &mut Cpu) -> bool {
+        if let Some(snapshot) = self.snapshots.pop() {
+            let mut pos = 0;
+            if pos + 4 > snapshot.len() { return false; }
+            let cpu_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+            pos += 4;
+            if pos + cpu_len > snapshot.len() { return false; }
+            cpu.load_state(&snapshot[pos..pos+cpu_len]);
+            pos += cpu_len;
+            
+            if pos + 4 > snapshot.len() { return false; }
+            let bus_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+            pos += 4;
+            if pos + bus_len > snapshot.len() { return false; }
+            bus.load_state(&snapshot[pos..pos+bus_len]);
+            true
+        } else {
+            false
+        }
+    }
+    
+    fn clear(&mut self) {
+        self.snapshots.clear();
+        self.frame_counter = 0;
+    }
+}
+
+// =====================================================================
+// Battery SRAM persistence (automatic save for Zelda, FF, etc.)
+// =====================================================================
+
+fn sram_path(config: &EmulatorConfig) -> Option<PathBuf> {
+    let recent = config.recent_games.first()?;
+    let filename = Path::new(recent).file_stem()?.to_string_lossy().to_string();
+    Some(save_state_dir().join(format!("{}.sram", filename)))
+}
+
+fn auto_save_sram(bus: &Bus, config: &EmulatorConfig) {
+    if !bus.cartridge.has_battery { return; }
+    let Some(path) = sram_path(config) else { return; };
+    let _ = fs::create_dir_all(save_state_dir());
+    let sram = bus.get_sram();
+    if !sram.is_empty() {
+        let _ = fs::write(&path, &sram);
+    }
+}
+
+fn auto_load_sram(bus: &mut Bus, config: &EmulatorConfig) {
+    if !bus.cartridge.has_battery { return; }
+    let Some(path) = sram_path(config) else { return; };
+    if let Ok(data) = fs::read(&path) {
+        bus.set_sram(&data);
+    }
+}
+
+// =====================================================================
+// Screenshot support
+// =====================================================================
+
+fn screenshot_path() -> PathBuf {
+    let dir = config_dir().join("screenshots");
+    let _ = fs::create_dir_all(&dir);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    dir.join(format!("nes_{}.ppm", timestamp))
+}
+
+fn save_screenshot(frame_data: &[u32]) -> Option<String> {
+    let path = screenshot_path();
+    let data = format!("P6\n256 240\n255\n");
+    let mut bytes = data.into_bytes();
+    for &pixel in frame_data.iter().take(256 * 240) {
+        bytes.push(((pixel >> 16) & 0xFF) as u8);
+        bytes.push(((pixel >> 8) & 0xFF) as u8);
+        bytes.push((pixel & 0xFF) as u8);
+    }
+    if fs::write(&path, &bytes).is_ok() {
+        Some(path.to_string_lossy().to_string())
+    } else {
+        None
+    }
 }
 
 // =====================================================================
@@ -886,7 +1079,8 @@ fn main() {
     )
     .expect("Failed to create window");
 
-    window.set_target_fps(60);
+    let target_fps = if config.region == "pal" { 50 } else { 60 };
+    window.set_target_fps(target_fps);
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().ok();
@@ -1016,8 +1210,6 @@ fn main() {
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
-    let mut mouse_was_down = false;
-
     // Menu framebuffer (256x240, same as NES PPU output)
     let mut menu_framebuffer = vec![0u32; 256 * 240];
 
@@ -1035,6 +1227,13 @@ fn main() {
     // Pause menu state
     let mut paused: bool = false;
     let mut pause_selected: usize = 0;
+    let mut current_save_slot: u8 = 1;
+    let mut rewind_buffer = RewindBuffer::new();
+
+    let mut show_fps = false;
+    let mut fps_timer = std::time::Instant::now();
+    let mut fps_frames: u32 = 0;
+    let mut fps_display: String = String::new();
 
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
@@ -1043,10 +1242,15 @@ fn main() {
             if let Ok(cart) = Cartridge::new(&rom_data) {
                 let mut bus = Bus::new(cart);
                 bus.set_apu_sample_rate(actual_sample_rate);
+                if config.region == "pal" {
+                    bus.ppu.set_region(Region::Pal);
+                }
                 let mut cpu = Cpu::new();
                 cpu.reset(&mut bus);
                 add_recent_game(&mut config, rom_path);
                 save_config(&config);
+                auto_load_sram(&mut bus, &config);
+                rewind_buffer.clear();
                 game_bus = Some(bus);
                 game_cpu = Some(cpu);
                 emulator_state = EmulatorState::Game;
@@ -1280,10 +1484,15 @@ fn main() {
                                     Ok(cart) => {
                                         let mut bus = Bus::new(cart);
                                         bus.set_apu_sample_rate(actual_sample_rate);
+                                        if config.region == "pal" {
+                                            bus.ppu.set_region(Region::Pal);
+                                        }
                                         let mut cpu = Cpu::new();
                                         cpu.reset(&mut bus);
                                         add_recent_game(&mut config, &path_str);
                                         save_config(&config);
+                                        auto_load_sram(&mut bus, &config);
+                                        rewind_buffer.clear();
                                         game_bus = Some(bus);
                                         game_cpu = Some(cpu);
                                         next_state = Some(EmulatorState::Game);
@@ -1374,7 +1583,7 @@ fn main() {
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
                                 1 => { // Save state
-                                    if save_state(bus, cpu, &config) {
+                                    if save_state(bus, cpu, &config, current_save_slot) {
                                         overlay_message = Some("STATE SAVED".to_string());
                                         overlay_timer = 90;
                                         paused = false;
@@ -1386,7 +1595,7 @@ fn main() {
                                     }
                                 }
                                 2 => { // Load state
-                                    if load_state(bus, cpu, &config) {
+                                    if load_state(bus, cpu, &config, current_save_slot) {
                                         overlay_message = Some("STATE LOADED".to_string());
                                         overlay_timer = 90;
                                         paused = false;
@@ -1398,6 +1607,9 @@ fn main() {
                                     }
                                 }
                                 3 => { // Return to menu
+                                    if let Some(ref bus) = game_bus {
+                                        auto_save_sram(bus, &config);
+                                    }
                                     game_bus = None;
                                     game_cpu = None;
                                     paused = false;
@@ -1415,38 +1627,70 @@ fn main() {
                         }
                     } else {
                         // Normal game emulation when not paused
-                        // Run one frame of emulation
-                        loop {
-                            cpu.clock(bus);
-                            bus.tick(1);
-                            bus.tick_apu();
-                            bus.service_dmc_dma();
-
-                            if bus.ppu.frame_complete() {
-                                break;
+                        let rewinding = window.is_key_down(Key::Backspace);
+                        
+                        if rewinding {
+                            // Rewind: pop snapshots and render them
+                            // Pop 2 frames for visible speed (since we only save every 2nd frame)
+                            let rewound = rewind_buffer.pop_frame(bus, cpu);
+                            if rewound {
+                                overlay_message = Some("<< REWIND".to_string());
+                                overlay_timer = 2;
                             }
-                        }
+                        } else {
+                            let fast_forward = window.is_key_down(Key::Tab);
+                            let frame_count = if fast_forward { 4 } else { 1 };
 
-                        // End APU frame and get band-limited samples
-                        bus.apu.end_frame();
+                            for ff in 0..frame_count {
+                                // Run one frame of emulation
+                                loop {
+                                    cpu.clock(bus);
+                                    bus.tick(1);
+                                    bus.tick_apu();
+                                    bus.service_dmc_dma();
 
-                        // Push audio samples with volume control
-                        {
-                            let samples = bus.apu.drain_samples();
-                            let vol = audio_volume as f32 / 100.0;
-                            for &sample in &samples {
-                                let _ = producer.try_push(sample * vol);
+                                    if bus.ppu.frame_complete() {
+                                        break;
+                                    }
+                                }
+
+                                // End APU frame
+                                bus.apu.end_frame();
+
+                                if ff == frame_count - 1 {
+                                    let samples = bus.apu.drain_samples();
+                                    let vol = audio_volume as f32 / 100.0;
+                                    for &sample in &samples {
+                                        let _ = producer.try_push(sample * vol);
+                                    }
+                                } else {
+                                    bus.apu.drain_samples();
+                                }
+                            }
+
+                            // Save snapshot for rewind (only during normal play, not fast-forward)
+                            if !fast_forward {
+                                rewind_buffer.push_frame(bus, cpu);
+                            }
+
+                            // Fast forward overlay
+                            if fast_forward {
+                                overlay_message = Some(">> FAST FORWARD".to_string());
+                                overlay_timer = 2;
                             }
                         }
                         
                         // Handle input when not paused
                         frame_counter = frame_counter.wrapping_add(1);
-                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter);
+                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter, &config.key_bindings);
 
                         // Gamepad quit combo: hold Start+Select for ~1 second (60 frames)
                         if start_held && select_held {
                             quit_hold_frames += 1;
                             if quit_hold_frames >= 60 {
+                                if let Some(ref bus) = game_bus {
+                                    auto_save_sram(bus, &config);
+                                }
                                 game_bus = None;
                                 game_cpu = None;
                                 quit_hold_frames = 0;
@@ -1458,10 +1702,32 @@ fn main() {
                             quit_hold_frames = 0;
                         }
 
-                        // F5 quick save, F9 quick load
+                        // Slot selection: F2=slot 1, F3=slot 2, F4=slot 3, F6=slot 4
+                        if window.is_key_pressed(Key::F2, KeyRepeat::No) {
+                            current_save_slot = 1;
+                            overlay_message = Some("SLOT 1 SELECTED".to_string());
+                            overlay_timer = 60;
+                        }
+                        if window.is_key_pressed(Key::F3, KeyRepeat::No) {
+                            current_save_slot = 2;
+                            overlay_message = Some("SLOT 2 SELECTED".to_string());
+                            overlay_timer = 60;
+                        }
+                        if window.is_key_pressed(Key::F4, KeyRepeat::No) {
+                            current_save_slot = 3;
+                            overlay_message = Some("SLOT 3 SELECTED".to_string());
+                            overlay_timer = 60;
+                        }
+                        if window.is_key_pressed(Key::F6, KeyRepeat::No) {
+                            current_save_slot = 4;
+                            overlay_message = Some("SLOT 4 SELECTED".to_string());
+                            overlay_timer = 60;
+                        }
+
+                        // F5 quick save, F9 quick load (using current slot)
                         if window.is_key_pressed(Key::F5, KeyRepeat::No) {
-                            if save_state(bus, cpu, &config) {
-                                overlay_message = Some("STATE SAVED".to_string());
+                            if save_state(bus, cpu, &config, current_save_slot) {
+                                overlay_message = Some(format!("STATE {} SAVED", current_save_slot));
                                 overlay_timer = 90;
                             } else {
                                 overlay_message = Some("SAVE FAILED".to_string());
@@ -1469,12 +1735,31 @@ fn main() {
                             }
                         }
                         if window.is_key_pressed(Key::F9, KeyRepeat::No) {
-                            if load_state(bus, cpu, &config) {
-                                overlay_message = Some("STATE LOADED".to_string());
+                            if load_state(bus, cpu, &config, current_save_slot) {
+                                overlay_message = Some(format!("STATE {} LOADED", current_save_slot));
                                 overlay_timer = 90;
                             } else {
                                 overlay_message = Some("NO SAVE FOUND".to_string());
                                 overlay_timer = 90;
+                            }
+                        }
+
+                        // F8 screenshot
+                        if window.is_key_pressed(Key::F8, KeyRepeat::No) {
+                            if let Some(_path) = save_screenshot(&bus.ppu.frame_data) {
+                                overlay_message = Some("SCREENSHOT SAVED".to_string());
+                                overlay_timer = 90;
+                            } else {
+                                overlay_message = Some("SCREENSHOT FAILED".to_string());
+                                overlay_timer = 90;
+                            }
+                        }
+
+                        // F10 FPS counter toggle
+                        if window.is_key_pressed(Key::F10, KeyRepeat::No) {
+                            show_fps = !show_fps;
+                            if !show_fps {
+                                fps_display.clear();
                             }
                         }
 
@@ -1530,6 +1815,22 @@ fn main() {
                         }
                         if overlay_timer == 0 {
                             overlay_message = None;
+                        }
+                    }
+
+                    // FPS counter
+                    if show_fps {
+                        fps_frames += 1;
+                        let elapsed = fps_timer.elapsed().as_secs_f64();
+                        if elapsed >= 1.0 {
+                            fps_display = format!("FPS: {}", fps_frames);
+                            fps_frames = 0;
+                            fps_timer = std::time::Instant::now();
+                        }
+                        if !fps_display.is_empty() {
+                            let fx = SCREEN_X + SCREEN_W - fps_display.len() * 8 - 8;
+                            let fy = SCREEN_Y + 8;
+                            draw_text(&mut composite_buffer, &fps_display, fx, fy, 0x00FF00, WINDOW_WIDTH);
                         }
                     }
 
@@ -1689,8 +1990,7 @@ fn main() {
 
                     // Mouse click handling for console interactions (only when not paused)
                     if !paused {
-                        let mouse_down = window.get_mouse_down(minifb::MouseButton::Left);
-                        mouse_was_down = mouse_down;
+                        let _mouse_down = window.get_mouse_down(minifb::MouseButton::Left);
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
@@ -1706,25 +2006,36 @@ fn main() {
 }
 
 
-fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32) -> (bool, bool) {
+fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, bindings: &KeyBindings) -> (bool, bool) {
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2) % 2 == 0; // ~15Hz: ON 2 frames, OFF 2 frames
 
-    // Keyboard: regular buttons
-    let mut a_pressed = keys.contains(&Key::A);
-    let mut b_pressed = keys.contains(&Key::S);
-    let mut select_pressed = keys.contains(&Key::RightShift);
-    let mut start_pressed = keys.contains(&Key::Enter);
-    let mut up_pressed = keys.contains(&Key::Up);
-    let mut down_pressed = keys.contains(&Key::Down);
-    let mut left_pressed = keys.contains(&Key::Left);
-    let mut right_pressed = keys.contains(&Key::Right);
+    // Keyboard: configurable buttons with arrow key fallbacks for directions
+    let key_up = string_to_key(&bindings.up);
+    let key_down = string_to_key(&bindings.down);
+    let key_left = string_to_key(&bindings.left);
+    let key_right = string_to_key(&bindings.right);
+    let key_a = string_to_key(&bindings.a);
+    let key_b = string_to_key(&bindings.b);
+    let key_start = string_to_key(&bindings.start);
+    let key_select = string_to_key(&bindings.select);
+    let key_turbo_a = string_to_key(&bindings.turbo_a);
+    let key_turbo_b = string_to_key(&bindings.turbo_b);
 
-    // Keyboard: turbo buttons (Z = Turbo A, X = Turbo B)
-    if keys.contains(&Key::Z) && turbo_active {
+    let mut up_pressed = key_up.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Up);
+    let mut down_pressed = key_down.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Down);
+    let mut left_pressed = key_left.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Left);
+    let mut right_pressed = key_right.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Right);
+    let mut a_pressed = key_a.map_or(false, |k| keys.contains(&k));
+    let mut b_pressed = key_b.map_or(false, |k| keys.contains(&k));
+    let mut start_pressed = key_start.map_or(false, |k| keys.contains(&k));
+    let mut select_pressed = key_select.map_or(false, |k| keys.contains(&k));
+
+    // Configurable turbo buttons
+    if key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
         a_pressed = true;
     }
-    if keys.contains(&Key::X) && turbo_active {
+    if key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
         b_pressed = true;
     }
 
@@ -1834,10 +2145,11 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     output.resize(SCREEN_W * SCREEN_H, 0);
     
     for dst_y in 0..SCREEN_H {
+        // Scanline pattern: bright-dim-dark, visible gap
         let scan_mul: u32 = match dst_y % 3 {
             0 => 255,
-            1 => 245,
-            2 => 195,
+            1 => 230,
+            2 => 140,  // dark gap — this is what makes it look CRT
             _ => 255,
         };
         
@@ -1847,7 +2159,6 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
             let table_idx = dst_y * SCREEN_W + dst_x;
             let (src_xf, src_yf) = distortion_table[table_idx];
             
-            // Out-of-bounds pixels (barrel distortion edges) → black
             if src_xf == 0xFFFFFFFF {
                 output[dst_row + dst_x] = 0x000000;
                 continue;
@@ -1862,58 +2173,51 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
             let frac_y = (src_yf & 0xFF) as u32;
             
             // Bilinear interpolation
+            let inv_fx = 256 - frac_x;
+            let inv_fy = 256 - frac_y;
+            
             let p00 = input[src_y0 * 256 + src_x0];
             let p10 = input[src_y0 * 256 + src_x1];
             let p01 = input[src_y1 * 256 + src_x0];
             let p11 = input[src_y1 * 256 + src_x1];
             
-            let inv_fx = 256 - frac_x;
-            let inv_fy = 256 - frac_y;
-            
             let r00 = (p00 >> 16) & 0xFF; let r10 = (p10 >> 16) & 0xFF;
             let r01 = (p01 >> 16) & 0xFF; let r11 = (p11 >> 16) & 0xFF;
-            let mut r = (r00 * inv_fx * inv_fy + r10 * frac_x * inv_fy 
+            let mut r = (r00 * inv_fx * inv_fy + r10 * frac_x * inv_fy
                        + r01 * inv_fx * frac_y + r11 * frac_x * frac_y) >> 16;
             
             let g00 = (p00 >> 8) & 0xFF; let g10 = (p10 >> 8) & 0xFF;
             let g01 = (p01 >> 8) & 0xFF; let g11 = (p11 >> 8) & 0xFF;
-            let mut g = (g00 * inv_fx * inv_fy + g10 * frac_x * inv_fy 
+            let mut g = (g00 * inv_fx * inv_fy + g10 * frac_x * inv_fy
                        + g01 * inv_fx * frac_y + g11 * frac_x * frac_y) >> 16;
             
             let b00 = p00 & 0xFF; let b10 = p10 & 0xFF;
             let b01 = p01 & 0xFF; let b11 = p11 & 0xFF;
-            let mut b = (b00 * inv_fx * inv_fy + b10 * frac_x * inv_fy 
+            let mut b = (b00 * inv_fx * inv_fy + b10 * frac_x * inv_fy
                        + b01 * inv_fx * frac_y + b11 * frac_x * frac_y) >> 16;
             
-            // Horizontal blur
+            // 3-tap horizontal blur (cheap composite signal simulation)
             if src_x0 > 0 && src_x0 < 255 {
                 let left = input[src_y0 * 256 + src_x0 - 1];
                 let right = input[src_y0 * 256 + src_x1.min(255)];
-                let lr = (left >> 16) & 0xFF; let rr = (right >> 16) & 0xFF;
-                let lg = (left >> 8) & 0xFF;  let rg = (right >> 8) & 0xFF;
-                let lb = left & 0xFF;          let rb = right & 0xFF;
-                r = (r * 205 + lr * 25 + rr * 25) >> 8;
-                g = (g * 205 + lg * 25 + rg * 25) >> 8;
-                b = (b * 205 + lb * 25 + rb * 25) >> 8;
+                r = (r * 205 + ((left >> 16) & 0xFF) * 25 + ((right >> 16) & 0xFF) * 25) >> 8;
+                g = (g * 205 + ((left >> 8) & 0xFF) * 25 + ((right >> 8) & 0xFF) * 25) >> 8;
+                b = (b * 205 + (left & 0xFF) * 25 + (right & 0xFF) * 25) >> 8;
             }
             
-            // Brightness boost
-            r = (r * 275) >> 8;
-            g = (g * 275) >> 8;
-            b = (b * 275) >> 8;
-            
-            // Warm color temperature
-            r = (r * 262) >> 8;
+            // Slight brightness boost + warm color temperature (CRT P22 phosphor)
+            // Keep it subtle — just a warmth tint, not a brightness explosion
+            r = (r * 268) >> 8;
             g = (g * 256) >> 8;
-            b = (b * 242) >> 8;
+            b = (b * 238) >> 8;
             
-            // Scanline
+            // Scanline darkening (the key CRT effect)
             r = (r * scan_mul) >> 8;
             g = (g * scan_mul) >> 8;
             b = (b * scan_mul) >> 8;
             
             // Vignette
-            let vig = vignette_table[dst_y * SCREEN_W + dst_x] as u32;
+            let vig = vignette_table[table_idx] as u32;
             r = (r * vig) >> 8;
             g = (g * vig) >> 8;
             b = (b * vig) >> 8;

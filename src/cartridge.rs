@@ -1,4 +1,4 @@
-use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper007};
+use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper007, Mapper009, Mapper010, Mapper011, Mapper066, Mapper069, Mapper071, Mapper079, Mapper206};
 
 const INES_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // "NES\x1a"
 
@@ -13,6 +13,7 @@ pub enum Mirroring {
 
 pub struct Cartridge {
     pub mapper: Box<dyn Mapper>,
+    pub has_battery: bool,
 }
 
 impl Cartridge {
@@ -29,7 +30,14 @@ impl Cartridge {
         let flags6 = rom_data[6];
         let flags7 = rom_data[7];
 
-        let mapper_id = (flags7 & 0xF0) | (flags6 >> 4);
+        let is_nes2 = (flags7 & 0x0C) == 0x08;
+        let mapper_id = if is_nes2 && rom_data.len() > 8 {
+            // NES 2.0: extended mapper from flags8
+            let flags8 = rom_data[8];
+            ((flags8 as u16 & 0x0F) << 8) | (flags7 as u16 & 0xF0) | ((flags6 as u16) >> 4)
+        } else {
+            ((flags7 & 0xF0) | (flags6 >> 4)) as u16
+        };
         let mirroring = if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {
@@ -38,6 +46,7 @@ impl Cartridge {
             Mirroring::Horizontal
         };
 
+        let has_battery = flags6 & 0x02 != 0;
         let has_trainer = flags6 & 0x04 != 0;
         let prg_start = 16 + if has_trainer { 512 } else { 0 };
         let chr_start = prg_start + prg_rom_size;
@@ -60,9 +69,17 @@ impl Cartridge {
             3 => Box::new(Mapper003::new(prg_rom, chr_rom, mirroring)),
             4 => Box::new(Mapper004::new(prg_rom, chr_rom, mirroring)),
             7 => Box::new(Mapper007::new(prg_rom, chr_rom, mirroring)),
-            _ => return Err(format!("Unsupported mapper: {}. Supported: 0,1,2,3,4,7", mapper_id)),
+            9 => Box::new(Mapper009::new(prg_rom, chr_rom, mirroring)),
+            10 => Box::new(Mapper010::new(prg_rom, chr_rom, mirroring)),
+            11 => Box::new(Mapper011::new(prg_rom, chr_rom, mirroring)),
+            66 => Box::new(Mapper066::new(prg_rom, chr_rom, mirroring)),
+            69 => Box::new(Mapper069::new(prg_rom, chr_rom, mirroring)),
+            71 => Box::new(Mapper071::new(prg_rom, chr_rom, mirroring)),
+            79 => Box::new(Mapper079::new(prg_rom, chr_rom, mirroring)),
+            206 => Box::new(Mapper206::new(prg_rom, chr_rom, mirroring)),
+            _ => return Err(format!("Unsupported mapper: {}. Supported: 0,1,2,3,4,7,9,10,11,66,69,71,79,206", mapper_id)),
         };
 
-        Ok(Cartridge { mapper })
+        Ok(Cartridge { mapper, has_battery })
     }
 }

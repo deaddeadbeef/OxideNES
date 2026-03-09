@@ -1617,6 +1617,60 @@ impl Cpu {
                 self.cycles = 8;
             }
 
+            // ── ANC (AND + set carry from bit 7) ───────────────
+            0x0B | 0x2B => {
+                let (addr, _) = self.get_operand_address(bus, AddressingMode::Immediate);
+                let val = bus.cpu_read(addr);
+                self.a &= val;
+                self.update_zero_negative(self.a);
+                self.set_flag(CARRY, self.a & 0x80 != 0);
+                self.cycles = 2;
+            }
+
+            // ── ALR / ASR (AND + LSR accumulator) ──────────────
+            0x4B => {
+                let (addr, _) = self.get_operand_address(bus, AddressingMode::Immediate);
+                let val = bus.cpu_read(addr);
+                self.a &= val;
+                self.set_flag(CARRY, self.a & 0x01 != 0);
+                self.a >>= 1;
+                self.update_zero_negative(self.a);
+                self.cycles = 2;
+            }
+
+            // ── ARR (AND + ROR with special flag behavior) ─────
+            0x6B => {
+                let (addr, _) = self.get_operand_address(bus, AddressingMode::Immediate);
+                let val = bus.cpu_read(addr);
+                self.a &= val;
+                let carry_in = if self.get_flag(CARRY) { 0x80 } else { 0 };
+                self.a = (self.a >> 1) | carry_in;
+                self.update_zero_negative(self.a);
+                self.set_flag(CARRY, self.a & 0x40 != 0);
+                self.set_flag(OVERFLOW, ((self.a & 0x40) ^ ((self.a & 0x20) << 1)) != 0);
+                self.cycles = 2;
+            }
+
+            // ── AXS / SBX (A AND X minus immediate, no borrow) ─
+            0xCB => {
+                let (addr, _) = self.get_operand_address(bus, AddressingMode::Immediate);
+                let val = bus.cpu_read(addr);
+                let ax = self.a & self.x;
+                let result = (ax as u16).wrapping_sub(val as u16);
+                self.x = result as u8;
+                self.update_zero_negative(self.x);
+                self.set_flag(CARRY, ax >= val);
+                self.cycles = 2;
+            }
+
+            // ── SBC unofficial duplicate ────────────────────────
+            0xEB => {
+                let (addr, _) = self.get_operand_address(bus, AddressingMode::Immediate);
+                let val = bus.cpu_read(addr);
+                self.sbc(val);
+                self.cycles = 2;
+            }
+
             // ── Illegal NOPs ────────────────────────────────────
             // 1-byte NOPs (implicit)
             0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => {

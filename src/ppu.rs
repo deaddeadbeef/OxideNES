@@ -1,5 +1,11 @@
 use crate::cartridge::{Cartridge, Mirroring};
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Region {
+    Ntsc,
+    Pal,
+}
+
 pub struct Ppu {
     pub oam_data: [u8; 256],
     vram: [u8; 2048],
@@ -42,6 +48,8 @@ pub struct Ppu {
     sprite_zero_hit_possible: bool,
     sprite_zero_being_rendered: bool,
     odd_frame: bool,
+    pub region: Region,
+    open_bus: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -110,6 +118,8 @@ impl Ppu {
             sprite_zero_hit_possible: false,
             sprite_zero_being_rendered: false,
             odd_frame: false,
+            region: Region::Ntsc,
+            open_bus: 0,
         }
     }
 
@@ -181,6 +191,7 @@ impl Ppu {
                 self.status &= !0x80; // clear vblank
                 self.nmi_occurred = false;
                 self.w = false;
+                self.open_bus = data;
                 data
             }
             0x2004 => self.oam_data[self.oam_addr as usize],
@@ -195,11 +206,12 @@ impl Ppu {
                 self.v = self.v.wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
                 data
             }
-            _ => 0,
+            _ => self.open_bus,
         }
     }
 
     pub fn cpu_write(&mut self, addr: u16, data: u8, cart: &mut Cartridge) {
+        self.open_bus = data;
         match addr {
             0x2000 => {
                 self.ctrl = data;
@@ -389,7 +401,7 @@ impl Ppu {
                 self.transfer_address_y();
             }
 
-            // Sprite evaluation
+            // Sprite evaluation with hardware overflow bug emulation
             if self.cycle == 257 && self.scanline >= 0 {
                 self.sprite_scanline = [OamEntry::default(); 8];
                 self.sprite_count = 0;
@@ -397,27 +409,49 @@ impl Ppu {
 
                 let sprite_size: i16 = if self.ctrl & 0x20 != 0 { 16 } else { 8 };
 
-                for i in 0..64usize {
-                    let oam_y = self.oam_data[i * 4] as i16;
+                let mut n: usize = 0;
+                // Phase 1: Find up to 8 sprites on this scanline
+                while n < 64 && self.sprite_count < 8 {
+                    let oam_y = self.oam_data[n * 4] as i16;
                     let diff = self.scanline - oam_y;
 
-                    if diff >= 0 && diff < sprite_size && self.sprite_count < 8 {
-                        if i == 0 {
+                    if diff >= 0 && diff < sprite_size {
+                        if n == 0 {
                             self.sprite_zero_hit_possible = true;
                         }
                         let entry = OamEntry {
-                            y: self.oam_data[i * 4],
-                            tile_id: self.oam_data[i * 4 + 1],
-                            attribute: self.oam_data[i * 4 + 2],
-                            x: self.oam_data[i * 4 + 3],
+                            y: self.oam_data[n * 4],
+                            tile_id: self.oam_data[n * 4 + 1],
+                            attribute: self.oam_data[n * 4 + 2],
+                            x: self.oam_data[n * 4 + 3],
                         };
                         self.sprite_scanline[self.sprite_count as usize] = entry;
                         self.sprite_count += 1;
                     }
+                    n += 1;
                 }
-                if self.sprite_count > 8 {
-                    self.sprite_count = 8;
-                    self.status |= 0x20; // sprite overflow
+
+                // Phase 2: Buggy overflow detection
+                // The hardware bug: after finding 8 sprites, the PPU increments
+                // both n (sprite index) AND m (byte offset within sprite) when
+                // checking remaining sprites, reading wrong OAM bytes
+                if self.sprite_count >= 8 {
+                    let mut m: usize = 0; // byte offset within OAM entry
+                    while n < 64 {
+                        // Bug: reads byte at (n*4 + m) instead of (n*4) for Y comparison
+                        let oam_index = (n * 4 + m) & 0xFF;
+                        let oam_y = self.oam_data[oam_index] as i16;
+                        let diff = self.scanline - oam_y;
+
+                        if diff >= 0 && diff < sprite_size {
+                            self.status |= 0x20; // sprite overflow
+                            break;
+                        } else {
+                            // Bug: increment m (wrapping 0-3) along with n
+                            m = (m + 1) & 0x03;
+                        }
+                        n += 1;
+                    }
                 }
             }
 
@@ -535,8 +569,42 @@ impl Ppu {
             };
 
             let color_addr = 0x3F00 + (palette as u16) * 4 + pixel as u16;
-            let color_index = self.ppu_read(color_addr, cart) as usize & 0x3F;
-            let color = NES_PALETTE[color_index];
+            let mut color_index = self.ppu_read(color_addr, cart) as usize & 0x3F;
+
+            // Greyscale mode: AND with 0x30 to only use grey column colors
+            if self.mask & 0x01 != 0 {
+                color_index &= 0x30;
+            }
+
+            let mut color = NES_PALETTE[color_index];
+
+            // Color emphasis: attenuate non-emphasized channels
+            // On NTSC NES, emphasis bits dim the OTHER channels
+            let emphasis = (self.mask >> 5) & 0x07;
+            if emphasis != 0 {
+                let mut r = (color >> 16) & 0xFF;
+                let mut g = (color >> 8) & 0xFF;
+                let mut b = color & 0xFF;
+
+                // Each emphasis bit dims the other two channels by ~25%
+                if emphasis & 0x01 != 0 {
+                    // Emphasize red: dim green and blue
+                    g = g * 3 / 4;
+                    b = b * 3 / 4;
+                }
+                if emphasis & 0x02 != 0 {
+                    // Emphasize green: dim red and blue
+                    r = r * 3 / 4;
+                    b = b * 3 / 4;
+                }
+                if emphasis & 0x04 != 0 {
+                    // Emphasize blue: dim red and green
+                    r = r * 3 / 4;
+                    g = g * 3 / 4;
+                }
+
+                color = (r << 16) | (g << 8) | b;
+            }
 
             let x = (self.cycle - 1) as usize;
             let y = self.scanline as usize;
@@ -557,7 +625,11 @@ impl Ppu {
         if self.cycle >= 341 {
             self.cycle = 0;
             self.scanline += 1;
-            if self.scanline >= 261 {
+            let max_scanline = match self.region {
+                Region::Ntsc => 261,
+                Region::Pal => 311,
+            };
+            if self.scanline >= max_scanline {
                 self.scanline = -1;
                 self.frame_complete = true;
                 self.odd_frame = !self.odd_frame;
@@ -573,6 +645,10 @@ impl Ppu {
             self.nmi_occurred = false;
         }
         nmi
+    }
+
+    pub fn set_region(&mut self, region: Region) {
+        self.region = region;
     }
 
     pub fn frame_complete(&mut self) -> bool {
@@ -633,6 +709,7 @@ impl Ppu {
         data.push(if self.sprite_zero_hit_possible { 1 } else { 0 });
         data.push(if self.sprite_zero_being_rendered { 1 } else { 0 });
         data.push(if self.odd_frame { 1 } else { 0 });
+        data.push(if self.region == Region::Pal { 1 } else { 0 });
         
         data
     }
@@ -695,7 +772,12 @@ impl Ppu {
         self.sprite_shifter_pattern_hi.copy_from_slice(&data[pos..pos+8]); pos += 8;
         self.sprite_zero_hit_possible = data[pos] != 0; pos += 1;
         self.sprite_zero_being_rendered = data[pos] != 0; pos += 1;
-        self.odd_frame = data[pos] != 0;
+        self.odd_frame = data[pos] != 0; pos += 1;
+
+        // Region (optional, backwards compatible)
+        if pos < data.len() {
+            self.region = if data[pos] == 1 { Region::Pal } else { Region::Ntsc };
+        }
         
         true
     }

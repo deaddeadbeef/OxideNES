@@ -3,6 +3,59 @@ use crate::ppu::Ppu;
 use crate::joypad::Joypad;
 use crate::apu::Apu;
 
+#[derive(Clone)]
+pub struct GameGenieCode {
+    pub address: u16,
+    pub replace: u8,
+    pub compare: Option<u8>,
+}
+
+impl GameGenieCode {
+    pub fn decode(code: &str) -> Option<Self> {
+        let letters = "APZLGITYEOXUKSVN";
+        let code = code.to_uppercase();
+        let vals: Vec<u8> = code.chars()
+            .filter_map(|c| letters.find(c).map(|i| i as u8))
+            .collect();
+        
+        if vals.len() == 6 {
+            let address = 0x8000
+                | ((vals[3] as u16 & 0x07) << 12)
+                | ((vals[5] as u16 & 0x07) << 8)
+                | ((vals[4] as u16 & 0x08) << 8)
+                | ((vals[2] as u16 & 0x07) << 4)
+                | ((vals[1] as u16 & 0x08) << 4)
+                | (vals[4] as u16 & 0x07)
+                | (vals[3] as u16 & 0x08);
+            let replace = ((vals[1] as u8 & 0x07) << 4)
+                | ((vals[0] as u8 & 0x08) << 4)
+                | (vals[0] as u8 & 0x07)
+                | (vals[5] as u8 & 0x08);
+            Some(GameGenieCode { address, replace, compare: None })
+        } else if vals.len() == 8 {
+            let address = 0x8000
+                | ((vals[3] as u16 & 0x07) << 12)
+                | ((vals[5] as u16 & 0x07) << 8)
+                | ((vals[4] as u16 & 0x08) << 8)
+                | ((vals[2] as u16 & 0x07) << 4)
+                | ((vals[1] as u16 & 0x08) << 4)
+                | (vals[4] as u16 & 0x07)
+                | (vals[3] as u16 & 0x08);
+            let replace = ((vals[1] as u8 & 0x07) << 4)
+                | ((vals[0] as u8 & 0x08) << 4)
+                | (vals[0] as u8 & 0x07)
+                | (vals[7] as u8 & 0x08);
+            let compare = ((vals[7] as u8 & 0x07) << 4)
+                | ((vals[6] as u8 & 0x08) << 4)
+                | (vals[6] as u8 & 0x07)
+                | (vals[5] as u8 & 0x08);
+            Some(GameGenieCode { address, replace, compare: Some(compare) })
+        } else {
+            None
+        }
+    }
+}
+
 pub struct Bus {
     cpu_ram: [u8; 2048],
     pub ppu: Ppu,
@@ -16,6 +69,7 @@ pub struct Bus {
     dma_data: u8,
     dma_transfer: bool,
     dma_dummy: bool,
+    pub cheats: Vec<GameGenieCode>,
 }
 
 impl Bus {
@@ -33,10 +87,25 @@ impl Bus {
             dma_data: 0,
             dma_transfer: false,
             dma_dummy: true,
+            cheats: Vec::new(),
         }
     }
 
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
+        // Game Genie interception
+        if addr >= 0x8000 && !self.cheats.is_empty() {
+            for cheat in &self.cheats {
+                if cheat.address == addr {
+                    let original = self.cartridge.mapper.read_prg(addr);
+                    match cheat.compare {
+                        None => return cheat.replace,
+                        Some(cmp) if cmp == original => return cheat.replace,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         match addr {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize],
             0x2000..=0x3FFF => self.ppu.cpu_read(addr & 0x2007, &self.cartridge),
@@ -45,7 +114,6 @@ impl Bus {
             0x4000..=0x4015 => self.apu.read(addr), // APU
             0x4018..=0x401F => 0, // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.read_prg(addr),
-            _ => 0,
         }
     }
 
@@ -75,7 +143,6 @@ impl Bus {
             0x4000..=0x4013 | 0x4015 | 0x4017 => self.apu.write(addr, data), // APU
             0x4018..=0x401F => {} // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.write_prg(addr, data),
-            _ => {}
         }
     }
 
@@ -176,6 +243,11 @@ impl Bus {
         data.push(if self.dma_transfer { 1 } else { 0 });
         data.push(if self.dma_dummy { 1 } else { 0 });
         
+        // APU state
+        let apu_state = self.apu.save_state();
+        data.extend_from_slice(&(apu_state.len() as u32).to_le_bytes());
+        data.extend(apu_state);
+        
         data
     }
 
@@ -225,6 +297,16 @@ impl Bus {
             self.dma_data = data[pos]; pos += 1;
             self.dma_transfer = data[pos] != 0; pos += 1;
             self.dma_dummy = data[pos] != 0;
+            pos += 1;
+        }
+        
+        // APU state (optional - backwards compatible with old saves)
+        if pos + 4 <= data.len() {
+            let apu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            pos += 4;
+            if pos + apu_len <= data.len() {
+                self.apu.load_state(&data[pos..pos+apu_len]);
+            }
         }
         
         true

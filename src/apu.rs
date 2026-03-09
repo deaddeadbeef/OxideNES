@@ -509,7 +509,7 @@ pub struct Apu {
 
     // Pre-computed mixer lookup tables
     pulse_table: [i32; 31],
-    tnd_table: [[i32; 16]; 16],
+
 
     // Reusable read buffer for end_frame
     read_buf: Vec<i16>,
@@ -531,16 +531,6 @@ impl Apu {
             pulse_table[i as usize] = (v * 32000.0) as i32;
         }
 
-        let mut tnd_table = [[0i32; 16]; 16];
-        for tri in 0..16u32 {
-            for noise in 0..16u32 {
-                if tri + noise > 0 {
-                    let v = 159.79 / ((1.0 / (tri as f64 / 8227.0 + noise as f64 / 12241.0)) + 100.0);
-                    tnd_table[tri as usize][noise as usize] = (v * 32000.0) as i32;
-                }
-            }
-        }
-
         Apu {
             pulse1: PulseChannel::new(true),
             pulse2: PulseChannel::new(false),
@@ -558,7 +548,6 @@ impl Apu {
             clock_cycle: 0,
             sample_buffer: Vec::with_capacity(2048),
             pulse_table,
-            tnd_table,
             read_buf: vec![0i16; 4096],  // pre-allocate
         }
     }
@@ -758,5 +747,235 @@ impl Apu {
     
     pub fn drain_samples(&mut self) -> Vec<f32> {
         std::mem::take(&mut self.sample_buffer)
+    }
+
+    // ── Save state support ──────────────────────────────────────────
+    pub fn save_state(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+
+        // Pulse 1
+        data.push(self.pulse1.enabled as u8);
+        data.push(self.pulse1.duty);
+        data.push(self.pulse1.duty_pos);
+        data.push(self.pulse1.length_counter);
+        data.push(self.pulse1.length_halt as u8);
+        data.extend_from_slice(&self.pulse1.timer.to_le_bytes());
+        data.extend_from_slice(&self.pulse1.timer_period.to_le_bytes());
+        data.push(self.pulse1.envelope.start as u8);
+        data.push(self.pulse1.envelope.loop_flag as u8);
+        data.push(self.pulse1.envelope.constant_volume as u8);
+        data.push(self.pulse1.envelope.volume);
+        data.push(self.pulse1.envelope.decay_level);
+        data.push(self.pulse1.envelope.divider);
+        data.push(self.pulse1.sweep.enabled as u8);
+        data.push(self.pulse1.sweep.period);
+        data.push(self.pulse1.sweep.negate as u8);
+        data.push(self.pulse1.sweep.shift);
+        data.push(self.pulse1.sweep.reload as u8);
+        data.push(self.pulse1.sweep.divider);
+        data.push(self.pulse1.sweep.is_pulse1 as u8);
+
+        // Pulse 2
+        data.push(self.pulse2.enabled as u8);
+        data.push(self.pulse2.duty);
+        data.push(self.pulse2.duty_pos);
+        data.push(self.pulse2.length_counter);
+        data.push(self.pulse2.length_halt as u8);
+        data.extend_from_slice(&self.pulse2.timer.to_le_bytes());
+        data.extend_from_slice(&self.pulse2.timer_period.to_le_bytes());
+        data.push(self.pulse2.envelope.start as u8);
+        data.push(self.pulse2.envelope.loop_flag as u8);
+        data.push(self.pulse2.envelope.constant_volume as u8);
+        data.push(self.pulse2.envelope.volume);
+        data.push(self.pulse2.envelope.decay_level);
+        data.push(self.pulse2.envelope.divider);
+        data.push(self.pulse2.sweep.enabled as u8);
+        data.push(self.pulse2.sweep.period);
+        data.push(self.pulse2.sweep.negate as u8);
+        data.push(self.pulse2.sweep.shift);
+        data.push(self.pulse2.sweep.reload as u8);
+        data.push(self.pulse2.sweep.divider);
+        data.push(self.pulse2.sweep.is_pulse1 as u8);
+
+        // Triangle
+        data.push(self.triangle.enabled as u8);
+        data.push(self.triangle.length_counter);
+        data.push(self.triangle.length_halt as u8);
+        data.push(self.triangle.linear_counter);
+        data.push(self.triangle.linear_counter_reload);
+        data.push(self.triangle.linear_counter_reload_flag as u8);
+        data.extend_from_slice(&self.triangle.timer.to_le_bytes());
+        data.extend_from_slice(&self.triangle.timer_period.to_le_bytes());
+        data.push(self.triangle.sequence_pos);
+
+        // Noise
+        data.push(self.noise.enabled as u8);
+        data.push(self.noise.length_counter);
+        data.push(self.noise.length_halt as u8);
+        data.push(self.noise.envelope.start as u8);
+        data.push(self.noise.envelope.loop_flag as u8);
+        data.push(self.noise.envelope.constant_volume as u8);
+        data.push(self.noise.envelope.volume);
+        data.push(self.noise.envelope.decay_level);
+        data.push(self.noise.envelope.divider);
+        data.extend_from_slice(&self.noise.timer.to_le_bytes());
+        data.extend_from_slice(&self.noise.timer_period.to_le_bytes());
+        data.push(self.noise.mode as u8);
+        data.extend_from_slice(&self.noise.shift_register.to_le_bytes());
+
+        // DMC
+        data.push(self.dmc.enabled as u8);
+        data.push(self.dmc.irq_enabled as u8);
+        data.push(self.dmc.loop_flag as u8);
+        data.push(self.dmc.rate_index);
+        data.extend_from_slice(&self.dmc.timer.to_le_bytes());
+        data.extend_from_slice(&self.dmc.timer_period.to_le_bytes());
+        data.push(self.dmc.output_level);
+        data.push(self.dmc.sample_buffer);
+        data.push(self.dmc.sample_buffer_empty as u8);
+        data.push(self.dmc.bits_remaining);
+        data.push(self.dmc.shift_register);
+        data.push(self.dmc.silence_flag as u8);
+        data.extend_from_slice(&self.dmc.sample_address.to_le_bytes());
+        data.extend_from_slice(&self.dmc.sample_length.to_le_bytes());
+        data.extend_from_slice(&self.dmc.start_address.to_le_bytes());
+        data.extend_from_slice(&self.dmc.start_length.to_le_bytes());
+        data.push(self.dmc.irq_pending as u8);
+        data.push(self.dmc.dma_request as u8);
+        data.extend_from_slice(&self.dmc.dma_address.to_le_bytes());
+
+        // Frame counter
+        data.push(self.frame_counter_mode);
+        data.push(self.frame_irq_inhibit as u8);
+        data.push(self.frame_step);
+        data.extend_from_slice(&self.frame_cycle.to_le_bytes());
+        data.push(self.irq_pending as u8);
+        data.extend_from_slice(&self.cycle.to_le_bytes());
+
+        data
+    }
+
+    pub fn load_state(&mut self, data: &[u8]) -> bool {
+        let mut pos = 0;
+
+        // Helper macro for bounds checking
+        macro_rules! need {
+            ($n:expr) => {
+                if pos + $n > data.len() { return false; }
+            };
+        }
+
+        // Pulse 1
+        need!(21);
+        self.pulse1.enabled = data[pos] != 0; pos += 1;
+        self.pulse1.duty = data[pos]; pos += 1;
+        self.pulse1.duty_pos = data[pos]; pos += 1;
+        self.pulse1.length_counter = data[pos]; pos += 1;
+        self.pulse1.length_halt = data[pos] != 0; pos += 1;
+        self.pulse1.timer = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.pulse1.timer_period = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.pulse1.envelope.start = data[pos] != 0; pos += 1;
+        self.pulse1.envelope.loop_flag = data[pos] != 0; pos += 1;
+        self.pulse1.envelope.constant_volume = data[pos] != 0; pos += 1;
+        self.pulse1.envelope.volume = data[pos]; pos += 1;
+        self.pulse1.envelope.decay_level = data[pos]; pos += 1;
+        self.pulse1.envelope.divider = data[pos]; pos += 1;
+        self.pulse1.sweep.enabled = data[pos] != 0; pos += 1;
+        self.pulse1.sweep.period = data[pos]; pos += 1;
+        self.pulse1.sweep.negate = data[pos] != 0; pos += 1;
+        self.pulse1.sweep.shift = data[pos]; pos += 1;
+        self.pulse1.sweep.reload = data[pos] != 0; pos += 1;
+        self.pulse1.sweep.divider = data[pos]; pos += 1;
+        self.pulse1.sweep.is_pulse1 = data[pos] != 0; pos += 1;
+
+        // Pulse 2
+        need!(21);
+        self.pulse2.enabled = data[pos] != 0; pos += 1;
+        self.pulse2.duty = data[pos]; pos += 1;
+        self.pulse2.duty_pos = data[pos]; pos += 1;
+        self.pulse2.length_counter = data[pos]; pos += 1;
+        self.pulse2.length_halt = data[pos] != 0; pos += 1;
+        self.pulse2.timer = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.pulse2.timer_period = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.pulse2.envelope.start = data[pos] != 0; pos += 1;
+        self.pulse2.envelope.loop_flag = data[pos] != 0; pos += 1;
+        self.pulse2.envelope.constant_volume = data[pos] != 0; pos += 1;
+        self.pulse2.envelope.volume = data[pos]; pos += 1;
+        self.pulse2.envelope.decay_level = data[pos]; pos += 1;
+        self.pulse2.envelope.divider = data[pos]; pos += 1;
+        self.pulse2.sweep.enabled = data[pos] != 0; pos += 1;
+        self.pulse2.sweep.period = data[pos]; pos += 1;
+        self.pulse2.sweep.negate = data[pos] != 0; pos += 1;
+        self.pulse2.sweep.shift = data[pos]; pos += 1;
+        self.pulse2.sweep.reload = data[pos] != 0; pos += 1;
+        self.pulse2.sweep.divider = data[pos]; pos += 1;
+        self.pulse2.sweep.is_pulse1 = data[pos] != 0; pos += 1;
+
+        // Triangle
+        need!(11);
+        self.triangle.enabled = data[pos] != 0; pos += 1;
+        self.triangle.length_counter = data[pos]; pos += 1;
+        self.triangle.length_halt = data[pos] != 0; pos += 1;
+        self.triangle.linear_counter = data[pos]; pos += 1;
+        self.triangle.linear_counter_reload = data[pos]; pos += 1;
+        self.triangle.linear_counter_reload_flag = data[pos] != 0; pos += 1;
+        self.triangle.timer = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.triangle.timer_period = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.triangle.sequence_pos = data[pos]; pos += 1;
+
+        // Noise
+        need!(16);
+        self.noise.enabled = data[pos] != 0; pos += 1;
+        self.noise.length_counter = data[pos]; pos += 1;
+        self.noise.length_halt = data[pos] != 0; pos += 1;
+        self.noise.envelope.start = data[pos] != 0; pos += 1;
+        self.noise.envelope.loop_flag = data[pos] != 0; pos += 1;
+        self.noise.envelope.constant_volume = data[pos] != 0; pos += 1;
+        self.noise.envelope.volume = data[pos]; pos += 1;
+        self.noise.envelope.decay_level = data[pos]; pos += 1;
+        self.noise.envelope.divider = data[pos]; pos += 1;
+        self.noise.timer = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.noise.timer_period = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.noise.mode = data[pos] != 0; pos += 1;
+        self.noise.shift_register = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+
+        // DMC
+        need!(24);
+        self.dmc.enabled = data[pos] != 0; pos += 1;
+        self.dmc.irq_enabled = data[pos] != 0; pos += 1;
+        self.dmc.loop_flag = data[pos] != 0; pos += 1;
+        self.dmc.rate_index = data[pos]; pos += 1;
+        self.dmc.timer = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.timer_period = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.output_level = data[pos]; pos += 1;
+        self.dmc.sample_buffer = data[pos]; pos += 1;
+        self.dmc.sample_buffer_empty = data[pos] != 0; pos += 1;
+        self.dmc.bits_remaining = data[pos]; pos += 1;
+        self.dmc.shift_register = data[pos]; pos += 1;
+        self.dmc.silence_flag = data[pos] != 0; pos += 1;
+        self.dmc.sample_address = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.sample_length = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.start_address = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.start_length = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+        self.dmc.irq_pending = data[pos] != 0; pos += 1;
+        self.dmc.dma_request = data[pos] != 0; pos += 1;
+        self.dmc.dma_address = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+
+        // Frame counter
+        let usize_bytes = std::mem::size_of::<usize>();
+        need!(3 + usize_bytes + 1 + usize_bytes);
+        self.frame_counter_mode = data[pos]; pos += 1;
+        self.frame_irq_inhibit = data[pos] != 0; pos += 1;
+        self.frame_step = data[pos]; pos += 1;
+        let mut fc_bytes = [0u8; 8];
+        fc_bytes[..usize_bytes].copy_from_slice(&data[pos..pos+usize_bytes]);
+        self.frame_cycle = usize::from_le_bytes(fc_bytes);
+        pos += usize_bytes;
+        self.irq_pending = data[pos] != 0; pos += 1;
+        let mut c_bytes = [0u8; 8];
+        c_bytes[..usize_bytes].copy_from_slice(&data[pos..pos+usize_bytes]);
+        self.cycle = usize::from_le_bytes(c_bytes);
+
+        true
     }
 }
