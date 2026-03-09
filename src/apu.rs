@@ -722,10 +722,15 @@ impl Apu {
         // Pulse channels use pre-computed table
         let pulse_out = self.pulse_table[(p1 + p2).min(30)];
         
-        // TND channels need full formula to include DMC
-        let tnd_out = if tri + noise > 0 || dmc > 0.0 {
-            let tnd = 159.79 / ((1.0 / (tri as f64 / 8227.0 + noise as f64 / 12241.0 + dmc / 22638.0)) + 100.0);
-            (tnd * 32000.0) as i32
+        // TND channels using safer formula to prevent NaN
+        let tnd_out = if tri > 0 || noise > 0 || dmc > 0.0 {
+            let tnd_sum = tri as f64 / 8227.0 + noise as f64 / 12241.0 + dmc / 22638.0;
+            if tnd_sum > 0.0 {
+                let tnd = 159.79 / (1.0 / tnd_sum + 100.0);
+                (tnd * 32000.0) as i32
+            } else {
+                0
+            }
         } else {
             0
         };

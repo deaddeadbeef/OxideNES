@@ -1529,71 +1529,126 @@ fn main() {
                         }
                     }
                     
-                    // Pause menu overlay
+                    // NES-style pause menu rendering
                     if paused {
-                        // Darken the screen
-                        for y in SCREEN_Y..(SCREEN_Y + SCREEN_H) {
-                            for x in SCREEN_X..(SCREEN_X + SCREEN_W) {
-                                let idx = y * WINDOW_WIDTH + x;
-                                if idx < composite_buffer.len() {
-                                    let p = composite_buffer[idx];
-                                    let r = ((p >> 16) & 0xFF) / 3;
-                                    let g = ((p >> 8) & 0xFF) / 3;
-                                    let b = (p & 0xFF) / 3;
-                                    composite_buffer[idx] = (r << 16) | (g << 8) | b;
-                                }
-                            }
+                        // Copy and darken the last game frame into menu_framebuffer
+                        for i in 0..menu_framebuffer.len().min(bus.ppu.frame_data.len()) {
+                            let p = bus.ppu.frame_data[i];
+                            let r = ((p >> 16) & 0xFF) / 3;
+                            let g = ((p >> 8) & 0xFF) / 3;
+                            let b = (p & 0xFF) / 3;
+                            menu_framebuffer[i] = (r << 16) | (g << 8) | b;
                         }
                         
-                        // Draw pause menu box
-                        let box_x = SCREEN_X + SCREEN_W / 2 - 120;
-                        let box_y = SCREEN_Y + SCREEN_H / 2 - 60;
-                        let box_w = 240;
-                        let box_h = 120;
+                        // Box background (tile coordinates: 32 cols × 30 rows)
+                        // Center a box roughly 20 tiles wide × 14 tiles tall
+                        let box_left = 6;
+                        let box_right = 26;
+                        let box_top = 8;
+                        let box_bottom = 22;
                         
-                        // Box background
-                        for y in box_y..box_y + box_h {
-                            for x in box_x..box_x + box_w {
-                                if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
-                                    composite_buffer[y * WINDOW_WIDTH + x] = 0x1A1A4A;
-                                }
-                            }
-                        }
-                        // Box border
-                        for x in box_x..box_x + box_w {
-                            if box_y < WINDOW_HEIGHT { composite_buffer[box_y * WINDOW_WIDTH + x] = 0x6888FC; }
-                            if box_y + box_h - 1 < WINDOW_HEIGHT { composite_buffer[(box_y + box_h - 1) * WINDOW_WIDTH + x] = 0x6888FC; }
-                        }
-                        for y in box_y..box_y + box_h {
-                            if y < WINDOW_HEIGHT {
-                                composite_buffer[y * WINDOW_WIDTH + box_x] = 0x6888FC;
-                                composite_buffer[y * WINDOW_WIDTH + box_x + box_w - 1] = 0x6888FC;
-                            }
-                        }
-                        
-                        // Title
-                        let title = "PAUSED";
-                        let tx = box_x + (box_w - title.len() * 8) / 2;
-                        draw_text(&mut composite_buffer, title, tx, box_y + 10, 0xF8D878, WINDOW_WIDTH);
-                        
-                        // Menu items
-                        let items = ["RESUME GAME", "SAVE STATE (F5)", "LOAD STATE (F9)", "RETURN TO MENU"];
-                        for (i, item) in items.iter().enumerate() {
-                            let iy = box_y + 35 + i * 20;
-                            let ix = box_x + 30;
-                            let color = if i == pause_selected { 0xFCFCFC } else { 0x9C9C9C };
-                            if i == pause_selected {
-                                // Highlight bar
-                                for x in (box_x + 2)..(box_x + box_w - 2) {
-                                    for dy in 0..16 {
-                                        if iy + dy < WINDOW_HEIGHT {
-                                            composite_buffer[(iy + dy) * WINDOW_WIDTH + x] = 0x3C3C8C;
+                        // Fill box background
+                        for ty in box_top..box_bottom {
+                            for tx in box_left..box_right {
+                                let px = tx * 8;
+                                let py = ty * 8;
+                                for dy in 0..8 {
+                                    for dx in 0..8 {
+                                        let x = px + dx;
+                                        let y = py + dy;
+                                        if y < 240 && x < 256 {
+                                            menu_framebuffer[y * 256 + x] = MENU_BG;
                                         }
                                     }
                                 }
-                                draw_text(&mut composite_buffer, ">", ix - 12, iy + 4, 0xFCFCFC, WINDOW_WIDTH);
                             }
-                            draw_text(&mut composite_buffer, item, ix, iy + 4, color, WINDOW_WIDTH);
+                        }
+                        
+                        // Draw border using MENU_LIGHT_BLUE
+                        for tx in box_left..box_right {
+                            let px = tx * 8;
+                            for dx in 0..8 {
+                                let x = px + dx;
+                                // Top border
+                                let y_top = box_top * 8;
+                                if y_top < 240 && x < 256 {
+                                    menu_framebuffer[y_top * 256 + x] = MENU_LIGHT_BLUE;
+                                    menu_framebuffer[(y_top + 1) * 256 + x] = MENU_LIGHT_BLUE;
+                                }
+                                // Bottom border
+                                let y_bot = box_bottom * 8 - 1;
+                                if y_bot < 240 && x < 256 {
+                                    menu_framebuffer[y_bot * 256 + x] = MENU_LIGHT_BLUE;
+                                    menu_framebuffer[(y_bot - 1) * 256 + x] = MENU_LIGHT_BLUE;
+                                }
+                            }
+                        }
+                        for ty in box_top..box_bottom {
+                            let py = ty * 8;
+                            for dy in 0..8 {
+                                let y = py + dy;
+                                if y < 240 {
+                                    // Left border
+                                    let xl = box_left * 8;
+                                    menu_framebuffer[y * 256 + xl] = MENU_LIGHT_BLUE;
+                                    menu_framebuffer[y * 256 + xl + 1] = MENU_LIGHT_BLUE;
+                                    // Right border
+                                    let xr = box_right * 8 - 1;
+                                    if xr < 256 {
+                                        menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE;
+                                        menu_framebuffer[y * 256 + xr - 1] = MENU_LIGHT_BLUE;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Title: "PAUSED" centered
+                        draw_text_centered_8x8(&mut menu_framebuffer, "\x11 PAUSED \x11", box_top + 1, MENU_GOLD);
+                        
+                        // Separator
+                        let sep_y = (box_top + 2) * 8 + 4;
+                        for x in (box_left * 8 + 8)..(box_right * 8 - 8) {
+                            if x % 4 < 2 && sep_y < 240 {
+                                menu_framebuffer[sep_y * 256 + x] = MENU_DARK_GRAY;
+                            }
+                        }
+                        
+                        // Menu items
+                        let items = ["RESUME GAME", "SAVE STATE  (F5)", "LOAD STATE  (F9)", "RETURN TO MENU"];
+                        for (i, item) in items.iter().enumerate() {
+                            let row = box_top + 4 + i * 2; // rows 12, 14, 16, 18
+                            let is_selected = i == pause_selected;
+                            
+                            if is_selected {
+                                // Highlight bar
+                                let hy = row * 8;
+                                for dy in 0..8 {
+                                    for hx in (box_left * 8 + 4)..(box_right * 8 - 4) {
+                                        if hy + dy < 240 && hx < 256 {
+                                            menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
+                                        }
+                                    }
+                                }
+                                draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, MENU_WHITE);
+                            }
+                            
+                            let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
+                            draw_text_8x8(&mut menu_framebuffer, item, box_left + 2, row, color);
+                        }
+                        
+                        // Hint at bottom of box
+                        draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
+                        
+                        // Now pass through CRT filter (same as menu rendering)
+                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                        if crt_enabled {
+                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                        } else {
+                            scale_simple(&menu_framebuffer, &mut crt_buffer);
+                        }
+                        composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                        if crt_enabled {
+                            apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
                         }
                     }
 
