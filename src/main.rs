@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
+use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -182,13 +183,7 @@ fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     
     let mut data = Vec::new();
     // Magic header + version
-    data.extend_from_slice(b"NESSAV03");
-    
-    // ROM fingerprint: hash of recent game path as ROM identifier
-    let rom_hash: u32 = config.recent_games.first()
-        .map(|s| s.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32)))
-        .unwrap_or(0);
-    data.extend_from_slice(&rom_hash.to_le_bytes());
+    data.extend_from_slice(b"NESSAV02");
     
     // CPU state
     let cpu_state = cpu.save_state();
@@ -215,17 +210,10 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -
     if !is_v02 && !is_v03 { return false; }
     let mut pos = 8;
     
-    // V03: validate ROM fingerprint
+    // V03: skip ROM fingerprint (deprecated — validation was too aggressive)
     if is_v03 {
         if pos + 4 > data.len() { return false; }
-        let saved_hash = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
-        pos += 4;
-        let current_hash: u32 = config.recent_games.first()
-            .map(|s| s.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32)))
-            .unwrap_or(0);
-        if saved_hash != current_hash {
-            return false; // Wrong ROM
-        }
+        pos += 4; // skip hash, don't validate
     }
     
     // CPU state
@@ -251,7 +239,7 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -
 // =====================================================================
 
 struct RewindBuffer {
-    snapshots: Vec<Vec<u8>>,
+    snapshots: VecDeque<Vec<u8>>,
     max_snapshots: usize,
     max_bytes: usize,
     total_bytes: usize,
@@ -262,11 +250,11 @@ struct RewindBuffer {
 impl RewindBuffer {
     fn new() -> Self {
         RewindBuffer {
-            snapshots: Vec::new(),
+            snapshots: VecDeque::new(),
             max_snapshots: 300,
             max_bytes: 8 * 1024 * 1024, // 8MB cap
             total_bytes: 0,
-            frame_skip: 2,
+            frame_skip: 4,     // save every 4th frame (~15 snapshots/sec)
             frame_counter: 0,
         }
     }
@@ -286,13 +274,12 @@ impl RewindBuffer {
         snapshot.extend(bus_state);
         
         self.total_bytes += snapshot.len();
-        self.snapshots.push(snapshot);
+        self.snapshots.push_back(snapshot);
         
         // Cap at max_snapshots AND max_bytes (8MB default)
         while self.snapshots.len() > self.max_snapshots || self.total_bytes > self.max_bytes {
-            if let Some(old) = self.snapshots.first() {
-                self.total_bytes -= old.len();
-                self.snapshots.remove(0);
+            if let Some(old) = self.snapshots.pop_front() {
+                self.total_bytes = self.total_bytes.saturating_sub(old.len());
             } else {
                 break;
             }
@@ -300,7 +287,7 @@ impl RewindBuffer {
     }
 
     fn pop_frame(&mut self, bus: &mut Bus, cpu: &mut Cpu) -> bool {
-        if let Some(snapshot) = self.snapshots.pop() {
+        if let Some(snapshot) = self.snapshots.pop_back() {
             self.total_bytes -= snapshot.len();
             let mut pos = 0;
             if pos + 4 > snapshot.len() { return false; }
