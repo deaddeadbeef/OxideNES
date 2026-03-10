@@ -77,7 +77,30 @@ impl Cartridge {
             71 => Box::new(Mapper071::new(prg_rom, chr_rom, mirroring)),
             79 => Box::new(Mapper079::new(prg_rom, chr_rom, mirroring)),
             206 => Box::new(Mapper206::new(prg_rom, chr_rom, mirroring)),
-            _ => return Err(format!("Unsupported mapper: {}. Supported: 0,1,2,3,4,7,9,10,11,66,69,71,79,206", mapper_id)),
+            _ => {
+                let popular = match mapper_id {
+                    5 => "Castlevania III, Just Breed",
+                    16 => "Dragon Ball Z (JP)",
+                    18 => "Jaleco games",
+                    19 => "Namco 163 games",
+                    21 | 22 | 23 | 25 => "Konami VRC games",
+                    24 | 26 => "Konami VRC6 (Castlevania III JP)",
+                    34 => "Deadly Towers, Impossible Mission II",
+                    48 => "Taito games",
+                    64 | 158 => "Tengen games",
+                    65 => "Irem games",
+                    67 => "Sunsoft-3 games",
+                    68 => "After Burner",
+                    85 => "Konami VRC7 (Lagrange Point)",
+                    _ => "",
+                };
+                let hint = if popular.is_empty() {
+                    format!("Unsupported mapper: {}", mapper_id)
+                } else {
+                    format!("Unsupported mapper: {} (used by: {})", mapper_id, popular)
+                };
+                return Err(format!("{}. Supported: 0,1,2,3,4,7,9,10,11,66,69,71,79,206", hint));
+            }
         };
 
         Ok(Cartridge { mapper, has_battery })

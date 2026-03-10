@@ -788,6 +788,9 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     draw_separator_line(fb, 25);
     draw_text_centered_8x8(fb, "A:OPEN  ESC:QUIT", 26, MENU_DARK_GRAY);
     draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 27, MENU_DARK_GRAY);
+
+    // Bottom hint
+    draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 28, 0x585858);
 }
 
 fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
@@ -1521,6 +1524,17 @@ fn main() {
                     Some(MenuAction::LoadRom(path_str)) => {
                         match fs::read(&path_str) {
                             Ok(rom_data) => {
+                                // Show loading indicator
+                                draw_text_centered_8x8(&mut menu_framebuffer, "LOADING...", 15, 0xF8D878);
+                                let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                                if crt_enabled {
+                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                                } else {
+                                    scale_simple(&menu_framebuffer, &mut crt_buffer);
+                                }
+                                composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                                let _ = window.update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+
                                 match Cartridge::new(&rom_data) {
                                     Ok(cart) => {
                                         let mut bus = Bus::new(cart);
@@ -1878,11 +1892,13 @@ fn main() {
                                 config.audio_volume = audio_volume;
                                 save_config(&config);
                                 audio_volume = 0;
-                                overlay_message = Some("AUDIO: MUTED".to_string());
+                                overlay_message = Some("VOLUME: [..........] MUTED".to_string());
                             } else {
                                 audio_volume = config.audio_volume;
                                 if audio_volume == 0 { audio_volume = 100; }
-                                overlay_message = Some(format!("AUDIO: {}%", audio_volume));
+                                let bars = (audio_volume / 10) as usize;
+                                let bar: String = "#".repeat(bars) + &".".repeat(10 - bars);
+                                overlay_message = Some(format!("VOLUME: [{}] {}%", bar, audio_volume));
                             }
                             overlay_timer = 60;
                         }
@@ -2063,7 +2079,7 @@ fn main() {
                         let box_left = 6;
                         let box_right = 26;
                         let box_top = 8;
-                        let box_bottom = 22;
+                        let box_bottom = 24;
                         
                         // Fill box background
                         for ty in box_top..box_bottom {
@@ -2134,9 +2150,9 @@ fn main() {
                         // Menu items
                         let slot_str = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
                         let load_str = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
-                        let items = ["RESUME GAME", &slot_str, &load_str, "RETURN TO MENU"];
+                        let items: [&str; 5] = ["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", "RETURN TO MENU"];
                         for (i, item) in items.iter().enumerate() {
-                            let row = box_top + 4 + i * 2; // rows 12, 14, 16, 18
+                            let row = box_top + 4 + i * 2; // rows 12, 14, 16, 18, 20
                             let is_selected = i == pause_selected;
                             
                             if is_selected {
@@ -2158,6 +2174,31 @@ fn main() {
                         
                         // Hint at bottom of box
                         draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
+                        
+                        if cheat_input_mode {
+                            // Overlay the cheat input box
+                            let box_y = 18 * 8;
+                            for dy in 0..24 {
+                                for dx in 0..160 {
+                                    let x = 48 + dx;
+                                    let y = box_y + dy;
+                                    if y < 240 && x < 256 {
+                                        menu_framebuffer[y * 256 + x] = 0x000030;
+                                    }
+                                }
+                            }
+                            draw_text_8x8(&mut menu_framebuffer, "GAME GENIE CODE:", 7, 18, 0xF8D878);
+                            let display = if cheat_input_buffer.is_empty() { "________" } else { &cheat_input_buffer };
+                            draw_text_8x8(&mut menu_framebuffer, display, 9, 20, 0xFCFCFC);
+                        }
+                        
+                        if cheat_message_timer > 0 {
+                            cheat_message_timer -= 1;
+                            if let Some(ref msg) = cheat_message {
+                                draw_text_8x8(&mut menu_framebuffer, msg, 6, 22, 0x44FF44);
+                            }
+                            if cheat_message_timer == 0 { cheat_message = None; }
+                        }
                         
                         // Now pass through CRT filter (same as menu rendering)
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
