@@ -251,6 +251,8 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -
 struct RewindBuffer {
     snapshots: Vec<Vec<u8>>,
     max_snapshots: usize,
+    max_bytes: usize,
+    total_bytes: usize,
     frame_skip: u32,
     frame_counter: u32,
 }
@@ -259,8 +261,10 @@ impl RewindBuffer {
     fn new() -> Self {
         RewindBuffer {
             snapshots: Vec::new(),
-            max_snapshots: 300, // ~5 seconds at 60fps (saving every frame would be ~10 seconds)
-            frame_skip: 2,     // save every 2nd frame to extend buffer
+            max_snapshots: 300,
+            max_bytes: 8 * 1024 * 1024, // 8MB cap
+            total_bytes: 0,
+            frame_skip: 2,
             frame_counter: 0,
         }
     }
@@ -279,14 +283,23 @@ impl RewindBuffer {
         snapshot.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
         snapshot.extend(bus_state);
         
+        self.total_bytes += snapshot.len();
         self.snapshots.push(snapshot);
-        if self.snapshots.len() > self.max_snapshots {
-            self.snapshots.remove(0);
+        
+        // Cap at max_snapshots AND max_bytes (8MB default)
+        while self.snapshots.len() > self.max_snapshots || self.total_bytes > self.max_bytes {
+            if let Some(old) = self.snapshots.first() {
+                self.total_bytes -= old.len();
+                self.snapshots.remove(0);
+            } else {
+                break;
+            }
         }
     }
 
     fn pop_frame(&mut self, bus: &mut Bus, cpu: &mut Cpu) -> bool {
         if let Some(snapshot) = self.snapshots.pop() {
+            self.total_bytes -= snapshot.len();
             let mut pos = 0;
             if pos + 4 > snapshot.len() { return false; }
             let cpu_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
@@ -308,6 +321,7 @@ impl RewindBuffer {
     
     fn clear(&mut self) {
         self.snapshots.clear();
+        self.total_bytes = 0;
         self.frame_counter = 0;
     }
 }

@@ -61,19 +61,3 @@ impl Joypad {
         }
     }
 }
-
-pub struct FourScore {
-    pub joypad3: Joypad,
-    pub joypad4: Joypad,
-    pub enabled: bool,
-}
-
-impl FourScore {
-    pub fn new() -> Self {
-        FourScore {
-            joypad3: Joypad::new(),
-            joypad4: Joypad::new(),
-            enabled: false,
-        }
-    }
-}
