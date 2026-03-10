@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
 use std::env;
 use std::fs;
