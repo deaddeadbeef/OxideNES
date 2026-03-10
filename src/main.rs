@@ -801,12 +801,12 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
         draw_text_8x8(fb, "SETTINGS", 3, row, color);
     }
 
-    draw_separator_line(fb, 25);
-    draw_text_centered_8x8(fb, "A:OPEN  ESC:QUIT", 26, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 27, MENU_DARK_GRAY);
+    draw_separator_line(fb, 24);
+    draw_text_centered_8x8(fb, "A:OPEN  ESC:QUIT", 25, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 26, MENU_DARK_GRAY);
 
     // Bottom hint
-    draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 28, 0x585858);
+    draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, 0x585858);
 }
 
 fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
@@ -838,8 +838,15 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     }
 
     draw_separator_line(fb, 16);
-    draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 20, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "ESC TO GO BACK", 21, MENU_DARK_GRAY);
+
+    // Key bindings display (read-only)
+    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 17, MENU_DARK_GRAY);
+    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.key_bindings.up, cfg.key_bindings.down, cfg.key_bindings.left, cfg.key_bindings.right), 4, 18, MENU_GRAY);
+    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.key_bindings.a, cfg.key_bindings.b, cfg.key_bindings.start, cfg.key_bindings.select), 4, 19, MENU_GRAY);
+    draw_text_centered_8x8(fb, "EDIT CONFIG.JSON TO REMAP", 20, MENU_DARK_GRAY);
+
+    draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 22, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "ESC TO GO BACK", 23, MENU_DARK_GRAY);
 }
 
 fn truncate_path_display(path: &Path, max_chars: usize) -> String {
@@ -885,8 +892,8 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             let is_selected = i == browser.selected;
 
             let name_upper = entry.name.to_uppercase();
-            let display_name = if name_upper.len() > 26 {
-                format!("{}..", &name_upper[..24])
+            let display_name = if name_upper.len() > 24 {
+                format!("{}...", &name_upper[..21])
             } else {
                 name_upper
             };
@@ -913,9 +920,9 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_WHITE };
                 draw_text_8x8(fb, &display, 3, row, color);
                 // File size for selected .nes files
-                if !entry.is_dir {
+                if !entry.is_dir && entry.size_kb > 0 {
                     let size_str = format!("{}K", entry.size_kb);
-                    let size_x = 30 - size_str.len();
+                    let size_x = 27 - size_str.len().min(6);
                     draw_text_8x8(fb, &size_str, size_x, row, MENU_DARK_GRAY);
                 }
             } else {
@@ -924,11 +931,11 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             }
         }
 
-        // Scroll position indicator
+        // Scroll position indicator (top-right corner)
         if browser.entries.len() > VISIBLE_ROWS {
             let pos_str = format!("{}/{}", browser.selected + 1, browser.entries.len());
-            let pos_x = 30 - pos_str.len();
-            draw_text_8x8(fb, &pos_str, pos_x, 25, MENU_DARK_GRAY);
+            let pos_x = 28 - pos_str.len().min(8);
+            draw_text_8x8(fb, &pos_str, pos_x, 3, MENU_DARK_GRAY);
         }
     }
 
