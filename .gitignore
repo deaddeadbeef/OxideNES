@@ -1,1 +1,11 @@
 /target
+
+# User data
+*.sav
+*.sav[0-9]
+*.sram
+screenshots/
+config.json
+
+# Development artifacts  
+apu_diag*.txt

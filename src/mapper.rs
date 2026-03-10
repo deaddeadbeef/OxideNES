@@ -86,11 +86,11 @@ impl Mapper for Mapper000 {
     }
 }
 
+#[allow(dead_code)]
 pub struct Mapper004 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    mirroring: crate::cartridge::Mirroring,
     
     // Bank select
     bank_select: u8,
@@ -122,7 +122,6 @@ impl Mapper004 {
             prg_rom,
             chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
             prg_ram: vec![0; 0x2000],
-            mirroring,
             bank_select: 0,
             prg_bank_mode: false,
             chr_inversion: false,
@@ -428,11 +427,11 @@ impl Mapper for Mapper002 {
     }
 }
 
+#[allow(dead_code)]
 pub struct Mapper001 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    mirroring: crate::cartridge::Mirroring,
     
     shift_register: u8,
     write_count: u8,
@@ -447,7 +446,7 @@ pub struct Mapper001 {
 }
 
 impl Mapper001 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
         let chr_size = chr_rom.len();
         let has_chr_ram = chr_rom.is_empty();
@@ -456,7 +455,6 @@ impl Mapper001 {
             prg_rom,
             chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
             prg_ram: vec![0; 0x2000],
-            mirroring,
             shift_register: 0x10,
             write_count: 0,
             control: 0x0C, // PRG fixed last bank mode
@@ -778,11 +776,11 @@ impl Mapper for Mapper007 {
 // === Mapper 9: MMC2 / PxROM (Mike Tyson's Punch-Out!!) ===
 // CHR bank switching triggered by PPU reads of specific tiles (latch-based)
 
+#[allow(dead_code)]
 pub struct Mapper009 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    mirroring: crate::cartridge::Mirroring,
     prg_banks: usize,
     
     prg_bank: u8,
@@ -799,12 +797,12 @@ pub struct Mapper009 {
 }
 
 impl Mapper009 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x2000;
         Mapper009 {
             prg_rom, chr_rom,
             prg_ram: vec![0; 0x2000],
-            mirroring, prg_banks,
+            prg_banks,
             prg_bank: 0,
             chr_bank_0_fd: 0, chr_bank_0_fe: 0,
             chr_bank_1_fd: 0, chr_bank_1_fe: 0,
@@ -1282,11 +1280,11 @@ impl Mapper for Mapper069 {
     }
 }
 
+#[allow(dead_code)]
 pub struct Mapper010 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    mirroring: crate::cartridge::Mirroring,
     prg_banks: usize,
     prg_bank: u8,
     chr_bank_0_fd: u8,
@@ -1299,11 +1297,11 @@ pub struct Mapper010 {
 }
 
 impl Mapper010 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
         Mapper010 {
             prg_rom, chr_rom, prg_ram: vec![0; 0x2000],
-            mirroring, prg_banks, prg_bank: 0,
+            prg_banks, prg_bank: 0,
             chr_bank_0_fd: 0, chr_bank_0_fe: 0,
             chr_bank_1_fd: 0, chr_bank_1_fe: 0,
             latch_0: std::cell::Cell::new(true), latch_1: std::cell::Cell::new(true),

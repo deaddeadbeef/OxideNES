@@ -180,7 +180,13 @@ fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     
     let mut data = Vec::new();
     // Magic header + version
-    data.extend_from_slice(b"NESSAV02");
+    data.extend_from_slice(b"NESSAV03");
+    
+    // ROM fingerprint: hash of recent game path as ROM identifier
+    let rom_hash: u32 = config.recent_games.first()
+        .map(|s| s.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32)))
+        .unwrap_or(0);
+    data.extend_from_slice(&rom_hash.to_le_bytes());
     
     // CPU state
     let cpu_state = cpu.save_state();
@@ -200,9 +206,25 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -
     if !path.exists() { return false; }
     let Ok(data) = fs::read(&path) else { return false; };
     
-    // Check magic header
-    if data.len() < 8 || &data[0..8] != b"NESSAV02" { return false; }
+    // Check magic header (accept V02 for backward compat, V03 with ROM fingerprint)
+    if data.len() < 8 { return false; }
+    let is_v03 = &data[0..8] == b"NESSAV03";
+    let is_v02 = &data[0..8] == b"NESSAV02";
+    if !is_v02 && !is_v03 { return false; }
     let mut pos = 8;
+    
+    // V03: validate ROM fingerprint
+    if is_v03 {
+        if pos + 4 > data.len() { return false; }
+        let saved_hash = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
+        pos += 4;
+        let current_hash: u32 = config.recent_games.first()
+            .map(|s| s.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32)))
+            .unwrap_or(0);
+        if saved_hash != current_hash {
+            return false; // Wrong ROM
+        }
+    }
     
     // CPU state
     if pos + 4 > data.len() { return false; }
@@ -784,8 +806,9 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         format!("CRT FILTER: {}", if cfg.crt_enabled { "ON" } else { "OFF" }),
         format!("BARREL DISTORTION: {}", if cfg.barrel_distortion { "ON" } else { "OFF" }),
         format!("AUDIO VOLUME: {}%", audio_volume),
+        format!("REGION: {}", if cfg.region == "pal" { "PAL" } else { "NTSC" }),
     ];
-    let setting_rows = [8, 10, 12];
+    let setting_rows = [8, 10, 12, 14];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
         let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
@@ -1228,9 +1251,14 @@ fn main() {
     let mut paused: bool = false;
     let mut pause_selected: usize = 0;
     let mut current_save_slot: u8 = 1;
+    let mut cheat_input_mode = false;
+    let mut cheat_input_buffer = String::new();
+    let mut cheat_message: Option<String> = None;
+    let mut cheat_message_timer: u32 = 0;
     let mut rewind_buffer = RewindBuffer::new();
 
     let mut show_fps = false;
+    let mut show_help = false;
     let mut fps_timer = std::time::Instant::now();
     let mut fps_frames: u32 = 0;
     let mut fps_display: String = String::new();
@@ -1255,6 +1283,10 @@ fn main() {
                 game_cpu = Some(cpu);
                 emulator_state = EmulatorState::Game;
                 println!("Loaded: {}", rom_path);
+                let game_name = Path::new(rom_path).file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                window.set_title(&format!("NES Emulator — {}", game_name));
             }
         }
     }
@@ -1337,7 +1369,7 @@ fn main() {
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
-                        if input.down && *selected < 2 {
+                        if input.down && *selected < 3 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -1368,6 +1400,15 @@ fn main() {
                                         audio_volume = audio_volume.saturating_sub(10);
                                     }
                                     config.audio_volume = audio_volume;
+                                    save_config(&config);
+                                }
+                                3 => {
+                                    // Toggle region
+                                    if config.region == "pal" {
+                                        config.region = "ntsc".to_string();
+                                    } else {
+                                        config.region = "pal".to_string();
+                                    }
                                     save_config(&config);
                                 }
                                 _ => {}
@@ -1497,6 +1538,10 @@ fn main() {
                                         game_cpu = Some(cpu);
                                         next_state = Some(EmulatorState::Game);
                                         println!("Loaded: {}", path_str);
+                                        let game_name = Path::new(&path_str).file_stem()
+                                            .map(|s| s.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| "Unknown".to_string());
+                                        window.set_title(&format!("NES Emulator — {}", game_name));
                                     }
                                     Err(e) => {
                                         play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -1560,7 +1605,52 @@ fn main() {
             EmulatorState::Game => {
                 if let (Some(ref mut bus), Some(ref mut cpu)) = (&mut game_bus, &mut game_cpu) {
                     // Handle pause menu input
-                    if paused {
+                    if paused && cheat_input_mode {
+                        // Cheat code text input mode
+                        for key in &window.get_keys_pressed(KeyRepeat::Yes) {
+                            match key {
+                                Key::A => cheat_input_buffer.push('A'),
+                                Key::E => cheat_input_buffer.push('E'),
+                                Key::G => cheat_input_buffer.push('G'),
+                                Key::I => cheat_input_buffer.push('I'),
+                                Key::K => cheat_input_buffer.push('K'),
+                                Key::L => cheat_input_buffer.push('L'),
+                                Key::N => cheat_input_buffer.push('N'),
+                                Key::O => cheat_input_buffer.push('O'),
+                                Key::P => cheat_input_buffer.push('P'),
+                                Key::S => cheat_input_buffer.push('S'),
+                                Key::T => cheat_input_buffer.push('T'),
+                                Key::U => cheat_input_buffer.push('U'),
+                                Key::V => cheat_input_buffer.push('V'),
+                                Key::X => cheat_input_buffer.push('X'),
+                                Key::Y => cheat_input_buffer.push('Y'),
+                                Key::Z => cheat_input_buffer.push('Z'),
+                                Key::Backspace => { cheat_input_buffer.pop(); }
+                                Key::Enter => {
+                                    if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
+                                        if let Some(code) = nes_emulator::bus::GameGenieCode::decode(&cheat_input_buffer) {
+                                            bus.cheats.push(code);
+                                            cheat_message = Some(format!("CHEAT ADDED: {}", cheat_input_buffer));
+                                            cheat_message_timer = 120;
+                                            cheat_input_mode = false;
+                                        } else {
+                                            cheat_message = Some("INVALID CODE".to_string());
+                                            cheat_message_timer = 90;
+                                        }
+                                    } else {
+                                        cheat_message = Some("CODE MUST BE 6 OR 8 CHARS".to_string());
+                                        cheat_message_timer = 90;
+                                    }
+                                    cheat_input_buffer.clear();
+                                }
+                                Key::Escape => {
+                                    cheat_input_mode = false;
+                                    cheat_input_buffer.clear();
+                                }
+                                _ => {}
+                            }
+                        }
+                    } else if paused {
                         let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
                         if input.up && pause_selected > 0 {
                             pause_selected -= 1;
@@ -1569,7 +1659,7 @@ fn main() {
                                 sound_cooldown = 3;
                             }
                         }
-                        if input.down && pause_selected < 3 {
+                        if input.down && pause_selected < 4 {
                             pause_selected += 1;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -1606,7 +1696,12 @@ fn main() {
                                         play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
                                 }
-                                3 => { // Return to menu
+                                3 => { // Enter cheat code
+                                    cheat_input_mode = true;
+                                    cheat_input_buffer.clear();
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                                4 => { // Return to menu
                                     if let Some(ref bus) = game_bus {
                                         auto_save_sram(bus, &config);
                                     }
@@ -1615,6 +1710,7 @@ fn main() {
                                     paused = false;
                                     quit_hold_frames = 0;
                                     emulator_state = EmulatorState::Menu(MenuState::new());
+                                    window.set_title("NES Emulator");
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
                                 }
@@ -1696,6 +1792,7 @@ fn main() {
                                 quit_hold_frames = 0;
                                 repeat_tracker = RepeatTracker::new();
                                 emulator_state = EmulatorState::Menu(MenuState::new());
+                                window.set_title("NES Emulator");
                                 continue;
                             }
                         } else {
@@ -1761,6 +1858,33 @@ fn main() {
                             if !show_fps {
                                 fps_display.clear();
                             }
+                        }
+
+                        // F12 help overlay
+                        if window.is_key_pressed(Key::F12, KeyRepeat::No) {
+                            show_help = !show_help;
+                        }
+
+                        // F7 reset game
+                        if window.is_key_pressed(Key::F7, KeyRepeat::No) {
+                            cpu.reset(bus);
+                            overlay_message = Some("GAME RESET".to_string());
+                            overlay_timer = 90;
+                        }
+
+                        // M mute toggle
+                        if window.is_key_pressed(Key::M, KeyRepeat::No) {
+                            if audio_volume > 0 {
+                                config.audio_volume = audio_volume;
+                                save_config(&config);
+                                audio_volume = 0;
+                                overlay_message = Some("AUDIO: MUTED".to_string());
+                            } else {
+                                audio_volume = config.audio_volume;
+                                if audio_volume == 0 { audio_volume = 100; }
+                                overlay_message = Some(format!("AUDIO: {}%", audio_volume));
+                            }
+                            overlay_timer = 60;
                         }
 
                         if window.is_key_pressed(Key::F1, KeyRepeat::No) {
@@ -1832,6 +1956,68 @@ fn main() {
                             let fy = SCREEN_Y + 8;
                             draw_text(&mut composite_buffer, &fps_display, fx, fy, 0x00FF00, WINDOW_WIDTH);
                         }
+                    }
+
+                    // Help overlay
+                    if show_help {
+                        // Semi-transparent dark background over the screen area
+                        for y in SCREEN_Y..(SCREEN_Y + SCREEN_H) {
+                            for x in SCREEN_X..(SCREEN_X + SCREEN_W) {
+                                let idx = y * WINDOW_WIDTH + x;
+                                if idx < composite_buffer.len() {
+                                    let p = composite_buffer[idx];
+                                    let r = ((p >> 16) & 0xFF) / 3;
+                                    let g = ((p >> 8) & 0xFF) / 3;
+                                    let b = (p & 0xFF) / 3;
+                                    composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                }
+                            }
+                        }
+                        
+                        let help_x = SCREEN_X + 40;
+                        let mut help_y = SCREEN_Y + 30;
+                        let color = 0x44FF44;
+                        let dim = 0x888888;
+                        
+                        draw_text(&mut composite_buffer, "=== CONTROLS ===", help_x, help_y, 0xFFFF00, WINDOW_WIDTH);
+                        help_y += 20;
+                        draw_text(&mut composite_buffer, "WASD/ARROWS  D-PAD", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "K  A BUTTON", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "J  B BUTTON", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "ENTER  START", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "RSHIFT  SELECT", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "Z/X  TURBO A/B", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 24;
+                        draw_text(&mut composite_buffer, "=== EMULATOR ===", help_x, help_y, 0xFFFF00, WINDOW_WIDTH);
+                        help_y += 20;
+                        draw_text(&mut composite_buffer, "ESC  PAUSE MENU", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "TAB  FAST FORWARD", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "BACKSPACE  REWIND", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "M  MUTE/UNMUTE", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F1  CRT FILTER", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F2-F4,F6  SAVE SLOT", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F5/F9  SAVE/LOAD", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F7  RESET GAME", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F8  SCREENSHOT", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F10  FPS COUNTER", help_x, help_y, color, WINDOW_WIDTH);
+                        help_y += 12;
+                        draw_text(&mut composite_buffer, "F12  THIS HELP", help_x, help_y, dim, WINDOW_WIDTH);
+                        help_y += 24;
+                        draw_text(&mut composite_buffer, "PRESS F12 TO CLOSE", help_x, help_y, dim, WINDOW_WIDTH);
                     }
 
                     // Draw quit combo progress overlay (uses previous frame's counter)
@@ -1946,7 +2132,9 @@ fn main() {
                         }
                         
                         // Menu items
-                        let items = ["RESUME GAME", "SAVE STATE  (F5)", "LOAD STATE  (F9)", "RETURN TO MENU"];
+                        let slot_str = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                        let load_str = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                        let items = ["RESUME GAME", &slot_str, &load_str, "RETURN TO MENU"];
                         for (i, item) in items.iter().enumerate() {
                             let row = box_top + 4 + i * 2; // rows 12, 14, 16, 18
                             let is_selected = i == pause_selected;
@@ -1994,6 +2182,7 @@ fn main() {
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
+                    window.set_title("NES Emulator");
                 }
             }
         }
