@@ -53,6 +53,39 @@ struct KeyBindings {
     turbo_b: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct KeyboardBindings {
+    up: String,
+    down: String,
+    left: String,
+    right: String,
+    a: String,
+    b: String,
+    start: String,
+    select: String,
+    turbo_a: String,
+    turbo_b: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ControllerBindings {
+    a: String,
+    b: String,
+    turbo_a: String,
+    turbo_b: String,
+    start: String,
+    select: String,
+    deadzone: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct InputBindings {
+    keyboard_p1: KeyboardBindings,
+    keyboard_p2: KeyboardBindings,
+    controller_p1: ControllerBindings,
+    controller_p2: ControllerBindings,
+}
+
 impl Default for KeyBindings {
     fn default() -> Self {
         Self {
@@ -66,6 +99,59 @@ impl Default for KeyBindings {
             select: "RightShift".to_string(),
             turbo_a: "Z".to_string(),
             turbo_b: "X".to_string(),
+        }
+    }
+}
+
+impl Default for KeyboardBindings {
+    fn default() -> Self {
+        Self {
+            up: "W".to_string(),
+            down: "S".to_string(),
+            left: "A".to_string(),
+            right: "D".to_string(),
+            a: "K".to_string(),
+            b: "J".to_string(),
+            start: "Enter".to_string(),
+            select: "RightShift".to_string(),
+            turbo_a: "Z".to_string(),
+            turbo_b: "X".to_string(),
+        }
+    }
+}
+
+impl Default for ControllerBindings {
+    fn default() -> Self {
+        Self {
+            a: "South".to_string(),
+            b: "West".to_string(),
+            turbo_a: "East".to_string(),
+            turbo_b: "North".to_string(),
+            start: "Start".to_string(),
+            select: "Select".to_string(),
+            deadzone: 0.3,
+        }
+    }
+}
+
+impl Default for InputBindings {
+    fn default() -> Self {
+        Self {
+            keyboard_p1: KeyboardBindings::default(),
+            keyboard_p2: KeyboardBindings {
+                up: "Up".to_string(),
+                down: "Down".to_string(),
+                left: "Left".to_string(),
+                right: "Right".to_string(),
+                a: "Period".to_string(),
+                b: "Comma".to_string(),
+                start: "Slash".to_string(),
+                select: "RightCtrl".to_string(),
+                turbo_a: "Semicolon".to_string(),
+                turbo_b: "Apostrophe".to_string(),
+            },
+            controller_p1: ControllerBindings::default(),
+            controller_p2: ControllerBindings::default(),
         }
     }
 }
@@ -89,11 +175,127 @@ fn string_to_key(s: &str) -> Option<Key> {
         "1" => Some(Key::Key1), "2" => Some(Key::Key2), "3" => Some(Key::Key3),
         "4" => Some(Key::Key4), "5" => Some(Key::Key5), "6" => Some(Key::Key6),
         "7" => Some(Key::Key7), "8" => Some(Key::Key8), "9" => Some(Key::Key9), "0" => Some(Key::Key0),
+        "Escape" => Some(Key::Escape), "Tab" => Some(Key::Tab), "Backspace" => Some(Key::Backspace),
+        "Delete" => Some(Key::Delete), "Insert" => Some(Key::Insert),
+        "Home" => Some(Key::Home), "End" => Some(Key::End),
+        "PageUp" => Some(Key::PageUp), "PageDown" => Some(Key::PageDown),
+        "Pause" => Some(Key::Pause), "Menu" => Some(Key::Menu),
+        "F1" => Some(Key::F1), "F2" => Some(Key::F2), "F3" => Some(Key::F3),
+        "F4" => Some(Key::F4), "F5" => Some(Key::F5), "F6" => Some(Key::F6),
+        "F7" => Some(Key::F7), "F8" => Some(Key::F8), "F9" => Some(Key::F9),
+        "F10" => Some(Key::F10), "F11" => Some(Key::F11), "F12" => Some(Key::F12),
+        "F13" => Some(Key::F13), "F14" => Some(Key::F14), "F15" => Some(Key::F15),
+        "CapsLock" => Some(Key::CapsLock), "NumLock" => Some(Key::NumLock), "ScrollLock" => Some(Key::ScrollLock),
+        "NumPad0" => Some(Key::NumPad0), "NumPad1" => Some(Key::NumPad1), "NumPad2" => Some(Key::NumPad2),
+        "NumPad3" => Some(Key::NumPad3), "NumPad4" => Some(Key::NumPad4), "NumPad5" => Some(Key::NumPad5),
+        "NumPad6" => Some(Key::NumPad6), "NumPad7" => Some(Key::NumPad7), "NumPad8" => Some(Key::NumPad8),
+        "NumPad9" => Some(Key::NumPad9),
+        "NumPadDot" => Some(Key::NumPadDot), "NumPadSlash" => Some(Key::NumPadSlash),
+        "NumPadAsterisk" => Some(Key::NumPadAsterisk), "NumPadMinus" => Some(Key::NumPadMinus),
+        "NumPadPlus" => Some(Key::NumPadPlus), "NumPadEnter" => Some(Key::NumPadEnter),
+        "LeftAlt" => Some(Key::LeftAlt), "RightAlt" => Some(Key::RightAlt),
+        "LeftSuper" => Some(Key::LeftSuper), "RightSuper" => Some(Key::RightSuper),
+        "Backquote" => Some(Key::Backquote), "Backslash" => Some(Key::Backslash),
+        "Equal" => Some(Key::Equal), "Minus" => Some(Key::Minus),
+        "LeftBracket" => Some(Key::LeftBracket), "RightBracket" => Some(Key::RightBracket),
         _ => None,
     }
 }
 
+fn string_to_gilrs_button(name: &str) -> Option<gilrs::Button> {
+    match name {
+        "South" => Some(gilrs::Button::South),
+        "East" => Some(gilrs::Button::East),
+        "North" => Some(gilrs::Button::North),
+        "West" => Some(gilrs::Button::West),
+        "Start" => Some(gilrs::Button::Start),
+        "Select" => Some(gilrs::Button::Select),
+        "Mode" => Some(gilrs::Button::Mode),
+        "LeftTrigger" => Some(gilrs::Button::LeftTrigger),
+        "RightTrigger" => Some(gilrs::Button::RightTrigger),
+        "LeftTrigger2" => Some(gilrs::Button::LeftTrigger2),
+        "RightTrigger2" => Some(gilrs::Button::RightTrigger2),
+        "LeftThumb" => Some(gilrs::Button::LeftThumb),
+        "RightThumb" => Some(gilrs::Button::RightThumb),
+        "DPadUp" => Some(gilrs::Button::DPadUp),
+        "DPadDown" => Some(gilrs::Button::DPadDown),
+        "DPadLeft" => Some(gilrs::Button::DPadLeft),
+        "DPadRight" => Some(gilrs::Button::DPadRight),
+        _ => None,
+    }
+}
+
+fn key_to_string(key: Key) -> String {
+    match key {
+        Key::A => "A".to_string(), Key::B => "B".to_string(), Key::C => "C".to_string(), Key::D => "D".to_string(),
+        Key::E => "E".to_string(), Key::F => "F".to_string(), Key::G => "G".to_string(), Key::H => "H".to_string(),
+        Key::I => "I".to_string(), Key::J => "J".to_string(), Key::K => "K".to_string(), Key::L => "L".to_string(),
+        Key::M => "M".to_string(), Key::N => "N".to_string(), Key::O => "O".to_string(), Key::P => "P".to_string(),
+        Key::Q => "Q".to_string(), Key::R => "R".to_string(), Key::S => "S".to_string(), Key::T => "T".to_string(),
+        Key::U => "U".to_string(), Key::V => "V".to_string(), Key::W => "W".to_string(), Key::X => "X".to_string(),
+        Key::Y => "Y".to_string(), Key::Z => "Z".to_string(),
+        Key::Up => "Up".to_string(), Key::Down => "Down".to_string(), Key::Left => "Left".to_string(), Key::Right => "Right".to_string(),
+        Key::Enter => "Enter".to_string(), Key::Space => "Space".to_string(),
+        Key::LeftShift => "LeftShift".to_string(), Key::RightShift => "RightShift".to_string(),
+        Key::LeftCtrl => "LeftCtrl".to_string(), Key::RightCtrl => "RightCtrl".to_string(),
+        Key::Comma => "Comma".to_string(), Key::Period => "Period".to_string(),
+        Key::Slash => "Slash".to_string(), Key::Semicolon => "Semicolon".to_string(),
+        Key::Apostrophe => "Apostrophe".to_string(),
+        Key::Key1 => "1".to_string(), Key::Key2 => "2".to_string(), Key::Key3 => "3".to_string(),
+        Key::Key4 => "4".to_string(), Key::Key5 => "5".to_string(), Key::Key6 => "6".to_string(),
+        Key::Key7 => "7".to_string(), Key::Key8 => "8".to_string(), Key::Key9 => "9".to_string(), Key::Key0 => "0".to_string(),
+        Key::Escape => "Escape".to_string(), Key::Tab => "Tab".to_string(), Key::Backspace => "Backspace".to_string(),
+        Key::Delete => "Delete".to_string(), Key::Insert => "Insert".to_string(),
+        Key::Home => "Home".to_string(), Key::End => "End".to_string(),
+        Key::PageUp => "PageUp".to_string(), Key::PageDown => "PageDown".to_string(),
+        Key::Pause => "Pause".to_string(), Key::Menu => "Menu".to_string(),
+        Key::F1 => "F1".to_string(), Key::F2 => "F2".to_string(), Key::F3 => "F3".to_string(),
+        Key::F4 => "F4".to_string(), Key::F5 => "F5".to_string(), Key::F6 => "F6".to_string(),
+        Key::F7 => "F7".to_string(), Key::F8 => "F8".to_string(), Key::F9 => "F9".to_string(),
+        Key::F10 => "F10".to_string(), Key::F11 => "F11".to_string(), Key::F12 => "F12".to_string(),
+        Key::F13 => "F13".to_string(), Key::F14 => "F14".to_string(), Key::F15 => "F15".to_string(),
+        Key::CapsLock => "CapsLock".to_string(), Key::NumLock => "NumLock".to_string(), Key::ScrollLock => "ScrollLock".to_string(),
+        Key::NumPad0 => "NumPad0".to_string(), Key::NumPad1 => "NumPad1".to_string(), Key::NumPad2 => "NumPad2".to_string(),
+        Key::NumPad3 => "NumPad3".to_string(), Key::NumPad4 => "NumPad4".to_string(), Key::NumPad5 => "NumPad5".to_string(),
+        Key::NumPad6 => "NumPad6".to_string(), Key::NumPad7 => "NumPad7".to_string(), Key::NumPad8 => "NumPad8".to_string(),
+        Key::NumPad9 => "NumPad9".to_string(),
+        Key::NumPadDot => "NumPadDot".to_string(), Key::NumPadSlash => "NumPadSlash".to_string(),
+        Key::NumPadAsterisk => "NumPadAsterisk".to_string(), Key::NumPadMinus => "NumPadMinus".to_string(),
+        Key::NumPadPlus => "NumPadPlus".to_string(), Key::NumPadEnter => "NumPadEnter".to_string(),
+        Key::LeftAlt => "LeftAlt".to_string(), Key::RightAlt => "RightAlt".to_string(),
+        Key::LeftSuper => "LeftSuper".to_string(), Key::RightSuper => "RightSuper".to_string(),
+        Key::Backquote => "Backquote".to_string(), Key::Backslash => "Backslash".to_string(),
+        Key::Equal => "Equal".to_string(), Key::Minus => "Minus".to_string(),
+        Key::LeftBracket => "LeftBracket".to_string(), Key::RightBracket => "RightBracket".to_string(),
+        _ => format!("{:?}", key),
+    }
+}
+
+fn gilrs_button_to_string(button: gilrs::Button) -> String {
+    match button {
+        gilrs::Button::South => "South".to_string(),
+        gilrs::Button::East => "East".to_string(),
+        gilrs::Button::North => "North".to_string(),
+        gilrs::Button::West => "West".to_string(),
+        gilrs::Button::Start => "Start".to_string(),
+        gilrs::Button::Select => "Select".to_string(),
+        gilrs::Button::Mode => "Mode".to_string(),
+        gilrs::Button::LeftTrigger => "LeftTrigger".to_string(),
+        gilrs::Button::RightTrigger => "RightTrigger".to_string(),
+        gilrs::Button::LeftTrigger2 => "LeftTrigger2".to_string(),
+        gilrs::Button::RightTrigger2 => "RightTrigger2".to_string(),
+        gilrs::Button::LeftThumb => "LeftThumb".to_string(),
+        gilrs::Button::RightThumb => "RightThumb".to_string(),
+        gilrs::Button::DPadUp => "DPadUp".to_string(),
+        gilrs::Button::DPadDown => "DPadDown".to_string(),
+        gilrs::Button::DPadLeft => "DPadLeft".to_string(),
+        gilrs::Button::DPadRight => "DPadRight".to_string(),
+        _ => format!("{:?}", button),
+    }
+}
+
 fn default_region() -> String { "ntsc".to_string() }
+fn default_glass_intensity() -> u8 { 60 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct EmulatorConfig {
@@ -102,9 +304,15 @@ struct EmulatorConfig {
     barrel_distortion: bool,
     audio_volume: u32,
     #[serde(default)]
-    key_bindings: KeyBindings,
+    key_bindings: Option<KeyBindings>,
     #[serde(default = "default_region")]
     region: String,
+    #[serde(default)]
+    input_bindings: InputBindings,
+    #[serde(default = "default_glass_intensity")]
+    glass_intensity: u8,
+    #[serde(default)]
+    config_version: u32,
 }
 
 impl Default for EmulatorConfig {
@@ -114,8 +322,11 @@ impl Default for EmulatorConfig {
             crt_enabled: true,
             barrel_distortion: false,
             audio_volume: 100,
-            key_bindings: KeyBindings::default(),
+            key_bindings: None,
             region: "ntsc".to_string(),
+            input_bindings: InputBindings::default(),
+            glass_intensity: 60,
+            config_version: 2,
         }
     }
 }
@@ -135,7 +346,33 @@ fn load_config() -> EmulatorConfig {
     let path = config_path();
     if path.exists() {
         if let Ok(data) = fs::read_to_string(&path) {
-            if let Ok(cfg) = serde_json::from_str::<EmulatorConfig>(&data) {
+            if let Ok(mut cfg) = serde_json::from_str::<EmulatorConfig>(&data) {
+                let mut migrated = false;
+                
+                // Handle migration from old key_bindings to new input_bindings
+                if cfg.config_version < 2 {
+                    if let Some(old) = &cfg.key_bindings {
+                        cfg.input_bindings.keyboard_p1 = KeyboardBindings {
+                            up: old.up.clone(),
+                            down: old.down.clone(),
+                            left: old.left.clone(),
+                            right: old.right.clone(),
+                            a: old.a.clone(),
+                            b: old.b.clone(),
+                            start: old.start.clone(),
+                            select: old.select.clone(),
+                            turbo_a: old.turbo_a.clone(),
+                            turbo_b: old.turbo_b.clone(),
+                        };
+                        cfg.key_bindings = None;
+                    }
+                    cfg.config_version = 2;
+                    migrated = true;
+                }
+                
+                if migrated {
+                    save_config(&cfg);
+                }
                 return cfg;
             }
         }
@@ -178,7 +415,8 @@ fn save_state_path(config: &EmulatorConfig, slot: u8) -> Option<PathBuf> {
 }
 
 fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
-    let Some(path) = save_state_path(config, slot) else { return false; };
+    let path_opt = save_state_path(config, slot);
+    let Some(path) = path_opt else { return false; };
     let _ = fs::create_dir_all(save_state_dir());
     
     let mut data = Vec::new();
@@ -199,7 +437,8 @@ fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
 }
 
 fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -> bool {
-    let Some(path) = save_state_path(config, slot) else { return false; };
+    let path_opt = save_state_path(config, slot);
+    let Some(path) = path_opt else { return false; };
     if !path.exists() { return false; }
     let Ok(data) = fs::read(&path) else { return false; };
     
@@ -294,14 +533,14 @@ impl RewindBuffer {
             let cpu_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
             pos += 4;
             if pos + cpu_len > snapshot.len() { return false; }
-            cpu.load_state(&snapshot[pos..pos+cpu_len]);
+            if !cpu.load_state(&snapshot[pos..pos+cpu_len]) { return false; }
             pos += cpu_len;
             
             if pos + 4 > snapshot.len() { return false; }
             let bus_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
             pos += 4;
             if pos + bus_len > snapshot.len() { return false; }
-            bus.load_state(&snapshot[pos..pos+bus_len]);
+            if !bus.load_state(&snapshot[pos..pos+bus_len]) { return false; }
             true
         } else {
             false
@@ -403,6 +642,16 @@ impl MenuState {
 enum SubMenu {
     Settings { selected: usize },
     FileBrowser(FileBrowser),
+    InputSettings(InputSettingsState),
+}
+
+struct InputSettingsState {
+    tab: u8,  // 0=KB P1, 1=KB P2, 2=Ctrl P1, 3=Ctrl P2
+    selected: usize,
+    waiting_for_input: bool,
+    bindings: InputBindings,  // working copy
+    conflict_message: Option<String>,
+    conflict_timer: u32,
 }
 
 struct FileBrowserEntry {
@@ -796,7 +1045,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, 0x585858);
 }
 
-fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32) {
+fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32, glass_intensity: u8) {
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
     }
@@ -811,10 +1060,12 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     let settings_items = [
         format!("CRT FILTER: {}", if cfg.crt_enabled { "ON" } else { "OFF" }),
         format!("BARREL DISTORTION: {}", if cfg.barrel_distortion { "ON" } else { "OFF" }),
+        format!("GLASS INTENSITY: {}%", glass_intensity),
         format!("AUDIO VOLUME: {}%", audio_volume),
         format!("REGION: {}", if cfg.region == "pal" { "PAL" } else { "NTSC" }),
+        "INPUT SETTINGS >".to_string(),
     ];
-    let setting_rows = [8, 10, 12, 14];
+    let setting_rows = [8, 10, 12, 14, 16, 18];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
         let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
@@ -824,16 +1075,113 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         draw_text_8x8(fb, item, 5, row, color);
     }
 
-    draw_separator_line(fb, 16);
+    draw_separator_line(fb, 20);
 
     // Key bindings display (read-only)
-    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 17, MENU_DARK_GRAY);
-    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.key_bindings.up, cfg.key_bindings.down, cfg.key_bindings.left, cfg.key_bindings.right), 4, 18, MENU_GRAY);
-    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.key_bindings.a, cfg.key_bindings.b, cfg.key_bindings.start, cfg.key_bindings.select), 4, 19, MENU_GRAY);
-    draw_text_centered_8x8(fb, "EDIT CONFIG.JSON TO REMAP", 20, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 19, MENU_DARK_GRAY);
+    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.input_bindings.keyboard_p1.up, cfg.input_bindings.keyboard_p1.down, cfg.input_bindings.keyboard_p1.left, cfg.input_bindings.keyboard_p1.right), 4, 20, MENU_GRAY);
+    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.input_bindings.keyboard_p1.a, cfg.input_bindings.keyboard_p1.b, cfg.input_bindings.keyboard_p1.start, cfg.input_bindings.keyboard_p1.select), 4, 21, MENU_GRAY);
+    draw_text_centered_8x8(fb, "USE INPUT SETTINGS TO REMAP", 22, MENU_DARK_GRAY);
 
     draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 22, MENU_DARK_GRAY);
     draw_text_centered_8x8(fb, "ESC TO GO BACK", 23, MENU_DARK_GRAY);
+}
+
+fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visible: bool) {
+    for pixel in fb.iter_mut() {
+        *pixel = MENU_BG;
+    }
+
+    draw_double_border_top(fb, 1);
+    draw_double_border_bottom(fb, 28);
+    draw_side_borders(fb);
+
+    draw_text_centered_8x8(fb, "\x11 INPUT SETTINGS \x11", 2, MENU_GOLD);
+
+    // Tab headers
+    let tabs = ["KB P1", "KB P2", "PAD P1", "PAD P2"];
+    let mut tab_x = 4;
+    for (i, tab) in tabs.iter().enumerate() {
+        let color = if i == state.tab as usize { MENU_LIGHT_BLUE } else { MENU_DARK_GRAY };
+        draw_text_8x8(fb, &format!("[{}]", tab), tab_x, 4, color);
+        tab_x += 8;
+    }
+
+    draw_separator_line(fb, 5);
+
+    // Binding lists based on active tab
+    let current_row = 7;
+    
+    match state.tab {
+        0 | 1 => {
+            // Keyboard bindings
+            let bindings = if state.tab == 0 { &state.bindings.keyboard_p1 } else { &state.bindings.keyboard_p2 };
+            let binding_names = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT", "TURBO A", "TURBO B"];
+            let binding_values = [
+                &bindings.up, &bindings.down, &bindings.left, &bindings.right,
+                &bindings.a, &bindings.b, &bindings.start, &bindings.select,
+                &bindings.turbo_a, &bindings.turbo_b
+            ];
+            
+            for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
+                let row = current_row + i;
+                let color = if i == state.selected { MENU_WHITE } else { MENU_GRAY };
+                
+                if i == state.selected && cursor_visible {
+                    draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
+                }
+                
+                if state.waiting_for_input && i == state.selected {
+                    draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
+                    draw_text_8x8(fb, "PRESS A KEY...", 18, row, MENU_GOLD);
+                } else {
+                    draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
+                    draw_text_8x8(fb, value, 18, row, color);
+                }
+            }
+        }
+        2 | 3 => {
+            // Controller bindings
+            let bindings = if state.tab == 2 { &state.bindings.controller_p1 } else { &state.bindings.controller_p2 };
+            let binding_names = ["A", "B", "TURBO A", "TURBO B", "START", "SELECT", "DEADZONE"];
+            let binding_values = [
+                bindings.a.as_str(), bindings.b.as_str(), bindings.turbo_a.as_str(), 
+                bindings.turbo_b.as_str(), bindings.start.as_str(), bindings.select.as_str(),
+                ""  // Special case for deadzone
+            ];
+            
+            for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
+                let row = current_row + i;
+                let color = if i == state.selected { MENU_WHITE } else { MENU_GRAY };
+                
+                if i == state.selected && cursor_visible {
+                    draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
+                }
+                
+                if i == 6 {
+                    // Deadzone special handling
+                    draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
+                    draw_text_8x8(fb, &format!("{:.2}", bindings.deadzone), 18, row, color);
+                } else if state.waiting_for_input && i == state.selected {
+                    draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
+                    draw_text_8x8(fb, "PRESS A BUTTON...", 18, row, MENU_GOLD);
+                } else {
+                    draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
+                    draw_text_8x8(fb, value, 18, row, color);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Conflict message
+    if let Some(ref message) = state.conflict_message {
+        draw_text_centered_8x8(fb, message, 19, 0xFF4444);
+    }
+
+    draw_separator_line(fb, 21);
+    draw_text_centered_8x8(fb, "Enter: REBIND    Tab: NEXT TAB", 22, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "Esc: BACK (save)", 23, MENU_DARK_GRAY);
 }
 
 fn truncate_path_display(path: &Path, max_chars: usize) -> String {
@@ -1197,6 +1545,7 @@ fn main() {
     }
 
     let mut crt_buffer: Vec<u32> = vec![0; SCREEN_W * SCREEN_H];
+    let mut ca_temp: Vec<u32> = vec![0; SCREEN_W * SCREEN_H];
 
     // Build static TV frame once at startup (zero per-frame cost)
     let mut tv_frame_bg = Vec::new();
@@ -1246,6 +1595,8 @@ fn main() {
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
+    let mut glass_intensity = config.glass_intensity;
+    let mut ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
     // Menu framebuffer (256x240, same as NES PPU output)
     let mut menu_framebuffer = vec![0u32; 256 * 240];
 
@@ -1279,27 +1630,37 @@ fn main() {
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
     if let Some(rom_path) = args.get(1) {
-        if let Ok(rom_data) = fs::read(rom_path) {
-            if let Ok(cart) = Cartridge::new(&rom_data) {
-                let mut bus = Bus::new(cart);
-                bus.set_apu_sample_rate(actual_sample_rate);
-                if config.region == "pal" {
-                    bus.ppu.set_region(Region::Pal);
+        match fs::read(rom_path) {
+            Ok(rom_data) => {
+                match Cartridge::new(&rom_data) {
+                    Ok(cart) => {
+                        let mut bus = Bus::new(cart);
+                        bus.set_apu_sample_rate(actual_sample_rate);
+                        if config.region == "pal" {
+                            bus.ppu.set_region(Region::Pal);
+                        }
+                        let mut cpu = Cpu::new();
+                        cpu.reset(&mut bus);
+                        add_recent_game(&mut config, rom_path);
+                        save_config(&config);
+                        auto_load_sram(&mut bus, &config);
+                        rewind_buffer.clear();
+                        game_bus = Some(bus);
+                        game_cpu = Some(cpu);
+                        emulator_state = EmulatorState::Game;
+                        println!("Loaded: {}", rom_path);
+                        let game_name = Path::new(rom_path).file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        window.set_title(&format!("NES Emulator — {}", game_name));
+                    }
+                    Err(e) => {
+                        eprintln!("Error loading ROM: {}", e);
+                    }
                 }
-                let mut cpu = Cpu::new();
-                cpu.reset(&mut bus);
-                add_recent_game(&mut config, rom_path);
-                save_config(&config);
-                auto_load_sram(&mut bus, &config);
-                rewind_buffer.clear();
-                game_bus = Some(bus);
-                game_cpu = Some(cpu);
-                emulator_state = EmulatorState::Game;
-                println!("Loaded: {}", rom_path);
-                let game_name = Path::new(rom_path).file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown".to_string());
-                window.set_title(&format!("NES Emulator — {}", game_name));
+            }
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", rom_path, e);
             }
         }
     }
@@ -1382,7 +1743,7 @@ fn main() {
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
-                        if input.down && *selected < 3 {
+                        if input.down && *selected < 4 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -1405,6 +1766,19 @@ fn main() {
                                 }
                                 2 => {
                                     if input.right || input.confirm {
+                                        if glass_intensity < 100 {
+                                            glass_intensity = (glass_intensity + 10).min(100);
+                                        }
+                                    }
+                                    if input.left {
+                                        glass_intensity = glass_intensity.saturating_sub(10);
+                                    }
+                                    config.glass_intensity = glass_intensity;
+                                    ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
+                                    save_config(&config);
+                                }
+                                3 => {
+                                    if input.right || input.confirm {
                                         if audio_volume < 100 {
                                             audio_volume = (audio_volume + 10).min(100);
                                         }
@@ -1415,7 +1789,7 @@ fn main() {
                                     config.audio_volume = audio_volume;
                                     save_config(&config);
                                 }
-                                3 => {
+                                4 => {
                                     // Toggle region
                                     if config.region == "pal" {
                                         config.region = "ntsc".to_string();
@@ -1423,6 +1797,21 @@ fn main() {
                                         config.region = "pal".to_string();
                                     }
                                     save_config(&config);
+                                }
+                                5 => {
+                                    // Open input settings
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    menu.submenu = Some(SubMenu::InputSettings(InputSettingsState {
+                                        tab: 0,
+                                        selected: 0,
+                                        waiting_for_input: false,
+                                        bindings: config.input_bindings.clone(),
+                                        conflict_message: None,
+                                        conflict_timer: 0,
+                                    }));
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                    return; // Skip the confirm sound below
                                 }
                                 _ => {}
                             }
@@ -1527,6 +1916,307 @@ fn main() {
                             }
                         }
                     }
+                    Some(SubMenu::InputSettings(ref mut state)) => {
+                        // Handle conflict timer
+                        if state.conflict_timer > 0 {
+                            state.conflict_timer -= 1;
+                            if state.conflict_timer == 0 {
+                                state.conflict_message = None;
+                            }
+                        }
+
+                        if state.waiting_for_input {
+                            // In key capture mode - handle raw input differently
+                            let mut captured = false;
+                            
+                            if state.tab < 2 {
+                                // Keyboard capture
+                                let keys = window.get_keys_pressed(KeyRepeat::No);
+                                if let Some(&key) = keys.first() {
+                                    if key != Key::Escape {
+                                        let key_string = key_to_string(key);
+                                        
+                                        // Check for conflicts within the same player
+                                        let binding_refs = if state.tab == 0 {
+                                            [&state.bindings.keyboard_p1.up, &state.bindings.keyboard_p1.down, &state.bindings.keyboard_p1.left, &state.bindings.keyboard_p1.right,
+                                             &state.bindings.keyboard_p1.a, &state.bindings.keyboard_p1.b, &state.bindings.keyboard_p1.start, &state.bindings.keyboard_p1.select,
+                                             &state.bindings.keyboard_p1.turbo_a, &state.bindings.keyboard_p1.turbo_b]
+                                        } else {
+                                            [&state.bindings.keyboard_p2.up, &state.bindings.keyboard_p2.down, &state.bindings.keyboard_p2.left, &state.bindings.keyboard_p2.right,
+                                             &state.bindings.keyboard_p2.a, &state.bindings.keyboard_p2.b, &state.bindings.keyboard_p2.start, &state.bindings.keyboard_p2.select,
+                                             &state.bindings.keyboard_p2.turbo_a, &state.bindings.keyboard_p2.turbo_b]
+                                        };
+                                        
+                                        let binding_names = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT", "TURBO A", "TURBO B"];
+                                        let old_value = binding_refs[state.selected].clone();
+                                        let mut conflict_idx: Option<usize> = None;
+                                        
+                                        for (i, &existing_key) in binding_refs.iter().enumerate() {
+                                            if i != state.selected && existing_key == &key_string {
+                                                state.conflict_message = Some(format!("Swapped with {}", binding_names[i]));
+                                                state.conflict_timer = 90;
+                                                conflict_idx = Some(i);
+                                                break;
+                                            }
+                                        }
+                                        
+                                        // Apply the binding
+                                        match state.tab {
+                                            0 => match state.selected {
+                                                0 => state.bindings.keyboard_p1.up = key_string,
+                                                1 => state.bindings.keyboard_p1.down = key_string,
+                                                2 => state.bindings.keyboard_p1.left = key_string,
+                                                3 => state.bindings.keyboard_p1.right = key_string,
+                                                4 => state.bindings.keyboard_p1.a = key_string,
+                                                5 => state.bindings.keyboard_p1.b = key_string,
+                                                6 => state.bindings.keyboard_p1.start = key_string,
+                                                7 => state.bindings.keyboard_p1.select = key_string,
+                                                8 => state.bindings.keyboard_p1.turbo_a = key_string,
+                                                9 => state.bindings.keyboard_p1.turbo_b = key_string,
+                                                _ => {}
+                                            },
+                                            1 => match state.selected {
+                                                0 => state.bindings.keyboard_p2.up = key_string,
+                                                1 => state.bindings.keyboard_p2.down = key_string,
+                                                2 => state.bindings.keyboard_p2.left = key_string,
+                                                3 => state.bindings.keyboard_p2.right = key_string,
+                                                4 => state.bindings.keyboard_p2.a = key_string,
+                                                5 => state.bindings.keyboard_p2.b = key_string,
+                                                6 => state.bindings.keyboard_p2.start = key_string,
+                                                7 => state.bindings.keyboard_p2.select = key_string,
+                                                8 => state.bindings.keyboard_p2.turbo_a = key_string,
+                                                9 => state.bindings.keyboard_p2.turbo_b = key_string,
+                                                _ => {}
+                                            },
+                                            _ => {}
+                                        }
+                                        
+                                        // Swap: set conflicting binding to the old value
+                                        if let Some(ci) = conflict_idx {
+                                            match state.tab {
+                                                0 => match ci {
+                                                    0 => state.bindings.keyboard_p1.up = old_value,
+                                                    1 => state.bindings.keyboard_p1.down = old_value,
+                                                    2 => state.bindings.keyboard_p1.left = old_value,
+                                                    3 => state.bindings.keyboard_p1.right = old_value,
+                                                    4 => state.bindings.keyboard_p1.a = old_value,
+                                                    5 => state.bindings.keyboard_p1.b = old_value,
+                                                    6 => state.bindings.keyboard_p1.start = old_value,
+                                                    7 => state.bindings.keyboard_p1.select = old_value,
+                                                    8 => state.bindings.keyboard_p1.turbo_a = old_value,
+                                                    9 => state.bindings.keyboard_p1.turbo_b = old_value,
+                                                    _ => {}
+                                                },
+                                                1 => match ci {
+                                                    0 => state.bindings.keyboard_p2.up = old_value,
+                                                    1 => state.bindings.keyboard_p2.down = old_value,
+                                                    2 => state.bindings.keyboard_p2.left = old_value,
+                                                    3 => state.bindings.keyboard_p2.right = old_value,
+                                                    4 => state.bindings.keyboard_p2.a = old_value,
+                                                    5 => state.bindings.keyboard_p2.b = old_value,
+                                                    6 => state.bindings.keyboard_p2.start = old_value,
+                                                    7 => state.bindings.keyboard_p2.select = old_value,
+                                                    8 => state.bindings.keyboard_p2.turbo_a = old_value,
+                                                    9 => state.bindings.keyboard_p2.turbo_b = old_value,
+                                                    _ => {}
+                                                },
+                                                _ => {}
+                                            }
+                                        }
+                                        
+                                        captured = true;
+                                    }
+                                }
+                            } else {
+                                // Controller capture
+                                if let Some(ref mut g) = gilrs {
+                                    while let Some(event) = g.next_event() {
+                                        if let gilrs::EventType::ButtonPressed(btn, _) = event.event {
+                                            let button_string = gilrs_button_to_string(btn);
+                                            
+                                            // Check for conflicts within the same controller
+                                            let binding_refs = if state.tab == 2 {
+                                                [&state.bindings.controller_p1.a, &state.bindings.controller_p1.b,
+                                                 &state.bindings.controller_p1.turbo_a, &state.bindings.controller_p1.turbo_b,
+                                                 &state.bindings.controller_p1.start, &state.bindings.controller_p1.select]
+                                            } else {
+                                                [&state.bindings.controller_p2.a, &state.bindings.controller_p2.b,
+                                                 &state.bindings.controller_p2.turbo_a, &state.bindings.controller_p2.turbo_b,
+                                                 &state.bindings.controller_p2.start, &state.bindings.controller_p2.select]
+                                            };
+                                            
+                                            let binding_names = ["A", "B", "TURBO A", "TURBO B", "START", "SELECT"];
+                                            let old_value = binding_refs[state.selected].clone();
+                                            let mut conflict_idx: Option<usize> = None;
+                                            
+                                            for (i, &existing) in binding_refs.iter().enumerate() {
+                                                if i != state.selected && existing == &button_string {
+                                                    state.conflict_message = Some(format!("Swapped with {}", binding_names[i]));
+                                                    state.conflict_timer = 90;
+                                                    conflict_idx = Some(i);
+                                                    break;
+                                                }
+                                            }
+                                            
+                                            // Apply the binding
+                                            match state.tab {
+                                                2 => match state.selected {
+                                                    0 => state.bindings.controller_p1.a = button_string,
+                                                    1 => state.bindings.controller_p1.b = button_string,
+                                                    2 => state.bindings.controller_p1.turbo_a = button_string,
+                                                    3 => state.bindings.controller_p1.turbo_b = button_string,
+                                                    4 => state.bindings.controller_p1.start = button_string,
+                                                    5 => state.bindings.controller_p1.select = button_string,
+                                                    _ => {}
+                                                },
+                                                3 => match state.selected {
+                                                    0 => state.bindings.controller_p2.a = button_string,
+                                                    1 => state.bindings.controller_p2.b = button_string,
+                                                    2 => state.bindings.controller_p2.turbo_a = button_string,
+                                                    3 => state.bindings.controller_p2.turbo_b = button_string,
+                                                    4 => state.bindings.controller_p2.start = button_string,
+                                                    5 => state.bindings.controller_p2.select = button_string,
+                                                    _ => {}
+                                                },
+                                                _ => {}
+                                            }
+                                            
+                                            // Swap: set conflicting binding to the old value
+                                            if let Some(ci) = conflict_idx {
+                                                match state.tab {
+                                                    2 => match ci {
+                                                        0 => state.bindings.controller_p1.a = old_value,
+                                                        1 => state.bindings.controller_p1.b = old_value,
+                                                        2 => state.bindings.controller_p1.turbo_a = old_value,
+                                                        3 => state.bindings.controller_p1.turbo_b = old_value,
+                                                        4 => state.bindings.controller_p1.start = old_value,
+                                                        5 => state.bindings.controller_p1.select = old_value,
+                                                        _ => {}
+                                                    },
+                                                    3 => match ci {
+                                                        0 => state.bindings.controller_p2.a = old_value,
+                                                        1 => state.bindings.controller_p2.b = old_value,
+                                                        2 => state.bindings.controller_p2.turbo_a = old_value,
+                                                        3 => state.bindings.controller_p2.turbo_b = old_value,
+                                                        4 => state.bindings.controller_p2.start = old_value,
+                                                        5 => state.bindings.controller_p2.select = old_value,
+                                                        _ => {}
+                                                    },
+                                                    _ => {}
+                                                }
+                                            }
+                                            
+                                            captured = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if captured {
+                                state.waiting_for_input = false;
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                            
+                            if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
+                                // Cancel capture
+                                state.waiting_for_input = false;
+                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                        } else {
+                            // Normal navigation mode
+                            let max_items = if state.tab < 2 { 9 } else { 6 }; // 10 keyboard items (0-9), 7 controller items (0-6, including deadzone)
+                            
+                            if input.up && state.selected > 0 {
+                                state.selected -= 1;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.down && state.selected < max_items {
+                                state.selected += 1;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            
+                            // Tab switching (skip when deadzone row is active on controller tabs)
+                            let deadzone_active = state.tab >= 2 && state.selected == 6;
+                            if input.left && state.tab > 0 && !deadzone_active {
+                                state.tab -= 1;
+                                state.selected = 0;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.right && state.tab < 3 && !deadzone_active {
+                                state.tab += 1;
+                                state.selected = 0;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            
+                            // Handle Tab key for switching tabs
+                            if window.is_key_pressed(Key::Tab, KeyRepeat::No) {
+                                state.tab = (state.tab + 1) % 4;
+                                state.selected = 0;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            
+                            if input.confirm {
+                                // Start rebinding process
+                                if state.tab >= 2 && state.selected == 6 {
+                                    // Special case for deadzone - adjust with left/right instead of rebinding
+                                } else {
+                                    state.waiting_for_input = true;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                            }
+                            
+                            // Handle deadzone adjustment for controller tabs
+                            if state.tab >= 2 && state.selected == 6 && (input.left || input.right) {
+                                let deadzone = if state.tab == 2 { &mut state.bindings.controller_p1.deadzone } else { &mut state.bindings.controller_p2.deadzone };
+                                if input.left {
+                                    *deadzone = (*deadzone - 0.05).max(0.05);
+                                }
+                                if input.right {
+                                    *deadzone = (*deadzone + 0.05).min(0.95);
+                                }
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            
+                            if input.back {
+                                // Save and go back
+                                config.input_bindings = state.bindings.clone();
+                                save_config(&config);
+                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                menu.submenu = Some(SubMenu::Settings { selected: 4 }); // Return to settings, INPUT SETTINGS selected
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                            }
+                        }
+                    }
                 }
 
                 // Process actions
@@ -1602,10 +2292,13 @@ fn main() {
                 match menu.submenu {
                     None => render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible),
                     Some(SubMenu::Settings { selected }) => {
-                        render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume);
+                        render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume, glass_intensity);
                     }
                     Some(SubMenu::FileBrowser(ref browser)) => {
                         render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible);
+                    }
+                    Some(SubMenu::InputSettings(ref state)) => {
+                        render_input_settings(&mut menu_framebuffer, state, menu.cursor_visible);
                     }
                 }
 
@@ -1613,12 +2306,17 @@ fn main() {
                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                 if crt_enabled {
                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                    // Apply chromatic aberration to crt_buffer (screen area only)
+                    if glass_intensity > 0 {
+                        ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
+                        apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                    }
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
                 composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
                 if crt_enabled {
-                    apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
+                    apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
                 }
 
                 window
@@ -1802,7 +2500,7 @@ fn main() {
                         
                         // Handle input when not paused
                         frame_counter = frame_counter.wrapping_add(1);
-                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter, &config.key_bindings);
+                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter, &config.input_bindings);
 
                         // Gamepad quit combo: hold Start+Select for ~1 second (60 frames)
                         if start_held && select_held {
@@ -1932,6 +2630,11 @@ fn main() {
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt);
+                        // Apply chromatic aberration to crt_buffer (screen area only)
+                        if glass_intensity > 0 {
+                            ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
+                            apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                        }
                     } else {
                         scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
                     }
@@ -1940,7 +2643,7 @@ fn main() {
                     composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
                     if crt_enabled {
-                        apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
+                        apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
                     }
 
                     // Overlay message display
@@ -2214,12 +2917,17 @@ fn main() {
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                            // Apply chromatic aberration to crt_buffer (screen area only)
+                            if glass_intensity > 0 {
+                                ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
+                                apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                            }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
                         composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
                         if crt_enabled {
-                            apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH);
+                            apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
                         }
                     }
 
@@ -2246,128 +2954,178 @@ fn main() {
 }
 
 
-fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, bindings: &KeyBindings) -> (bool, bool) {
+fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, input_bindings: &InputBindings) -> (bool, bool) {
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2) % 2 == 0; // ~15Hz: ON 2 frames, OFF 2 frames
 
-    // Keyboard: configurable buttons with arrow key fallbacks for directions
-    let key_up = string_to_key(&bindings.up);
-    let key_down = string_to_key(&bindings.down);
-    let key_left = string_to_key(&bindings.left);
-    let key_right = string_to_key(&bindings.right);
-    let key_a = string_to_key(&bindings.a);
-    let key_b = string_to_key(&bindings.b);
-    let key_start = string_to_key(&bindings.start);
-    let key_select = string_to_key(&bindings.select);
-    let key_turbo_a = string_to_key(&bindings.turbo_a);
-    let key_turbo_b = string_to_key(&bindings.turbo_b);
+    // Player 1 - Keyboard
+    let kb1 = &input_bindings.keyboard_p1;
+    let p1_key_up = string_to_key(&kb1.up);
+    let p1_key_down = string_to_key(&kb1.down);
+    let p1_key_left = string_to_key(&kb1.left);
+    let p1_key_right = string_to_key(&kb1.right);
+    let p1_key_a = string_to_key(&kb1.a);
+    let p1_key_b = string_to_key(&kb1.b);
+    let p1_key_start = string_to_key(&kb1.start);
+    let p1_key_select = string_to_key(&kb1.select);
+    let p1_key_turbo_a = string_to_key(&kb1.turbo_a);
+    let p1_key_turbo_b = string_to_key(&kb1.turbo_b);
 
-    let mut up_pressed = key_up.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Up);
-    let mut down_pressed = key_down.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Down);
-    let mut left_pressed = key_left.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Left);
-    let mut right_pressed = key_right.map_or(false, |k| keys.contains(&k)) || keys.contains(&Key::Right);
-    let mut a_pressed = key_a.map_or(false, |k| keys.contains(&k));
-    let mut b_pressed = key_b.map_or(false, |k| keys.contains(&k));
-    let mut start_pressed = key_start.map_or(false, |k| keys.contains(&k));
-    let mut select_pressed = key_select.map_or(false, |k| keys.contains(&k));
+    let mut p1_up = p1_key_up.map_or(false, |k| keys.contains(&k));
+    let mut p1_down = p1_key_down.map_or(false, |k| keys.contains(&k));
+    let mut p1_left = p1_key_left.map_or(false, |k| keys.contains(&k));
+    let mut p1_right = p1_key_right.map_or(false, |k| keys.contains(&k));
+    let mut p1_a = p1_key_a.map_or(false, |k| keys.contains(&k));
+    let mut p1_b = p1_key_b.map_or(false, |k| keys.contains(&k));
+    let mut p1_start = p1_key_start.map_or(false, |k| keys.contains(&k));
+    let mut p1_select = p1_key_select.map_or(false, |k| keys.contains(&k));
 
-    // Configurable turbo buttons
-    if key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
-        a_pressed = true;
+    // P1 turbo buttons
+    if p1_key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
+        p1_a = true;
     }
-    if key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
-        b_pressed = true;
+    if p1_key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
+        p1_b = true;
     }
 
-    // Poll gamepad events and read state
+    // Player 2 - Keyboard
+    let kb2 = &input_bindings.keyboard_p2;
+    let p2_key_up = string_to_key(&kb2.up);
+    let p2_key_down = string_to_key(&kb2.down);
+    let p2_key_left = string_to_key(&kb2.left);
+    let p2_key_right = string_to_key(&kb2.right);
+    let p2_key_a = string_to_key(&kb2.a);
+    let p2_key_b = string_to_key(&kb2.b);
+    let p2_key_start = string_to_key(&kb2.start);
+    let p2_key_select = string_to_key(&kb2.select);
+    let p2_key_turbo_a = string_to_key(&kb2.turbo_a);
+    let p2_key_turbo_b = string_to_key(&kb2.turbo_b);
+
+    let mut p2_up = p2_key_up.map_or(false, |k| keys.contains(&k));
+    let mut p2_down = p2_key_down.map_or(false, |k| keys.contains(&k));
+    let mut p2_left = p2_key_left.map_or(false, |k| keys.contains(&k));
+    let mut p2_right = p2_key_right.map_or(false, |k| keys.contains(&k));
+    let mut p2_a = p2_key_a.map_or(false, |k| keys.contains(&k));
+    let mut p2_b = p2_key_b.map_or(false, |k| keys.contains(&k));
+    let mut p2_start = p2_key_start.map_or(false, |k| keys.contains(&k));
+    let mut p2_select = p2_key_select.map_or(false, |k| keys.contains(&k));
+
+    // P2 turbo buttons
+    if p2_key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
+        p2_a = true;
+    }
+    if p2_key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
+        p2_b = true;
+    }
+
+    // Controllers - Poll gamepad events and read state
     if let Some(ref mut g) = gilrs {
         // Process pending events (required by gilrs)
         while let Some(_event) = g.next_event() {}
 
-        // Read first connected gamepad
-        if let Some((_id, gamepad)) = g.gamepads().find(|(_, gp)| gp.is_connected()) {
+        // Get all connected gamepads
+        let gamepads: Vec<_> = g.gamepads().filter(|(_, gp)| gp.is_connected()).collect();
+        
+        // Player 1 controller
+        if let Some((_, gamepad)) = gamepads.get(0) {
+            let ctrl1 = &input_bindings.controller_p1;
+            
             // D-pad buttons
-            up_pressed |= gamepad.is_pressed(Button::DPadUp);
-            down_pressed |= gamepad.is_pressed(Button::DPadDown);
-            left_pressed |= gamepad.is_pressed(Button::DPadLeft);
-            right_pressed |= gamepad.is_pressed(Button::DPadRight);
+            p1_up |= gamepad.is_pressed(Button::DPadUp);
+            p1_down |= gamepad.is_pressed(Button::DPadDown);
+            p1_left |= gamepad.is_pressed(Button::DPadLeft);
+            p1_right |= gamepad.is_pressed(Button::DPadRight);
 
-            // Left analog stick (with deadzone)
+            // Left analog stick (with configurable deadzone)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let deadzone = 0.3;
+            let deadzone = ctrl1.deadzone;
 
-            if stick_x < -deadzone { left_pressed = true; }
-            if stick_x > deadzone { right_pressed = true; }
-            if stick_y > deadzone { up_pressed = true; }
-            if stick_y < -deadzone { down_pressed = true; }
+            if stick_x < -deadzone { p1_left = true; }
+            if stick_x > deadzone { p1_right = true; }
+            if stick_y > deadzone { p1_up = true; }
+            if stick_y < -deadzone { p1_down = true; }
 
-            // Face buttons
-            // Regular: Xbox A (South) → NES A, Xbox X (West) → NES B
-            a_pressed |= gamepad.is_pressed(Button::South);
-            b_pressed |= gamepad.is_pressed(Button::West);
-
-            // Turbo: Xbox B (East) → Turbo NES A, Xbox Y (North) → Turbo NES B
-            if gamepad.is_pressed(Button::East) && turbo_active {
-                a_pressed = true;
+            // Face buttons - configurable
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.a) {
+                p1_a |= gamepad.is_pressed(btn);
             }
-            if gamepad.is_pressed(Button::North) && turbo_active {
-                b_pressed = true;
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.b) {
+                p1_b |= gamepad.is_pressed(btn);
             }
-
-            // Start / Select
-            start_pressed |= gamepad.is_pressed(Button::Start);
-            select_pressed |= gamepad.is_pressed(Button::Select);
-            select_pressed |= gamepad.is_pressed(Button::Mode);
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.turbo_a) {
+                if gamepad.is_pressed(btn) && turbo_active {
+                    p1_a = true;
+                }
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.turbo_b) {
+                if gamepad.is_pressed(btn) && turbo_active {
+                    p1_b = true;
+                }
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.start) {
+                p1_start |= gamepad.is_pressed(btn);
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl1.select) {
+                p1_select |= gamepad.is_pressed(btn);
+            }
         }
-    }
 
-    // Apply all input to joypad
-    bus.joypad1.set_button_pressed(JoypadButton::A, a_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::B, b_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Select, select_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Start, start_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Up, up_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Down, down_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Left, left_pressed);
-    bus.joypad1.set_button_pressed(JoypadButton::Right, right_pressed);
-
-    // Player 2 - second gamepad
-    let mut p2_a = false;
-    let mut p2_b = false;
-    let mut p2_select = false;
-    let mut p2_start = false;
-    let mut p2_up = false;
-    let mut p2_down = false;
-    let mut p2_left = false;
-    let mut p2_right = false;
-
-    if let Some(ref mut g) = gilrs {
-        // Find second connected gamepad
-        let gamepads: Vec<_> = g.gamepads().filter(|(_, gp)| gp.is_connected()).collect();
-        if gamepads.len() >= 2 {
-            let (_, gamepad) = &gamepads[1];
+        // Player 2 controller
+        if let Some((_, gamepad)) = gamepads.get(1) {
+            let ctrl2 = &input_bindings.controller_p2;
+            
+            // D-pad buttons
             p2_up |= gamepad.is_pressed(Button::DPadUp);
             p2_down |= gamepad.is_pressed(Button::DPadDown);
             p2_left |= gamepad.is_pressed(Button::DPadLeft);
             p2_right |= gamepad.is_pressed(Button::DPadRight);
-            
+
+            // Left analog stick (with configurable deadzone)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let deadzone = 0.3;
+            let deadzone = ctrl2.deadzone;
+
             if stick_x < -deadzone { p2_left = true; }
             if stick_x > deadzone { p2_right = true; }
             if stick_y > deadzone { p2_up = true; }
             if stick_y < -deadzone { p2_down = true; }
-            
-            p2_a |= gamepad.is_pressed(Button::South);
-            p2_b |= gamepad.is_pressed(Button::West);
-            if gamepad.is_pressed(Button::East) && turbo_active { p2_a = true; }
-            if gamepad.is_pressed(Button::North) && turbo_active { p2_b = true; }
-            p2_start |= gamepad.is_pressed(Button::Start);
-            p2_select |= gamepad.is_pressed(Button::Select);
+
+            // Face buttons - configurable
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.a) {
+                p2_a |= gamepad.is_pressed(btn);
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.b) {
+                p2_b |= gamepad.is_pressed(btn);
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.turbo_a) {
+                if gamepad.is_pressed(btn) && turbo_active {
+                    p2_a = true;
+                }
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.turbo_b) {
+                if gamepad.is_pressed(btn) && turbo_active {
+                    p2_b = true;
+                }
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.start) {
+                p2_start |= gamepad.is_pressed(btn);
+            }
+            if let Some(btn) = string_to_gilrs_button(&ctrl2.select) {
+                p2_select |= gamepad.is_pressed(btn);
+            }
         }
     }
+
+    // Apply all input to joypads
+    bus.joypad1.set_button_pressed(JoypadButton::A, p1_a);
+    bus.joypad1.set_button_pressed(JoypadButton::B, p1_b);
+    bus.joypad1.set_button_pressed(JoypadButton::Select, p1_select);
+    bus.joypad1.set_button_pressed(JoypadButton::Start, p1_start);
+    bus.joypad1.set_button_pressed(JoypadButton::Up, p1_up);
+    bus.joypad1.set_button_pressed(JoypadButton::Down, p1_down);
+    bus.joypad1.set_button_pressed(JoypadButton::Left, p1_left);
+    bus.joypad1.set_button_pressed(JoypadButton::Right, p1_right);
 
     bus.joypad2.set_button_pressed(JoypadButton::A, p2_a);
     bus.joypad2.set_button_pressed(JoypadButton::B, p2_b);
@@ -2378,7 +3136,7 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     bus.joypad2.set_button_pressed(JoypadButton::Left, p2_left);
     bus.joypad2.set_button_pressed(JoypadButton::Right, p2_right);
 
-    (start_pressed, select_pressed)
+    (p1_start, p1_select)
 }
 
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)]) {
@@ -2448,7 +3206,7 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
             // Slight brightness boost + warm color temperature (CRT P22 phosphor)
             // Keep it subtle — just a warmth tint, not a brightness explosion
             r = (r * 268) >> 8;
-            g = (g * 256) >> 8;
+            g = (g * 252) >> 8;
             b = (b * 238) >> 8;
             
             // Scanline darkening (the key CRT effect)
@@ -2704,49 +3462,51 @@ fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>
 }
 
 fn build_glare_table() -> Vec<u8> {
-
     let mut table = vec![0u8; SCREEN_W * SCREEN_H];
-
-    // Diagonal glare band: line from (0, 0.1*H) to (W, 0.7*H)
-    let a = 0.6 * SCREEN_H as f32;
-    let b = -(SCREEN_W as f32);
-    let c = 0.1 * SCREEN_H as f32 * SCREEN_W as f32;
-    let norm = (a * a + b * b).sqrt();
-    let band_sigma = 180.0_f32;
-    let band_peak = 35.0_f32; // curved glass catches more light
-
-    // Specular highlight: small bright spot upper-left
-    let spec_x = 150.0_f32;
-    let spec_y = 120.0_f32;
-    let spec_sigma_sq = 35.0_f32 * 35.0;
-    let spec_peak = 60.0_f32; // curved glass specular highlight
 
     for y in 0..SCREEN_H {
         for x in 0..SCREEN_W {
-            let fx = x as f32;
-            let fy = y as f32;
-
-            // Perpendicular distance to diagonal line
-            let dist = (a * fx + b * fy + c).abs() / norm;
-            let band = band_peak * (-dist * dist / (2.0 * band_sigma * band_sigma)).exp();
-
-            // Fade: strongest upper-left, fades toward lower-right
-            let fade = 1.0 - 0.5 * (fx / SCREEN_W as f32 + fy / SCREEN_H as f32);
-            let band = band * fade.max(0.0);
-
-            // Specular highlight (radial Gaussian)
-            let dx = fx - spec_x;
-            let dy = fy - spec_y;
-            let spec = spec_peak * (-(dx * dx + dy * dy) / (2.0 * spec_sigma_sq)).exp();
-
-            table[y * SCREEN_W + x] = (band + spec).min(30.0) as u8;
+            // Normalized coordinates (-1 to 1)
+            let fx = (x as f64 / SCREEN_W as f64) * 2.0 - 1.0;
+            let fy = (y as f64 / SCREEN_H as f64) * 2.0 - 1.0;
+            
+            // Layer 1: Fresnel edge brightening
+            let edge_dist = (fx.abs().max(fy.abs())).min(1.0);
+            let fresnel = ((edge_dist - 0.7).max(0.0) / 0.3).powi(2) * 18.0;
+            
+            // Layer 2a: Primary specular highlight (upper-left area)
+            let dx1 = (x as f64 - SCREEN_W as f64 * 0.28) / (SCREEN_W as f64 * 0.15);
+            let dy1 = (y as f64 - SCREEN_H as f64 * 0.22) / (SCREEN_H as f64 * 0.15);
+            let spec1 = (-(dx1 * dx1 + dy1 * dy1) / 2.0).exp() * 40.0;
+            
+            // Layer 2b: Secondary highlight (lower-right, dimmer)
+            let dx2 = (x as f64 - SCREEN_W as f64 * 0.72) / (SCREEN_W as f64 * 0.20);
+            let dy2 = (y as f64 - SCREEN_H as f64 * 0.78) / (SCREEN_H as f64 * 0.20);
+            let spec2 = (-(dx2 * dx2 + dy2 * dy2) / 2.0).exp() * 20.0;
+            
+            // Layer 3: Wide diagonal reflection band
+            let diag = (fx + fy) / 2.0_f64.sqrt();
+            let band = (-(diag * diag) * 4.0).exp() * 18.0;
+            // Fade near edges to avoid harsh cutoff
+            let edge_fade = (1.0 - edge_dist.powi(4)).max(0.0);
+            let band = band * edge_fade;
+            
+            // Combine all layers
+            let total = (fresnel + spec1 + spec2 + band).max(0.0).min(50.0) as u8;
+            
+            // Zero out near border (glass-bezel junction has no glare)
+            let in_border = x < 4 || x >= SCREEN_W - 4 || y < 4 || y >= SCREEN_H - 4;
+            table[y * SCREEN_W + x] = if in_border { 0 } else { total };
         }
     }
     table
 }
 
-fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usize) {
+fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usize, glass_intensity: u8) {
+    if glass_intensity == 0 { return; }
     let corner_r = 12usize;
+    let intensity_factor = glass_intensity as u32;
+    
     for y in 0..SCREEN_H {
         let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
         let glare_row = y * SCREEN_W;
@@ -2758,15 +3518,85 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usiz
                 || (x >= SCREEN_W - corner_r && y >= SCREEN_H - corner_r && sq_dist(x, y, SCREEN_W - 1 - corner_r, SCREEN_H - 1 - corner_r) > corner_r * corner_r);
             if in_corner { continue; }
 
-            let glare = glare_table[glare_row + x] as u32;
-            if glare == 0 { continue; }
+            let glare_base = glare_table[glare_row + x] as u32;
+            if glare_base == 0 { continue; }
 
             let pixel = buffer[buf_row + x];
-            let r = ((pixel >> 16) & 0xFF) + glare;
-            let g = ((pixel >> 8) & 0xFF) + glare;
-            let b = (pixel & 0xFF) + glare;
+            let r = (pixel >> 16) & 0xFF;
+            let g = (pixel >> 8) & 0xFF;
+            let b = pixel & 0xFF;
+            
+            // Calculate brightness (0-255)
+            let brightness = (r + g + b) / 3;
+            
+            // Glare more visible on darker content, scaled by glass intensity
+            let glare = glare_base * intensity_factor * (200_u32.saturating_sub(brightness)) / 20000;
+            
+            let r = (r + glare).min(255);
+            let g = (g + glare).min(255);
+            let b = (b + glare).min(255);
 
-            buffer[buf_row + x] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+            buffer[buf_row + x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+/// Per-pixel CA shift offsets, precomputed once at startup (or when glass_intensity changes).
+/// Each entry: (shift_x, shift_y) as i16 in sub-pixel units.
+/// Positive shift means red channel shifts outward, blue inward (or vice-versa).
+struct CaTable {
+    /// For each pixel index (y * width + x): (shift_x, shift_y) in pixels (i16).
+    shifts: Vec<(i16, i16)>,
+}
+
+fn build_ca_table(width: usize, height: usize, glass_intensity: u8) -> CaTable {
+    let intensity_factor = glass_intensity as f64 / 100.0;
+    let cx = width as f64 / 2.0;
+    let cy = height as f64 / 2.0;
+    let max_shift = 1.5; // max pixel shift at full intensity at edges
+    let mut shifts = vec![(0i16, 0i16); width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            let dx = (x as f64 - cx) / cx; // normalized -1..1
+            let dy = (y as f64 - cy) / cy;
+            let edge_sq = (dx * dx + dy * dy).min(1.0);
+            let edge_factor = edge_sq.sqrt();
+
+            if edge_factor > 0.85 {
+                let strength = ((edge_factor - 0.85) / 0.15).min(1.0) * intensity_factor;
+                let sx = (dx * edge_factor * max_shift * strength) as i16;
+                let sy = (dy * edge_factor * max_shift * strength) as i16;
+                if sx != 0 || sy != 0 {
+                    shifts[y * width + x] = (sx, sy);
+                }
+            }
+        }
+    }
+
+    CaTable { shifts }
+}
+
+fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaTable, width: usize, height: usize) {
+    let w = width as i32;
+    let h = height as i32;
+
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..width {
+            let (sx, sy) = ca_table.shifts[row + x];
+            if sx == 0 && sy == 0 { continue; }
+
+            let r_x = ((x as i32) - sx as i32).clamp(0, w - 1) as usize;
+            let r_y = ((y as i32) - sy as i32).clamp(0, h - 1) as usize;
+            let b_x = ((x as i32) + sx as i32).clamp(0, w - 1) as usize;
+            let b_y = ((y as i32) + sy as i32).clamp(0, h - 1) as usize;
+
+            let r = (source[r_y * width + r_x] >> 16) & 0xFF;
+            let g = (source[row + x] >> 8) & 0xFF;
+            let b = source[b_y * width + b_x] & 0xFF;
+
+            buffer[row + x] = (r << 16) | (g << 8) | b;
         }
     }
 }

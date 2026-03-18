@@ -389,7 +389,9 @@ impl Mapper for Mapper002 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
             0x8000..=0xFFFF => {
-                self.bank_select = data & 0x0F;
+                if self.prg_banks > 0 {
+                    self.bank_select = (data as usize % self.prg_banks) as u8;
+                }
             }
             _ => {}
         }
@@ -422,7 +424,11 @@ impl Mapper for Mapper002 {
     
     fn load_state(&mut self, data: &[u8]) {
         if !data.is_empty() {
-            self.bank_select = data[0];
+            if self.prg_banks > 0 {
+                self.bank_select = (data[0] as usize % self.prg_banks) as u8;
+            } else {
+                self.bank_select = 0;
+            }
         }
     }
 }

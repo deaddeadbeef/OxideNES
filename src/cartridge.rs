@@ -31,13 +31,26 @@ impl Cartridge {
         let flags7 = rom_data[7];
 
         let is_nes2 = (flags7 & 0x0C) == 0x08;
+
+        // Detect dirty headers (e.g., "DiskDude!" watermark in bytes 7-15)
+        // In valid iNES 1.0, bytes 12-15 must be zero
+        let has_dirty_header = !is_nes2 && rom_data.len() > 15 &&
+            rom_data[12..16].iter().any(|&b| b != 0);
+
         let mapper_id = if is_nes2 && rom_data.len() > 8 {
             // NES 2.0: extended mapper from flags8
             let flags8 = rom_data[8];
             ((flags8 as u16 & 0x0F) << 8) | (flags7 as u16 & 0xF0) | ((flags6 as u16) >> 4)
+        } else if has_dirty_header {
+            // Dirty header: only trust lower nibble from flags6
+            (flags6 >> 4) as u16
         } else {
             ((flags7 & 0xF0) | (flags6 >> 4)) as u16
         };
+
+        if has_dirty_header {
+            eprintln!("Warning: ROM has dirty iNES header (bytes 12-15 non-zero), using mapper {} from flags6 only", mapper_id);
+        }
         let mirroring = if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {

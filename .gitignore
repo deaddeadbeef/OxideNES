@@ -9,3 +9,6 @@ config.json
 
 # Development artifacts  
 apu_diag*.txt
+
+# Inno Setup output
+installer/Output/

@@ -1712,7 +1712,7 @@ impl Cpu {
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        if data.len() < 19 { return false; } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
+        if data.len() < 18 { return false; } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
         let mut pos = 0;
         self.pc = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
         self.sp = data[pos]; pos += 1;
