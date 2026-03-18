@@ -69,6 +69,7 @@ pub struct Bus {
     dma_data: u8,
     dma_transfer: bool,
     dma_dummy: bool,
+    dmc_stall_cycles: u8,
     pub cheats: Vec<GameGenieCode>,
 }
 
@@ -87,8 +88,14 @@ impl Bus {
             dma_data: 0,
             dma_transfer: false,
             dma_dummy: true,
+            dmc_stall_cycles: 0,
             cheats: Vec::new(),
         }
+    }
+
+    /// Snapshot the first 2KB of CPU RAM (0x0000-0x07FF) for scripting.
+    pub fn ram_snapshot(&self) -> Vec<u8> {
+        self.cpu_ram.to_vec()
     }
 
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
@@ -202,6 +209,8 @@ impl Bus {
     }
 
     pub fn tick_apu(&mut self) {
+        // Mix in mapper expansion audio (audio_output added by mapper.rs agent)
+        self.apu.external_audio = self.cartridge.mapper.audio_output();
         self.apu.tick();
     }
     
@@ -210,7 +219,17 @@ impl Bus {
             let addr = self.apu.dmc.dma_address;
             let data = self.cpu_read(addr);
             self.apu.dmc.receive_sample(data);
+            // DMC DMA steals CPU cycles: 4 on even cycle, 3 on odd (approximate: always 4)
+            self.dmc_stall_cycles = 4;
         }
+    }
+
+    pub fn dmc_stall_active(&self) -> bool {
+        self.dmc_stall_cycles > 0
+    }
+
+    pub fn dmc_stall_tick(&mut self) {
+        self.dmc_stall_cycles -= 1;
     }
     
     // ── Save state support ──────────────────────────────────────────

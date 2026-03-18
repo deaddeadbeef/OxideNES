@@ -14,7 +14,13 @@ use nes_emulator::bus::Bus;
 use nes_emulator::cartridge::Cartridge;
 use nes_emulator::cpu::Cpu;
 use nes_emulator::joypad::JoypadButton;
+use nes_emulator::netplay::{NetplaySession, NetplayState};
 use nes_emulator::ppu::Region;
+use nes_emulator::scripting::ScriptEngine;
+use nes_emulator::achievements::{AchievementEngine, md5_hex};
+use nes_emulator::recording::{InputRecording, sha256};
+use nes_emulator::romdb::RomDatabase;
+use nes_emulator::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
 const TV_WIDTH: usize = 1200;
@@ -296,6 +302,42 @@ fn gilrs_button_to_string(button: gilrs::Button) -> String {
 
 fn default_region() -> String { "ntsc".to_string() }
 fn default_glass_intensity() -> u8 { 60 }
+fn default_true() -> bool { true }
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+enum CrtMaskMode {
+    Off,
+    ShadowMask,
+    ApertureGrille,
+}
+
+impl Default for CrtMaskMode {
+    fn default() -> Self { CrtMaskMode::Off }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+struct CrtConfig {
+    scanline_intensity: u8,   // 0-100, default 70
+    phosphor_warmth: u8,      // 0-100, default 50
+    vignette_strength: u8,    // 0-100, default 60
+    blur_amount: u8,          // 0-100, default 40
+    curvature_strength: u8,   // 0-100, default 50
+    mask_mode: CrtMaskMode,
+}
+
+impl Default for CrtConfig {
+    fn default() -> Self {
+        Self {
+            scanline_intensity: 70,
+            phosphor_warmth: 50,
+            vignette_strength: 60,
+            blur_amount: 40,
+            curvature_strength: 50,
+            mask_mode: CrtMaskMode::Off,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct EmulatorConfig {
@@ -313,6 +355,10 @@ struct EmulatorConfig {
     glass_intensity: u8,
     #[serde(default)]
     config_version: u32,
+    #[serde(default)]
+    crt_config: CrtConfig,
+    #[serde(default = "default_true")]
+    check_for_updates: bool,
 }
 
 impl Default for EmulatorConfig {
@@ -327,6 +373,8 @@ impl Default for EmulatorConfig {
             input_bindings: InputBindings::default(),
             glass_intensity: 60,
             config_version: 2,
+            crt_config: CrtConfig::default(),
+            check_for_updates: true,
         }
     }
 }
@@ -414,6 +462,34 @@ fn save_state_path(config: &EmulatorConfig, slot: u8) -> Option<PathBuf> {
     }
 }
 
+fn capture_thumbnail(frame_data: &[u32]) -> Vec<u8> {
+    let mut thumb = Vec::with_capacity(64 * 60 * 3);
+    for y in (0..240).step_by(4) {
+        for x in (0..256).step_by(4) {
+            let pixel = frame_data[y * 256 + x];
+            thumb.push(((pixel >> 16) & 0xFF) as u8);
+            thumb.push(((pixel >> 8) & 0xFF) as u8);
+            thumb.push((pixel & 0xFF) as u8);
+        }
+    }
+    thumb
+}
+
+fn save_thumbnail(config: &EmulatorConfig, slot: u8, frame_data: &[u32]) {
+    if let Some(path) = save_state_path(config, slot) {
+        let thumb_path = PathBuf::from(format!("{}.thumb", path.display()));
+        let thumb = capture_thumbnail(frame_data);
+        let _ = fs::write(&thumb_path, &thumb);
+    }
+}
+
+fn load_thumbnail(config: &EmulatorConfig, slot: u8) -> Option<Vec<u8>> {
+    let path = save_state_path(config, slot)?;
+    let thumb_path = PathBuf::from(format!("{}.thumb", path.display()));
+    let data = fs::read(&thumb_path).ok()?;
+    if data.len() == 64 * 60 * 3 { Some(data) } else { None }
+}
+
 fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     let path_opt = save_state_path(config, slot);
     let Some(path) = path_opt else { return false; };
@@ -432,6 +508,9 @@ fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     let bus_state = bus.save_state();
     data.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
     data.extend(bus_state);
+    
+    // Save thumbnail alongside state
+    save_thumbnail(config, slot, &bus.ppu.frame_data);
     
     fs::write(&path, &data).is_ok()
 }
@@ -643,6 +722,7 @@ enum SubMenu {
     Settings { selected: usize },
     FileBrowser(FileBrowser),
     InputSettings(InputSettingsState),
+    CrtSettings { selected: usize, tables_dirty: bool },
 }
 
 struct InputSettingsState {
@@ -1063,9 +1143,11 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         format!("GLASS INTENSITY: {}%", glass_intensity),
         format!("AUDIO VOLUME: {}%", audio_volume),
         format!("REGION: {}", if cfg.region == "pal" { "PAL" } else { "NTSC" }),
+        "CRT SETTINGS >".to_string(),
         "INPUT SETTINGS >".to_string(),
+        format!("CHECK FOR UPDATES: {}", if cfg.check_for_updates { "ON" } else { "OFF" }),
     ];
-    let setting_rows = [8, 10, 12, 14, 16, 18];
+    let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
         let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
@@ -1075,16 +1157,70 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         draw_text_8x8(fb, item, 5, row, color);
     }
 
-    draw_separator_line(fb, 20);
+    draw_separator_line(fb, 23);
 
     // Key bindings display (read-only)
-    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 19, MENU_DARK_GRAY);
-    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.input_bindings.keyboard_p1.up, cfg.input_bindings.keyboard_p1.down, cfg.input_bindings.keyboard_p1.left, cfg.input_bindings.keyboard_p1.right), 4, 20, MENU_GRAY);
-    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.input_bindings.keyboard_p1.a, cfg.input_bindings.keyboard_p1.b, cfg.input_bindings.keyboard_p1.start, cfg.input_bindings.keyboard_p1.select), 4, 21, MENU_GRAY);
-    draw_text_centered_8x8(fb, "USE INPUT SETTINGS TO REMAP", 22, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 24, MENU_DARK_GRAY);
+    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.input_bindings.keyboard_p1.up, cfg.input_bindings.keyboard_p1.down, cfg.input_bindings.keyboard_p1.left, cfg.input_bindings.keyboard_p1.right), 4, 25, MENU_GRAY);
+    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.input_bindings.keyboard_p1.a, cfg.input_bindings.keyboard_p1.b, cfg.input_bindings.keyboard_p1.start, cfg.input_bindings.keyboard_p1.select), 4, 26, MENU_GRAY);
 
-    draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 22, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "ESC TO GO BACK", 23, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 26, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "ESC TO GO BACK", 27, MENU_DARK_GRAY);
+}
+
+fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool) {
+    for pixel in fb.iter_mut() {
+        *pixel = MENU_BG;
+    }
+
+    draw_double_border_top(fb, 1);
+    draw_double_border_bottom(fb, 28);
+    draw_side_borders(fb);
+
+    draw_text_centered_8x8(fb, "\x11 CRT SETTINGS \x11", 4, MENU_GOLD);
+    draw_separator_line(fb, 5);
+
+    let crt = &cfg.crt_config;
+    let mask_name = match crt.mask_mode {
+        CrtMaskMode::Off => "OFF",
+        CrtMaskMode::ShadowMask => "SHADOW MASK",
+        CrtMaskMode::ApertureGrille => "APERTURE GRILLE",
+    };
+
+    let items: [(& str, String); 8] = [
+        ("SCANLINES:", format_slider_bar(crt.scanline_intensity)),
+        ("PHOSPHOR:", format_slider_bar(crt.phosphor_warmth)),
+        ("VIGNETTE:", format_slider_bar(crt.vignette_strength)),
+        ("BLUR:", format_slider_bar(crt.blur_amount)),
+        ("CURVATURE:", format_slider_bar(crt.curvature_strength)),
+        ("GLASS:", format_slider_bar(cfg.glass_intensity)),
+        ("MASK:", mask_name.to_string()),
+        ("BACK", String::new()),
+    ];
+    let rows = [7, 9, 11, 13, 15, 17, 19, 22];
+
+    for (i, ((label, value), &row)) in items.iter().zip(rows.iter()).enumerate() {
+        let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
+        if i == selected && cursor_visible {
+            draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
+        }
+        draw_text_8x8(fb, label, 4, row, color);
+        if !value.is_empty() {
+            draw_text_8x8(fb, value, 16, row, color);
+        }
+    }
+
+    draw_separator_line(fb, 24);
+    draw_text_centered_8x8(fb, "LEFT/RIGHT TO ADJUST", 25, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "ESC/BACK TO RETURN", 26, MENU_DARK_GRAY);
+}
+
+fn format_slider_bar(value: u8) -> String {
+    let filled = (value as usize * 20) / 100;
+    let empty = 20 - filled;
+    // Use simple ASCII chars for the bar (compatible with 8x8 font)
+    let bar: String = "#".repeat(filled) + &"-".repeat(empty);
+    format!("[{}] {}%", bar, value)
 }
 
 fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visible: bool) {
@@ -1311,9 +1447,79 @@ fn build_flat_distortion_table() -> Vec<(u32, u32)> {
     table
 }
 
-// =====================================================================
-// Menu input handling
-// =====================================================================
+fn build_vignette_table_with_strength(strength: u8) -> Vec<u16> {
+    let mut table = vec![0u16; SCREEN_W * SCREEN_H];
+    let scale = strength as f32 / 60.0;
+    for y in 0..SCREEN_H {
+        for x in 0..SCREEN_W {
+            let fx = (x as f32 / SCREEN_W as f32) - 0.5;
+            let fy = (y as f32 / SCREEN_H as f32) - 0.5;
+            let v = 1.0 - (fx * fx + fy * fy) * 1.5 * scale;
+            table[y * SCREEN_W + x] = (v.max(0.3).min(1.0) * 256.0) as u16;
+        }
+    }
+    table
+}
+
+fn build_distortion_table_with_curvature(curvature: u8) -> Vec<(u32, u32)> {
+    let mut table = Vec::with_capacity(SCREEN_W * SCREEN_H);
+    let amount = curvature as f32 / 3333.0;
+    for dst_y in 0..SCREEN_H {
+        for dst_x in 0..SCREEN_W {
+            let nx = (dst_x as f32 / SCREEN_W as f32) * 2.0 - 1.0;
+            let ny = (dst_y as f32 / SCREEN_H as f32) * 2.0 - 1.0;
+            let r2 = nx * nx + ny * ny;
+            let distortion = 1.0 + amount * r2;
+            let dx = nx / distortion;
+            let dy = ny / distortion;
+            let src_x = ((dx + 1.0) / 2.0) * 256.0;
+            let src_y = ((dy + 1.0) / 2.0) * 240.0;
+            if src_x < 0.0 || src_x >= 255.99 || src_y < 0.0 || src_y >= 239.99 {
+                table.push((0xFFFFFFFF, 0));
+            } else {
+                let src_xf = (src_x * 256.0) as u32;
+                let src_yf = (src_y * 256.0) as u32;
+                table.push((src_xf, src_yf));
+            }
+        }
+    }
+    table
+}
+
+fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
+    let mut table = vec![(255u8, 255u8, 255u8); SCREEN_W * SCREEN_H];
+    match mode {
+        CrtMaskMode::Off => {} // all (255,255,255) — no effect
+        CrtMaskMode::ShadowMask => {
+            // 3×3 repeating dot triad, shifted per row
+            let triad: [(u8, u8, u8); 3] = [
+                (255, 80, 80),
+                (80, 255, 80),
+                (80, 80, 255),
+            ];
+            for y in 0..SCREEN_H {
+                let shift = y % 3;
+                for x in 0..SCREEN_W {
+                    table[y * SCREEN_W + x] = triad[(x + shift) % 3];
+                }
+            }
+        }
+        CrtMaskMode::ApertureGrille => {
+            // 3-column repeating vertical stripes
+            let stripes: [(u8, u8, u8); 3] = [
+                (255, 100, 100),
+                (100, 255, 100),
+                (100, 100, 255),
+            ];
+            for y in 0..SCREEN_H {
+                for x in 0..SCREEN_W {
+                    table[y * SCREEN_W + x] = stripes[x % 3];
+                }
+            }
+        }
+    }
+    table
+}
 
 struct RepeatTracker {
     up_held: u32,
@@ -1451,6 +1657,12 @@ fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, s
 
 fn main() {
     let mut config = load_config();
+    let romdb = RomDatabase::new();
+    let updater = Updater::new();
+    if config.check_for_updates {
+        updater.check_async();
+    }
+    let mut update_dismissed = false;
 
     let mut window = Window::new(
         "NES Emulator",
@@ -1553,45 +1765,13 @@ fn main() {
     build_console_overlay(&mut tv_frame_bg, TV_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT);
     let mut composite_buffer = vec![0u32; WINDOW_WIDTH * WINDOW_HEIGHT];
 
-    // Pre-compute vignette lookup table (same every frame)
-    let vignette_table = {
-        let mut table = vec![0u16; SCREEN_W * SCREEN_H];
-        for y in 0..SCREEN_H {
-            for x in 0..SCREEN_W {
-                let fx = (x as f32 / SCREEN_W as f32) - 0.5;
-                let fy = (y as f32 / SCREEN_H as f32) - 0.5;
-                let v = 1.0 - (fx * fx + fy * fy) * 1.5;
-                table[y * SCREEN_W + x] = (v.max(0.3).min(1.0) * 256.0) as u16;
-            }
-        }
-        table
-    };
-    // Pre-compute barrel distortion lookup table for curved CRT glass
-    let distortion_table: Vec<(u32, u32)> = {
-        let mut table = Vec::with_capacity(SCREEN_W * SCREEN_H);
-        for dst_y in 0..SCREEN_H {
-            for dst_x in 0..SCREEN_W {
-                let nx = (dst_x as f32 / SCREEN_W as f32) * 2.0 - 1.0;
-                let ny = (dst_y as f32 / SCREEN_H as f32) * 2.0 - 1.0;
-                let r2 = nx * nx + ny * ny;
-                let distortion = 1.0 + 0.015 * r2;
-                let dx = nx / distortion;
-                let dy = ny / distortion;
-                let src_x = ((dx + 1.0) / 2.0) * 256.0;
-                let src_y = ((dy + 1.0) / 2.0) * 240.0;
-                if src_x < 0.0 || src_x >= 255.99 || src_y < 0.0 || src_y >= 239.99 {
-                    table.push((0xFFFFFFFF, 0));
-                } else {
-                    let src_xf = (src_x * 256.0) as u32;
-                    let src_yf = (src_y * 256.0) as u32;
-                    table.push((src_xf, src_yf));
-                }
-            }
-        }
-        table
-    };
+    // Pre-compute vignette lookup table (configurable strength)
+    let mut vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
+    // Pre-compute barrel distortion lookup table (configurable curvature)
+    let mut distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
     let flat_distortion_table = build_flat_distortion_table();
     let glare_table = build_glare_table();
+    let mut mask_table = build_mask_table(&config.crt_config.mask_mode);
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
@@ -1620,6 +1800,34 @@ fn main() {
     let mut cheat_message: Option<String> = None;
     let mut cheat_message_timer: u32 = 0;
     let mut rewind_buffer = RewindBuffer::new();
+    let mut is_rewinding = false;
+    let mut thumbnail_cache: [Option<Vec<u8>>; 4] = [None, None, None, None];
+
+    // Netplay state
+    let mut netplay = NetplaySession::new();
+    let mut netplay_submenu: bool = false;
+    let mut netplay_selected: usize = 0;
+    let mut netplay_ip_input: String = "127.0.0.1:7777".to_string();
+    let mut netplay_ip_editing: bool = false;
+
+    // Lua scripting state
+    let mut script_engine: Option<ScriptEngine> = None;
+    let mut script_path_arg: Option<String> = None;
+    // Parse --script argument
+    {
+        let args: Vec<String> = env::args().collect();
+        let mut i = 1;
+        while i < args.len() {
+            if args[i] == "--script" {
+                if let Some(path) = args.get(i + 1) {
+                    script_path_arg = Some(path.clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+    }
 
     let mut show_fps = false;
     let mut show_help = false;
@@ -1627,13 +1835,22 @@ fn main() {
     let mut fps_frames: u32 = 0;
     let mut fps_display: String = String::new();
 
+    // Achievement system state
+    let mut achievement_engine = AchievementEngine::new();
+    let mut achievement_submenu = false;
+
+    // Recording & playback state
+    let mut recorder = InputRecording::new([0u8; 32]);
+    let mut current_rom_name = String::new();
+
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
     if let Some(rom_path) = args.get(1) {
         match fs::read(rom_path) {
             Ok(rom_data) => {
-                match Cartridge::new(&rom_data) {
+                match Cartridge::new_with_romdb(&rom_data, Some(&romdb)) {
                     Ok(cart) => {
+                        let rom_title = cart.rom_title.clone();
                         let mut bus = Bus::new(cart);
                         bus.set_apu_sample_rate(actual_sample_rate);
                         if config.region == "pal" {
@@ -1649,10 +1866,18 @@ fn main() {
                         game_cpu = Some(cpu);
                         emulator_state = EmulatorState::Game;
                         println!("Loaded: {}", rom_path);
-                        let game_name = Path::new(rom_path).file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "Unknown".to_string());
+                        let game_name = rom_title.unwrap_or_else(|| {
+                            Path::new(rom_path).file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        });
                         window.set_title(&format!("NES Emulator — {}", game_name));
+                        // Initialize achievements & recording for this ROM
+                        let rom_md5 = md5_hex(&rom_data);
+                        achievement_engine = AchievementEngine::load_for_rom(&rom_md5);
+                        let rom_sha = sha256(&rom_data);
+                        recorder = InputRecording::new(rom_sha);
+                        current_rom_name = game_name;
                     }
                     Err(e) => {
                         eprintln!("Error loading ROM: {}", e);
@@ -1661,6 +1886,20 @@ fn main() {
             }
             Err(e) => {
                 eprintln!("Error reading file '{}': {}", rom_path, e);
+            }
+        }
+    }
+
+    // Load script from --script arg (after ROM is loaded)
+    if let Some(ref spath) = script_path_arg {
+        let mut engine = ScriptEngine::init();
+        match engine.load_script(spath) {
+            Ok(()) => {
+                eprintln!("[scripting] Script loaded from --script arg: {}", spath);
+                script_engine = Some(engine);
+            }
+            Err(e) => {
+                eprintln!("[scripting] Failed to load script: {}", e);
             }
         }
     }
@@ -1682,6 +1921,7 @@ fn main() {
                 let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
 
                 let mut action: Option<MenuAction> = None;
+                let mut input_back_crt = false;
 
                 match menu.submenu {
                     None => {
@@ -1729,6 +1969,36 @@ fn main() {
                                 menu.cursor_visible = true;
                             }
                         }
+                        // Handle update banner: U to open download URL, Esc to dismiss
+                        if !update_dismissed {
+                            if let Some(info) = updater.get_update() {
+                                if window.is_key_pressed(Key::U, KeyRepeat::No) {
+                                    let url = if info.download_url.is_empty() {
+                                        format!("https://github.com/pf-github-code/nes-emulator/releases/tag/{}", info.version)
+                                    } else {
+                                        info.download_url.clone()
+                                    };
+                                    // Validate URL before opening to prevent command injection
+                                    if url.starts_with("https://github.com/") || url.starts_with("https://api.github.com/") {
+                                        #[cfg(target_os = "windows")]
+                                        {
+                                            let _ = std::process::Command::new("cmd")
+                                                .args(["/C", "start", "", &url])
+                                                .spawn();
+                                        }
+                                        #[cfg(not(target_os = "windows"))]
+                                        {
+                                            let _ = std::process::Command::new("xdg-open")
+                                                .arg(&url)
+                                                .spawn();
+                                        }
+                                    } else {
+                                        eprintln!("Suspicious update URL rejected: {}", url);
+                                    }
+                                    update_dismissed = true;
+                                }
+                            }
+                        }
                         if input.back {
                             break;
                         }
@@ -1743,7 +2013,7 @@ fn main() {
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
-                        if input.down && *selected < 4 {
+                        if input.down && *selected < 7 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -1799,6 +2069,14 @@ fn main() {
                                     save_config(&config);
                                 }
                                 5 => {
+                                    // Open CRT settings
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    menu.submenu = Some(SubMenu::CrtSettings { selected: 0, tables_dirty: false });
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                    return; // Skip the confirm sound below
+                                }
+                                6 => {
                                     // Open input settings
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     menu.submenu = Some(SubMenu::InputSettings(InputSettingsState {
@@ -1813,6 +2091,11 @@ fn main() {
                                     menu.cursor_visible = true;
                                     return; // Skip the confirm sound below
                                 }
+                                7 => {
+                                    // Toggle check for updates
+                                    config.check_for_updates = !config.check_for_updates;
+                                    save_config(&config);
+                                }
                                 _ => {}
                             }
                             play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -1820,6 +2103,84 @@ fn main() {
                         if input.back {
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             menu.submenu = None;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                        }
+                    }
+                    Some(SubMenu::CrtSettings { ref mut selected, ref mut tables_dirty }) => {
+                        if input.up && *selected > 0 {
+                            *selected -= 1;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3;
+                            }
+                        }
+                        if input.down && *selected < 7 {
+                            *selected += 1;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3;
+                            }
+                        }
+                        if input.left || input.right {
+                            let delta: i16 = if input.right { 5 } else { -5 };
+                            match *selected {
+                                0 => {
+                                    config.crt_config.scanline_intensity = (config.crt_config.scanline_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
+                                1 => {
+                                    config.crt_config.phosphor_warmth = (config.crt_config.phosphor_warmth as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
+                                2 => {
+                                    config.crt_config.vignette_strength = (config.crt_config.vignette_strength as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
+                                3 => {
+                                    config.crt_config.blur_amount = (config.crt_config.blur_amount as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
+                                4 => {
+                                    config.crt_config.curvature_strength = (config.crt_config.curvature_strength as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
+                                5 => {
+                                    // Glass intensity (existing field)
+                                    glass_intensity = (glass_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    config.glass_intensity = glass_intensity;
+                                    ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
+                                }
+                                6 => {
+                                    // Cycle mask mode
+                                    config.crt_config.mask_mode = match config.crt_config.mask_mode {
+                                        CrtMaskMode::Off => if input.right { CrtMaskMode::ShadowMask } else { CrtMaskMode::ApertureGrille },
+                                        CrtMaskMode::ShadowMask => if input.right { CrtMaskMode::ApertureGrille } else { CrtMaskMode::Off },
+                                        CrtMaskMode::ApertureGrille => if input.right { CrtMaskMode::Off } else { CrtMaskMode::ShadowMask },
+                                    };
+                                    mask_table = build_mask_table(&config.crt_config.mask_mode);
+                                    *tables_dirty = true;
+                                }
+                                _ => {}
+                            }
+                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            save_config(&config);
+                        }
+                        if input.confirm && *selected == 7 {
+                            // BACK
+                            input_back_crt = true;
+                        }
+                        if input.back || input_back_crt {
+                            if *tables_dirty {
+                                vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
+                                distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
+                            }
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            menu.submenu = Some(SubMenu::Settings { selected: 5 });
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                         }
@@ -2228,15 +2589,16 @@ fn main() {
                                 draw_text_centered_8x8(&mut menu_framebuffer, "LOADING...", 15, 0xF8D878);
                                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                                 if crt_enabled {
-                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                                 } else {
                                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                                 }
                                 composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
                                 let _ = window.update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
-                                match Cartridge::new(&rom_data) {
+                                match Cartridge::new_with_romdb(&rom_data, Some(&romdb)) {
                                     Ok(cart) => {
+                                        let rom_title = cart.rom_title.clone();
                                         let mut bus = Bus::new(cart);
                                         bus.set_apu_sample_rate(actual_sample_rate);
                                         if config.region == "pal" {
@@ -2252,10 +2614,18 @@ fn main() {
                                         game_cpu = Some(cpu);
                                         next_state = Some(EmulatorState::Game);
                                         println!("Loaded: {}", path_str);
-                                        let game_name = Path::new(&path_str).file_stem()
-                                            .map(|s| s.to_string_lossy().to_string())
-                                            .unwrap_or_else(|| "Unknown".to_string());
+                                        let game_name = rom_title.unwrap_or_else(|| {
+                                            Path::new(&path_str).file_stem()
+                                                .map(|s| s.to_string_lossy().to_string())
+                                                .unwrap_or_else(|| "Unknown".to_string())
+                                        });
                                         window.set_title(&format!("NES Emulator — {}", game_name));
+                                        // Initialize achievements & recording for this ROM
+                                        let rom_md5 = md5_hex(&rom_data);
+                                        achievement_engine = AchievementEngine::load_for_rom(&rom_md5);
+                                        let rom_sha = sha256(&rom_data);
+                                        recorder = InputRecording::new(rom_sha);
+                                        current_rom_name = game_name;
                                     }
                                     Err(e) => {
                                         play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -2290,7 +2660,17 @@ fn main() {
 
                 // Render menu to 256x240 framebuffer
                 match menu.submenu {
-                    None => render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible),
+                    None => {
+                        render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible);
+                        // Show update banner if available and not dismissed
+                        if !update_dismissed {
+                            if let Some(info) = updater.get_update() {
+                                let banner = format!("UPDATE: {}", info.version);
+                                draw_text_centered_8x8(&mut menu_framebuffer, &banner, 28, MENU_GOLD);
+                                draw_text_centered_8x8(&mut menu_framebuffer, "U:DOWNLOAD  ESC:DISMISS", 29, MENU_DARK_GRAY);
+                            }
+                        }
+                    }
                     Some(SubMenu::Settings { selected }) => {
                         render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume, glass_intensity);
                     }
@@ -2300,12 +2680,15 @@ fn main() {
                     Some(SubMenu::InputSettings(ref state)) => {
                         render_input_settings(&mut menu_framebuffer, state, menu.cursor_visible);
                     }
+                    Some(SubMenu::CrtSettings { selected, .. }) => {
+                        render_crt_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible);
+                    }
                 }
 
                 // Apply CRT filter pipeline (same as game!)
                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                 if crt_enabled {
-                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                     // Apply chromatic aberration to crt_buffer (screen area only)
                     if glass_intensity > 0 {
                         ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -2372,6 +2755,109 @@ fn main() {
                                 _ => {}
                             }
                         }
+                    } else if paused && achievement_submenu {
+                        // Achievement submenu input handling
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        if input.back {
+                            achievement_submenu = false;
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                        }
+                    } else if paused && netplay_submenu {
+                        // Netplay submenu input handling
+                        if netplay_ip_editing {
+                            // IP address text input mode
+                            for key in &window.get_keys_pressed(KeyRepeat::Yes) {
+                                match key {
+                                    Key::Key0 | Key::NumPad0 => netplay_ip_input.push('0'),
+                                    Key::Key1 | Key::NumPad1 => netplay_ip_input.push('1'),
+                                    Key::Key2 | Key::NumPad2 => netplay_ip_input.push('2'),
+                                    Key::Key3 | Key::NumPad3 => netplay_ip_input.push('3'),
+                                    Key::Key4 | Key::NumPad4 => netplay_ip_input.push('4'),
+                                    Key::Key5 | Key::NumPad5 => netplay_ip_input.push('5'),
+                                    Key::Key6 | Key::NumPad6 => netplay_ip_input.push('6'),
+                                    Key::Key7 | Key::NumPad7 => netplay_ip_input.push('7'),
+                                    Key::Key8 | Key::NumPad8 => netplay_ip_input.push('8'),
+                                    Key::Key9 | Key::NumPad9 => netplay_ip_input.push('9'),
+                                    Key::Period | Key::NumPadDot => netplay_ip_input.push('.'),
+                                    Key::Semicolon => netplay_ip_input.push(':'), // shift+; = : on most layouts
+                                    Key::Backspace => { netplay_ip_input.pop(); }
+                                    Key::Enter => {
+                                        match netplay.join(&netplay_ip_input) {
+                                            Ok(()) => {
+                                                overlay_message = Some("CONNECTING...".to_string());
+                                                overlay_timer = 120;
+                                                netplay_submenu = false;
+                                                paused = false;
+                                            }
+                                            Err(e) => {
+                                                overlay_message = Some(format!("FAILED: {}", e));
+                                                overlay_timer = 120;
+                                            }
+                                        }
+                                        netplay_ip_editing = false;
+                                    }
+                                    Key::Escape => {
+                                        netplay_ip_editing = false;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else {
+                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                            if input.up && netplay_selected > 0 {
+                                netplay_selected -= 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.down && netplay_selected < 3 {
+                                netplay_selected += 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.confirm {
+                                match netplay_selected {
+                                    0 => { // Host
+                                        match netplay.host(7777) {
+                                            Ok(()) => {
+                                                overlay_message = Some("HOSTING ON PORT 7777".to_string());
+                                                overlay_timer = 120;
+                                                netplay_submenu = false;
+                                                paused = false;
+                                            }
+                                            Err(e) => {
+                                                overlay_message = Some(format!("HOST FAILED: {}", e));
+                                                overlay_timer = 120;
+                                            }
+                                        }
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    1 => { // Join
+                                        netplay_ip_editing = true;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    2 => { // Disconnect
+                                        netplay.disconnect();
+                                        overlay_message = Some("NETPLAY DISCONNECTED".to_string());
+                                        overlay_timer = 90;
+                                        netplay_submenu = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    3 => { // Input delay toggle (cycle 1-5)
+                                        netplay.input_delay = if netplay.input_delay >= 5 { 1 } else { netplay.input_delay + 1 };
+                                        play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if input.back {
+                                netplay_submenu = false;
+                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                        }
                     } else if paused {
                         let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
                         if input.up && pause_selected > 0 {
@@ -2381,7 +2867,7 @@ fn main() {
                                 sound_cooldown = 3;
                             }
                         }
-                        if input.down && pause_selected < 4 {
+                        if input.down && pause_selected < 11 {
                             pause_selected += 1;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -2396,6 +2882,7 @@ fn main() {
                                 }
                                 1 => { // Save state
                                     if save_state(bus, cpu, &config, current_save_slot) {
+                                        thumbnail_cache[(current_save_slot as usize).saturating_sub(1).min(3)] = load_thumbnail(&config, current_save_slot);
                                         overlay_message = Some("STATE SAVED".to_string());
                                         overlay_timer = 90;
                                         paused = false;
@@ -2423,7 +2910,52 @@ fn main() {
                                     cheat_input_buffer.clear();
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
-                                4 => { // Return to menu
+                                4 => { // Netplay
+                                    netplay_submenu = true;
+                                    netplay_selected = 0;
+                                    netplay_ip_editing = false;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                                5 => { // Reload / Load script
+                                    let path = script_engine.as_ref()
+                                        .and_then(|s| s.script_path.clone())
+                                        .or_else(|| script_path_arg.clone());
+                                    if let Some(spath) = path {
+                                        let mut engine = ScriptEngine::init();
+                                        match engine.load_script(&spath) {
+                                            Ok(()) => {
+                                                script_engine = Some(engine);
+                                                overlay_message = Some("SCRIPT LOADED".to_string());
+                                                overlay_timer = 90;
+                                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("[scripting] {}", e);
+                                                overlay_message = Some("SCRIPT ERROR".to_string());
+                                                overlay_timer = 90;
+                                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            }
+                                        }
+                                    } else {
+                                        overlay_message = Some("NO SCRIPT SET (--script)".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    paused = false;
+                                }
+                                6 => { // Unload script
+                                    if let Some(ref mut engine) = script_engine {
+                                        engine.unload();
+                                        overlay_message = Some("SCRIPT UNLOADED".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    script_engine = None;
+                                    paused = false;
+                                }
+                                7 => { // Return to menu
+                                    netplay.disconnect();
+                                    script_engine = None;
                                     if let Some(ref bus) = game_bus {
                                         auto_save_sram(bus, &config);
                                     }
@@ -2431,10 +2963,89 @@ fn main() {
                                     game_cpu = None;
                                     paused = false;
                                     quit_hold_frames = 0;
+                                    achievement_engine = AchievementEngine::new();
+                                    recorder = InputRecording::new([0u8; 32]);
                                     emulator_state = EmulatorState::Menu(MenuState::new());
                                     window.set_title("NES Emulator");
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
+                                }
+                                8 => { // Achievements
+                                    achievement_submenu = !achievement_submenu;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                                9 => { // Save recording
+                                    if recorder.frame_count() > 0 {
+                                        if let Some(base) = recordings_dir() {
+                                            let _ = std::fs::create_dir_all(&base);
+                                            let path = base.join(format!("{}.nrec", current_rom_name));
+                                            match recorder.save_to_file(path.to_str().unwrap_or("recording.nrec")) {
+                                                Ok(()) => {
+                                                    overlay_message = Some("RECORDING SAVED".to_string());
+                                                    overlay_timer = 90;
+                                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("[recording] Save error: {}", e);
+                                                    overlay_message = Some("SAVE FAILED".to_string());
+                                                    overlay_timer = 90;
+                                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        overlay_message = Some("NO RECORDING DATA".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    paused = false;
+                                }
+                                10 => { // Load recording
+                                    if let Some(base) = recordings_dir() {
+                                        let path = base.join(format!("{}.nrec", current_rom_name));
+                                        match InputRecording::load_from_file(path.to_str().unwrap_or("")) {
+                                            Ok(loaded) => {
+                                                let count = loaded.frame_count();
+                                                recorder = loaded;
+                                                overlay_message = Some(format!("LOADED {} FRAMES", count));
+                                                overlay_timer = 90;
+                                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("[recording] Load error: {}", e);
+                                                overlay_message = Some("LOAD FAILED".to_string());
+                                                overlay_timer = 90;
+                                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            }
+                                        }
+                                    }
+                                    paused = false;
+                                }
+                                11 => { // Export FM2
+                                    if recorder.frame_count() > 0 {
+                                        if let Some(base) = recordings_dir() {
+                                            let _ = std::fs::create_dir_all(&base);
+                                            let path = base.join(format!("{}.fm2", current_rom_name));
+                                            match recorder.export_fm2(path.to_str().unwrap_or("recording.fm2"), &current_rom_name) {
+                                                Ok(()) => {
+                                                    overlay_message = Some("FM2 EXPORTED".to_string());
+                                                    overlay_timer = 90;
+                                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("[recording] FM2 export error: {}", e);
+                                                    overlay_message = Some("EXPORT FAILED".to_string());
+                                                    overlay_timer = 90;
+                                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        overlay_message = Some("NO RECORDING DATA".to_string());
+                                        overlay_timer = 90;
+                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    paused = false;
                                 }
                                 _ => {}
                             }
@@ -2446,15 +3057,12 @@ fn main() {
                     } else {
                         // Normal game emulation when not paused
                         let rewinding = window.is_key_down(Key::Backspace);
+                        is_rewinding = rewinding;
                         
                         if rewinding {
                             // Rewind: pop snapshots and render them
                             // Pop 2 frames for visible speed (since we only save every 2nd frame)
-                            let rewound = rewind_buffer.pop_frame(bus, cpu);
-                            if rewound {
-                                overlay_message = Some("<< REWIND".to_string());
-                                overlay_timer = 2;
-                            }
+                            let _rewound = rewind_buffer.pop_frame(bus, cpu);
                         } else {
                             let fast_forward = window.is_key_down(Key::Tab);
                             let frame_count = if fast_forward { 4 } else { 1 };
@@ -2496,11 +3104,136 @@ fn main() {
                                 overlay_message = Some(">> FAST FORWARD".to_string());
                                 overlay_timer = 2;
                             }
+
+                            // Lua scripting: run per-frame callback
+                            if let Some(ref mut script) = script_engine {
+                                let ram_snapshot = bus.ram_snapshot();
+                                if let Err(e) = script.on_frame(&ram_snapshot, frame_counter as u64) {
+                                    eprintln!("[scripting] {}", e);
+                                }
+                                // Apply overlay pixels onto PPU frame
+                                for (x, y, color) in script.overlay_pixels.drain(..) {
+                                    if x < 256 && y < 240 {
+                                        bus.ppu.frame_data[y * 256 + x] = color;
+                                    }
+                                }
+                                // Show script messages as overlay
+                                for (msg, _frames) in script.messages.drain(..) {
+                                    overlay_message = Some(msg);
+                                    overlay_timer = 2;
+                                }
+                            }
+
+                            // Achievement system: check RAM conditions each frame
+                            {
+                                let ram_snapshot = bus.ram_snapshot();
+                                achievement_engine.check_frame(&ram_snapshot);
+                                achievement_engine.tick_notifications();
+                            }
                         }
                         
                         // Handle input when not paused
                         frame_counter = frame_counter.wrapping_add(1);
                         let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter, &config.input_bindings);
+
+                        // Recording: capture current joypad state after input handling
+                        if recorder.is_recording() {
+                            let p1 = joypad_to_byte(bus, 1);
+                            let p2 = joypad_to_byte(bus, 2);
+                            recorder.record_frame(p1, p2);
+                        }
+
+                        // Playback: override joypad input from recording
+                        if recorder.is_playing() {
+                            if let Some((p1, p2)) = recorder.next_frame() {
+                                byte_to_joypad(bus, 1, p1);
+                                byte_to_joypad(bus, 2, p2);
+                            } else {
+                                overlay_message = Some("PLAYBACK FINISHED".to_string());
+                                overlay_timer = 90;
+                            }
+                        }
+
+                        // Netplay: exchange inputs with remote peer
+                        if netplay.is_connected() {
+                            netplay.frame_num = netplay.frame_num.wrapping_add(1);
+
+                            // Encode local input (from whichever player we are)
+                            let local_bits = if netplay.local_player == 0 {
+                                // We're P1 - encode our P1 joypad state
+                                NetplaySession::encode_input(
+                                    bus.joypad1.get_button(JoypadButton::A),
+                                    bus.joypad1.get_button(JoypadButton::B),
+                                    bus.joypad1.get_button(JoypadButton::Select),
+                                    bus.joypad1.get_button(JoypadButton::Start),
+                                    bus.joypad1.get_button(JoypadButton::Up),
+                                    bus.joypad1.get_button(JoypadButton::Down),
+                                    bus.joypad1.get_button(JoypadButton::Left),
+                                    bus.joypad1.get_button(JoypadButton::Right),
+                                )
+                            } else {
+                                // We're P2 - encode our local input (read from P1 keys, applied to P2 remotely)
+                                NetplaySession::encode_input(
+                                    bus.joypad1.get_button(JoypadButton::A),
+                                    bus.joypad1.get_button(JoypadButton::B),
+                                    bus.joypad1.get_button(JoypadButton::Select),
+                                    bus.joypad1.get_button(JoypadButton::Start),
+                                    bus.joypad1.get_button(JoypadButton::Up),
+                                    bus.joypad1.get_button(JoypadButton::Down),
+                                    bus.joypad1.get_button(JoypadButton::Left),
+                                    bus.joypad1.get_button(JoypadButton::Right),
+                                )
+                            };
+
+                            // Simple checksum of frame state
+                            let checksum = netplay.frame_num as u32 ^ (local_bits as u32);
+                            netplay.send_input(netplay.frame_num, local_bits, checksum);
+
+                            // Receive remote input
+                            let remote_bits = netplay.receive_input().unwrap_or(netplay.last_remote_input());
+                            let (ra, rb, rsel, rst, rup, rdn, rlt, rrt) = NetplaySession::decode_input(remote_bits);
+
+                            // Apply remote input to the other player's joypad
+                            if netplay.local_player == 0 {
+                                // We're P1, remote controls P2
+                                bus.joypad2.set_button_pressed(JoypadButton::A, ra);
+                                bus.joypad2.set_button_pressed(JoypadButton::B, rb);
+                                bus.joypad2.set_button_pressed(JoypadButton::Select, rsel);
+                                bus.joypad2.set_button_pressed(JoypadButton::Start, rst);
+                                bus.joypad2.set_button_pressed(JoypadButton::Up, rup);
+                                bus.joypad2.set_button_pressed(JoypadButton::Down, rdn);
+                                bus.joypad2.set_button_pressed(JoypadButton::Left, rlt);
+                                bus.joypad2.set_button_pressed(JoypadButton::Right, rrt);
+                            } else {
+                                // We're P2: our local input goes to P2 joypad, remote goes to P1
+                                // First, move our local input from joypad1 to joypad2
+                                let (la, lb, lsel, lst, lup, ldn, llt, lrt) = NetplaySession::decode_input(local_bits);
+                                bus.joypad2.set_button_pressed(JoypadButton::A, la);
+                                bus.joypad2.set_button_pressed(JoypadButton::B, lb);
+                                bus.joypad2.set_button_pressed(JoypadButton::Select, lsel);
+                                bus.joypad2.set_button_pressed(JoypadButton::Start, lst);
+                                bus.joypad2.set_button_pressed(JoypadButton::Up, lup);
+                                bus.joypad2.set_button_pressed(JoypadButton::Down, ldn);
+                                bus.joypad2.set_button_pressed(JoypadButton::Left, llt);
+                                bus.joypad2.set_button_pressed(JoypadButton::Right, lrt);
+                                // Remote (host) controls P1
+                                bus.joypad1.set_button_pressed(JoypadButton::A, ra);
+                                bus.joypad1.set_button_pressed(JoypadButton::B, rb);
+                                bus.joypad1.set_button_pressed(JoypadButton::Select, rsel);
+                                bus.joypad1.set_button_pressed(JoypadButton::Start, rst);
+                                bus.joypad1.set_button_pressed(JoypadButton::Up, rup);
+                                bus.joypad1.set_button_pressed(JoypadButton::Down, rdn);
+                                bus.joypad1.set_button_pressed(JoypadButton::Left, rlt);
+                                bus.joypad1.set_button_pressed(JoypadButton::Right, rrt);
+                            }
+                        } else if netplay.state != NetplayState::Disconnected {
+                            // Still hosting/connecting - poll for handshake packets
+                            let _ = netplay.receive_input();
+                            if netplay.is_connected() {
+                                overlay_message = Some(format!("NETPLAY CONNECTED (P{})", netplay.local_player + 1));
+                                overlay_timer = 120;
+                            }
+                        }
 
                         // Gamepad quit combo: hold Start+Select for ~1 second (60 frames)
                         if start_held && select_held {
@@ -2619,17 +3352,51 @@ fn main() {
                             overlay_timer = 90; // 1.5 seconds
                         }
 
+                        // Shift+R toggle recording
+                        if window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift) {
+                            if window.is_key_pressed(Key::R, KeyRepeat::No) {
+                                if recorder.is_recording() {
+                                    recorder.stop_recording();
+                                    overlay_message = Some(format!("REC STOPPED ({} FRAMES)", recorder.frame_count()));
+                                    overlay_timer = 90;
+                                } else {
+                                    recorder.start_recording();
+                                    overlay_message = Some("REC STARTED".to_string());
+                                    overlay_timer = 90;
+                                }
+                            }
+                            // Shift+P toggle playback
+                            if window.is_key_pressed(Key::P, KeyRepeat::No) {
+                                if recorder.is_playing() {
+                                    recorder.stop_recording(); // stops playback (sets Idle)
+                                    overlay_message = Some("PLAYBACK STOPPED".to_string());
+                                    overlay_timer = 90;
+                                } else if recorder.frame_count() > 0 {
+                                    recorder.start_playback();
+                                    overlay_message = Some(format!("PLAYING {} FRAMES", recorder.frame_count()));
+                                    overlay_timer = 90;
+                                } else {
+                                    overlay_message = Some("NO RECORDING".to_string());
+                                    overlay_timer = 90;
+                                }
+                            }
+                        }
+
                         // Escape toggles pause menu
                         if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
                             paused = true;
                             pause_selected = 0;
+                            // Load thumbnails for save slot display
+                            for slot in 0..4u8 {
+                                thumbnail_cache[slot as usize] = load_thumbnail(&config, slot + 1);
+                            }
                         }
                     }
 
                     // ALWAYS render (even when paused - shows frozen frame)
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
-                        crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt);
+                        crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                         // Apply chromatic aberration to crt_buffer (screen area only)
                         if glass_intensity > 0 {
                             ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -2644,6 +3411,95 @@ fn main() {
 
                     if crt_enabled {
                         apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
+                    }
+
+                    // Rewind visual effect: desaturate + blue tint + jitter
+                    if is_rewinding {
+                        // Apply effect only to the screen area within composite buffer
+                        // Extract screen region, apply effect, write back
+                        let sx = SCREEN_X;
+                        let sy = SCREEN_Y;
+                        let sw = SCREEN_W;
+                        let sh = SCREEN_H;
+                        for row in 0..sh {
+                            let buf_y = sy + row;
+                            // VHS jitter per scanline
+                            let jitter = ((frame_counter.wrapping_mul(7919).wrapping_add((row as u32).wrapping_mul(104729))) % 3) as usize;
+                            // Shift right (process right-to-left)
+                            if jitter > 0 {
+                                for x in (jitter..sw).rev() {
+                                    let dst = buf_y * WINDOW_WIDTH + sx + x;
+                                    let src = buf_y * WINDOW_WIDTH + sx + x - jitter;
+                                    if dst < composite_buffer.len() && src < composite_buffer.len() {
+                                        composite_buffer[dst] = composite_buffer[src];
+                                    }
+                                }
+                                for x in 0..jitter {
+                                    let idx = buf_y * WINDOW_WIDTH + sx + x;
+                                    if idx < composite_buffer.len() {
+                                        composite_buffer[idx] = 0x101030;
+                                    }
+                                }
+                            }
+                            // Desaturate + blue tint
+                            for x in 0..sw {
+                                let idx = buf_y * WINDOW_WIDTH + sx + x;
+                                if idx >= composite_buffer.len() { break; }
+                                let p = composite_buffer[idx];
+                                let r = ((p >> 16) & 0xFF) as u32;
+                                let g = ((p >> 8) & 0xFF) as u32;
+                                let b = (p & 0xFF) as u32;
+                                let gray = (r * 77 + g * 150 + b * 29) >> 8;
+                                let r2 = (r * 70 + gray * 30) / 100;
+                                let g2 = (g * 70 + gray * 30) / 100;
+                                let b2 = ((b * 70 + gray * 30) / 100) * 120 / 100;
+                                composite_buffer[idx] = (r2.min(255) << 16) | (g2.min(255) << 8) | b2.min(255);
+                            }
+                        }
+                    }
+
+                    // Rewind buffer HUD bar (top-right of screen, only when buffer has data)
+                    if !paused && !rewind_buffer.snapshots.is_empty() {
+                        let rewind_pct = (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
+                        let bar_w: usize = 60;
+                        let bar_h: usize = 4;
+                        let bar_x = SCREEN_X + SCREEN_W - 70;
+                        let bar_y = SCREEN_Y + 8;
+                        let filled = (bar_w * rewind_pct) / 100;
+                        for dy in 0..bar_h {
+                            for dx in 0..bar_w {
+                                let px = bar_x + dx;
+                                let py = bar_y + dy;
+                                let idx = py * WINDOW_WIDTH + px;
+                                if idx < composite_buffer.len() {
+                                    composite_buffer[idx] = if dx < filled { 0x4040FF } else { 0x202040 };
+                                }
+                            }
+                        }
+                    }
+
+                    // "<< REWIND" text overlay while rewinding
+                    if is_rewinding {
+                        let rw_text = "<< REWIND";
+                        let text_w = rw_text.len() * 4;
+                        let tx = SCREEN_X + SCREEN_W / 2 - text_w;
+                        let ty = SCREEN_Y + 20;
+                        // Dark background
+                        for y in ty.saturating_sub(2)..=(ty + 8) {
+                            for x in (tx.saturating_sub(4))..=(tx + text_w * 2 + 4) {
+                                if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                    let idx = y * WINDOW_WIDTH + x;
+                                    if idx < composite_buffer.len() {
+                                        let p = composite_buffer[idx];
+                                        let r = ((p >> 16) & 0xFF) / 2;
+                                        let g = ((p >> 8) & 0xFF) / 2;
+                                        let b = (p & 0xFF) / 2;
+                                        composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                    }
+                                }
+                            }
+                        }
+                        draw_text(&mut composite_buffer, rw_text, tx, ty, 0x6688FF, WINDOW_WIDTH);
                     }
 
                     // Overlay message display
@@ -2671,6 +3527,77 @@ fn main() {
                         }
                     }
 
+                    // Achievement notification toasts (top-right, gold background)
+                    {
+                        let mut notify_y = SCREEN_Y + 40;
+                        for notif in achievement_engine.notifications.iter() {
+                            if notif.frames_remaining == 0 { continue; }
+                            let text = format!("* {} (+{})", notif.title, notif.points);
+                            let text_w = text.len() * 4;
+                            let nx = SCREEN_X + SCREEN_W - text_w - 16;
+                            // Gold background bar
+                            for y in notify_y.saturating_sub(2)..=(notify_y + 8) {
+                                for x in (nx.saturating_sub(4))..=(nx + text_w + 4) {
+                                    if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                        let idx = y * WINDOW_WIDTH + x;
+                                        if idx < composite_buffer.len() {
+                                            composite_buffer[idx] = 0x886820;
+                                        }
+                                    }
+                                }
+                            }
+                            draw_text(&mut composite_buffer, &text, nx, notify_y, 0xF8D878, WINDOW_WIDTH);
+                            notify_y += 14;
+                        }
+                    }
+
+                    // Recording/playback HUD indicators (top-left)
+                    if !paused {
+                        if recorder.is_recording() {
+                            let rec_text = "* REC";
+                            let rx = SCREEN_X + 8;
+                            let ry = SCREEN_Y + 20;
+                            // Dark background
+                            let tw = rec_text.len() * 4 + 4;
+                            for y in ry.saturating_sub(1)..=(ry + 6) {
+                                for x in rx.saturating_sub(2)..=(rx + tw) {
+                                    if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                        let idx = y * WINDOW_WIDTH + x;
+                                        if idx < composite_buffer.len() {
+                                            let p = composite_buffer[idx];
+                                            let r = ((p >> 16) & 0xFF) / 3;
+                                            let g = ((p >> 8) & 0xFF) / 3;
+                                            let b = (p & 0xFF) / 3;
+                                            composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                        }
+                                    }
+                                }
+                            }
+                            draw_text(&mut composite_buffer, rec_text, rx, ry, 0xFF4444, WINDOW_WIDTH);
+                        }
+                        if recorder.is_playing() {
+                            let play_text = "> PLAY";
+                            let px = SCREEN_X + 8;
+                            let py = SCREEN_Y + 20;
+                            let tw = play_text.len() * 4 + 4;
+                            for y in py.saturating_sub(1)..=(py + 6) {
+                                for x in px.saturating_sub(2)..=(px + tw) {
+                                    if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                        let idx = y * WINDOW_WIDTH + x;
+                                        if idx < composite_buffer.len() {
+                                            let p = composite_buffer[idx];
+                                            let r = ((p >> 16) & 0xFF) / 3;
+                                            let g = ((p >> 8) & 0xFF) / 3;
+                                            let b = (p & 0xFF) / 3;
+                                            composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                        }
+                                    }
+                                }
+                            }
+                            draw_text(&mut composite_buffer, play_text, px, py, 0x44FF44, WINDOW_WIDTH);
+                        }
+                    }
+
                     // FPS counter
                     if show_fps {
                         fps_frames += 1;
@@ -2685,6 +3612,30 @@ fn main() {
                             let fy = SCREEN_Y + 8;
                             draw_text(&mut composite_buffer, &fps_display, fx, fy, 0x00FF00, WINDOW_WIDTH);
                         }
+                    }
+
+                    // Netplay indicator (top-left during gameplay)
+                    if netplay.is_connected() && !paused {
+                        let net_text = format!("NET {}MS", netplay.ping_ms);
+                        let nx = SCREEN_X + 8;
+                        let ny = SCREEN_Y + 8;
+                        // Dark background
+                        let tw = net_text.len() * 4 + 4;
+                        for y in ny.saturating_sub(1)..=(ny + 6) {
+                            for x in nx.saturating_sub(2)..=(nx + tw) {
+                                if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
+                                    let idx = y * WINDOW_WIDTH + x;
+                                    if idx < composite_buffer.len() {
+                                        let p = composite_buffer[idx];
+                                        let r = ((p >> 16) & 0xFF) / 3;
+                                        let g = ((p >> 8) & 0xFF) / 3;
+                                        let b = (p & 0xFF) / 3;
+                                        composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                    }
+                                }
+                            }
+                        }
+                        draw_text(&mut composite_buffer, &net_text, nx, ny, 0x44CCFF, WINDOW_WIDTH);
                     }
 
                     // Help overlay
@@ -2788,11 +3739,11 @@ fn main() {
                         }
                         
                         // Box background (tile coordinates: 32 cols × 30 rows)
-                        // Center a box roughly 20 tiles wide × 14 tiles tall
+                        // Center a box roughly 20 tiles wide × 22 tiles tall
                         let box_left = 6;
                         let box_right = 26;
-                        let box_top = 8;
-                        let box_bottom = 24;
+                        let box_top = 3;
+                        let box_bottom = 28;
                         
                         // Fill box background
                         for ty in box_top..box_bottom {
@@ -2849,8 +3800,13 @@ fn main() {
                             }
                         }
                         
-                        // Title: "PAUSED" centered
-                        draw_text_centered_8x8(&mut menu_framebuffer, "\x11 PAUSED \x11", box_top + 1, MENU_GOLD);
+                        // Title: game name or "PAUSED" centered
+                        if !current_rom_name.is_empty() {
+                            let title: String = current_rom_name.to_uppercase().chars().take(24).collect();
+                            draw_text_centered_8x8(&mut menu_framebuffer, &format!("\x11 {} \x11", title), box_top + 1, MENU_GOLD);
+                        } else {
+                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 PAUSED \x11", box_top + 1, MENU_GOLD);
+                        }
                         
                         // Separator
                         let sep_y = (box_top + 2) * 8 + 4;
@@ -2863,9 +3819,30 @@ fn main() {
                         // Menu items
                         let slot_str = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
                         let load_str = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
-                        let items: [&str; 5] = ["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", "RETURN TO MENU"];
+                        let net_status = match &netplay.state {
+                            NetplayState::Connected => format!("NETPLAY  ({}MS)", netplay.ping_ms),
+                            NetplayState::Hosting { .. } => "NETPLAY  (HOSTING)".to_string(),
+                            NetplayState::Connecting => "NETPLAY  (...)".to_string(),
+                            _ => "NETPLAY".to_string(),
+                        };
+                        let script_status = if script_engine.as_ref().map_or(false, |s| s.active) {
+                            "RELOAD SCRIPT"
+                        } else {
+                            "LOAD SCRIPT"
+                        };
+                        let ach_label = if achievement_engine.achievements.is_empty() {
+                            "ACHIEVEMENTS".to_string()
+                        } else {
+                            format!("ACHIEVEMENTS ({}/{})", achievement_engine.unlocked_count, achievement_engine.achievements.len())
+                        };
+                        let rec_label = if recorder.is_recording() {
+                            format!("SAVE REC ({} FR)", recorder.frame_count())
+                        } else {
+                            "SAVE RECORDING".to_string()
+                        };
+                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2"];
                         for (i, item) in items.iter().enumerate() {
-                            let row = box_top + 4 + i * 2; // rows 12, 14, 16, 18, 20
+                            let row = box_top + 3 + i;
                             let is_selected = i == pause_selected;
                             
                             if is_selected {
@@ -2912,11 +3889,180 @@ fn main() {
                             }
                             if cheat_message_timer == 0 { cheat_message = None; }
                         }
+
+                        // Netplay submenu overlay
+                        if netplay_submenu {
+                            // Draw overlay box over the pause menu
+                            let nb_left = 7;
+                            let nb_right = 25;
+                            let nb_top = 10;
+                            let nb_bottom = 22;
+                            for ty in nb_top..nb_bottom {
+                                for tx in nb_left..nb_right {
+                                    let px = tx * 8;
+                                    let py = ty * 8;
+                                    for dy in 0..8 {
+                                        for dx in 0..8 {
+                                            let x = px + dx;
+                                            let y = py + dy;
+                                            if y < 240 && x < 256 {
+                                                menu_framebuffer[y * 256 + x] = 0x0C0C4C;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Border
+                            for tx in nb_left..nb_right {
+                                let px = tx * 8;
+                                for dx in 0..8 {
+                                    let x = px + dx;
+                                    let yt = nb_top * 8;
+                                    let yb = nb_bottom * 8 - 1;
+                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE; }
+                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE; }
+                                }
+                            }
+                            for ty in nb_top..nb_bottom {
+                                let py = ty * 8;
+                                for dy in 0..8 {
+                                    let y = py + dy;
+                                    if y < 240 {
+                                        let xl = nb_left * 8;
+                                        let xr = nb_right * 8 - 1;
+                                        menu_framebuffer[y * 256 + xl] = MENU_LIGHT_BLUE;
+                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE; }
+                                    }
+                                }
+                            }
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 NETPLAY \x11", nb_top + 1, MENU_GOLD);
+
+                            // Status line
+                            let status_color = if netplay.is_connected() { 0x44FF44u32 } else { MENU_GRAY };
+                            draw_text_centered_8x8(&mut menu_framebuffer, netplay.status_text(), nb_top + 2, status_color);
+
+                            let delay_str = format!("INPUT DELAY: {}", netplay.input_delay);
+                            let np_items: [&str; 4] = ["HOST (PORT 7777)", "JOIN...", "DISCONNECT", &delay_str];
+                            for (i, item) in np_items.iter().enumerate() {
+                                let row = nb_top + 4 + i * 2;
+                                let is_sel = i == netplay_selected;
+                                if is_sel {
+                                    let hy = row * 8;
+                                    for dy in 0..8 {
+                                        for hx in (nb_left * 8 + 4)..(nb_right * 8 - 4) {
+                                            if hy + dy < 240 && hx < 256 {
+                                                menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
+                                            }
+                                        }
+                                    }
+                                    draw_char_8x8(&mut menu_framebuffer, '\x10', nb_left + 1, row, MENU_WHITE);
+                                }
+                                let color = if is_sel { MENU_WHITE } else { MENU_GRAY };
+                                draw_text_8x8(&mut menu_framebuffer, item, nb_left + 2, row, color);
+                            }
+
+                            // IP input overlay when editing
+                            if netplay_ip_editing {
+                                let ip_y = (nb_top + 5) * 8;
+                                for dy in 0..16 {
+                                    for dx in 0..128 {
+                                        let x = 64 + dx;
+                                        let y = ip_y + dy;
+                                        if y < 240 && x < 256 {
+                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                        }
+                                    }
+                                }
+                                draw_text_8x8(&mut menu_framebuffer, "IP:PORT:", 9, nb_top + 5, 0xF8D878);
+                                let ip_display = if netplay_ip_input.is_empty() { "_" } else { &netplay_ip_input };
+                                draw_text_8x8(&mut menu_framebuffer, ip_display, 9, nb_top + 7, 0xFCFCFC);
+                            }
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:SELECT", nb_bottom - 1, MENU_DARK_GRAY);
+                        }
+
+                        // Achievement submenu overlay
+                        if achievement_submenu {
+                            let ab_left = 4;
+                            let ab_right = 28;
+                            let ab_top = 5;
+                            let ab_bottom = 27;
+                            // Fill background
+                            for ty in ab_top..ab_bottom {
+                                for tx in ab_left..ab_right {
+                                    let px = tx * 8;
+                                    let py = ty * 8;
+                                    for dy in 0..8 {
+                                        for dx in 0..8 {
+                                            let x = px + dx;
+                                            let y = py + dy;
+                                            if y < 240 && x < 256 {
+                                                menu_framebuffer[y * 256 + x] = 0x0C0C3C;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Border
+                            for tx in ab_left..ab_right {
+                                let px = tx * 8;
+                                for dx in 0..8 {
+                                    let x = px + dx;
+                                    let yt = ab_top * 8;
+                                    let yb = ab_bottom * 8 - 1;
+                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_GOLD; }
+                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_GOLD; }
+                                }
+                            }
+                            for ty in ab_top..ab_bottom {
+                                let py = ty * 8;
+                                for dy in 0..8 {
+                                    let y = py + dy;
+                                    if y < 240 {
+                                        let xl = ab_left * 8;
+                                        let xr = ab_right * 8 - 1;
+                                        menu_framebuffer[y * 256 + xl] = MENU_GOLD;
+                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_GOLD; }
+                                    }
+                                }
+                            }
+
+                            let title = if achievement_engine.game_title.is_empty() {
+                                "ACHIEVEMENTS".to_string()
+                            } else {
+                                format!("{}", achievement_engine.game_title)
+                            };
+                            draw_text_centered_8x8(&mut menu_framebuffer, &title, ab_top + 1, MENU_GOLD);
+
+                            let stats = format!("{}/{} UNLOCKED  {}PTS", achievement_engine.unlocked_count, achievement_engine.achievements.len(), achievement_engine.total_points);
+                            draw_text_centered_8x8(&mut menu_framebuffer, &stats, ab_top + 2, MENU_WHITE);
+
+                            // List achievements (up to 16 visible)
+                            let max_visible = (ab_bottom - ab_top - 4).min(achievement_engine.achievements.len());
+                            for (i, ach) in achievement_engine.achievements.iter().take(max_visible).enumerate() {
+                                let row = ab_top + 4 + i;
+                                if row >= ab_bottom - 1 { break; }
+                                let icon = if ach.unlocked { "\x0F" } else { "." };
+                                let label = format!("{} {} ({})", icon, ach.title, ach.points);
+                                let color = if ach.unlocked { 0x44FF44u32 } else { MENU_GRAY };
+                                draw_text_8x8(&mut menu_framebuffer, &label, ab_left + 1, row, color);
+                            }
+
+                            if achievement_engine.achievements.is_empty() {
+                                draw_text_centered_8x8(&mut menu_framebuffer, "NO ACHIEVEMENTS LOADED", ab_top + 6, MENU_DARK_GRAY);
+                                draw_text_centered_8x8(&mut menu_framebuffer, "PLACE JSON FILES IN", ab_top + 8, MENU_DARK_GRAY);
+                                draw_text_centered_8x8(&mut menu_framebuffer, "~/.nes-emulator/", ab_top + 10, MENU_DARK_GRAY);
+                                draw_text_centered_8x8(&mut menu_framebuffer, "achievements/", ab_top + 11, MENU_DARK_GRAY);
+                            }
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK", ab_bottom - 1, MENU_DARK_GRAY);
+                        }
                         
                         // Now pass through CRT filter (same as menu rendering)
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
-                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt);
+                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                             // Apply chromatic aberration to crt_buffer (screen area only)
                             if glass_intensity > 0 {
                                 ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -2928,6 +4074,122 @@ fn main() {
                         composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
                         if crt_enabled {
                             apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
+                        }
+
+                        // Render save state thumbnail in pause menu (composite buffer)
+                        // Position thumbnail to the right of the pause menu box
+                        let thumb_scale = 2usize;
+                        let thumb_w = 64 * thumb_scale;
+                        let thumb_h = 60 * thumb_scale;
+                        // Place thumbnail right of center, aligned with save/load items
+                        // The NES screen maps to SCREEN_X..SCREEN_X+SCREEN_W in composite
+                        // Menu box right edge is at tile 26 = pixel 208 in NES coords
+                        // Scale factor from NES to screen: SCREEN_W / 256
+                        let scale_x = SCREEN_W as f32 / 256.0;
+                        let scale_y = SCREEN_H as f32 / 240.0;
+                        let thumb_cx = SCREEN_X + ((26 * 8 + 8) as f32 * scale_x) as usize;
+                        let thumb_cy = SCREEN_Y + ((12 * 8) as f32 * scale_y) as usize;
+                        let slot_idx = (current_save_slot as usize).saturating_sub(1).min(3);
+                        if let Some(ref thumb_data) = thumbnail_cache[slot_idx] {
+                            // Render thumbnail upscaled 2×
+                            for ty in 0..60usize {
+                                for tx in 0..64usize {
+                                    let src = (ty * 64 + tx) * 3;
+                                    if src + 2 >= thumb_data.len() { continue; }
+                                    let r = thumb_data[src] as u32;
+                                    let g = thumb_data[src + 1] as u32;
+                                    let b = thumb_data[src + 2] as u32;
+                                    let color = (r << 16) | (g << 8) | b;
+                                    for sy in 0..thumb_scale {
+                                        for sx in 0..thumb_scale {
+                                            let px = thumb_cx + tx * thumb_scale + sx;
+                                            let py = thumb_cy + ty * thumb_scale + sy;
+                                            if px < WINDOW_WIDTH && py < WINDOW_HEIGHT {
+                                                let idx = py * WINDOW_WIDTH + px;
+                                                if idx < composite_buffer.len() {
+                                                    composite_buffer[idx] = color;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Border around thumbnail
+                            for dx in 0..thumb_w + 2 {
+                                let bx = thumb_cx + dx - 1;
+                                let by_top = thumb_cy.saturating_sub(1);
+                                let by_bot = thumb_cy + thumb_h;
+                                if bx < WINDOW_WIDTH {
+                                    if by_top < WINDOW_HEIGHT {
+                                        composite_buffer[by_top * WINDOW_WIDTH + bx] = 0x4444AA;
+                                    }
+                                    if by_bot < WINDOW_HEIGHT {
+                                        composite_buffer[by_bot * WINDOW_WIDTH + bx] = 0x4444AA;
+                                    }
+                                }
+                            }
+                            for dy in 0..thumb_h {
+                                let by = thumb_cy + dy;
+                                let bx_l = thumb_cx.saturating_sub(1);
+                                let bx_r = thumb_cx + thumb_w;
+                                if by < WINDOW_HEIGHT {
+                                    if bx_l < WINDOW_WIDTH {
+                                        composite_buffer[by * WINDOW_WIDTH + bx_l] = 0x4444AA;
+                                    }
+                                    if bx_r < WINDOW_WIDTH {
+                                        composite_buffer[by * WINDOW_WIDTH + bx_r] = 0x4444AA;
+                                    }
+                                }
+                            }
+                            // Slot label above thumbnail
+                            let label = format!("SLOT {}", current_save_slot);
+                            draw_text(&mut composite_buffer, &label, thumb_cx, thumb_cy.saturating_sub(10), 0xF8D878, WINDOW_WIDTH);
+                        } else {
+                            // Empty slot: dark background with "EMPTY" text
+                            for dy in 0..thumb_h {
+                                for dx in 0..thumb_w {
+                                    let px = thumb_cx + dx;
+                                    let py = thumb_cy + dy;
+                                    if px < WINDOW_WIDTH && py < WINDOW_HEIGHT {
+                                        let idx = py * WINDOW_WIDTH + px;
+                                        if idx < composite_buffer.len() {
+                                            composite_buffer[idx] = 0x181830;
+                                        }
+                                    }
+                                }
+                            }
+                            // Border
+                            for dx in 0..thumb_w + 2 {
+                                let bx = thumb_cx + dx - 1;
+                                let by_top = thumb_cy.saturating_sub(1);
+                                let by_bot = thumb_cy + thumb_h;
+                                if bx < WINDOW_WIDTH {
+                                    if by_top < WINDOW_HEIGHT {
+                                        composite_buffer[by_top * WINDOW_WIDTH + bx] = 0x333366;
+                                    }
+                                    if by_bot < WINDOW_HEIGHT {
+                                        composite_buffer[by_bot * WINDOW_WIDTH + bx] = 0x333366;
+                                    }
+                                }
+                            }
+                            for dy in 0..thumb_h {
+                                let by = thumb_cy + dy;
+                                let bx_l = thumb_cx.saturating_sub(1);
+                                let bx_r = thumb_cx + thumb_w;
+                                if by < WINDOW_HEIGHT {
+                                    if bx_l < WINDOW_WIDTH {
+                                        composite_buffer[by * WINDOW_WIDTH + bx_l] = 0x333366;
+                                    }
+                                    if bx_r < WINDOW_WIDTH {
+                                        composite_buffer[by * WINDOW_WIDTH + bx_r] = 0x333366;
+                                    }
+                                }
+                            }
+                            let label = format!("SLOT {}", current_save_slot);
+                            draw_text(&mut composite_buffer, &label, thumb_cx, thumb_cy.saturating_sub(10), 0xF8D878, WINDOW_WIDTH);
+                            let empty_x = thumb_cx + (thumb_w - 5 * 4) / 2;
+                            let empty_y = thumb_cy + (thumb_h - 5) / 2;
+                            draw_text(&mut composite_buffer, "EMPTY", empty_x, empty_y, 0x666688, WINDOW_WIDTH);
                         }
                     }
 
@@ -3139,18 +4401,32 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     (p1_start, p1_select)
 }
 
-fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)]) {
+fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u8, u8, u8)]) {
     output.resize(SCREEN_W * SCREEN_H, 0);
-    
+
+    // Pre-compute scanline multipliers from scanline_intensity (0=no scanlines, 100=max dark)
+    let si = crt_cfg.scanline_intensity as u32;
+    let scan_muls: [u32; 3] = [
+        255,
+        255 - (si * 25 / 100),       // row1: 255 at 0, 230 at 100
+        255 - (si * 115 / 100).min(255), // row2: 255 at 0, 140 at 100
+    ];
+
+    // Phosphor warmth: 0=neutral(256,256,256), 100=warm amber(280,248,220)
+    let pw = crt_cfg.phosphor_warmth as u32;
+    let pr_mul = 256 + (pw * 24 / 100);  // 256..280
+    let pg_mul = 256 - (pw * 8 / 100);   // 256..248
+    let pb_mul = 256 - (pw * 36 / 100);  // 256..220
+
+    // Blur side-tap weight scaled by blur_amount/40
+    let blur_side = (25u32 * crt_cfg.blur_amount as u32) / 40;
+    let blur_center = 256 - blur_side * 2;
+
+    let use_mask = crt_cfg.mask_mode != CrtMaskMode::Off;
+
     for dst_y in 0..SCREEN_H {
-        // Scanline pattern: bright-dim-dark, visible gap
-        let scan_mul: u32 = match dst_y % 3 {
-            0 => 255,
-            1 => 230,
-            2 => 140,  // dark gap — this is what makes it look CRT
-            _ => 255,
-        };
-        
+        let scan_mul = scan_muls[dst_y % 3];
+
         let dst_row = dst_y * SCREEN_W;
         
         for dst_x in 0..SCREEN_W {
@@ -3195,19 +4471,18 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
                        + b01 * inv_fx * frac_y + b11 * frac_x * frac_y) >> 16;
             
             // 3-tap horizontal blur (cheap composite signal simulation)
-            if src_x0 > 0 && src_x0 < 255 {
+            if blur_side > 0 && src_x0 > 0 && src_x0 < 255 {
                 let left = input[src_y0 * 256 + src_x0 - 1];
                 let right = input[src_y0 * 256 + src_x1.min(255)];
-                r = (r * 205 + ((left >> 16) & 0xFF) * 25 + ((right >> 16) & 0xFF) * 25) >> 8;
-                g = (g * 205 + ((left >> 8) & 0xFF) * 25 + ((right >> 8) & 0xFF) * 25) >> 8;
-                b = (b * 205 + (left & 0xFF) * 25 + (right & 0xFF) * 25) >> 8;
+                r = (r * blur_center + ((left >> 16) & 0xFF) * blur_side + ((right >> 16) & 0xFF) * blur_side) >> 8;
+                g = (g * blur_center + ((left >> 8) & 0xFF) * blur_side + ((right >> 8) & 0xFF) * blur_side) >> 8;
+                b = (b * blur_center + (left & 0xFF) * blur_side + (right & 0xFF) * blur_side) >> 8;
             }
             
-            // Slight brightness boost + warm color temperature (CRT P22 phosphor)
-            // Keep it subtle — just a warmth tint, not a brightness explosion
-            r = (r * 268) >> 8;
-            g = (g * 252) >> 8;
-            b = (b * 238) >> 8;
+            // Phosphor warmth color temperature (CRT P22 phosphor)
+            r = (r * pr_mul) >> 8;
+            g = (g * pg_mul) >> 8;
+            b = (b * pb_mul) >> 8;
             
             // Scanline darkening (the key CRT effect)
             r = (r * scan_mul) >> 8;
@@ -3219,6 +4494,14 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
             r = (r * vig) >> 8;
             g = (g * vig) >> 8;
             b = (b * vig) >> 8;
+
+            // Shadow mask / aperture grille
+            if use_mask {
+                let (mr, mg, mb) = mask_table[table_idx];
+                r = (r as u16 * mr as u16 / 255) as u32;
+                g = (g as u16 * mg as u16 / 255) as u32;
+                b = (b as u16 * mb as u16 / 255) as u32;
+            }
             
             output[dst_row + dst_x] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
         }
@@ -3693,5 +4976,45 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
                 frame[idx] = 0x3A3A40;
             }
         }
+    }
+}
+
+/// Read joypad state as a byte (bit layout: A=0, B=1, Select=2, Start=3, Up=4, Down=5, Left=6, Right=7)
+fn joypad_to_byte(bus: &Bus, player: u8) -> u8 {
+    let jp = if player == 1 { &bus.joypad1 } else { &bus.joypad2 };
+    let mut b: u8 = 0;
+    if jp.get_button(JoypadButton::A) { b |= 0x01; }
+    if jp.get_button(JoypadButton::B) { b |= 0x02; }
+    if jp.get_button(JoypadButton::Select) { b |= 0x04; }
+    if jp.get_button(JoypadButton::Start) { b |= 0x08; }
+    if jp.get_button(JoypadButton::Up) { b |= 0x10; }
+    if jp.get_button(JoypadButton::Down) { b |= 0x20; }
+    if jp.get_button(JoypadButton::Left) { b |= 0x40; }
+    if jp.get_button(JoypadButton::Right) { b |= 0x80; }
+    b
+}
+
+/// Apply a byte of button state onto a joypad
+fn byte_to_joypad(bus: &mut Bus, player: u8, buttons: u8) {
+    let jp = if player == 1 { &mut bus.joypad1 } else { &mut bus.joypad2 };
+    jp.set_button_pressed(JoypadButton::A, buttons & 0x01 != 0);
+    jp.set_button_pressed(JoypadButton::B, buttons & 0x02 != 0);
+    jp.set_button_pressed(JoypadButton::Select, buttons & 0x04 != 0);
+    jp.set_button_pressed(JoypadButton::Start, buttons & 0x08 != 0);
+    jp.set_button_pressed(JoypadButton::Up, buttons & 0x10 != 0);
+    jp.set_button_pressed(JoypadButton::Down, buttons & 0x20 != 0);
+    jp.set_button_pressed(JoypadButton::Left, buttons & 0x40 != 0);
+    jp.set_button_pressed(JoypadButton::Right, buttons & 0x80 != 0);
+}
+
+/// Get the recordings directory: ~/.nes-emulator/recordings/
+fn recordings_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE").ok().map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
     }
 }

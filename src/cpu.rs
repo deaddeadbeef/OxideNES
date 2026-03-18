@@ -239,6 +239,13 @@ impl Cpu {
             return;
         }
 
+        // DMC DMA cycle stealing — CPU halted while DMC fetches a sample byte
+        if bus.dmc_stall_active() {
+            bus.dmc_stall_tick();
+            self.total_cycles = self.total_cycles.wrapping_add(1);
+            return;
+        }
+
         if self.cycles == 0 {
             // Service interrupts that were detected at the end of the previous instruction.
             // On a real 6502, interrupts are sampled during the instruction and serviced

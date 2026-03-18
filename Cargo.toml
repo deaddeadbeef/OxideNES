@@ -17,6 +17,11 @@ ringbuf = "0.4"
 gilrs = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+socket2 = "0.5"
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
+crc32fast = "1"
+ureq = "2"
+semver = "1"
 
 [profile.dev]
 opt-level = 2

@@ -48,6 +48,7 @@ pub struct Ppu {
     sprite_zero_hit_possible: bool,
     sprite_zero_being_rendered: bool,
     odd_frame: bool,
+    nmi_previous: bool,
     pub region: Region,
     open_bus: u8,
 }
@@ -118,6 +119,7 @@ impl Ppu {
             sprite_zero_hit_possible: false,
             sprite_zero_being_rendered: false,
             odd_frame: false,
+            nmi_previous: false,
             region: Region::Ntsc,
             open_bus: 0,
         }
@@ -187,23 +189,33 @@ impl Ppu {
     pub fn cpu_read(&mut self, addr: u16, cart: &Cartridge) -> u8 {
         match addr {
             0x2002 => {
-                let data = (self.status & 0xE0) | (self.ppu_data_buffer & 0x1F);
+                let data = (self.status & 0xE0) | (self.open_bus & 0x1F);
                 self.status &= !0x80; // clear vblank
                 self.nmi_occurred = false;
                 self.w = false;
                 self.open_bus = data;
                 data
             }
-            0x2004 => self.oam_data[self.oam_addr as usize],
+            0x2004 => {
+                let data = self.oam_data[self.oam_addr as usize];
+                self.open_bus = data;
+                data
+            }
             0x2007 => {
-                let mut data = self.ppu_data_buffer;
-                self.ppu_data_buffer = self.ppu_read(self.v, cart);
-                if self.v >= 0x3F00 {
+                let addr = self.v;
+                let data;
+                if addr >= 0x3F00 {
+                    // Palette: return immediately with open bus in top 2 bits
+                    // Buffer the nametable data "underneath" the palette address
+                    self.ppu_data_buffer = self.ppu_read(addr & 0x2FFF, cart);
+                    data = (self.ppu_read(addr, cart) & 0x3F) | (self.open_bus & 0xC0);
+                } else {
+                    // Normal: return buffer, load new value into buffer
                     data = self.ppu_data_buffer;
-                    // Read from nametable "underneath" the palette
-                    self.ppu_data_buffer = self.ppu_read(self.v - 0x1000, cart);
+                    self.ppu_data_buffer = self.ppu_read(addr, cart);
                 }
                 self.v = self.v.wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
+                self.open_bus = data;
                 data
             }
             _ => self.open_bus,
@@ -556,10 +568,10 @@ impl Ppu {
                     if self.sprite_zero_hit_possible && self.sprite_zero_being_rendered {
                         if self.mask & 0x18 == 0x18 {
                             if !(self.mask & 0x06 == 0x06) {
-                                if self.cycle >= 9 && self.cycle <= 256 {
+                                if self.cycle >= 9 && self.cycle < 256 {
                                     self.status |= 0x40;
                                 }
-                            } else if self.cycle >= 1 && self.cycle <= 256 {
+                            } else if self.cycle >= 1 && self.cycle < 256 {
                                 self.status |= 0x40;
                             }
                         }
@@ -640,11 +652,10 @@ impl Ppu {
     }
 
     pub fn poll_nmi(&mut self) -> bool {
-        let nmi = self.nmi_occurred && self.nmi_output;
-        if nmi {
-            self.nmi_occurred = false;
-        }
-        nmi
+        let nmi_line = self.nmi_occurred && self.nmi_output;
+        let triggered = nmi_line && !self.nmi_previous;
+        self.nmi_previous = nmi_line;
+        triggered
     }
 
     pub fn set_region(&mut self, region: Region) {
@@ -709,6 +720,7 @@ impl Ppu {
         data.push(if self.sprite_zero_hit_possible { 1 } else { 0 });
         data.push(if self.sprite_zero_being_rendered { 1 } else { 0 });
         data.push(if self.odd_frame { 1 } else { 0 });
+        data.push(if self.nmi_previous { 1 } else { 0 });
         data.push(if self.region == Region::Pal { 1 } else { 0 });
         
         data
@@ -773,6 +785,11 @@ impl Ppu {
         self.sprite_zero_hit_possible = data[pos] != 0; pos += 1;
         self.sprite_zero_being_rendered = data[pos] != 0; pos += 1;
         self.odd_frame = data[pos] != 0; pos += 1;
+
+        // nmi_previous (optional, backwards compatible)
+        if pos < data.len() {
+            self.nmi_previous = data[pos] != 0; pos += 1;
+        }
 
         // Region (optional, backwards compatible)
         if pos < data.len() {

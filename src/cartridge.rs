@@ -1,4 +1,5 @@
-use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper007, Mapper009, Mapper010, Mapper011, Mapper066, Mapper069, Mapper071, Mapper079, Mapper206};
+use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper005, Mapper007, Mapper009, Mapper010, Mapper011, Mapper019, Mapper034, Mapper066, Mapper069, Mapper071, Mapper079, Mapper085, Mapper206, MapperVRC6};
+use crate::romdb::RomDatabase;
 
 const INES_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // "NES\x1a"
 
@@ -14,10 +15,15 @@ pub enum Mirroring {
 pub struct Cartridge {
     pub mapper: Box<dyn Mapper>,
     pub has_battery: bool,
+    pub rom_title: Option<String>,
 }
 
 impl Cartridge {
     pub fn new(rom_data: &[u8]) -> Result<Self, String> {
+        Self::new_with_romdb(rom_data, None)
+    }
+
+    pub fn new_with_romdb(rom_data: &[u8], romdb: Option<&RomDatabase>) -> Result<Self, String> {
         if rom_data.len() < 16 {
             return Err("ROM too small".to_string());
         }
@@ -37,7 +43,7 @@ impl Cartridge {
         let has_dirty_header = !is_nes2 && rom_data.len() > 15 &&
             rom_data[12..16].iter().any(|&b| b != 0);
 
-        let mapper_id = if is_nes2 && rom_data.len() > 8 {
+        let mut mapper_id = if is_nes2 && rom_data.len() > 8 {
             // NES 2.0: extended mapper from flags8
             let flags8 = rom_data[8];
             ((flags8 as u16 & 0x0F) << 8) | (flags7 as u16 & 0xF0) | ((flags6 as u16) >> 4)
@@ -51,7 +57,7 @@ impl Cartridge {
         if has_dirty_header {
             eprintln!("Warning: ROM has dirty iNES header (bytes 12-15 non-zero), using mapper {} from flags6 only", mapper_id);
         }
-        let mirroring = if flags6 & 0x08 != 0 {
+        let mut mirroring = if flags6 & 0x08 != 0 {
             Mirroring::FourScreen
         } else if flags6 & 0x01 != 0 {
             Mirroring::Vertical
@@ -59,9 +65,33 @@ impl Cartridge {
             Mirroring::Horizontal
         };
 
-        let has_battery = flags6 & 0x02 != 0;
+        let mut has_battery = flags6 & 0x02 != 0;
         let has_trainer = flags6 & 0x04 != 0;
         let prg_start = 16 + if has_trainer { 512 } else { 0 };
+
+        // Compute CRC32 of ROM data (excluding header) for database lookup
+        let crc = crc32fast::hash(&rom_data[prg_start..]);
+        let mut rom_title: Option<String> = None;
+
+        if let Some(db) = romdb {
+            if let Some(entry) = db.lookup(crc) {
+                rom_title = Some(entry.title.clone());
+                let db_mapper = entry.mapper;
+                let db_mirroring = match entry.mirroring.as_str() {
+                    "vertical" => Mirroring::Vertical,
+                    "four_screen" => Mirroring::FourScreen,
+                    _ => Mirroring::Horizontal,
+                };
+                if db_mapper != mapper_id || db_mirroring != mirroring {
+                    eprintln!("ROM DB: \"{}\" — correcting mapper {}→{}, mirroring {:?}→{:?}",
+                        entry.title, mapper_id, db_mapper, mirroring, db_mirroring);
+                    mapper_id = db_mapper;
+                    mirroring = db_mirroring;
+                }
+                has_battery = entry.battery;
+                eprintln!("ROM DB: Identified \"{}\" (CRC: {:08X})", entry.title, crc);
+            }
+        }
         let chr_start = prg_start + prg_rom_size;
 
         if rom_data.len() < chr_start + chr_rom_size {
@@ -81,14 +111,20 @@ impl Cartridge {
             2 => Box::new(Mapper002::new(prg_rom, chr_rom, mirroring)),
             3 => Box::new(Mapper003::new(prg_rom, chr_rom, mirroring)),
             4 => Box::new(Mapper004::new(prg_rom, chr_rom, mirroring)),
+            5 => Box::new(Mapper005::new(prg_rom, chr_rom, mirroring)),
             7 => Box::new(Mapper007::new(prg_rom, chr_rom, mirroring)),
             9 => Box::new(Mapper009::new(prg_rom, chr_rom, mirroring)),
             10 => Box::new(Mapper010::new(prg_rom, chr_rom, mirroring)),
             11 => Box::new(Mapper011::new(prg_rom, chr_rom, mirroring)),
+            19 => Box::new(Mapper019::new(prg_rom, chr_rom, mirroring)),
+            24 => Box::new(MapperVRC6::new(prg_rom, chr_rom, mirroring, false)),
+            26 => Box::new(MapperVRC6::new(prg_rom, chr_rom, mirroring, true)),
+            34 => Box::new(Mapper034::new(prg_rom, chr_rom, mirroring)),
             66 => Box::new(Mapper066::new(prg_rom, chr_rom, mirroring)),
             69 => Box::new(Mapper069::new(prg_rom, chr_rom, mirroring)),
             71 => Box::new(Mapper071::new(prg_rom, chr_rom, mirroring)),
             79 => Box::new(Mapper079::new(prg_rom, chr_rom, mirroring)),
+            85 => Box::new(Mapper085::new(prg_rom, chr_rom, mirroring)),
             206 => Box::new(Mapper206::new(prg_rom, chr_rom, mirroring)),
             _ => {
                 let popular = match mapper_id {
@@ -112,10 +148,10 @@ impl Cartridge {
                 } else {
                     format!("Unsupported mapper: {} (used by: {})", mapper_id, popular)
                 };
-                return Err(format!("{}. Supported: 0,1,2,3,4,7,9,10,11,66,69,71,79,206", hint));
+                return Err(format!("{}. Supported: 0,1,2,3,4,5,7,9,10,11,19,24,26,34,66,69,71,79,85,206", hint));
             }
         };
 
-        Ok(Cartridge { mapper, has_battery })
+        Ok(Cartridge { mapper, has_battery, rom_title })
     }
 }

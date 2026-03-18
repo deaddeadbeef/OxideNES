@@ -60,4 +60,18 @@ impl Joypad {
             self.button_status &= !(1 << bit);
         }
     }
+
+    pub fn get_button(&self, button: JoypadButton) -> bool {
+        let bit = match button {
+            JoypadButton::A => 0,
+            JoypadButton::B => 1,
+            JoypadButton::Select => 2,
+            JoypadButton::Start => 3,
+            JoypadButton::Up => 4,
+            JoypadButton::Down => 5,
+            JoypadButton::Left => 6,
+            JoypadButton::Right => 7,
+        };
+        self.button_status & (1 << bit) != 0
+    }
 }

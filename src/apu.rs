@@ -507,6 +507,9 @@ pub struct Apu {
     // Output samples ready for audio callback
     pub sample_buffer: Vec<f32>,
 
+    // External audio from mapper expansion chips
+    pub external_audio: f32,
+
     // Pre-computed mixer lookup tables
     pulse_table: [i32; 31],
 
@@ -547,6 +550,7 @@ impl Apu {
             prev_output: 0,
             clock_cycle: 0,
             sample_buffer: Vec::with_capacity(2048),
+            external_audio: 0.0,
             pulse_table,
             read_buf: vec![0i16; 4096],  // pre-allocate
         }
@@ -724,7 +728,14 @@ impl Apu {
             0
         };
 
-        pulse_out + tnd_out
+        let ext_out = self.ext_output();
+
+        pulse_out + tnd_out + ext_out
+    }
+
+    // External/mapper expansion audio contribution, scaled to match internal amplitude
+    fn ext_output(&self) -> i32 {
+        (self.external_audio * 32000.0) as i32
     }
     
     // Called at end of each emulated frame (~29780 CPU cycles)
