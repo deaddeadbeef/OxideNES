@@ -3458,8 +3458,8 @@ fn main() {
                         }
                     }
 
-                    // Rewind buffer HUD bar (top-right of screen, only when buffer has data)
-                    if !paused && !rewind_buffer.snapshots.is_empty() {
+                    // Rewind buffer HUD bar (top-right of screen, only while actively rewinding)
+                    if !paused && is_rewinding && !rewind_buffer.snapshots.is_empty() {
                         let rewind_pct = (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
                         let bar_w: usize = 60;
                         let bar_h: usize = 4;
