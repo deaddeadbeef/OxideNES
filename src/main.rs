@@ -570,7 +570,7 @@ impl RewindBuffer {
         RewindBuffer {
             snapshots: VecDeque::new(),
             max_snapshots: 300,
-            max_bytes: 8 * 1024 * 1024, // 8MB cap
+            max_bytes: 64 * 1024 * 1024, // 64MB cap (includes PPU frame data for smooth rewind)
             total_bytes: 0,
             frame_skip: 4,     // save every 4th frame (~15 snapshots/sec)
             frame_counter: 0,
@@ -590,11 +590,17 @@ impl RewindBuffer {
         let bus_state = bus.save_state();
         snapshot.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
         snapshot.extend(bus_state);
+        // Store PPU frame buffer for smooth rewind playback
+        let frame = &bus.ppu.frame_data;
+        snapshot.extend_from_slice(&(frame.len() as u32).to_le_bytes());
+        for pixel in frame.iter() {
+            snapshot.extend_from_slice(&pixel.to_le_bytes());
+        }
         
         self.total_bytes += snapshot.len();
         self.snapshots.push_back(snapshot);
         
-        // Cap at max_snapshots AND max_bytes (8MB default)
+        // Cap at max_snapshots AND max_bytes (64MB default)
         while self.snapshots.len() > self.max_snapshots || self.total_bytes > self.max_bytes {
             if let Some(old) = self.snapshots.pop_front() {
                 self.total_bytes = self.total_bytes.saturating_sub(old.len());
@@ -620,6 +626,21 @@ impl RewindBuffer {
             pos += 4;
             if pos + bus_len > snapshot.len() { return false; }
             if !bus.load_state(&snapshot[pos..pos+bus_len]) { return false; }
+            pos += bus_len;
+            // Restore PPU frame buffer for smooth rewind playback
+            if pos + 4 <= snapshot.len() {
+                let frame_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+                pos += 4;
+                if pos + frame_len * 4 <= snapshot.len() {
+                    bus.ppu.frame_data.resize(frame_len, 0);
+                    for i in 0..frame_len {
+                        let off = pos + i * 4;
+                        bus.ppu.frame_data[i] = u32::from_le_bytes([
+                            snapshot[off], snapshot[off+1], snapshot[off+2], snapshot[off+3]
+                        ]);
+                    }
+                }
+            }
             true
         } else {
             false
