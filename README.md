@@ -1,107 +1,134 @@
-# NES Emulator
+# 🎮 NES Emulator
 
-A cycle-accurate Nintendo Entertainment System emulator written in Rust, featuring a CRT TV-style interface with scanlines, barrel distortion, and a retro menu system.
+A feature-rich NES (Nintendo Entertainment System) emulator written in Rust.
+
+[Screenshot placeholder]
 
 ## Features
 
-- **14 mappers** — NROM, MMC1, UxROM, CNROM, MMC3, AxROM, MMC2, MMC4, Color Dreams, GxROM, FME-7, Camerica, NINA, Namcot (~85% of commercial NES games)
-- **Full APU** — all 5 channels (Pulse×2, Triangle, Noise, DMC) with band-limited resampling
-- **CRT simulation** — scanlines, horizontal blur, warm phosphor color, barrel distortion, vignette, screen glare
-- **Save states** — 4 slots with quick save/load (F5/F9)
-- **Battery SRAM** — automatic save/load for games like Zelda and Final Fantasy
-- **Rewind** — hold Backspace to rewind ~5 seconds of gameplay
-- **Fast forward** — hold Tab for 4× speed
-- **Gamepad support** — Xbox/PlayStation controllers with analog stick, turbo buttons, 2-player
-- **Game Genie** — cheat code support
-- **Configurable controls** — key bindings saved to config file
-- **NTSC/PAL** — region support with correct timing
-- **nestest validated** — all official CPU opcodes pass automated testing
+- **20 mapper support** (0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 19, 24, 26, 34, 66, 69, 71, 79, 85, 206)
+- **CRT simulation** — Scanlines, phosphor warmth, barrel distortion, shadow mask, aperture grille, glass reflections with chromatic aberration
+- **Full input remapping** — Keyboard and controller for P1/P2, in-app rebinding UI
+- **Save states** with thumbnail previews (4 slots)
+- **Rewind** — Hold Backspace to rewind with VHS tape effect
+- **Netplay** — Local network multiplayer via UDP
+- **Lua scripting** — Write scripts to read memory, draw overlays
+- **Achievement system** — Local achievement definitions with unlock notifications
+- **Input recording** — Record and playback with FM2 export for TAS
+- **ROM database** — Auto-identifies ~50 popular games, fixes bad headers
+- **Game Genie cheats** — Enter cheat codes in the pause menu
+- **Battery save** — Automatic SRAM persistence for games like Zelda
+- **Auto-updater** — Checks GitHub Releases for new versions
+- **CRT settings** — Real-time adjustable scanlines, phosphor, vignette, blur, curvature, glass intensity
+- **Fullscreen** — Toggle with F11
 
-## Building
+## Quick Start
 
-Requires [Rust](https://rustup.rs/) (1.70+).
+### Pre-built Binaries
+Download the latest release from the [Releases](../../releases) page.
 
+### Build from Source
 ```bash
-git clone https://github.com/user/nes-emulator.git
-cd nes-emulator
+# Prerequisites: Rust toolchain (https://rustup.rs)
 cargo build --release
 ```
 
-The binary will be at `target/release/nes-emulator` (or `nes-emulator.exe` on Windows).
-
-## Running
-
+### Run
 ```bash
-# Launch with menu (browse for ROMs)
-./target/release/nes-emulator
-
-# Launch directly with a ROM
+# With a ROM file
 ./target/release/nes-emulator path/to/game.nes
+
+# Or use the built-in file browser
+./target/release/nes-emulator
 ```
 
 ## Controls
 
-| Action | Keyboard | Gamepad |
-|--------|----------|---------|
-| D-Pad | W/A/S/D or Arrow Keys | D-Pad / Left Stick |
-| A Button | K | South (A/×) |
-| B Button | J | West (X/□) |
-| Start | Enter | Start |
-| Select | Right Shift | Select/Back |
-| Turbo A | Z | East (B/○) |
-| Turbo B | X | North (Y/△) |
+| Action | Keyboard (P1) | Keyboard (P2) | Controller |
+|--------|---------------|---------------|------------|
+| D-Pad | WASD | Arrow Keys | D-Pad / Left Stick |
+| A | K | Period | South Button |
+| B | J | Comma | West Button |
+| Start | Enter | Slash | Start |
+| Select | Right Shift | Right Ctrl | Select |
+| Turbo A | Z | Semicolon | East Button |
+| Turbo B | X | Apostrophe | North Button |
 
-### Emulator Keys
-
+### System Shortcuts
 | Key | Action |
 |-----|--------|
-| **Escape** | Pause menu |
-| **Tab** (hold) | Fast forward (4×) |
-| **Backspace** (hold) | Rewind (~5s) |
-| **F1** | Toggle CRT filter |
-| **F2–F4, F6** | Select save slot 1–4 |
-| **F5** | Quick save |
-| **F8** | Screenshot (saved to ~/.nes-emulator/screenshots/) |
-| **F9** | Quick load |
-| **F10** | Toggle FPS counter |
+| Escape | Pause / Menu |
+| F5 | Quick Save |
+| F9 | Quick Load |
+| F11 | Toggle Fullscreen |
+| Backspace | Rewind (hold) |
+| Tab | Fast Forward (hold) |
+| Shift+R | Toggle Recording |
+| Shift+P | Toggle Playback |
+| Ctrl+R | Reset |
 
 ## Configuration
 
-Settings are saved to `~/.nes-emulator/config.json`:
-- CRT filter on/off
-- Barrel distortion on/off
-- Audio volume
-- Key bindings
-- Region (NTSC/PAL)
-- Recent games list
+Settings are stored in `~/.nes-emulator/config.json` and can be edited in-app via the Settings menu.
 
-## Supported Mappers
+## Lua Scripting
 
-| ID | Name | Notable Games |
-|----|------|---------------|
-| 0 | NROM | Super Mario Bros, Donkey Kong |
-| 1 | MMC1 | Legend of Zelda, Metroid, Final Fantasy |
-| 2 | UxROM | Mega Man, Castlevania, Contra |
-| 3 | CNROM | Gradius, Paperboy |
-| 4 | MMC3 | Super Mario Bros 3, Kirby's Adventure |
-| 7 | AxROM | Battletoads, Marble Madness |
-| 9 | MMC2 | Mike Tyson's Punch-Out!! |
-| 10 | MMC4 | Fire Emblem |
-| 11 | Color Dreams | Bible Adventures |
-| 66 | GxROM | SMB/Duck Hunt combo |
-| 69 | FME-7 | Batman: Return of the Joker |
-| 71 | Camerica | Micro Machines |
-| 79 | NINA | Various unlicensed |
-| 206 | Namcot | Various Namco games |
-
-## Testing
-
+Place `.lua` scripts in `~/.nes-emulator/scripts/` or load via `--script` flag:
 ```bash
-cargo test
+nes-emulator game.nes --script myscript.lua
 ```
 
-Runs nestest.nes CPU validation (all official opcodes verified).
+### API
+```lua
+nes.read(addr)        -- Read byte from CPU memory
+nes.framecount()      -- Current frame number
+nes.message(text)     -- Show HUD message
+nes.pixel(x, y, color) -- Draw overlay pixel
+nes.log(text)         -- Print to stderr
+```
+
+## Achievements
+
+Place achievement JSON files in `~/.nes-emulator/achievements/{rom_md5}.json`:
+```json
+{
+    "game_title": "Game Name",
+    "achievements": [
+        {"id": 1, "title": "Achievement", "description": "Do the thing", "points": 10, "conditions": "0xH0075>0"}
+    ]
+}
+```
+
+## Netplay
+
+1. Player 1: Pause → Netplay → Host
+2. Player 2: Pause → Netplay → Join → Enter IP:Port
+3. Both players must load the same ROM
+
+## Building
+
+### Prerequisites
+- Rust 1.70+ (install via [rustup](https://rustup.rs))
+- Linux: `sudo apt install libasound2-dev libxkbcommon-dev libwayland-dev`
+- Windows/macOS: No additional dependencies
+
+### Commands
+```bash
+cargo build --release    # Build
+cargo test               # Run tests
+cargo run --release -- game.nes  # Run
+```
+
+### Windows Installer
+Requires [Inno Setup](https://jrsoftware.org/isinfo.php):
+```bash
+iscc installer/nes-emulator.iss
+```
 
 ## License
 
-MIT
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

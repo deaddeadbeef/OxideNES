@@ -8,6 +8,8 @@ pub struct GameGenieCode {
     pub address: u16,
     pub replace: u8,
     pub compare: Option<u8>,
+    pub enabled: bool,
+    pub code_str: String,
 }
 
 impl GameGenieCode {
@@ -31,7 +33,7 @@ impl GameGenieCode {
                 | ((vals[0] as u8 & 0x08) << 4)
                 | (vals[0] as u8 & 0x07)
                 | (vals[5] as u8 & 0x08);
-            Some(GameGenieCode { address, replace, compare: None })
+            Some(GameGenieCode { address, replace, compare: None, enabled: true, code_str: code.clone() })
         } else if vals.len() == 8 {
             let address = 0x8000
                 | ((vals[3] as u16 & 0x07) << 12)
@@ -49,7 +51,7 @@ impl GameGenieCode {
                 | ((vals[6] as u8 & 0x08) << 4)
                 | (vals[6] as u8 & 0x07)
                 | (vals[5] as u8 & 0x08);
-            Some(GameGenieCode { address, replace, compare: Some(compare) })
+            Some(GameGenieCode { address, replace, compare: Some(compare), enabled: true, code_str: code.clone() })
         } else {
             None
         }
@@ -102,7 +104,7 @@ impl Bus {
         // Game Genie interception
         if addr >= 0x8000 && !self.cheats.is_empty() {
             for cheat in &self.cheats {
-                if cheat.address == addr {
+                if cheat.enabled && cheat.address == addr {
                     let original = self.cartridge.mapper.read_prg(addr);
                     match cheat.compare {
                         None => return cheat.replace,

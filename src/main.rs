@@ -1,6 +1,6 @@
 #![windows_subsystem = "windows"]
 
-use minifb::{Key, KeyRepeat, Scale, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
@@ -450,6 +450,40 @@ fn add_recent_game(cfg: &mut EmulatorConfig, path: &str) {
 
 fn save_state_dir() -> PathBuf {
     config_dir().join("saves")
+}
+
+// =====================================================================
+// Game Genie cheat code persistence
+// =====================================================================
+
+fn cheats_dir() -> PathBuf {
+    config_dir().join("cheats")
+}
+
+fn save_cheats(rom_name: &str, cheats: &[nes_emulator::bus::GameGenieCode]) {
+    if rom_name.is_empty() { return; }
+    let dir = cheats_dir();
+    let _ = fs::create_dir_all(&dir);
+    let entries: Vec<serde_json::Value> = cheats.iter().map(|c| {
+        serde_json::json!({ "code": c.code_str, "enabled": c.enabled })
+    }).collect();
+    if let Ok(data) = serde_json::to_string_pretty(&entries) {
+        let _ = fs::write(dir.join(format!("{}.json", rom_name)), data);
+    }
+}
+
+fn load_cheats(rom_name: &str) -> Vec<nes_emulator::bus::GameGenieCode> {
+    if rom_name.is_empty() { return Vec::new(); }
+    let path = cheats_dir().join(format!("{}.json", rom_name));
+    let Ok(data) = fs::read_to_string(&path) else { return Vec::new(); };
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&data) else { return Vec::new(); };
+    entries.iter().filter_map(|e| {
+        let code_str = e.get("code")?.as_str()?;
+        let enabled = e.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+        let mut code = nes_emulator::bus::GameGenieCode::decode(code_str)?;
+        code.enabled = enabled;
+        Some(code)
+    }).collect()
 }
 
 fn save_state_path(config: &EmulatorConfig, slot: u8) -> Option<PathBuf> {
@@ -1676,7 +1710,54 @@ fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, s
 // Main function
 // =====================================================================
 
+#[cfg(windows)]
+fn get_screen_resolution() -> (usize, usize) {
+    extern "system" {
+        fn GetSystemMetrics(nIndex: i32) -> i32;
+    }
+    const SM_CXSCREEN: i32 = 0;
+    const SM_CYSCREEN: i32 = 1;
+    unsafe {
+        (GetSystemMetrics(SM_CXSCREEN) as usize, GetSystemMetrics(SM_CYSCREEN) as usize)
+    }
+}
+
+#[cfg(not(windows))]
+fn get_screen_resolution() -> (usize, usize) {
+    (1920, 1080)
+}
+
 fn main() {
+    // CLI flags (handle before any initialization)
+    let args: Vec<String> = std::env::args().collect();
+    if args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
+        println!("NES Emulator v{}", env!("CARGO_PKG_VERSION"));
+        println!();
+        println!("USAGE:");
+        println!("    nes-emulator [OPTIONS] [ROM_FILE]");
+        println!();
+        println!("ARGS:");
+        println!("    <ROM_FILE>    Path to a .nes ROM file (optional, opens file browser if omitted)");
+        println!();
+        println!("OPTIONS:");
+        println!("    -h, --help       Show this help message");
+        println!("    --version        Show version");
+        println!("    --script <FILE>  Load a Lua script on startup");
+        println!();
+        println!("CONTROLS:");
+        println!("    Escape       Pause / Menu");
+        println!("    F5           Quick Save");
+        println!("    F9           Quick Load");
+        println!("    F11          Toggle Fullscreen");
+        println!("    Backspace    Rewind (hold)");
+        println!("    Tab          Fast Forward (hold)");
+        std::process::exit(0);
+    }
+    if args.contains(&"--version".to_string()) {
+        println!("nes-emulator {}", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
     let mut config = load_config();
     let romdb = RomDatabase::new();
     let updater = Updater::new();
@@ -1811,6 +1892,10 @@ fn main() {
     let mut overlay_message: Option<String> = None;
     let mut overlay_timer: u32 = 0;
     let mut sound_cooldown: u32 = 0;
+
+    // Fullscreen state
+    let mut is_fullscreen: bool = false;
+    let mut window_title: String = "NES Emulator".to_string();
     
     // Pause menu state
     let mut paused: bool = false;
@@ -1820,6 +1905,8 @@ fn main() {
     let mut cheat_input_buffer = String::new();
     let mut cheat_message: Option<String> = None;
     let mut cheat_message_timer: u32 = 0;
+    let mut cheats_submenu = false;
+    let mut cheats_selected: usize = 0;
     let mut rewind_buffer = RewindBuffer::new();
     let mut is_rewinding = false;
     let mut thumbnail_cache: [Option<Vec<u8>>; 4] = [None, None, None, None];
@@ -1893,13 +1980,18 @@ fn main() {
                                 .map(|s| s.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "Unknown".to_string())
                         });
-                        window.set_title(&format!("NES Emulator — {}", game_name));
+                        window_title = format!("NES Emulator — {}", game_name);
+                        window.set_title(&window_title);
                         // Initialize achievements & recording for this ROM
                         let rom_md5 = md5_hex(&rom_data);
                         achievement_engine = AchievementEngine::load_for_rom(&rom_md5);
                         let rom_sha = sha256(&rom_data);
                         recorder = InputRecording::new(rom_sha);
                         current_rom_name = game_name;
+                        // Load persisted Game Genie cheats for this ROM
+                        if let Some(ref mut bus) = game_bus {
+                            bus.cheats = load_cheats(&current_rom_name);
+                        }
                     }
                     Err(e) => {
                         eprintln!("Error loading ROM: {}", e);
@@ -2641,16 +2733,20 @@ fn main() {
                                                 .map(|s| s.to_string_lossy().to_string())
                                                 .unwrap_or_else(|| "Unknown".to_string())
                                         });
-                                        window.set_title(&format!("NES Emulator — {}", game_name));
+                                        window_title = format!("NES Emulator — {}", game_name);
+                                        window.set_title(&window_title);
                                         // Initialize achievements & recording for this ROM
                                         let rom_md5 = md5_hex(&rom_data);
                                         achievement_engine = AchievementEngine::load_for_rom(&rom_md5);
                                         let rom_sha = sha256(&rom_data);
                                         recorder = InputRecording::new(rom_sha);
                                         current_rom_name = game_name;
+                                        // Load persisted Game Genie cheats for this ROM
+                                        if let Some(ref mut bus) = game_bus {
+                                            bus.cheats = load_cheats(&current_rom_name);
+                                        }
                                     }
                                     Err(e) => {
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                         let msg = format!("{}", e);
                                         if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                             browser.error_message = Some(msg.clone());
@@ -2732,49 +2828,106 @@ fn main() {
             EmulatorState::Game => {
                 if let (Some(ref mut bus), Some(ref mut cpu)) = (&mut game_bus, &mut game_cpu) {
                     // Handle pause menu input
-                    if paused && cheat_input_mode {
-                        // Cheat code text input mode
-                        for key in &window.get_keys_pressed(KeyRepeat::Yes) {
-                            match key {
-                                Key::A => cheat_input_buffer.push('A'),
-                                Key::E => cheat_input_buffer.push('E'),
-                                Key::G => cheat_input_buffer.push('G'),
-                                Key::I => cheat_input_buffer.push('I'),
-                                Key::K => cheat_input_buffer.push('K'),
-                                Key::L => cheat_input_buffer.push('L'),
-                                Key::N => cheat_input_buffer.push('N'),
-                                Key::O => cheat_input_buffer.push('O'),
-                                Key::P => cheat_input_buffer.push('P'),
-                                Key::S => cheat_input_buffer.push('S'),
-                                Key::T => cheat_input_buffer.push('T'),
-                                Key::U => cheat_input_buffer.push('U'),
-                                Key::V => cheat_input_buffer.push('V'),
-                                Key::X => cheat_input_buffer.push('X'),
-                                Key::Y => cheat_input_buffer.push('Y'),
-                                Key::Z => cheat_input_buffer.push('Z'),
-                                Key::Backspace => { cheat_input_buffer.pop(); }
-                                Key::Enter => {
-                                    if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
-                                        if let Some(code) = nes_emulator::bus::GameGenieCode::decode(&cheat_input_buffer) {
-                                            bus.cheats.push(code);
-                                            cheat_message = Some(format!("CHEAT ADDED: {}", cheat_input_buffer));
-                                            cheat_message_timer = 120;
-                                            cheat_input_mode = false;
+                    if paused && cheats_submenu {
+                        // Cheats submenu input handling
+                        if cheat_input_mode {
+                            // Text input for new Game Genie code
+                            for key in &window.get_keys_pressed(KeyRepeat::Yes) {
+                                match key {
+                                    Key::A => cheat_input_buffer.push('A'),
+                                    Key::E => cheat_input_buffer.push('E'),
+                                    Key::G => cheat_input_buffer.push('G'),
+                                    Key::I => cheat_input_buffer.push('I'),
+                                    Key::K => cheat_input_buffer.push('K'),
+                                    Key::L => cheat_input_buffer.push('L'),
+                                    Key::N => cheat_input_buffer.push('N'),
+                                    Key::O => cheat_input_buffer.push('O'),
+                                    Key::P => cheat_input_buffer.push('P'),
+                                    Key::S => cheat_input_buffer.push('S'),
+                                    Key::T => cheat_input_buffer.push('T'),
+                                    Key::U => cheat_input_buffer.push('U'),
+                                    Key::V => cheat_input_buffer.push('V'),
+                                    Key::X => cheat_input_buffer.push('X'),
+                                    Key::Y => cheat_input_buffer.push('Y'),
+                                    Key::Z => cheat_input_buffer.push('Z'),
+                                    Key::Backspace => { cheat_input_buffer.pop(); }
+                                    Key::Enter => {
+                                        if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
+                                            if let Some(code) = nes_emulator::bus::GameGenieCode::decode(&cheat_input_buffer) {
+                                                bus.cheats.push(code);
+                                                save_cheats(&current_rom_name, &bus.cheats);
+                                                cheat_message = Some(format!("ADDED: {}", cheat_input_buffer));
+                                                cheat_message_timer = 120;
+                                                cheat_input_mode = false;
+                                            } else {
+                                                cheat_message = Some("INVALID CODE".to_string());
+                                                cheat_message_timer = 90;
+                                            }
                                         } else {
-                                            cheat_message = Some("INVALID CODE".to_string());
+                                            cheat_message = Some("NEED 6 OR 8 CHARS".to_string());
                                             cheat_message_timer = 90;
                                         }
-                                    } else {
-                                        cheat_message = Some("CODE MUST BE 6 OR 8 CHARS".to_string());
-                                        cheat_message_timer = 90;
+                                        cheat_input_buffer.clear();
                                     }
-                                    cheat_input_buffer.clear();
+                                    Key::Escape => {
+                                        cheat_input_mode = false;
+                                        cheat_input_buffer.clear();
+                                    }
+                                    _ => {}
                                 }
-                                Key::Escape => {
-                                    cheat_input_mode = false;
-                                    cheat_input_buffer.clear();
+                            }
+                        } else {
+                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                            // Items: each cheat (toggle), then ADD CODE, CLEAR ALL
+                            let item_count = bus.cheats.len() + 2;
+                            if input.up && cheats_selected > 0 {
+                                cheats_selected -= 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
                                 }
-                                _ => {}
+                            }
+                            if input.down && cheats_selected < item_count - 1 {
+                                cheats_selected += 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.confirm {
+                                if cheats_selected < bus.cheats.len() {
+                                    // Toggle cheat on/off
+                                    bus.cheats[cheats_selected].enabled = !bus.cheats[cheats_selected].enabled;
+                                    save_cheats(&current_rom_name, &bus.cheats);
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                } else if cheats_selected == bus.cheats.len() {
+                                    // ADD CODE
+                                    cheat_input_mode = true;
+                                    cheat_input_buffer.clear();
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                } else {
+                                    // CLEAR ALL
+                                    bus.cheats.clear();
+                                    save_cheats(&current_rom_name, &bus.cheats);
+                                    cheats_selected = 0;
+                                    cheat_message = Some("ALL CHEATS CLEARED".to_string());
+                                    cheat_message_timer = 90;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                }
+                            }
+                            if input.backspace && cheats_selected < bus.cheats.len() {
+                                // Delete individual cheat with Backspace
+                                bus.cheats.remove(cheats_selected);
+                                save_cheats(&current_rom_name, &bus.cheats);
+                                if cheats_selected >= bus.cheats.len() + 2 {
+                                    cheats_selected = (bus.cheats.len() + 1).max(0);
+                                }
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                            if input.back {
+                                cheats_submenu = false;
+                                cheat_input_mode = false;
+                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             }
                         }
                     } else if paused && controls_submenu {
@@ -2934,9 +3087,9 @@ fn main() {
                                         play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
                                 }
-                                3 => { // Enter cheat code
-                                    cheat_input_mode = true;
-                                    cheat_input_buffer.clear();
+                                3 => { // Cheats submenu
+                                    cheats_submenu = true;
+                                    cheats_selected = 0;
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
                                 4 => { // Netplay
@@ -2995,7 +3148,8 @@ fn main() {
                                     achievement_engine = AchievementEngine::new();
                                     recorder = InputRecording::new([0u8; 32]);
                                     emulator_state = EmulatorState::Menu(MenuState::new());
-                                    window.set_title("NES Emulator");
+                                    window_title = "NES Emulator".to_string();
+                                    window.set_title(&window_title);
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
                                 }
@@ -3280,7 +3434,8 @@ fn main() {
                                 quit_hold_frames = 0;
                                 repeat_tracker = RepeatTracker::new();
                                 emulator_state = EmulatorState::Menu(MenuState::new());
-                                window.set_title("NES Emulator");
+                                window_title = "NES Emulator".to_string();
+                                window.set_title(&window_title);
                                 continue;
                             }
                         } else {
@@ -3346,6 +3501,39 @@ fn main() {
                             if !show_fps {
                                 fps_display.clear();
                             }
+                        }
+
+                        // F11 fullscreen toggle
+                        if window.is_key_pressed(Key::F11, KeyRepeat::No) {
+                            is_fullscreen = !is_fullscreen;
+                            if is_fullscreen {
+                                let (sw, sh) = get_screen_resolution();
+                                window = Window::new(
+                                    &window_title,
+                                    sw,
+                                    sh,
+                                    WindowOptions {
+                                        borderless: true,
+                                        scale: Scale::X1,
+                                        scale_mode: ScaleMode::AspectRatioStretch,
+                                        ..WindowOptions::default()
+                                    },
+                                ).expect("Failed to create fullscreen window");
+                                window.set_position(0, 0);
+                            } else {
+                                window = Window::new(
+                                    &window_title,
+                                    WINDOW_WIDTH,
+                                    WINDOW_HEIGHT,
+                                    WindowOptions {
+                                        scale: Scale::X1,
+                                        ..WindowOptions::default()
+                                    },
+                                ).expect("Failed to create window");
+                            }
+                            window.set_target_fps(target_fps);
+                            overlay_message = Some(if is_fullscreen { "FULLSCREEN".to_string() } else { "WINDOWED".to_string() });
+                            overlay_timer = 60;
                         }
 
                         // F12 help overlay
@@ -3992,7 +4180,8 @@ fn main() {
                         } else {
                             "SAVE RECORDING".to_string()
                         };
-                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
+                        let cheat_label = format!("CHEATS ({})", bus.cheats.len());
+                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, &cheat_label, &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
                         for (i, item) in items.iter().enumerate() {
                             let row = box_top + 3 + i;
                             let is_selected = i == pause_selected;
@@ -4017,29 +4206,119 @@ fn main() {
                         // Hint at bottom of box
                         draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
                         
-                        if cheat_input_mode {
-                            // Overlay the cheat input box
-                            let box_y = 18 * 8;
-                            for dy in 0..24 {
-                                for dx in 0..160 {
-                                    let x = 48 + dx;
-                                    let y = box_y + dy;
-                                    if y < 240 && x < 256 {
-                                        menu_framebuffer[y * 256 + x] = 0x000030;
+                        if cheats_submenu {
+                            // Cheats submenu overlay
+                            let cb_left = 4;
+                            let cb_right = 28;
+                            let cb_top = 6;
+                            let cb_bottom = 24;
+                            // Background fill
+                            for ty in cb_top..cb_bottom {
+                                for tx in cb_left..cb_right {
+                                    let px = tx * 8;
+                                    let py = ty * 8;
+                                    for dy in 0..8 {
+                                        for dx in 0..8 {
+                                            let x = px + dx;
+                                            let y = py + dy;
+                                            if y < 240 && x < 256 {
+                                                menu_framebuffer[y * 256 + x] = 0x0C0C4C;
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            draw_text_8x8(&mut menu_framebuffer, "GAME GENIE CODE:", 7, 18, 0xF8D878);
-                            let display = if cheat_input_buffer.is_empty() { "________" } else { &cheat_input_buffer };
-                            draw_text_8x8(&mut menu_framebuffer, display, 9, 20, 0xFCFCFC);
-                        }
-                        
-                        if cheat_message_timer > 0 {
-                            cheat_message_timer -= 1;
-                            if let Some(ref msg) = cheat_message {
-                                draw_text_8x8(&mut menu_framebuffer, msg, 6, 22, 0x44FF44);
+                            // Border
+                            for tx in cb_left..cb_right {
+                                let px = tx * 8;
+                                for dx in 0..8 {
+                                    let x = px + dx;
+                                    let yt = cb_top * 8;
+                                    let yb = cb_bottom * 8 - 1;
+                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE; }
+                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE; }
+                                }
                             }
-                            if cheat_message_timer == 0 { cheat_message = None; }
+                            for ty in cb_top..cb_bottom {
+                                let py = ty * 8;
+                                for dy in 0..8 {
+                                    let y = py + dy;
+                                    if y < 240 {
+                                        let xl = cb_left * 8;
+                                        let xr = cb_right * 8 - 1;
+                                        menu_framebuffer[y * 256 + xl] = MENU_LIGHT_BLUE;
+                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE; }
+                                    }
+                                }
+                            }
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 CHEATS \x11", cb_top + 1, MENU_GOLD);
+
+                            // List cheats + ADD CODE + CLEAR ALL
+                            let max_visible = 12usize; // max rows for cheat list
+                            let total_items = bus.cheats.len() + 2;
+                            let scroll_offset = if cheats_selected >= max_visible {
+                                cheats_selected - max_visible + 1
+                            } else { 0 };
+
+                            for i in 0..max_visible.min(total_items) {
+                                let item_idx = scroll_offset + i;
+                                if item_idx >= total_items { break; }
+                                let row = cb_top + 3 + i;
+                                if row >= cb_bottom - 1 { break; }
+                                let is_sel = item_idx == cheats_selected;
+
+                                if is_sel {
+                                    let hy = row * 8;
+                                    for dy in 0..8 {
+                                        for hx in (cb_left * 8 + 4)..(cb_right * 8 - 4) {
+                                            if hy + dy < 240 && hx < 256 {
+                                                menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
+                                            }
+                                        }
+                                    }
+                                    draw_char_8x8(&mut menu_framebuffer, '\x10', cb_left + 1, row, MENU_WHITE);
+                                }
+
+                                let color = if is_sel { MENU_WHITE } else { MENU_GRAY };
+                                if item_idx < bus.cheats.len() {
+                                    let status = if bus.cheats[item_idx].enabled { "ON " } else { "OFF" };
+                                    let label = format!("[{}] {}", status, bus.cheats[item_idx].code_str);
+                                    draw_text_8x8(&mut menu_framebuffer, &label, cb_left + 2, row, color);
+                                } else if item_idx == bus.cheats.len() {
+                                    draw_text_8x8(&mut menu_framebuffer, "ADD CODE...", cb_left + 2, row, color);
+                                } else {
+                                    draw_text_8x8(&mut menu_framebuffer, "CLEAR ALL", cb_left + 2, row, color);
+                                }
+                            }
+
+                            // Cheat code text input overlay
+                            if cheat_input_mode {
+                                let input_y = cb_bottom - 4;
+                                for dy in 0..24 {
+                                    for dx in 0..160 {
+                                        let x = 48 + dx;
+                                        let y = input_y * 8 + dy;
+                                        if y < 240 && x < 256 {
+                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                        }
+                                    }
+                                }
+                                draw_text_8x8(&mut menu_framebuffer, "GAME GENIE CODE:", 7, input_y, 0xF8D878);
+                                let display = if cheat_input_buffer.is_empty() { "________" } else { &cheat_input_buffer };
+                                draw_text_8x8(&mut menu_framebuffer, display, 9, input_y + 1, 0xFCFCFC);
+                            }
+
+                            // Status message
+                            if cheat_message_timer > 0 {
+                                cheat_message_timer -= 1;
+                                if let Some(ref msg) = cheat_message {
+                                    draw_text_centered_8x8(&mut menu_framebuffer, msg, cb_bottom - 2, 0x44FF44);
+                                }
+                                if cheat_message_timer == 0 { cheat_message = None; }
+                            }
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:TOGGLE  BS:DEL", cb_bottom - 1, MENU_DARK_GRAY);
                         }
 
                         // Netplay submenu overlay
@@ -4447,7 +4726,8 @@ fn main() {
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
-                    window.set_title("NES Emulator");
+                    window_title = "NES Emulator".to_string();
+                    window.set_title(&window_title);
                 }
             }
         }
