@@ -1838,6 +1838,7 @@ fn main() {
     // Achievement system state
     let mut achievement_engine = AchievementEngine::new();
     let mut achievement_submenu = false;
+    let mut controls_submenu = false;
 
     // Recording & playback state
     let mut recorder = InputRecording::new([0u8; 32]);
@@ -2755,6 +2756,13 @@ fn main() {
                                 _ => {}
                             }
                         }
+                    } else if paused && controls_submenu {
+                        // Controls reference page input handling
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        if input.back {
+                            controls_submenu = false;
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                        }
                     } else if paused && achievement_submenu {
                         // Achievement submenu input handling
                         let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
@@ -2867,7 +2875,7 @@ fn main() {
                                 sound_cooldown = 3;
                             }
                         }
-                        if input.down && pause_selected < 11 {
+                        if input.down && pause_selected < 12 {
                             pause_selected += 1;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -3046,6 +3054,10 @@ fn main() {
                                         play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
                                     paused = false;
+                                }
+                                12 => { // Controls reference page
+                                    controls_submenu = true;
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
                                 _ => {}
                             }
@@ -3413,52 +3425,165 @@ fn main() {
                         apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
                     }
 
-                    // Rewind visual effect: desaturate + blue tint + jitter
+                    // ── VHS Rewind visual effect ──────────────────────────────
                     if is_rewinding {
-                        // Apply effect only to the screen area within composite buffer
-                        // Extract screen region, apply effect, write back
                         let sx = SCREEN_X;
                         let sy = SCREEN_Y;
                         let sw = SCREEN_W;
                         let sh = SCREEN_H;
+                        let fc = frame_counter as u64;
+
+                        // Deterministic pseudo-random hash (no rand crate)
+                        #[inline(always)]
+                        fn vhs_hash(x: usize, y: usize, f: u64) -> u32 {
+                            (x as u32).wrapping_mul(2654435761)
+                                ^ (y as u32).wrapping_mul(340573321)
+                                ^ (f as u32).wrapping_mul(1013904223)
+                        }
+
+                        // ── 5. Brightness pumping: triangle wave 0.70–0.94 ──
+                        let pump = (fc % 120) as u32;
+                        let pump = if pump < 60 { pump } else { 120 - pump };
+                        let bright = 180 + pump; // numerator out of 256
+
+                        // ── Scanline loop (tearing → color bleed → per-pixel) ──
                         for row in 0..sh {
                             let buf_y = sy + row;
-                            // VHS jitter per scanline
-                            let jitter = ((frame_counter.wrapping_mul(7919).wrapping_add((row as u32).wrapping_mul(104729))) % 3) as usize;
-                            // Shift right (process right-to-left)
-                            if jitter > 0 {
-                                for x in (jitter..sw).rev() {
-                                    let dst = buf_y * WINDOW_WIDTH + sx + x;
-                                    let src = buf_y * WINDOW_WIDTH + sx + x - jitter;
-                                    if dst < composite_buffer.len() && src < composite_buffer.len() {
-                                        composite_buffer[dst] = composite_buffer[src];
+
+                            // ── 2. Horizontal tearing: groups of ~12 lines shift ──
+                            let tear_seed = vhs_hash(0, row / 12, fc.wrapping_mul(3));
+                            let tear = (tear_seed % 47) as i32 - 23; // −23..+23 px
+                            if tear > 0 {
+                                let t = tear as usize;
+                                for x in (t..sw).rev() {
+                                    let d = buf_y * WINDOW_WIDTH + sx + x;
+                                    let s = d - t;
+                                    if d < composite_buffer.len() && s < composite_buffer.len() {
+                                        composite_buffer[d] = composite_buffer[s];
                                     }
                                 }
-                                for x in 0..jitter {
-                                    let idx = buf_y * WINDOW_WIDTH + sx + x;
-                                    if idx < composite_buffer.len() {
-                                        composite_buffer[idx] = 0x101030;
+                                for x in 0..t.min(sw) {
+                                    let i = buf_y * WINDOW_WIDTH + sx + x;
+                                    if i < composite_buffer.len() {
+                                        let n = vhs_hash(x, row, fc) & 0x3F;
+                                        composite_buffer[i] = (n << 16) | (n << 8) | n;
+                                    }
+                                }
+                            } else if tear < 0 {
+                                let t = (-tear) as usize;
+                                for x in 0..sw.saturating_sub(t) {
+                                    let d = buf_y * WINDOW_WIDTH + sx + x;
+                                    let s = d + t;
+                                    if d < composite_buffer.len() && s < composite_buffer.len() {
+                                        composite_buffer[d] = composite_buffer[s];
+                                    }
+                                }
+                                for x in sw.saturating_sub(t)..sw {
+                                    let i = buf_y * WINDOW_WIDTH + sx + x;
+                                    if i < composite_buffer.len() {
+                                        let n = vhs_hash(x, row, fc) & 0x3F;
+                                        composite_buffer[i] = (n << 16) | (n << 8) | n;
                                     }
                                 }
                             }
-                            // Desaturate + blue tint
+
+                            // ── 3. Color bleeding on ~30 % of scanlines ──
+                            let bleed_h = vhs_hash(0, row, fc / 2);
+                            if bleed_h % 10 < 3 {
+                                let sp = 1 + (bleed_h as usize % 2); // 1–2 px
+                                // Shift red channel left (source = right neighbour)
+                                for x in 0..sw.saturating_sub(sp) {
+                                    let di = buf_y * WINDOW_WIDTH + sx + x;
+                                    let si = di + sp;
+                                    if di < composite_buffer.len() && si < composite_buffer.len() {
+                                        let src_r = (composite_buffer[si] >> 16) & 0xFF;
+                                        composite_buffer[di] = (src_r << 16) | (composite_buffer[di] & 0x00FFFF);
+                                    }
+                                }
+                                // Shift blue channel right (source = left neighbour)
+                                for x in (sp..sw).rev() {
+                                    let di = buf_y * WINDOW_WIDTH + sx + x;
+                                    let si = di - sp;
+                                    if di < composite_buffer.len() && si < composite_buffer.len() {
+                                        let src_b = composite_buffer[si] & 0xFF;
+                                        composite_buffer[di] = (composite_buffer[di] & 0xFFFF00) | src_b;
+                                    }
+                                }
+                            }
+
+                            // ── Per-pixel: desaturate, pump, snow, roll bar, speed lines ──
                             for x in 0..sw {
                                 let idx = buf_y * WINDOW_WIDTH + sx + x;
                                 if idx >= composite_buffer.len() { break; }
                                 let p = composite_buffer[idx];
-                                let r = ((p >> 16) & 0xFF) as u32;
-                                let g = ((p >> 8) & 0xFF) as u32;
-                                let b = (p & 0xFF) as u32;
+                                let mut r = (p >> 16) & 0xFF;
+                                let mut g = (p >> 8) & 0xFF;
+                                let mut b = p & 0xFF;
+
+                                // Desaturate + blue tint
                                 let gray = (r * 77 + g * 150 + b * 29) >> 8;
-                                let r2 = (r * 70 + gray * 30) / 100;
-                                let g2 = (g * 70 + gray * 30) / 100;
-                                let b2 = ((b * 70 + gray * 30) / 100) * 120 / 100;
-                                composite_buffer[idx] = (r2.min(255) << 16) | (g2.min(255) << 8) | b2.min(255);
+                                r = (r * 55 + gray * 45) / 100;
+                                g = (g * 55 + gray * 45) / 100;
+                                b = ((b * 55 + gray * 45) / 100) * 135 / 100;
+
+                                // Brightness pumping
+                                r = (r * bright) >> 8;
+                                g = (g * bright) >> 8;
+                                b = (b * bright) >> 8;
+
+                                // ── 4. Static / snow (heavier at top & bottom edges) ──
+                                let noise = vhs_hash(x, row, fc);
+                                let edge = if row < 40 || row + 40 > sh { 3u32 } else { 0 };
+                                if (noise & 0x07) < 1 + edge {
+                                    let snow = (noise >> 3) & 0xFF;
+                                    r = (r * 60 + snow * 40) / 100;
+                                    g = (g * 60 + snow * 40) / 100;
+                                    b = (b * 60 + snow * 40) / 100;
+                                }
+
+                                // ── 6. Rolling dark bar (~40 px, scrolls upward) ──
+                                let roll_y = ((fc.wrapping_mul(3)) % sh as u64) as usize;
+                                let dist = if row >= roll_y { row - roll_y } else { row + sh - roll_y };
+                                if dist < 40 {
+                                    let fade = if dist < 10 { 128u32 } else if dist < 30 { 160 } else { 192 };
+                                    r = (r * fade) >> 8;
+                                    g = (g * fade) >> 8;
+                                    b = (b * fade) >> 8;
+                                }
+
+                                // ── 8. Diagonal speed lines (3 faint, ~20 % white) ──
+                                for ln in 0..3u64 {
+                                    let diag = (x as u64 + row as u64 + fc * 11 + ln * 257) % 200;
+                                    if diag < 2 {
+                                        r = r + (255 - r) / 5;
+                                        g = g + (255 - g) / 5;
+                                        b = b + (255 - b) / 5;
+                                    }
+                                }
+
+                                composite_buffer[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+                            }
+                        }
+
+                        // ── 1. Tracking lines: 4 bright noise bands scrolling down ──
+                        for band in 0..4u64 {
+                            let by = ((fc.wrapping_mul(7).wrapping_add(band * 193)) % sh as u64) as usize;
+                            for dy in 0..3usize {
+                                let row = (by + dy) % sh;
+                                let buf_y = sy + row;
+                                for x in 0..sw {
+                                    let idx = buf_y * WINDOW_WIDTH + sx + x;
+                                    if idx < composite_buffer.len() {
+                                        let n = vhs_hash(x, row, fc) & 0xFF;
+                                        let v = 128 + n / 2; // bright static 128..255
+                                        composite_buffer[idx] = (v << 16) | (v << 8) | v;
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // Rewind buffer HUD bar (top-right of screen, only while actively rewinding)
+                    // Rewind buffer HUD bar (VCR style, top-right)
                     if !paused && is_rewinding && !rewind_buffer.snapshots.is_empty() {
                         let rewind_pct = (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
                         let bar_w: usize = 60;
@@ -3472,34 +3597,40 @@ fn main() {
                                 let py = bar_y + dy;
                                 let idx = py * WINDOW_WIDTH + px;
                                 if idx < composite_buffer.len() {
-                                    composite_buffer[idx] = if dx < filled { 0x4040FF } else { 0x202040 };
+                                    composite_buffer[idx] = if dx < filled { 0x00DDDD } else { 0x102030 };
                                 }
                             }
                         }
                     }
 
-                    // "<< REWIND" text overlay while rewinding
+                    // ── 7. VCR on-screen display: "<< REW" + backward timecode ──
                     if is_rewinding {
-                        let rw_text = "<< REWIND";
-                        let text_w = rw_text.len() * 4;
-                        let tx = SCREEN_X + SCREEN_W / 2 - text_w;
-                        let ty = SCREEN_Y + 20;
-                        // Dark background
-                        for y in ty.saturating_sub(2)..=(ty + 8) {
-                            for x in (tx.saturating_sub(4))..=(tx + text_w * 2 + 4) {
+                        let fc = frame_counter as u64;
+                        let osd_x = SCREEN_X + SCREEN_W - 100;
+                        let osd_y = SCREEN_Y + SCREEN_H - 30;
+                        // Semi-transparent dark background box
+                        for y in osd_y.saturating_sub(3)..=(osd_y + 18) {
+                            for x in osd_x.saturating_sub(4)..=(osd_x + 96) {
                                 if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
                                     let idx = y * WINDOW_WIDTH + x;
                                     if idx < composite_buffer.len() {
                                         let p = composite_buffer[idx];
-                                        let r = ((p >> 16) & 0xFF) / 2;
-                                        let g = ((p >> 8) & 0xFF) / 2;
-                                        let b = (p & 0xFF) / 2;
-                                        composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                        composite_buffer[idx] = ((((p >> 16) & 0xFF) / 4) << 16)
+                                            | ((((p >> 8) & 0xFF) / 4) << 8)
+                                            | ((p & 0xFF) / 4);
                                     }
                                 }
                             }
                         }
-                        draw_text(&mut composite_buffer, rw_text, tx, ty, 0x6688FF, WINDOW_WIDTH);
+                        draw_text(&mut composite_buffer, "<< REW", osd_x, osd_y, 0x00FFFF, WINDOW_WIDTH);
+                        // Fake backward-counting timecode  MM:SS:FF
+                        let tc_total = 36000u64.saturating_sub(fc % 36000);
+                        let display_s = tc_total / 60;
+                        let mm = (display_s / 60) % 100;
+                        let ss = display_s % 60;
+                        let ff = tc_total % 60;
+                        let tc = format!("{:02}:{:02}:{:02}", mm, ss, ff);
+                        draw_text(&mut composite_buffer, &tc, osd_x + 8, osd_y + 10, 0x00DDDD, WINDOW_WIDTH);
                     }
 
                     // Overlay message display
@@ -3840,7 +3971,7 @@ fn main() {
                         } else {
                             "SAVE RECORDING".to_string()
                         };
-                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2"];
+                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, "ENTER CHEAT CODE", &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
                         for (i, item) in items.iter().enumerate() {
                             let row = box_top + 3 + i;
                             let is_selected = i == pause_selected;
@@ -4057,6 +4188,98 @@ fn main() {
                             }
 
                             draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK", ab_bottom - 1, MENU_DARK_GRAY);
+                        }
+
+                        // Controls reference page overlay
+                        if controls_submenu {
+                            // Fill entire framebuffer for full-screen reference page
+                            for i in 0..256 * 240 {
+                                menu_framebuffer[i] = MENU_BG;
+                            }
+
+                            // Title
+                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 CONTROLS \x11", 1, MENU_GOLD);
+
+                            // Separator
+                            let sep_y = 2 * 8 + 4;
+                            for x in 8..248 {
+                                if x % 4 < 2 {
+                                    menu_framebuffer[sep_y * 256 + x] = MENU_DARK_GRAY;
+                                }
+                            }
+
+                            // --- Player 1 & 2 Keyboard ---
+                            draw_text_8x8(&mut menu_framebuffer, "P1 KEYBOARD", 2, 3, MENU_GOLD);
+                            draw_text_8x8(&mut menu_framebuffer, "P2 KEYBOARD", 18, 3, MENU_GOLD);
+
+                            let kb1 = &config.input_bindings.keyboard_p1;
+                            let kb2 = &config.input_bindings.keyboard_p2;
+                            let kb_rows: [(&str, &str, &str); 10] = [
+                                ("Up",     &kb1.up,      &kb2.up),
+                                ("Down",   &kb1.down,    &kb2.down),
+                                ("Left",   &kb1.left,    &kb2.left),
+                                ("Right",  &kb1.right,   &kb2.right),
+                                ("A",      &kb1.a,       &kb2.a),
+                                ("B",      &kb1.b,       &kb2.b),
+                                ("Start",  &kb1.start,   &kb2.start),
+                                ("Select", &kb1.select,  &kb2.select),
+                                ("TrboA",  &kb1.turbo_a, &kb2.turbo_a),
+                                ("TrboB",  &kb1.turbo_b, &kb2.turbo_b),
+                            ];
+                            for (i, (label, v1, v2)) in kb_rows.iter().enumerate() {
+                                let y = 4 + i;
+                                draw_text_8x8(&mut menu_framebuffer, label, 2, y, MENU_GRAY);
+                                draw_text_8x8(&mut menu_framebuffer, v1, 9, y, MENU_WHITE);
+                                draw_text_8x8(&mut menu_framebuffer, label, 18, y, MENU_GRAY);
+                                draw_text_8x8(&mut menu_framebuffer, v2, 25, y, MENU_WHITE);
+                            }
+
+                            // --- Controller P1 & P2 ---
+                            draw_text_8x8(&mut menu_framebuffer, "CONTROLLER P1", 2, 15, MENU_GOLD);
+                            draw_text_8x8(&mut menu_framebuffer, "CONTROLLER P2", 18, 15, MENU_GOLD);
+
+                            let ct1 = &config.input_bindings.controller_p1;
+                            let ct2 = &config.input_bindings.controller_p2;
+                            let ct_rows: [(&str, &str, &str); 6] = [
+                                ("A",      &ct1.a,       &ct2.a),
+                                ("B",      &ct1.b,       &ct2.b),
+                                ("TrboA",  &ct1.turbo_a, &ct2.turbo_a),
+                                ("TrboB",  &ct1.turbo_b, &ct2.turbo_b),
+                                ("Start",  &ct1.start,   &ct2.start),
+                                ("Select", &ct1.select,  &ct2.select),
+                            ];
+                            for (i, (label, v1, v2)) in ct_rows.iter().enumerate() {
+                                let y = 16 + i;
+                                draw_text_8x8(&mut menu_framebuffer, label, 2, y, MENU_GRAY);
+                                draw_text_8x8(&mut menu_framebuffer, v1, 9, y, MENU_WHITE);
+                                draw_text_8x8(&mut menu_framebuffer, label, 18, y, MENU_GRAY);
+                                draw_text_8x8(&mut menu_framebuffer, v2, 25, y, MENU_WHITE);
+                            }
+
+                            // --- System Shortcuts ---
+                            draw_text_centered_8x8(&mut menu_framebuffer, "SYSTEM SHORTCUTS", 23, MENU_GOLD);
+
+                            draw_text_8x8(&mut menu_framebuffer, "Pause",  2, 24, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Escape", 9, 24, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Save",   18, 24, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "F5",     25, 24, MENU_WHITE);
+
+                            draw_text_8x8(&mut menu_framebuffer, "Load",   2, 25, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "F9",     9, 25, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Rewind", 18, 25, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Bksp",   25, 25, MENU_WHITE);
+
+                            draw_text_8x8(&mut menu_framebuffer, "FF",     2, 26, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Tab",    9, 26, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Reset",  18, 26, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Ctrl+R", 25, 26, MENU_WHITE);
+
+                            draw_text_8x8(&mut menu_framebuffer, "Record", 2, 27, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Shft+R", 9, 27, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Play",   18, 27, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Shft+P", 25, 27, MENU_WHITE);
+
+                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC TO GO BACK", 29, MENU_DARK_GRAY);
                         }
                         
                         // Now pass through CRT filter (same as menu rendering)
