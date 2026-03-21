@@ -92,6 +92,27 @@ struct InputBindings {
     controller_p2: ControllerBindings,
 }
 
+#[derive(Default, Clone)]
+struct StickState {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+}
+
+impl StickState {
+    #[inline]
+    fn any_active(&self) -> bool {
+        self.up || self.down || self.left || self.right
+    }
+    fn clear(&mut self) {
+        self.up = false;
+        self.down = false;
+        self.left = false;
+        self.right = false;
+    }
+}
+
 impl Default for KeyBindings {
     fn default() -> Self {
         Self {
@@ -318,23 +339,23 @@ impl Default for CrtMaskMode {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct CrtConfig {
-    scanline_intensity: u8,   // 0-100, default 70
-    phosphor_warmth: u8,      // 0-100, default 50
-    vignette_strength: u8,    // 0-100, default 60
-    blur_amount: u8,          // 0-100, default 40
-    curvature_strength: u8,   // 0-100, default 50
+    scanline_intensity: u8,   // 0-100, default 15
+    phosphor_warmth: u8,      // 0-100, default 20
+    vignette_strength: u8,    // 0-100, default 20
+    blur_amount: u8,          // 0-100, default 0
+    curvature_strength: u8,   // 0-100, default 15
     mask_mode: CrtMaskMode,
 }
 
 impl Default for CrtConfig {
     fn default() -> Self {
         Self {
-            scanline_intensity: 70,
-            phosphor_warmth: 50,
-            vignette_strength: 60,
-            blur_amount: 40,
-            curvature_strength: 50,
-            mask_mode: CrtMaskMode::Off,
+            scanline_intensity: 30,
+            phosphor_warmth: 30,
+            vignette_strength: 20,
+            blur_amount: 0,
+            curvature_strength: 15,
+            mask_mode: CrtMaskMode::ShadowMask,
         }
     }
 }
@@ -359,6 +380,8 @@ struct EmulatorConfig {
     crt_config: CrtConfig,
     #[serde(default = "default_true")]
     check_for_updates: bool,
+    #[serde(default)]
+    favorite_games: Vec<String>,
 }
 
 impl Default for EmulatorConfig {
@@ -375,6 +398,7 @@ impl Default for EmulatorConfig {
             config_version: 2,
             crt_config: CrtConfig::default(),
             check_for_updates: true,
+            favorite_games: Vec::new(),
         }
     }
 }
@@ -442,6 +466,20 @@ fn add_recent_game(cfg: &mut EmulatorConfig, path: &str) {
     cfg.recent_games.retain(|p| p != path);
     cfg.recent_games.insert(0, path.to_string());
     cfg.recent_games.truncate(10);
+}
+
+fn toggle_favorite(config: &mut EmulatorConfig, path: &str) -> bool {
+    if let Some(pos) = config.favorite_games.iter().position(|g| g == path) {
+        config.favorite_games.remove(pos);
+        false // removed
+    } else {
+        config.favorite_games.push(path.to_string());
+        true // added
+    }
+}
+
+fn is_favorite(config: &EmulatorConfig, path: &str) -> bool {
+    config.favorite_games.iter().any(|g| g == path)
 }
 
 // =====================================================================
@@ -760,6 +798,10 @@ struct MenuState {
     submenu: Option<SubMenu>,
     cursor_visible: bool,
     cursor_timer: u32,
+    // Screen transition fade effect
+    transition_timer: u8,      // counts down from 6 to 0
+    transition_out: bool,      // true = fading out, false = fading in
+    favorites_page: usize,
 }
 
 impl MenuState {
@@ -769,15 +811,18 @@ impl MenuState {
             submenu: None,
             cursor_visible: true,
             cursor_timer: 0,
+            transition_timer: 0,
+            transition_out: false,
+            favorites_page: 0,
         }
     }
 }
 
 enum SubMenu {
-    Settings { selected: usize },
+    Settings { selected: usize, value_flash: u8 },
     FileBrowser(FileBrowser),
     InputSettings(InputSettingsState),
-    CrtSettings { selected: usize, tables_dirty: bool },
+    CrtSettings { selected: usize, tables_dirty: bool, value_flash: u8 },
 }
 
 struct InputSettingsState {
@@ -1057,7 +1102,33 @@ fn draw_side_borders(fb: &mut [u32]) {
     }
 }
 
-fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cursor_visible: bool) {
+/// Draw a selection highlight bar across a region of the framebuffer.
+#[inline]
+fn draw_highlight_bar(fb: &mut [u32], y_start: usize, height: usize, x_left: usize, x_right: usize, color: u32) {
+    for row in y_start..y_start + height {
+        if row >= 240 { break; }
+        for col in x_left..x_right.min(256) {
+            fb[row * 256 + col] = color;
+        }
+    }
+}
+
+/// Apply a fade overlay to the framebuffer for screen transitions.
+/// fade_level: 0=full brightness, 8=nearly black
+#[inline]
+fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) {
+    if fade_level == 0 { return; }
+    // fade_level 0=full brightness, 8=nearly black
+    let brightness = (255u32).saturating_sub(fade_level as u32 * 30); // 255, 225, 195... down to 15
+    for pixel in fb[..width * height].iter_mut() {
+        let r = ((*pixel >> 16) & 0xFF) * brightness / 255;
+        let g = ((*pixel >> 8) & 0xFF) * brightness / 255;
+        let b = (*pixel & 0xFF) * brightness / 255;
+        *pixel = (r << 16) | (g << 8) | b;
+    }
+}
+
+fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cursor_visible: bool, favorites_valid: &[bool], recents_valid: &[bool]) {
     for pixel in fb.iter_mut() { *pixel = MENU_BG; }
 
     draw_double_border_top(fb, 1);
@@ -1067,47 +1138,51 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     draw_text_centered_8x8(fb, "\x11 NES EMULATOR \x11", 2, MENU_GOLD);
     draw_separator_line(fb, 3);
 
-    let recent_count = cfg.recent_games.len().min(10);
-    let browse_idx = recent_count;
-    let settings_idx = recent_count + 1;
-
     let mut current_row: usize = 4;
+    let mut item_index: usize = 0;
 
-    if recent_count > 0 {
-        draw_text_8x8(fb, "RECENT GAMES", 3, current_row, MENU_DARK_GRAY);
+    // === FAVORITES SECTION ===
+    let valid_favorites: Vec<&String> = cfg.favorite_games.iter().enumerate()
+        .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
+        .map(|(_, p)| p)
+        .collect();
+    let total_favs = valid_favorites.len();
+    let per_page = 5usize;
+    let total_pages = if total_favs == 0 { 0 } else { (total_favs + per_page - 1) / per_page };
+    let page = menu.favorites_page.min(total_pages.saturating_sub(1));
+    let page_start = page * per_page;
+    let page_end = (page_start + per_page).min(total_favs);
+    let fav_count = page_end - page_start;
+
+    if total_favs > 0 {
+        // Header with page indicator
+        if total_pages > 1 {
+            let header = format!("\x11 FAVORITES  {}/{}", page + 1, total_pages);
+            draw_text_8x8(fb, &header, 3, current_row, MENU_GOLD);
+            // Page hint on right side
+            draw_text_8x8(fb, "SEL:\x1A", 25, current_row, MENU_DARK_GRAY);
+        } else {
+            draw_text_8x8(fb, "\x11 FAVORITES", 3, current_row, MENU_GOLD);
+        }
         current_row += 1;
 
-        for i in 0..recent_count {
-            let row = current_row + i;
-            if row >= 26 { break; }
+        for i in 0..fav_count {
+            let row = current_row;
+            if row >= 24 { break; }
 
-            let path_str = &cfg.recent_games[i];
+            let path_str = valid_favorites[page_start + i];
             let filename = Path::new(path_str)
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| path_str.clone());
 
-            let exists = Path::new(path_str).exists();
-            let is_selected = i == menu.selected;
+            let is_selected = menu.selected == item_index;
 
             if is_selected {
-                for x in 20..236 {
-                    let y_base = row * 8;
-                    for dy in 0..8 {
-                        if y_base + dy < 240 {
-                            fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
-                        }
-                    }
-                }
+                draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
             }
 
-            let color = if !exists {
-                MENU_DARK_GRAY
-            } else if is_selected {
-                MENU_WHITE
-            } else {
-                MENU_GRAY
-            };
+            let color = if is_selected { MENU_WHITE } else { MENU_GOLD };
 
             if is_selected && cursor_visible {
                 draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
@@ -1115,55 +1190,97 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
 
             let display_name = filename.to_uppercase();
             let display_name = display_name.strip_suffix(".NES").unwrap_or(&display_name);
-            let display: String = display_name.chars().take(26).collect();
+            let display = format!("\x11 {}", &display_name.chars().take(24).collect::<String>());
             draw_text_8x8(fb, &display, 3, row, color);
-        }
 
-        current_row += recent_count + 1;
-    } else {
-        draw_text_centered_8x8(fb, "NO RECENT GAMES YET", current_row + 1, MENU_DARK_GRAY);
-        draw_text_centered_8x8(fb, "BROWSE TO PLAY!", current_row + 2, MENU_DARK_GRAY);
-        current_row += 4;
+            item_index += 1;
+            current_row += 1;
+        }
+        draw_separator_line(fb, current_row);
+        current_row += 1;
     }
 
-    draw_separator_line(fb, current_row);
-    current_row += 1;
+    // === RECENT GAMES SECTION ===
+    let recent_non_fav: Vec<(usize, &String)> = cfg.recent_games.iter().enumerate()
+        .filter(|(_, p)| !cfg.favorite_games.contains(p))
+        .collect();
+    let max_recent = (23_usize.saturating_sub(current_row)).min(8);
+    let recent_count = recent_non_fav.len().min(max_recent);
+
+    if recent_count > 0 || fav_count == 0 {
+        draw_text_8x8(fb, "RECENT GAMES", 3, current_row, MENU_DARK_GRAY);
+        current_row += 1;
+
+        if recent_count == 0 {
+            draw_text_centered_8x8(fb, "NO RECENT GAMES YET", current_row, MENU_DARK_GRAY);
+            current_row += 1;
+            draw_text_centered_8x8(fb, "BROWSE TO PLAY!", current_row, MENU_DARK_GRAY);
+            current_row += 1;
+        } else {
+            for i in 0..recent_count {
+                let row = current_row;
+                if row >= 24 { break; }
+
+                let (orig_idx, path_str) = recent_non_fav[i];
+                let filename = Path::new(path_str)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path_str.clone());
+
+                let exists = recents_valid.get(orig_idx).copied().unwrap_or(false);
+                let is_selected = menu.selected == item_index;
+
+                if is_selected {
+                    draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
+                }
+
+                let color = if !exists {
+                    MENU_DARK_GRAY
+                } else if is_selected {
+                    MENU_WHITE
+                } else {
+                    MENU_GRAY
+                };
+
+                if is_selected && cursor_visible {
+                    draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
+                }
+
+                let display_name = filename.to_uppercase();
+                let display_name = display_name.strip_suffix(".NES").unwrap_or(&display_name);
+                let display: String = display_name.chars().take(26).collect();
+                draw_text_8x8(fb, &display, 3, row, color);
+
+                item_index += 1;
+                current_row += 1;
+            }
+        }
+        draw_separator_line(fb, current_row);
+        current_row += 1;
+    }
 
     // BROWSE FILES option
     {
         let row = current_row;
-        let is_selected = menu.selected == browse_idx;
+        let is_selected = menu.selected == item_index;
         if is_selected {
-            for x in 20..236 {
-                let y_base = row * 8;
-                for dy in 0..8 {
-                    if y_base + dy < 240 {
-                        fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
-                    }
-                }
-            }
+            draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
         }
         let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
         if is_selected && cursor_visible {
             draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
         }
         draw_text_8x8(fb, "BROWSE FILES", 3, row, color);
+        item_index += 1;
         current_row += 1;
     }
 
     // SETTINGS option
     {
         let row = current_row;
-        let is_selected = menu.selected == settings_idx;
+        let is_selected = menu.selected == item_index;
         if is_selected {
-            for x in 20..236 {
-                let y_base = row * 8;
-                for dy in 0..8 {
-                    if y_base + dy < 240 {
-                        fb[(y_base + dy) * 256 + x] = 0x3C3C8C;
-                    }
-                }
-            }
+            draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
         }
         let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
         if is_selected && cursor_visible {
@@ -1173,14 +1290,14 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     }
 
     draw_separator_line(fb, 24);
-    draw_text_centered_8x8(fb, "A:OPEN  ESC:QUIT", 25, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "A:OPEN  F:FAV  ESC:QUIT", 25, MENU_DARK_GRAY);
     draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 26, MENU_DARK_GRAY);
 
     // Bottom hint
     draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, 0x585858);
 }
 
-fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32, glass_intensity: u8) {
+fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32, glass_intensity: u8, value_flash: u8) {
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
     }
@@ -1189,6 +1306,8 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
+    draw_text_8x8(fb, "MENU >", 3, 2, 0x666666);
+    draw_text_8x8(fb, "SETTINGS", 10, 2, 0xCCCCCC);
     draw_text_centered_8x8(fb, "\x11 SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
@@ -1205,7 +1324,8 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
-        let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
+        let is_flashing = i == selected && value_flash > 0;
+        let color = if is_flashing { MENU_GOLD } else if i == selected { MENU_WHITE } else { MENU_GRAY };
         if i == selected && cursor_visible {
             draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
         }
@@ -1223,7 +1343,7 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     draw_text_centered_8x8(fb, "ESC TO GO BACK", 27, MENU_DARK_GRAY);
 }
 
-fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool) {
+fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, value_flash: u8) {
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
     }
@@ -1232,6 +1352,8 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
+    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 2, 0x666666);
+    draw_text_8x8(fb, "CRT", 19, 2, 0xCCCCCC);
     draw_text_centered_8x8(fb, "\x11 CRT SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
@@ -1255,13 +1377,15 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
     let rows = [7, 9, 11, 13, 15, 17, 19, 22];
 
     for (i, ((label, value), &row)) in items.iter().zip(rows.iter()).enumerate() {
-        let color = if i == selected { MENU_WHITE } else { MENU_GRAY };
+        let is_flashing = i == selected && value_flash > 0;
+        let color = if is_flashing { MENU_GOLD } else if i == selected { MENU_WHITE } else { MENU_GRAY };
+        let value_color = if is_flashing { MENU_GOLD } else { color };
         if i == selected && cursor_visible {
             draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
         }
         draw_text_8x8(fb, label, 4, row, color);
         if !value.is_empty() {
-            draw_text_8x8(fb, value, 16, row, color);
+            draw_text_8x8(fb, value, 16, row, value_color);
         }
     }
 
@@ -1288,6 +1412,8 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
     draw_side_borders(fb);
 
     draw_text_centered_8x8(fb, "\x11 INPUT SETTINGS \x11", 2, MENU_GOLD);
+    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 3, 0x666666);
+    draw_text_8x8(fb, "INPUT", 19, 3, 0xCCCCCC);
 
     // Tab headers
     let tabs = ["KB P1", "KB P2", "PAD P1", "PAD P2"];
@@ -1376,15 +1502,17 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
 }
 
 fn truncate_path_display(path: &Path, max_chars: usize) -> String {
-    let s = path.to_string_lossy().to_uppercase();
+    let s = path.to_string_lossy()
+        .to_uppercase()
+        .replace('\\', "/");
     if s.len() <= max_chars {
-        s.to_string()
+        s
     } else {
         format!("...{}", &s[s.len() - (max_chars - 3)..])
     }
 }
 
-fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool) {
+fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, cfg: &EmulatorConfig) {
     const VISIBLE_ROWS: usize = 20;
     const FIRST_ROW: usize = 5;
     const DIR_COLOR: u32 = 0x5C94FC;
@@ -1424,32 +1552,38 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 name_upper
             };
 
+            let is_fav = !entry.is_dir && is_favorite(cfg, &entry.full_path.to_string_lossy());
+
             let display = if entry.is_dir {
                 format!("> {}", display_name)
+            } else if is_fav {
+                format!("\x11 {}", display_name)
             } else {
                 format!("  {}", display_name)
             };
 
             if is_selected {
                 // Highlight bar
-                for x in 20..236 {
-                    let y_base = row * 8;
-                    for dy in 0..8 {
-                        if y_base + dy < 240 {
-                            fb[(y_base + dy) * 256 + x] = HIGHLIGHT_BG;
-                        }
-                    }
-                }
+                draw_highlight_bar(fb, row * 8, 8, 20, 236, HIGHLIGHT_BG);
                 if cursor_visible {
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
                 let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_WHITE };
-                draw_text_8x8(fb, &display, 3, row, color);
-                // File size for selected .nes files
+
                 if !entry.is_dir && entry.size_kb > 0 {
                     let size_str = format!("{}K", entry.size_kb);
-                    let size_x = 27 - size_str.len().min(6);
+                    let size_x = 28 - size_str.len().min(6);
+                    // Truncate display name so it doesn't overlap with size
+                    let max_name_chars = size_x.saturating_sub(3);
+                    let truncated = if display.len() > max_name_chars && max_name_chars > 3 {
+                        format!("{}...", &display[..max_name_chars - 3])
+                    } else {
+                        display.clone()
+                    };
+                    draw_text_8x8(fb, &truncated, 3, row, color);
                     draw_text_8x8(fb, &size_str, size_x, row, MENU_DARK_GRAY);
+                } else {
+                    draw_text_8x8(fb, &display, 3, row, color);
                 }
             } else {
                 let color = if entry.is_dir { DIR_COLOR } else { MENU_GRAY };
@@ -1466,7 +1600,7 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
     }
 
     draw_separator_line(fb, 25);
-    draw_text_centered_8x8(fb, "A:OPEN B:BACK L/R:PAGE", 26, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "A:OPEN B:BACK F:FAV L/R:PG", 26, MENU_DARK_GRAY);
 
     // Error overlay
     if let Some(ref msg) = browser.error_message {
@@ -1490,13 +1624,11 @@ fn build_flat_distortion_table() -> Vec<(u32, u32)> {
         for dst_x in 0..SCREEN_W {
             let src_x = dst_x as f32 / SCREEN_W as f32 * 256.0;
             let src_y = dst_y as f32 / SCREEN_H as f32 * 240.0;
-            if src_x >= 255.99 || src_y >= 239.99 {
-                table.push((0xFFFFFFFF, 0));
-            } else {
-                let src_xf = (src_x * 256.0) as u32;
-                let src_yf = (src_y * 256.0) as u32;
-                table.push((src_xf, src_yf));
-            }
+            let src_x = src_x.clamp(0.0, 255.98);
+            let src_y = src_y.clamp(0.0, 239.98);
+            let src_xf = (src_x * 256.0) as u32;
+            let src_yf = (src_y * 256.0) as u32;
+            table.push((src_xf, src_yf));
         }
     }
     table
@@ -1529,13 +1661,11 @@ fn build_distortion_table_with_curvature(curvature: u8) -> Vec<(u32, u32)> {
             let dy = ny / distortion;
             let src_x = ((dx + 1.0) / 2.0) * 256.0;
             let src_y = ((dy + 1.0) / 2.0) * 240.0;
-            if src_x < 0.0 || src_x >= 255.99 || src_y < 0.0 || src_y >= 239.99 {
-                table.push((0xFFFFFFFF, 0));
-            } else {
-                let src_xf = (src_x * 256.0) as u32;
-                let src_yf = (src_y * 256.0) as u32;
-                table.push((src_xf, src_yf));
-            }
+            let src_x = src_x.clamp(0.0, 255.98);
+            let src_y = src_y.clamp(0.0, 239.98);
+            let src_xf = (src_x * 256.0) as u32;
+            let src_yf = (src_y * 256.0) as u32;
+            table.push((src_xf, src_yf));
         }
     }
     table
@@ -1546,29 +1676,58 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
     match mode {
         CrtMaskMode::Off => {} // all (255,255,255) — no effect
         CrtMaskMode::ShadowMask => {
-            // 3×3 repeating dot triad, shifted per row
-            let triad: [(u8, u8, u8); 3] = [
-                (255, 80, 80),
-                (80, 255, 80),
-                (80, 80, 255),
-            ];
+            // Realistic shadow mask: 3×3 repeating phosphor triads with gaps
+            // Each "pixel" has R, G, B phosphor dots arranged in a triad
+            // with dark gaps between them (like a real shadow mask)
             for y in 0..SCREEN_H {
-                let shift = y % 3;
+                let row_in_cell = y % 3;
+                let row_shift = (y / 3) % 2; // Alternate rows offset by half a cell
                 for x in 0..SCREEN_W {
-                    table[y * SCREEN_W + x] = triad[(x + shift) % 3];
+                    let col = (x + row_shift * 2) % 6; // 6-wide pattern with half-cell offset
+                    let (r, g, b) = match (row_in_cell, col) {
+                        // Top row of triad
+                        (0, 0) => (240, 60, 60),   // R dot
+                        (0, 1) => (180, 80, 60),   // R-G transition
+                        (0, 2) => (60, 240, 60),   // G dot
+                        (0, 3) => (60, 180, 80),   // G-B transition
+                        (0, 4) => (60, 60, 240),   // B dot
+                        (0, 5) => (120, 60, 180),  // B-R transition
+                        // Middle row - brightest, phosphors at full
+                        (1, 0) => (255, 40, 40),   // R dot center
+                        (1, 1) => (160, 100, 40),  // gap
+                        (1, 2) => (40, 255, 40),   // G dot center
+                        (1, 3) => (40, 160, 100),  // gap
+                        (1, 4) => (40, 40, 255),   // B dot center
+                        (1, 5) => (100, 40, 160),  // gap
+                        // Bottom row - fading
+                        (2, 0) => (200, 80, 80),   // R fading
+                        (2, 1) => (140, 100, 80),  // inter-dot gap
+                        (2, 2) => (80, 200, 80),   // G fading
+                        (2, 3) => (80, 140, 100),  // inter-dot gap
+                        (2, 4) => (80, 80, 200),   // B fading
+                        (2, 5) => (100, 80, 140),  // inter-dot gap
+                        _ => (255, 255, 255),
+                    };
+                    table[y * SCREEN_W + x] = (r, g, b);
                 }
             }
         }
         CrtMaskMode::ApertureGrille => {
-            // 3-column repeating vertical stripes
-            let stripes: [(u8, u8, u8); 3] = [
-                (255, 100, 100),
-                (100, 255, 100),
-                (100, 100, 255),
-            ];
+            // Realistic aperture grille: vertical phosphor stripes with dark gaps
+            // Sony Trinitron style — thin dark lines between color stripes
             for y in 0..SCREEN_H {
                 for x in 0..SCREEN_W {
-                    table[y * SCREEN_W + x] = stripes[x % 3];
+                    let col = x % 6; // 6-wide repeating pattern
+                    let (r, g, b) = match col {
+                        0 => (255, 30, 30),    // R stripe center
+                        1 => (200, 50, 40),    // R stripe edge / gap
+                        2 => (30, 255, 30),    // G stripe center
+                        3 => (40, 200, 50),    // G stripe edge / gap
+                        4 => (30, 30, 255),    // B stripe center
+                        5 => (50, 40, 200),    // B stripe edge / gap
+                        _ => (255, 255, 255),
+                    };
+                    table[y * SCREEN_W + x] = (r, g, b);
                 }
             }
         }
@@ -1591,7 +1750,20 @@ impl RepeatTracker {
     fn update_axis(raw_held: bool, counter: &mut u32) -> bool {
         if raw_held {
             *counter += 1;
-            *counter == 1 || (*counter > 18 && (*counter - 18) % 4 == 0)
+            if *counter == 1 {
+                true // Immediate fire on first press
+            } else if *counter <= 20 {
+                false // Initial delay: 20 frames (~333ms) — no repeat
+            } else if *counter <= 50 {
+                // Slow phase: every 6 frames (~10/sec)
+                (*counter - 20) % 6 == 0
+            } else if *counter <= 90 {
+                // Medium phase: every 3 frames (~20/sec)
+                (*counter - 50) % 3 == 0
+            } else {
+                // Fast phase: every 2 frames (~30/sec)
+                (*counter - 90) % 2 == 0
+            }
         } else {
             *counter = 0;
             false
@@ -1617,9 +1789,11 @@ struct MenuInput {
     backspace: bool,
     page_up: bool,
     page_down: bool,
+    favorite: bool,
+    select: bool,
 }
 
-fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut RepeatTracker) -> MenuInput {
+fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut RepeatTracker, menu_deadzone: f32, stick_state: &mut StickState) -> MenuInput {
     let confirm = window.is_key_pressed(Key::Enter, KeyRepeat::No);
     let back = window.is_key_pressed(Key::Escape, KeyRepeat::No);
     let backspace = window.is_key_pressed(Key::Backspace, KeyRepeat::No);
@@ -1635,6 +1809,8 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
     let mut mi = MenuInput {
         up: false, down: false, left: false, right: false,
         confirm, back, backspace, page_up, page_down,
+        favorite: window.is_key_pressed(Key::F, KeyRepeat::No),
+        select: window.is_key_pressed(Key::Tab, KeyRepeat::No),
     };
 
     if let Some(ref mut g) = gilrs {
@@ -1644,8 +1820,10 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
                 match btn {
                     Button::Start | Button::South => mi.confirm = true,
                     Button::East => mi.back = true,
+                    Button::West => mi.favorite = true,
                     Button::LeftTrigger | Button::LeftTrigger2 => mi.page_up = true,
                     Button::RightTrigger | Button::RightTrigger2 => mi.page_down = true,
+                    Button::Select => mi.select = true,
                     _ => {}
                 }
             }
@@ -1658,11 +1836,13 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
             raw_right |= gamepad.is_pressed(Button::DPadRight);
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let deadzone = 0.3;
-            if stick_y > deadzone { raw_up = true; }
-            if stick_y < -deadzone { raw_down = true; }
-            if stick_x < -deadzone { raw_left = true; }
-            if stick_x > deadzone { raw_right = true; }
+            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
+                stick_x, stick_y, menu_deadzone, stick_state
+            );
+            raw_up    |= s_up;
+            raw_down  |= s_down;
+            raw_left  |= s_left;
+            raw_right |= s_right;
         }
     }
 
@@ -1694,6 +1874,7 @@ enum MenuSound {
     Confirm,
     Back,
     Error,
+    Adjust,
 }
 
 fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, sound: MenuSound, sample_rate: u32, volume: f32) {
@@ -1703,6 +1884,7 @@ fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, s
         MenuSound::Confirm => generate_menu_tone(producer, 440.0, 60, vol, sample_rate),
         MenuSound::Back => generate_menu_tone(producer, 330.0, 40, vol, sample_rate),
         MenuSound::Error => generate_menu_tone(producer, 220.0, 100, vol, sample_rate),
+        MenuSound::Adjust => generate_menu_tone(producer, 1200.0, 15, vol, sample_rate),
     }
 }
 
@@ -1865,7 +2047,7 @@ fn main() {
     let mut tv_frame_bg = Vec::new();
     build_tv_frame(&mut tv_frame_bg);
     build_console_overlay(&mut tv_frame_bg, TV_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT);
-    let mut composite_buffer = vec![0u32; WINDOW_WIDTH * WINDOW_HEIGHT];
+    let mut composite_buffer = tv_frame_bg.clone();
 
     // Pre-compute vignette lookup table (configurable strength)
     let mut vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
@@ -1873,12 +2055,15 @@ fn main() {
     let mut distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
     let flat_distortion_table = build_flat_distortion_table();
     let glare_table = build_glare_table();
+    let glass_thickness_table = build_glass_thickness_table();
     let mut mask_table = build_mask_table(&config.crt_config.mask_mode);
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
     let mut glass_intensity = config.glass_intensity;
     let mut ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
+    let mut ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
+    let mut ghost_buffer = tv_frame_bg.clone();
     // Menu framebuffer (256x240, same as NES PPU output)
     let mut menu_framebuffer = vec![0u32; 256 * 240];
 
@@ -1892,15 +2077,30 @@ fn main() {
     let mut overlay_message: Option<String> = None;
     let mut overlay_timer: u32 = 0;
     let mut sound_cooldown: u32 = 0;
+    let mut cached_net_text: String = String::new();
+    let mut cached_net_ping: u32 = u32::MAX;
 
     // Fullscreen state
     let mut is_fullscreen: bool = false;
     let mut window_title: String = "NES Emulator".to_string();
+
+    // Analog stick state for hysteresis
+    let mut stick_state_p1 = StickState::default();
+    let mut stick_state_p2 = StickState::default();
+    let mut stick_state_menu = StickState::default();
     
     // Pause menu state
     let mut paused: bool = false;
     let mut pause_selected: usize = 0;
+    let mut pause_cursor_timer: u32 = 0;
+    let mut pause_cursor_visible: bool = true;
+    // Quick overlay state (L+R menu)
+    let mut quick_overlay: bool = false;
+    let mut quick_overlay_selected: usize = 0;
+    let mut quick_overlay_lr_frames: u8 = 0; // debounce counter
     let mut current_save_slot: u8 = 1;
+    let mut pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+    let mut pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
     let mut cheat_input_mode = false;
     let mut cheat_input_buffer = String::new();
     let mut cheat_message: Option<String> = None;
@@ -1951,6 +2151,7 @@ fn main() {
     // Recording & playback state
     let mut recorder = InputRecording::new([0u8; 32]);
     let mut current_rom_name = String::new();
+    let mut current_rom_path = String::new();
 
     // Check command-line argument for direct ROM load
     let args: Vec<String> = env::args().collect();
@@ -1988,6 +2189,7 @@ fn main() {
                         let rom_sha = sha256(&rom_data);
                         recorder = InputRecording::new(rom_sha);
                         current_rom_name = game_name;
+                        current_rom_path = rom_path.clone();
                         // Load persisted Game Genie cheats for this ROM
                         if let Some(ref mut bus) = game_bus {
                             bus.cheats = load_cheats(&current_rom_name);
@@ -2018,6 +2220,14 @@ fn main() {
         }
     }
 
+    // Cached validity for favorites/recents — avoids Path::exists() syscalls per frame
+    let mut favorites_valid: Vec<bool> = config.favorite_games.iter()
+        .map(|p| std::path::Path::new(p.as_str()).exists())
+        .collect();
+    let mut recents_valid: Vec<bool> = config.recent_games.iter()
+        .map(|p| std::path::Path::new(p.as_str()).exists())
+        .collect();
+
     while window.is_open() {
         let mut next_state: Option<EmulatorState> = None;
         
@@ -2032,17 +2242,47 @@ fn main() {
                     menu.cursor_visible = !menu.cursor_visible;
                 }
 
-                let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
 
                 let mut action: Option<MenuAction> = None;
                 let mut input_back_crt = false;
 
                 match menu.submenu {
                     None => {
-                        let recent_count = config.recent_games.len().min(10);
-                        let browse_idx = recent_count;
-                        let settings_idx = recent_count + 1;
-                        let total_items = recent_count + 2;
+                        // Compute item layout: favorites, then recent (non-fav), then browse, settings
+                        let valid_favorites: Vec<String> = config.favorite_games.iter().enumerate()
+                            .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
+                            .map(|(_, p)| p.clone())
+                            .collect();
+                        let total_favs = valid_favorites.len();
+                        let per_page = 5usize;
+                        let total_pages = if total_favs == 0 { 0 } else { (total_favs + per_page - 1) / per_page };
+                        let page = menu.favorites_page.min(total_pages.saturating_sub(1));
+                        let page_start = page * per_page;
+                        let page_end = (page_start + per_page).min(total_favs);
+                        let fav_count = page_end - page_start;
+                        let recent_non_fav: Vec<String> = config.recent_games.iter()
+                            .filter(|p| !config.favorite_games.contains(p))
+                            .map(|p| p.clone())
+                            .collect();
+                        let max_recent = 8usize;
+                        let recent_count = recent_non_fav.len().min(max_recent);
+                        let browse_idx = fav_count + recent_count;
+                        let settings_idx = browse_idx + 1;
+                        let total_items = settings_idx + 1;
+
+                        // Select cycles favorites page
+                        if input.select && total_pages > 1 {
+                            menu.favorites_page = (menu.favorites_page + 1) % total_pages;
+                            // Reset cursor to first favorite on new page
+                            menu.selected = 0;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            if sound_cooldown == 0 {
+                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                sound_cooldown = 3;
+                            }
+                        }
 
                         if input.up && menu.selected > 0 {
                             menu.selected -= 1;
@@ -2050,7 +2290,7 @@ fn main() {
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
-                                sound_cooldown = 3; // skip 3 frames between beeps
+                                sound_cooldown = 3;
                             }
                         }
                         if input.down && menu.selected < total_items - 1 {
@@ -2059,12 +2299,51 @@ fn main() {
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
-                                sound_cooldown = 3; // skip 3 frames between beeps
+                                sound_cooldown = 3;
+                            }
+                        }
+                        // Toggle favorite with F key / Y button
+                        if input.favorite {
+                            let game_path = if menu.selected < fav_count {
+                                Some(valid_favorites[page_start + menu.selected].clone())
+                            } else if menu.selected < fav_count + recent_count {
+                                Some(recent_non_fav[menu.selected - fav_count].clone())
+                            } else {
+                                None
+                            };
+                            if let Some(path) = game_path {
+                                let added = toggle_favorite(&mut config, &path);
+                                save_config(&config);
+                                favorites_valid = config.favorite_games.iter()
+                                    .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                recents_valid = config.recent_games.iter()
+                                    .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                if added {
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                } else {
+                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    // Adjust selection if item was removed from favorites section
+                                    if menu.selected < fav_count && menu.selected > 0 {
+                                        menu.selected -= 1;
+                                    }
+                                    // If page now empty, go back a page
+                                    let new_total = config.favorite_games.iter()
+                                        .filter(|p| std::path::Path::new(p.as_str()).exists())
+                                        .count();
+                                    let new_pages = if new_total == 0 { 0 } else { (new_total + per_page - 1) / per_page };
+                                    if menu.favorites_page >= new_pages && menu.favorites_page > 0 {
+                                        menu.favorites_page -= 1;
+                                    }
+                                }
                             }
                         }
                         if input.confirm {
-                            if menu.selected < recent_count {
-                                let path = config.recent_games[menu.selected].clone();
+                            if menu.selected < fav_count {
+                                let path = valid_favorites[page_start + menu.selected].clone();
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                action = Some(MenuAction::LoadRom(path));
+                            } else if menu.selected < fav_count + recent_count {
+                                let path = recent_non_fav[menu.selected - fav_count].clone();
                                 if Path::new(&path).exists() {
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     action = Some(MenuAction::LoadRom(path));
@@ -2076,11 +2355,15 @@ fn main() {
                                 menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                menu.transition_timer = 6;
+                                menu.transition_out = false;
                             } else if menu.selected == settings_idx {
                                 play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::Settings { selected: 0 });
+                                menu.submenu = Some(SubMenu::Settings { selected: 0, value_flash: 0 });
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                menu.transition_timer = 6;
+                                menu.transition_out = false;
                             }
                         }
                         // Handle update banner: U to open download URL, Esc to dismiss
@@ -2088,7 +2371,7 @@ fn main() {
                             if let Some(info) = updater.get_update() {
                                 if window.is_key_pressed(Key::U, KeyRepeat::No) {
                                     let url = if info.download_url.is_empty() {
-                                        format!("https://github.com/pf-github-code/nes-emulator/releases/tag/{}", info.version)
+                                        format!("https://github.com/deaddeadbeef/OxideNES/releases/tag/{}", info.version)
                                     } else {
                                         info.download_url.clone()
                                     };
@@ -2117,7 +2400,7 @@ fn main() {
                             break;
                         }
                     }
-                    Some(SubMenu::Settings { ref mut selected }) => {
+                    Some(SubMenu::Settings { ref mut selected, ref mut value_flash }) => {
                         if input.up && *selected > 0 {
                             *selected -= 1;
                             menu.cursor_timer = 0;
@@ -2137,6 +2420,7 @@ fn main() {
                             }
                         }
                         if input.confirm || input.left || input.right {
+                            let is_slider_adjust = (input.left || input.right) && (*selected == 2 || *selected == 3);
                             match *selected {
                                 0 => {
                                     crt_enabled = !crt_enabled;
@@ -2151,27 +2435,30 @@ fn main() {
                                 2 => {
                                     if input.right || input.confirm {
                                         if glass_intensity < 100 {
-                                            glass_intensity = (glass_intensity + 10).min(100);
+                                            glass_intensity = (glass_intensity + 5).min(100);
                                         }
                                     }
                                     if input.left {
-                                        glass_intensity = glass_intensity.saturating_sub(10);
+                                        glass_intensity = glass_intensity.saturating_sub(5);
                                     }
                                     config.glass_intensity = glass_intensity;
                                     ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
+                                    ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
                                     save_config(&config);
+                                    *value_flash = 8;
                                 }
                                 3 => {
                                     if input.right || input.confirm {
                                         if audio_volume < 100 {
-                                            audio_volume = (audio_volume + 10).min(100);
+                                            audio_volume = (audio_volume + 5).min(100);
                                         }
                                     }
                                     if input.left {
-                                        audio_volume = audio_volume.saturating_sub(10);
+                                        audio_volume = audio_volume.saturating_sub(5);
                                     }
                                     config.audio_volume = audio_volume;
                                     save_config(&config);
+                                    *value_flash = 8;
                                 }
                                 4 => {
                                     // Toggle region
@@ -2185,9 +2472,11 @@ fn main() {
                                 5 => {
                                     // Open CRT settings
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                    menu.submenu = Some(SubMenu::CrtSettings { selected: 0, tables_dirty: false });
+                                    menu.submenu = Some(SubMenu::CrtSettings { selected: 0, tables_dirty: false, value_flash: 0 });
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
+                                    menu.transition_timer = 6;
+                                    menu.transition_out = false;
                                     return; // Skip the confirm sound below
                                 }
                                 6 => {
@@ -2203,6 +2492,8 @@ fn main() {
                                     }));
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
+                                    menu.transition_timer = 6;
+                                    menu.transition_out = false;
                                     return; // Skip the confirm sound below
                                 }
                                 7 => {
@@ -2212,16 +2503,18 @@ fn main() {
                                 }
                                 _ => {}
                             }
-                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(&mut producer, if is_slider_adjust { MenuSound::Adjust } else { MenuSound::Confirm }, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                         if input.back {
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             menu.submenu = None;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
                         }
                     }
-                    Some(SubMenu::CrtSettings { ref mut selected, ref mut tables_dirty }) => {
+                    Some(SubMenu::CrtSettings { ref mut selected, ref mut tables_dirty, ref mut value_flash }) => {
                         if input.up && *selected > 0 {
                             *selected -= 1;
                             menu.cursor_timer = 0;
@@ -2268,6 +2561,7 @@ fn main() {
                                     glass_intensity = (glass_intensity as i16 + delta).clamp(0, 100) as u8;
                                     config.glass_intensity = glass_intensity;
                                     ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
+                                    ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
                                 }
                                 6 => {
                                     // Cycle mask mode
@@ -2281,8 +2575,9 @@ fn main() {
                                 }
                                 _ => {}
                             }
-                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(&mut producer, MenuSound::Adjust, actual_sample_rate, audio_volume as f32 / 100.0);
                             save_config(&config);
+                            *value_flash = 8;
                         }
                         if input.confirm && *selected == 7 {
                             // BACK
@@ -2294,9 +2589,11 @@ fn main() {
                                 distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
                             }
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
-                            menu.submenu = Some(SubMenu::Settings { selected: 5 });
+                            menu.submenu = Some(SubMenu::Settings { selected: 5, value_flash: 0 });
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
                         }
                     }
                     Some(SubMenu::FileBrowser(ref mut browser)) => {
@@ -2331,7 +2628,7 @@ fn main() {
                                     browser.scroll_offset = browser.selected - 19;
                                 }
                             }
-                            if input.page_up && browser.selected > 0 {
+                            if (input.page_up || input.left) && browser.selected > 0 {
                                 browser.selected = browser.selected.saturating_sub(10);
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
@@ -2343,7 +2640,7 @@ fn main() {
                                     browser.scroll_offset = browser.selected;
                                 }
                             }
-                            if input.page_down && count > 0 {
+                            if (input.page_down || input.right) && count > 0 {
                                 browser.selected = (browser.selected + 10).min(count - 1);
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
@@ -2370,6 +2667,24 @@ fn main() {
                                     ));
                                 }
                             }
+                            if input.favorite {
+                                if let Some(entry) = browser.entries.get(browser.selected) {
+                                    if !entry.is_dir {
+                                        let path_str = entry.full_path.to_string_lossy().to_string();
+                                        let added = toggle_favorite(&mut config, &path_str);
+                                        save_config(&config);
+                                        favorites_valid = config.favorite_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        recents_valid = config.recent_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        if added {
+                                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        } else {
+                                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         if input.back || input.backspace {
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -2383,11 +2698,15 @@ fn main() {
                                     menu.submenu = None;
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
+                                    menu.transition_timer = 6;
+                                    menu.transition_out = false;
                                 }
                             } else {
                                 menu.submenu = None;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                menu.transition_timer = 6;
+                                menu.transition_out = false;
                             }
                         }
                     }
@@ -2670,10 +2989,10 @@ fn main() {
                             if state.tab >= 2 && state.selected == 6 && (input.left || input.right) {
                                 let deadzone = if state.tab == 2 { &mut state.bindings.controller_p1.deadzone } else { &mut state.bindings.controller_p2.deadzone };
                                 if input.left {
-                                    *deadzone = (*deadzone - 0.05).max(0.05);
+                                    *deadzone = (*deadzone - 0.05).max(0.10);
                                 }
                                 if input.right {
-                                    *deadzone = (*deadzone + 0.05).min(0.95);
+                                    *deadzone = (*deadzone + 0.05).min(0.80);
                                 }
                                 if sound_cooldown == 0 {
                                     play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -2686,9 +3005,11 @@ fn main() {
                                 config.input_bindings = state.bindings.clone();
                                 save_config(&config);
                                 play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::Settings { selected: 4 }); // Return to settings, INPUT SETTINGS selected
+                                menu.submenu = Some(SubMenu::Settings { selected: 4, value_flash: 0 }); // Return to settings, INPUT SETTINGS selected
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
+                                menu.transition_timer = 6;
+                                menu.transition_out = false;
                             }
                         }
                     }
@@ -2704,10 +3025,12 @@ fn main() {
                                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                                 if crt_enabled {
                                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                                    // Phosphor bloom — bright pixels glow into neighbors
+                                    apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                                 } else {
                                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                                 }
-                                composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                                composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                                 let _ = window.update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
                                 match Cartridge::new_with_romdb(&rom_data, Some(&romdb)) {
@@ -2722,6 +3045,10 @@ fn main() {
                                         cpu.reset(&mut bus);
                                         add_recent_game(&mut config, &path_str);
                                         save_config(&config);
+                                        favorites_valid = config.favorite_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        recents_valid = config.recent_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
                                         auto_load_sram(&mut bus, &config);
                                         rewind_buffer.clear();
                                         game_bus = Some(bus);
@@ -2741,6 +3068,7 @@ fn main() {
                                         let rom_sha = sha256(&rom_data);
                                         recorder = InputRecording::new(rom_sha);
                                         current_rom_name = game_name;
+                                        current_rom_path = path_str.clone();
                                         // Load persisted Game Genie cheats for this ROM
                                         if let Some(ref mut bus) = game_bus {
                                             bus.cheats = load_cheats(&current_rom_name);
@@ -2779,7 +3107,7 @@ fn main() {
                 // Render menu to 256x240 framebuffer
                 match menu.submenu {
                     None => {
-                        render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible);
+                        render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible, &favorites_valid, &recents_valid);
                         // Show update banner if available and not dismissed
                         if !update_dismissed {
                             if let Some(info) = updater.get_update() {
@@ -2789,35 +3117,54 @@ fn main() {
                             }
                         }
                     }
-                    Some(SubMenu::Settings { selected }) => {
-                        render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume, glass_intensity);
+                    Some(SubMenu::Settings { selected, ref mut value_flash }) => {
+                        render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume, glass_intensity, *value_flash);
+                        if *value_flash > 0 { *value_flash -= 1; }
                     }
                     Some(SubMenu::FileBrowser(ref browser)) => {
-                        render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible);
+                        render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible, &config);
                     }
                     Some(SubMenu::InputSettings(ref state)) => {
                         render_input_settings(&mut menu_framebuffer, state, menu.cursor_visible);
                     }
-                    Some(SubMenu::CrtSettings { selected, .. }) => {
-                        render_crt_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible);
+                    Some(SubMenu::CrtSettings { selected, ref mut value_flash, .. }) => {
+                        render_crt_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, *value_flash);
+                        if *value_flash > 0 { *value_flash -= 1; }
                     }
+                }
+
+                // Apply screen transition fade
+                if menu.transition_timer > 0 {
+                    apply_menu_fade(&mut menu_framebuffer, 256, 240, menu.transition_timer);
+                    menu.transition_timer -= 1;
                 }
 
                 // Apply CRT filter pipeline (same as game!)
                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                 if crt_enabled {
                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                    // Phosphor bloom — bright pixels glow into neighbors
+                    apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                     // Apply chromatic aberration to crt_buffer (screen area only)
-                    if glass_intensity > 0 {
+                    if glass_intensity > 30 {
                         ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
                         apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
                     }
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
-                composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                 if crt_enabled {
-                    apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
+                    apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
+                    // Internal ghost reflection from thick CRT glass
+                    if glass_intensity > 20 {
+                        for y in 0..SCREEN_H {
+                            let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                            ghost_buffer[row_start..row_start + SCREEN_W]
+                                .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                        }
+                        apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
+                    }
                 }
 
                 window
@@ -2877,7 +3224,7 @@ fn main() {
                                 }
                             }
                         } else {
-                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
                             // Items: each cheat (toggle), then ADD CODE, CLEAR ALL
                             let item_count = bus.cheats.len() + 2;
                             if input.up && cheats_selected > 0 {
@@ -2932,14 +3279,14 @@ fn main() {
                         }
                     } else if paused && controls_submenu {
                         // Controls reference page input handling
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
                         if input.back {
                             controls_submenu = false;
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                         }
                     } else if paused && achievement_submenu {
                         // Achievement submenu input handling
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
                         if input.back {
                             achievement_submenu = false;
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -2985,7 +3332,7 @@ fn main() {
                                 }
                             }
                         } else {
-                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
                             if input.up && netplay_selected > 0 {
                                 netplay_selected -= 1;
                                 if sound_cooldown == 0 {
@@ -3041,7 +3388,7 @@ fn main() {
                             }
                         }
                     } else if paused {
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker);
+                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
                         if input.up && pause_selected > 0 {
                             pause_selected -= 1;
                             if sound_cooldown == 0 {
@@ -3049,11 +3396,32 @@ fn main() {
                                 sound_cooldown = 3;
                             }
                         }
-                        if input.down && pause_selected < 12 {
+                        if input.down && pause_selected < 13 {
                             pause_selected += 1;
                             if sound_cooldown == 0 {
                                 play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                                 sound_cooldown = 3;
+                            }
+                        }
+                        // L/R cycles save slot when on Save or Load items
+                        if pause_selected == 1 || pause_selected == 2 {
+                            if input.left {
+                                current_save_slot = if current_save_slot == 1 { 5 } else { current_save_slot - 1 };
+                                pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.right {
+                                current_save_slot = if current_save_slot == 5 { 1 } else { current_save_slot + 1 };
+                                pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
                             }
                         }
                         if input.confirm {
@@ -3135,7 +3503,25 @@ fn main() {
                                     script_engine = None;
                                     paused = false;
                                 }
-                                7 => { // Return to menu
+                                7 => { // Toggle favorite
+                                    if !current_rom_path.is_empty() {
+                                        let added = toggle_favorite(&mut config, &current_rom_path);
+                                        save_config(&config);
+                                        favorites_valid = config.favorite_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        recents_valid = config.recent_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        if added {
+                                            overlay_message = Some("ADDED TO FAVORITES".to_string());
+                                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        } else {
+                                            overlay_message = Some("REMOVED FROM FAVORITES".to_string());
+                                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        }
+                                        overlay_timer = 90;
+                                    }
+                                }
+                                8 => { // Return to menu
                                     netplay.disconnect();
                                     script_engine = None;
                                     if let Some(ref bus) = game_bus {
@@ -3153,11 +3539,11 @@ fn main() {
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
                                 }
-                                8 => { // Achievements
+                                9 => { // Achievements
                                     achievement_submenu = !achievement_submenu;
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
-                                9 => { // Save recording
+                                10 => { // Save recording
                                     if recorder.frame_count() > 0 {
                                         if let Some(base) = recordings_dir() {
                                             let _ = std::fs::create_dir_all(&base);
@@ -3183,7 +3569,7 @@ fn main() {
                                     }
                                     paused = false;
                                 }
-                                10 => { // Load recording
+                                11 => { // Load recording
                                     if let Some(base) = recordings_dir() {
                                         let path = base.join(format!("{}.nrec", current_rom_name));
                                         match InputRecording::load_from_file(path.to_str().unwrap_or("")) {
@@ -3204,7 +3590,7 @@ fn main() {
                                     }
                                     paused = false;
                                 }
-                                11 => { // Export FM2
+                                12 => { // Export FM2
                                     if recorder.frame_count() > 0 {
                                         if let Some(base) = recordings_dir() {
                                             let _ = std::fs::create_dir_all(&base);
@@ -3230,7 +3616,7 @@ fn main() {
                                     }
                                     paused = false;
                                 }
-                                12 => { // Controls reference page
+                                13 => { // Controls reference page
                                     controls_submenu = true;
                                     play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                 }
@@ -3243,6 +3629,7 @@ fn main() {
                         }
                     } else {
                         // Normal game emulation when not paused
+                        if !quick_overlay {
                         let rewinding = window.is_key_down(Key::Backspace);
                         is_rewinding = rewinding;
                         
@@ -3288,7 +3675,9 @@ fn main() {
 
                             // Fast forward overlay
                             if fast_forward {
-                                overlay_message = Some(">> FAST FORWARD".to_string());
+                                if overlay_message.is_none() {
+                                    overlay_message = Some(">> FAST FORWARD".to_string());
+                                }
                                 overlay_timer = 2;
                             }
 
@@ -3318,16 +3707,33 @@ fn main() {
                                 achievement_engine.tick_notifications();
                             }
                         }
+                        } // end if !quick_overlay
                         
                         // Handle input when not paused
                         frame_counter = frame_counter.wrapping_add(1);
-                        let (start_held, select_held) = handle_input(&window, bus, &mut gilrs, frame_counter, &config.input_bindings);
+                        let (start_held, select_held, l_held, r_held) = if quick_overlay {
+                            // When overlay is open, don't consume gilrs events — let poll_menu_input handle them.
+                            // But we still need L+R state for dismissal. Read from raw gamepad state (no event drain).
+                            let mut l = false;
+                            let mut r = false;
+                            if let Some(ref mut g) = gilrs {
+                                if let Some((_, gamepad)) = g.gamepads().find(|(_, gp)| gp.is_connected()) {
+                                    l = gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
+                                    r = gamepad.is_pressed(Button::RightTrigger) || gamepad.is_pressed(Button::RightTrigger2);
+                                }
+                            }
+                            (false, false, l, r)
+                        } else {
+                            handle_input(&window, bus, &mut gilrs, frame_counter, &config.input_bindings, &mut stick_state_p1, &mut stick_state_p2)
+                        };
 
                         // Recording: capture current joypad state after input handling
-                        if recorder.is_recording() {
-                            let p1 = joypad_to_byte(bus, 1);
-                            let p2 = joypad_to_byte(bus, 2);
-                            recorder.record_frame(p1, p2);
+                        if !quick_overlay {
+                            if recorder.is_recording() {
+                                let p1 = joypad_to_byte(bus, 1);
+                                let p2 = joypad_to_byte(bus, 2);
+                                recorder.record_frame(p1, p2);
+                            }
                         }
 
                         // Playback: override joypad input from recording
@@ -3445,21 +3851,29 @@ fn main() {
                         // Slot selection: F2=slot 1, F3=slot 2, F4=slot 3, F6=slot 4
                         if window.is_key_pressed(Key::F2, KeyRepeat::No) {
                             current_save_slot = 1;
+                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 1 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F3, KeyRepeat::No) {
                             current_save_slot = 2;
+                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 2 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F4, KeyRepeat::No) {
                             current_save_slot = 3;
+                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 3 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F6, KeyRepeat::No) {
                             current_save_slot = 4;
+                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 4 SELECTED".to_string());
                             overlay_timer = 60;
                         }
@@ -3603,10 +4017,137 @@ fn main() {
                             }
                         }
 
+                        // L+R Quick Overlay toggle
+                        if l_held && r_held {
+                            quick_overlay_lr_frames += 1;
+                            if quick_overlay_lr_frames == 3 && !quick_overlay {
+                                // Open overlay after 3 frames debounce
+                                quick_overlay = true;
+                                quick_overlay_selected = 0;
+                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                        } else {
+                            if quick_overlay_lr_frames > 0 && quick_overlay_lr_frames < 3 {
+                                // Short tap — ignore
+                            }
+                            quick_overlay_lr_frames = 0;
+                        }
+
+                        // Quick overlay input handling
+                        if quick_overlay {
+                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                            let overlay_item_count: usize = 6;
+
+                            if input.up && quick_overlay_selected > 0 {
+                                quick_overlay_selected -= 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            if input.down && quick_overlay_selected < overlay_item_count - 1 {
+                                quick_overlay_selected += 1;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                            }
+                            // L/R cycles save slot on save/load items
+                            if quick_overlay_selected == 1 || quick_overlay_selected == 2 {
+                                if input.left {
+                                    current_save_slot = if current_save_slot == 1 { 5 } else { current_save_slot - 1 };
+                                    pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                    pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                }
+                                if input.right {
+                                    current_save_slot = if current_save_slot == 5 { 1 } else { current_save_slot + 1 };
+                                    pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                    pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                }
+                            }
+                            if input.confirm {
+                                match quick_overlay_selected {
+                                    0 => { // Resume
+                                        quick_overlay = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    1 => { // Save State
+                                        if save_state(bus, cpu, &config, current_save_slot) {
+                                            thumbnail_cache[(current_save_slot as usize).saturating_sub(1).min(3)] = load_thumbnail(&config, current_save_slot);
+                                            overlay_message = Some(format!("STATE {} SAVED", current_save_slot));
+                                            overlay_timer = 90;
+                                        } else {
+                                            overlay_message = Some("SAVE FAILED".to_string());
+                                            overlay_timer = 90;
+                                        }
+                                        quick_overlay = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    2 => { // Load State
+                                        if load_state(bus, cpu, &config, current_save_slot) {
+                                            overlay_message = Some(format!("STATE {} LOADED", current_save_slot));
+                                            overlay_timer = 90;
+                                        } else {
+                                            overlay_message = Some("NO SAVE FOUND".to_string());
+                                            overlay_timer = 90;
+                                        }
+                                        quick_overlay = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    3 => { // Toggle Favorite
+                                        let added = toggle_favorite(&mut config, &current_rom_path);
+                                        save_config(&config);
+                                        favorites_valid = config.favorite_games.iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        if added {
+                                            overlay_message = Some("ADDED TO FAVORITES".to_string());
+                                        } else {
+                                            overlay_message = Some("REMOVED FROM FAVORITES".to_string());
+                                        }
+                                        overlay_timer = 90;
+                                        quick_overlay = false;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    4 => { // Full Pause Menu
+                                        quick_overlay = false;
+                                        paused = true;
+                                        pause_selected = 0;
+                                        pause_cursor_timer = 0;
+                                        pause_cursor_visible = true;
+                                        for slot in 0..4u8 {
+                                            thumbnail_cache[slot as usize] = load_thumbnail(&config, slot + 1);
+                                        }
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    5 => { // Return to Menu
+                                        if let Some(ref bus) = game_bus {
+                                            auto_save_sram(bus, &config);
+                                        }
+                                        game_bus = None;
+                                        game_cpu = None;
+                                        quick_overlay = false;
+                                        repeat_tracker = RepeatTracker::new();
+                                        emulator_state = EmulatorState::Menu(MenuState::new());
+                                        window_title = "NES Emulator".to_string();
+                                        window.set_title(&window_title);
+                                        play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        continue;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if input.back {
+                                quick_overlay = false;
+                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            }
+                        }
+
                         // Escape toggles pause menu
                         if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
                             paused = true;
                             pause_selected = 0;
+                            pause_cursor_timer = 0;
+                            pause_cursor_visible = true;
                             // Load thumbnails for save slot display
                             for slot in 0..4u8 {
                                 thumbnail_cache[slot as usize] = load_thumbnail(&config, slot + 1);
@@ -3618,8 +4159,10 @@ fn main() {
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                        // Phosphor bloom — bright pixels glow into neighbors
+                        apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         // Apply chromatic aberration to crt_buffer (screen area only)
-                        if glass_intensity > 0 {
+                        if glass_intensity > 30 {
                             ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
                             apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
                         }
@@ -3628,13 +4171,20 @@ fn main() {
                     }
 
                     // Composite game output into TV frame
-                    composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                    composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
 
                     if crt_enabled {
-                        apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
+                        apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
+                        // Internal ghost reflection from thick CRT glass
+                        if glass_intensity > 20 {
+                            for y in 0..SCREEN_H {
+                                let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                ghost_buffer[row_start..row_start + SCREEN_W]
+                                    .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                            }
+                            apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
+                        }
                     }
-
-                    // ── VHS Rewind visual effect ──────────────────────────────
                     if is_rewinding {
                         let sx = SCREEN_X;
                         let sy = SCREEN_Y;
@@ -3872,7 +4422,7 @@ fn main() {
                         let mut notify_y = SCREEN_Y + 40;
                         for notif in achievement_engine.notifications.iter() {
                             if notif.frames_remaining == 0 { continue; }
-                            let text = format!("* {} (+{})", notif.title, notif.points);
+                            let text = &notif.cached_text;
                             let text_w = text.len() * 4;
                             let nx = SCREEN_X + SCREEN_W - text_w - 16;
                             // Gold background bar
@@ -3956,11 +4506,14 @@ fn main() {
 
                     // Netplay indicator (top-left during gameplay)
                     if netplay.is_connected() && !paused {
-                        let net_text = format!("NET {}MS", netplay.ping_ms);
+                        if netplay.ping_ms != cached_net_ping {
+                            cached_net_ping = netplay.ping_ms;
+                            cached_net_text = format!("NET {}MS", netplay.ping_ms);
+                        }
                         let nx = SCREEN_X + 8;
                         let ny = SCREEN_Y + 8;
                         // Dark background
-                        let tw = net_text.len() * 4 + 4;
+                        let tw = cached_net_text.len() * 4 + 4;
                         for y in ny.saturating_sub(1)..=(ny + 6) {
                             for x in nx.saturating_sub(2)..=(nx + tw) {
                                 if y < WINDOW_HEIGHT && x < WINDOW_WIDTH {
@@ -3975,7 +4528,7 @@ fn main() {
                                 }
                             }
                         }
-                        draw_text(&mut composite_buffer, &net_text, nx, ny, 0x44CCFF, WINDOW_WIDTH);
+                        draw_text(&mut composite_buffer, &cached_net_text, nx, ny, 0x44CCFF, WINDOW_WIDTH);
                     }
 
                     // Help overlay
@@ -4069,6 +4622,13 @@ fn main() {
                     
                     // NES-style pause menu rendering
                     if paused {
+                        // Update pause cursor blink (~500ms at 60fps)
+                        pause_cursor_timer += 1;
+                        if pause_cursor_timer >= 30 {
+                            pause_cursor_timer = 0;
+                            pause_cursor_visible = !pause_cursor_visible;
+                        }
+
                         // Copy and darken the last game frame into menu_framebuffer
                         for i in 0..menu_framebuffer.len().min(bus.ppu.frame_data.len()) {
                             let p = bus.ppu.frame_data[i];
@@ -4156,9 +4716,7 @@ fn main() {
                             }
                         }
                         
-                        // Menu items
-                        let slot_str = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                        let load_str = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                        // Menu items (use cached slot labels)
                         let net_status = match &netplay.state {
                             NetplayState::Connected => format!("NETPLAY  ({}MS)", netplay.ping_ms),
                             NetplayState::Hosting { .. } => "NETPLAY  (HOSTING)".to_string(),
@@ -4181,22 +4739,23 @@ fn main() {
                             "SAVE RECORDING".to_string()
                         };
                         let cheat_label = format!("CHEATS ({})", bus.cheats.len());
-                        let items: Vec<&str> = vec!["RESUME GAME", &slot_str, &load_str, &cheat_label, &net_status, script_status, "UNLOAD SCRIPT", "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
+                        let fav_label = if is_favorite(&config, &current_rom_path) {
+                            "REMOVE FROM FAVORITES".to_string()
+                        } else {
+                            "ADD TO FAVORITES".to_string()
+                        };
+                        let items: Vec<&str> = vec!["RESUME GAME", &pause_save_label, &pause_load_label, &cheat_label, &net_status, script_status, "UNLOAD SCRIPT", &fav_label, "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
                         for (i, item) in items.iter().enumerate() {
                             let row = box_top + 3 + i;
                             let is_selected = i == pause_selected;
                             
                             if is_selected {
-                                // Highlight bar
-                                let hy = row * 8;
-                                for dy in 0..8 {
-                                    for hx in (box_left * 8 + 4)..(box_right * 8 - 4) {
-                                        if hy + dy < 240 && hx < 256 {
-                                            menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
-                                        }
-                                    }
+                                // Highlight bar (always visible)
+                                draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, box_left * 8 + 4, box_right * 8 - 4, 0x3C3C8C);
+                                // Arrow blinks
+                                if pause_cursor_visible {
+                                    draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, MENU_WHITE);
                                 }
-                                draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, MENU_WHITE);
                             }
                             
                             let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
@@ -4204,7 +4763,11 @@ fn main() {
                         }
                         
                         // Hint at bottom of box
-                        draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
+                        if pause_selected == 1 || pause_selected == 2 {
+                            draw_text_centered_8x8(&mut menu_framebuffer, "A:SELECT  L/R:SLOT", box_bottom - 1, MENU_DARK_GRAY);
+                        } else {
+                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
+                        }
                         
                         if cheats_submenu {
                             // Cheats submenu overlay
@@ -4269,14 +4832,7 @@ fn main() {
                                 let is_sel = item_idx == cheats_selected;
 
                                 if is_sel {
-                                    let hy = row * 8;
-                                    for dy in 0..8 {
-                                        for hx in (cb_left * 8 + 4)..(cb_right * 8 - 4) {
-                                            if hy + dy < 240 && hx < 256 {
-                                                menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
-                                            }
-                                        }
-                                    }
+                                    draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, cb_left * 8 + 4, cb_right * 8 - 4, 0x3C3C8C);
                                     draw_char_8x8(&mut menu_framebuffer, '\x10', cb_left + 1, row, MENU_WHITE);
                                 }
 
@@ -4379,14 +4935,7 @@ fn main() {
                                 let row = nb_top + 4 + i * 2;
                                 let is_sel = i == netplay_selected;
                                 if is_sel {
-                                    let hy = row * 8;
-                                    for dy in 0..8 {
-                                        for hx in (nb_left * 8 + 4)..(nb_right * 8 - 4) {
-                                            if hy + dy < 240 && hx < 256 {
-                                                menu_framebuffer[(hy + dy) * 256 + hx] = 0x3C3C8C;
-                                            }
-                                        }
-                                    }
+                                    draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, nb_left * 8 + 4, nb_right * 8 - 4, 0x3C3C8C);
                                     draw_char_8x8(&mut menu_framebuffer, '\x10', nb_left + 1, row, MENU_WHITE);
                                 }
                                 let color = if is_sel { MENU_WHITE } else { MENU_GRAY };
@@ -4586,17 +5135,28 @@ fn main() {
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                            // Phosphor bloom — bright pixels glow into neighbors
+                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             // Apply chromatic aberration to crt_buffer (screen area only)
-                            if glass_intensity > 0 {
+                            if glass_intensity > 30 {
                                 ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
                                 apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
                             }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
-                        composite_screen(&tv_frame_bg, &crt_buffer, &mut composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                         if crt_enabled {
-                            apply_screen_glare(&mut composite_buffer, &glare_table, WINDOW_WIDTH, glass_intensity);
+                            apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
+                            // Internal ghost reflection from thick CRT glass
+                            if glass_intensity > 20 {
+                                for y in 0..SCREEN_H {
+                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                    ghost_buffer[row_start..row_start + SCREEN_W]
+                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                                }
+                                apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
+                            }
                         }
 
                         // Render save state thumbnail in pause menu (composite buffer)
@@ -4714,6 +5274,140 @@ fn main() {
                             let empty_y = thumb_cy + (thumb_h - 5) / 2;
                             draw_text(&mut composite_buffer, "EMPTY", empty_x, empty_y, 0x666688, WINDOW_WIDTH);
                         }
+                    } else if quick_overlay {
+                        // Quick overlay rendering
+                        // Darken the CRT output by 50%
+                        for i in 0..menu_framebuffer.len().min(bus.ppu.frame_data.len()) {
+                            let p = bus.ppu.frame_data[i];
+                            let r = ((p >> 16) & 0xFF) >> 1;
+                            let g = ((p >> 8) & 0xFF) >> 1;
+                            let b = (p & 0xFF) >> 1;
+                            menu_framebuffer[i] = (r << 16) | (g << 8) | b;
+                        }
+
+                        // Draw centered overlay box (compact: 20 tiles wide × 12 tiles tall)
+                        let box_left: usize = 6;
+                        let box_right: usize = 26;
+                        let box_top: usize = 8;
+                        let box_bottom: usize = 22;
+
+                        // Fill box background
+                        for ty in box_top..box_bottom {
+                            for tx in box_left..box_right {
+                                let px = tx * 8;
+                                let py = ty * 8;
+                                for dy in 0..8 {
+                                    for dx in 0..8 {
+                                        let x = px + dx;
+                                        let y = py + dy;
+                                        if y < 240 && x < 256 {
+                                            menu_framebuffer[y * 256 + x] = 0x0A0A1A;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Border
+                        for tx in box_left..box_right {
+                            let px = tx * 8;
+                            for dx in 0..8 {
+                                let x = px + dx;
+                                let yt = box_top * 8;
+                                let yb = box_bottom * 8 - 1;
+                                if yt < 240 && x < 256 {
+                                    menu_framebuffer[yt * 256 + x] = 0x4080C0;
+                                    if yt + 1 < 240 { menu_framebuffer[(yt + 1) * 256 + x] = 0x4080C0; }
+                                }
+                                if yb < 240 && x < 256 {
+                                    menu_framebuffer[yb * 256 + x] = 0x4080C0;
+                                    if yb > 0 { menu_framebuffer[(yb - 1) * 256 + x] = 0x4080C0; }
+                                }
+                            }
+                        }
+                        for ty in box_top..box_bottom {
+                            let py = ty * 8;
+                            for dy in 0..8 {
+                                let y = py + dy;
+                                if y < 240 {
+                                    let xl = box_left * 8;
+                                    let xr = box_right * 8 - 1;
+                                    if xl < 256 { menu_framebuffer[y * 256 + xl] = 0x4080C0; menu_framebuffer[y * 256 + xl + 1] = 0x4080C0; }
+                                    if xr < 256 { menu_framebuffer[y * 256 + xr] = 0x4080C0; if xr > 0 { menu_framebuffer[y * 256 + xr - 1] = 0x4080C0; } }
+                                }
+                            }
+                        }
+
+                        // Title
+                        draw_text_centered_8x8(&mut menu_framebuffer, "\x11 QUICK MENU \x11", box_top + 1, MENU_GOLD);
+
+                        // Separator
+                        let sep_y = (box_top + 2) * 8 + 4;
+                        for x in (box_left * 8 + 8)..(box_right * 8 - 8) {
+                            if x % 4 < 2 && sep_y < 240 {
+                                menu_framebuffer[sep_y * 256 + x] = 0x404040;
+                            }
+                        }
+
+                        // Menu items
+                        let fav_label = if is_favorite(&config, &current_rom_path) {
+                            "\x11 REMOVE FAVORITE"
+                        } else {
+                            "\x11 ADD FAVORITE"
+                        };
+                        let save_label = format!("SAVE STATE  [SLOT {}]", current_save_slot);
+                        let load_label = format!("LOAD STATE  [SLOT {}]", current_save_slot);
+                        let items: [&str; 6] = [
+                            "\x10 RESUME",
+                            &save_label,
+                            &load_label,
+                            fav_label,
+                            "MORE OPTIONS...",
+                            "RETURN TO MENU",
+                        ];
+
+                        for (i, item) in items.iter().enumerate() {
+                            let row = box_top + 3 + i;
+                            let is_selected = i == quick_overlay_selected;
+
+                            if is_selected {
+                                draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, box_left * 8 + 4, box_right * 8 - 4, 0x2A2A6A);
+                            }
+
+                            let color = if is_selected { 0xFFFFFF } else { 0xA0A0A0 };
+                            if is_selected {
+                                draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, 0xFFFFFF);
+                            }
+                            draw_text_8x8(&mut menu_framebuffer, item, box_left + 2, row, color);
+                        }
+
+                        // Hint at bottom
+                        draw_text_centered_8x8(&mut menu_framebuffer, "B:CLOSE  L/R:SLOT", box_bottom - 1, 0x606060);
+
+                        // Pass through CRT filter (same as pause menu rendering)
+                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                        if crt_enabled {
+                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            if glass_intensity > 30 {
+                                ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
+                                apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                            }
+                        } else {
+                            scale_simple(&menu_framebuffer, &mut crt_buffer);
+                        }
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                        if crt_enabled {
+                            apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
+                            if glass_intensity > 20 {
+                                for y in 0..SCREEN_H {
+                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                    ghost_buffer[row_start..row_start + SCREEN_W]
+                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                                }
+                                apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
+                            }
+                        }
                     }
 
                     window
@@ -4740,7 +5434,95 @@ fn main() {
 }
 
 
-fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, input_bindings: &InputBindings) -> (bool, bool) {
+/// Convert analog stick to NES D-pad with circular deadzone, cardinal snapping, and hysteresis.
+/// Returns (up, down, left, right) as booleans.
+#[inline]
+fn stick_to_dpad(
+    stick_x: f32,
+    stick_y: f32,
+    deadzone: f32,
+    prev_state: &mut StickState,
+) -> (bool, bool, bool, bool) {
+    let magnitude = (stick_x * stick_x + stick_y * stick_y).sqrt();
+
+    // Hysteresis: use lower threshold for release to prevent jitter
+    let active_deadzone = if prev_state.any_active() {
+        (deadzone * 0.75).max(0.05)
+    } else {
+        deadzone
+    };
+
+    if magnitude < active_deadzone {
+        prev_state.clear();
+        return (false, false, false, false);
+    }
+
+    // Normalize to unit circle
+    let nx = stick_x / magnitude;
+    let ny = stick_y / magnitude;
+
+    // Angle in degrees (0° = right, 90° = up, counter-clockwise)
+    let angle = ny.atan2(nx).to_degrees();
+    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+
+    // Push strength: 0.0 at deadzone edge, 1.0 at full tilt
+    let push_strength = ((magnitude - active_deadzone) / (1.0 - active_deadzone)).min(1.0);
+
+    // Cardinal snapping: 35° half-angle gives 70° pure-cardinal zones
+    // Diagonals only allowed in the remaining 20° windows at >70% push
+    let cardinal_half_angle = 35.0_f32;
+    let diagonal_min_strength = 0.70_f32;
+
+    let mut up = false;
+    let mut down = false;
+    let mut left = false;
+    let mut right = false;
+
+    let angle_dist = |target: f32| -> f32 {
+        let d = (angle - target).abs();
+        if d > 180.0 { 360.0 - d } else { d }
+    };
+
+    let dist_right = angle_dist(0.0);
+    let dist_up = angle_dist(90.0);
+    let dist_left = angle_dist(180.0);
+    let dist_down = angle_dist(270.0);
+
+    let min_dist = dist_right.min(dist_up).min(dist_left).min(dist_down);
+
+    if min_dist <= cardinal_half_angle {
+        // Pure cardinal zone
+        if min_dist == dist_right { right = true; }
+        else if min_dist == dist_up { up = true; }
+        else if min_dist == dist_left { left = true; }
+        else { down = true; }
+    } else if push_strength >= diagonal_min_strength {
+        // Diagonal zone with sufficient push
+        if angle > 0.0 && angle < 90.0 { right = true; up = true; }
+        else if angle > 90.0 && angle < 180.0 { left = true; up = true; }
+        else if angle > 180.0 && angle < 270.0 { left = true; down = true; }
+        else { right = true; down = true; }
+    } else {
+        // Diagonal zone but not pushed hard enough — snap to nearest cardinal
+        if min_dist == dist_right { right = true; }
+        else if min_dist == dist_up { up = true; }
+        else if min_dist == dist_left { left = true; }
+        else { down = true; }
+    }
+
+    // SOCD cleaning: prevent simultaneous opposite directions
+    if up && down { up = false; down = false; }
+    if left && right { left = false; right = false; }
+
+    prev_state.up = up;
+    prev_state.down = down;
+    prev_state.left = left;
+    prev_state.right = right;
+
+    (up, down, left, right)
+}
+
+fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, input_bindings: &InputBindings, stick_state_p1: &mut StickState, stick_state_p2: &mut StickState) -> (bool, bool, bool, bool) {
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2) % 2 == 0; // ~15Hz: ON 2 frames, OFF 2 frames
 
@@ -4765,6 +5547,8 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     let mut p1_b = p1_key_b.map_or(false, |k| keys.contains(&k));
     let mut p1_start = p1_key_start.map_or(false, |k| keys.contains(&k));
     let mut p1_select = p1_key_select.map_or(false, |k| keys.contains(&k));
+    let mut l_trigger = false;
+    let mut r_trigger = false;
 
     // P1 turbo buttons
     if p1_key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
@@ -4810,10 +5594,10 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
         while let Some(_event) = g.next_event() {}
 
         // Get all connected gamepads
-        let gamepads: Vec<_> = g.gamepads().filter(|(_, gp)| gp.is_connected()).collect();
+        let mut gp_iter = g.gamepads().filter(|(_, gp)| gp.is_connected());
         
         // Player 1 controller
-        if let Some((_, gamepad)) = gamepads.get(0) {
+        if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl1 = &input_bindings.controller_p1;
             
             // D-pad buttons
@@ -4822,15 +5606,16 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             p1_left |= gamepad.is_pressed(Button::DPadLeft);
             p1_right |= gamepad.is_pressed(Button::DPadRight);
 
-            // Left analog stick (with configurable deadzone)
+            // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let deadzone = ctrl1.deadzone;
-
-            if stick_x < -deadzone { p1_left = true; }
-            if stick_x > deadzone { p1_right = true; }
-            if stick_y > deadzone { p1_up = true; }
-            if stick_y < -deadzone { p1_down = true; }
+            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
+                stick_x, stick_y, ctrl1.deadzone, stick_state_p1
+            );
+            p1_up    |= s_up;
+            p1_down  |= s_down;
+            p1_left  |= s_left;
+            p1_right |= s_right;
 
             // Face buttons - configurable
             if let Some(btn) = string_to_gilrs_button(&ctrl1.a) {
@@ -4855,10 +5640,12 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             if let Some(btn) = string_to_gilrs_button(&ctrl1.select) {
                 p1_select |= gamepad.is_pressed(btn);
             }
+            l_trigger |= gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
+            r_trigger |= gamepad.is_pressed(Button::RightTrigger) || gamepad.is_pressed(Button::RightTrigger2);
         }
 
         // Player 2 controller
-        if let Some((_, gamepad)) = gamepads.get(1) {
+        if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl2 = &input_bindings.controller_p2;
             
             // D-pad buttons
@@ -4867,15 +5654,16 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             p2_left |= gamepad.is_pressed(Button::DPadLeft);
             p2_right |= gamepad.is_pressed(Button::DPadRight);
 
-            // Left analog stick (with configurable deadzone)
+            // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let deadzone = ctrl2.deadzone;
-
-            if stick_x < -deadzone { p2_left = true; }
-            if stick_x > deadzone { p2_right = true; }
-            if stick_y > deadzone { p2_up = true; }
-            if stick_y < -deadzone { p2_down = true; }
+            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
+                stick_x, stick_y, ctrl2.deadzone, stick_state_p2
+            );
+            p2_up    |= s_up;
+            p2_down  |= s_down;
+            p2_left  |= s_left;
+            p2_right |= s_right;
 
             // Face buttons - configurable
             if let Some(btn) = string_to_gilrs_button(&ctrl2.a) {
@@ -4922,112 +5710,342 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     bus.joypad2.set_button_pressed(JoypadButton::Left, p2_left);
     bus.joypad2.set_button_pressed(JoypadButton::Right, p2_right);
 
-    (p1_start, p1_select)
+    (p1_start, p1_select, l_trigger, r_trigger)
+}
+
+// Optimized: Inline all per-pixel color operations
+#[inline(always)]
+fn blend_bilinear_rgb(p00: u32, p10: u32, p01: u32, p11: u32, frac_x: u32, frac_y: u32) -> (u32, u32, u32) {
+    let inv_fx = 256 - frac_x;
+    let inv_fy = 256 - frac_y;
+    
+    // Process all channels in parallel using bit shifts
+    let r = ((p00 >> 16) & 0xFF) * inv_fx * inv_fy
+            + ((p10 >> 16) & 0xFF) * frac_x * inv_fy
+            + ((p01 >> 16) & 0xFF) * inv_fx * frac_y
+            + ((p11 >> 16) & 0xFF) * frac_x * frac_y >> 16;
+    
+    let g = ((p00 >> 8) & 0xFF) * inv_fx * inv_fy
+            + ((p10 >> 8) & 0xFF) * frac_x * inv_fy
+            + ((p01 >> 8) & 0xFF) * inv_fx * frac_y
+            + ((p11 >> 8) & 0xFF) * frac_x * frac_y >> 16;
+    
+    let b = (p00 & 0xFF) * inv_fx * inv_fy
+            + (p10 & 0xFF) * frac_x * inv_fy
+            + (p01 & 0xFF) * inv_fx * frac_y
+            + (p11 & 0xFF) * frac_x * frac_y >> 16;
+    
+    (r, g, b)
+}
+
+#[inline(always)]
+fn apply_blur_3tap(r: u32, g: u32, b: u32, left: u32, right: u32, blur_center: u32, blur_side: u32) -> (u32, u32, u32) {
+    let r = (r * blur_center + ((left >> 16) & 0xFF) * blur_side + ((right >> 16) & 0xFF) * blur_side) >> 8;
+    let g = (g * blur_center + ((left >> 8) & 0xFF) * blur_side + ((right >> 8) & 0xFF) * blur_side) >> 8;
+    let b = (b * blur_center + (left & 0xFF) * blur_side + (right & 0xFF) * blur_side) >> 8;
+    (r, g, b)
+}
+
+#[inline(always)]
+fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32) -> (u32, u32, u32) {
+    ((r * pr_mul) >> 8, (g * pg_mul) >> 8, (b * pb_mul) >> 8)
+}
+
+#[inline(always)]
+fn apply_scanline_vignette(r: u32, g: u32, b: u32, scan_mul: u32, vig: u32) -> (u32, u32, u32) {
+    // Combine scanline and vignette in one multiplication to reduce ops
+    let combined = (scan_mul * vig) >> 8;
+    ((r * combined) >> 8, (g * combined) >> 8, (b * combined) >> 8)
+}
+
+#[inline(always)]
+fn apply_mask(r: u32, g: u32, b: u32, mr: u8, mg: u8, mb: u8) -> (u32, u32, u32) {
+    ((r * mr as u32) / 255, (g * mg as u32) / 255, (b * mb as u32) / 255)
+}
+
+#[inline(always)]
+fn pack_rgb(r: u32, g: u32, b: u32) -> u32 {
+    (r.min(255) << 16) | (g.min(255) << 8) | b.min(255)
+}
+
+/// Phosphor bloom: simple horizontal-only glow for bright pixels.
+/// Single forward pass — no allocations, cache-friendly, ~630K pixel reads.
+#[inline]
+fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_strength: u32) {
+    if bloom_strength == 0 { return; }
+
+    let threshold: u32 = 180;
+    let bleed = (bloom_strength * 16 / 100).min(15); // 0-15 range
+    if bleed == 0 { return; }
+
+    // Single horizontal forward pass only — fast, cache-friendly, good enough visually
+    for y in 0..height {
+        let row = y * width;
+        let mut carry_r: u32 = 0;
+        let mut carry_g: u32 = 0;
+        let mut carry_b: u32 = 0;
+
+        for x in 0..width {
+            let idx = row + x;
+            let pixel = unsafe { *buffer.get_unchecked(idx) };
+            let r = (pixel >> 16) & 0xFF;
+            let g = (pixel >> 8) & 0xFF;
+            let b = pixel & 0xFF;
+
+            // Apply carry from previous bright pixel
+            if carry_r | carry_g | carry_b != 0 {
+                let nr = (r + carry_r).min(255);
+                let ng = (g + carry_g).min(255);
+                let nb = (b + carry_b).min(255);
+                unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
+                // Decay carry quickly
+                carry_r >>= 1;
+                carry_g >>= 1;
+                carry_b >>= 1;
+            }
+
+            // Bright pixels generate new carry
+            let brightness = ((r + g + b) * 85) >> 8; // fast /3 approximation
+            if brightness > threshold {
+                let excess = brightness - threshold;
+                carry_r = (r * excess * bleed) >> 16;
+                carry_g = (g * excess * bleed) >> 16;
+                carry_b = (b * excess * bleed) >> 16;
+            }
+        }
+    }
 }
 
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u8, u8, u8)]) {
     output.resize(SCREEN_W * SCREEN_H, 0);
 
-    // Pre-compute scanline multipliers from scanline_intensity (0=no scanlines, 100=max dark)
+    // Pre-compute all coefficients once
     let si = crt_cfg.scanline_intensity as u32;
     let scan_muls: [u32; 3] = [
         255,
-        255 - (si * 25 / 100),       // row1: 255 at 0, 230 at 100
-        255 - (si * 115 / 100).min(255), // row2: 255 at 0, 140 at 100
+        255 - (si * 20 / 100),
+        255 - (si * 65 / 100).min(255),
     ];
 
-    // Phosphor warmth: 0=neutral(256,256,256), 100=warm amber(280,248,220)
     let pw = crt_cfg.phosphor_warmth as u32;
-    let pr_mul = 256 + (pw * 24 / 100);  // 256..280
-    let pg_mul = 256 - (pw * 8 / 100);   // 256..248
-    let pb_mul = 256 - (pw * 36 / 100);  // 256..220
+    let pr_mul = 256 + (pw * 24 / 100);
+    let pg_mul = 256 - (pw * 8 / 100);
+    let pb_mul = 256 - (pw * 36 / 100);
 
-    // Blur side-tap weight scaled by blur_amount/40
     let blur_side = (25u32 * crt_cfg.blur_amount as u32) / 40;
     let blur_center = 256 - blur_side * 2;
+    let use_blur = blur_side > 0;
 
     let use_mask = crt_cfg.mask_mode != CrtMaskMode::Off;
 
-    for dst_y in 0..SCREEN_H {
-        let scan_mul = scan_muls[dst_y % 3];
+    // Hoist branching outside the pixel loop - create specialized paths
+    if use_mask && use_blur {
+        // Full pipeline: blur + mask
+        crt_filter_full(input, output, vignette_table, distortion_table, 
+                       &scan_muls, pr_mul, pg_mul, pb_mul, 
+                       blur_center, blur_side, mask_table);
+    } else if use_mask {
+        // Mask but no blur
+        crt_filter_masked(input, output, vignette_table, distortion_table, 
+                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table);
+    } else if use_blur {
+        // Blur but no mask
+        crt_filter_blurred(input, output, vignette_table, distortion_table, 
+                          &scan_muls, pr_mul, pg_mul, pb_mul, 
+                          blur_center, blur_side);
+    } else {
+        // Basic pipeline: no blur, no mask
+        crt_filter_basic(input, output, vignette_table, distortion_table, 
+                        &scan_muls, pr_mul, pg_mul, pb_mul);
+    }
+}
 
+// Specialized path: full pipeline with blur and mask
+#[inline(always)]
+fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
+                   distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                   pr_mul: u32, pg_mul: u32, pb_mul: u32,
+                   blur_center: u32, blur_side: u32, mask_table: &[(u8, u8, u8)]) {
+    for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
+        let scan_mul = scan_muls[dst_y % 3];
         
         for dst_x in 0..SCREEN_W {
-            let table_idx = dst_y * SCREEN_W + dst_x;
-            let (src_xf, src_yf) = distortion_table[table_idx];
+            let table_idx = dst_row + dst_x;
+            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
             
             if src_xf == 0xFFFFFFFF {
-                output[dst_row + dst_x] = 0x000000;
+                unsafe { *output.get_unchecked_mut(table_idx) = 0; }
                 continue;
             }
             
             let src_x0 = (src_xf >> 8) as usize;
-            let src_x1 = (src_x0 + 1).min(255);
-            let frac_x = (src_xf & 0xFF) as u32;
-            
             let src_y0 = (src_yf >> 8) as usize;
+            let src_x1 = (src_x0 + 1).min(255);
             let src_y1 = (src_y0 + 1).min(239);
-            let frac_y = (src_yf & 0xFF) as u32;
+            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
+            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
             
-            // Bilinear interpolation
-            let inv_fx = 256 - frac_x;
-            let inv_fy = 256 - frac_y;
+            let base_offset = src_y0 * 256;
+            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
-            let p00 = input[src_y0 * 256 + src_x0];
-            let p10 = input[src_y0 * 256 + src_x1];
-            let p01 = input[src_y1 * 256 + src_x0];
-            let p11 = input[src_y1 * 256 + src_x1];
+            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
             
-            let r00 = (p00 >> 16) & 0xFF; let r10 = (p10 >> 16) & 0xFF;
-            let r01 = (p01 >> 16) & 0xFF; let r11 = (p11 >> 16) & 0xFF;
-            let mut r = (r00 * inv_fx * inv_fy + r10 * frac_x * inv_fy
-                       + r01 * inv_fx * frac_y + r11 * frac_x * frac_y) >> 16;
-            
-            let g00 = (p00 >> 8) & 0xFF; let g10 = (p10 >> 8) & 0xFF;
-            let g01 = (p01 >> 8) & 0xFF; let g11 = (p11 >> 8) & 0xFF;
-            let mut g = (g00 * inv_fx * inv_fy + g10 * frac_x * inv_fy
-                       + g01 * inv_fx * frac_y + g11 * frac_x * frac_y) >> 16;
-            
-            let b00 = p00 & 0xFF; let b10 = p10 & 0xFF;
-            let b01 = p01 & 0xFF; let b11 = p11 & 0xFF;
-            let mut b = (b00 * inv_fx * inv_fy + b10 * frac_x * inv_fy
-                       + b01 * inv_fx * frac_y + b11 * frac_x * frac_y) >> 16;
-            
-            // 3-tap horizontal blur (cheap composite signal simulation)
-            if blur_side > 0 && src_x0 > 0 && src_x0 < 255 {
-                let left = input[src_y0 * 256 + src_x0 - 1];
-                let right = input[src_y0 * 256 + src_x1.min(255)];
-                r = (r * blur_center + ((left >> 16) & 0xFF) * blur_side + ((right >> 16) & 0xFF) * blur_side) >> 8;
-                g = (g * blur_center + ((left >> 8) & 0xFF) * blur_side + ((right >> 8) & 0xFF) * blur_side) >> 8;
-                b = (b * blur_center + (left & 0xFF) * blur_side + (right & 0xFF) * blur_side) >> 8;
+            // Blur
+            if src_x0 > 0 && src_x0 < 255 {
+                let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
+                let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
             }
             
-            // Phosphor warmth color temperature (CRT P22 phosphor)
-            r = (r * pr_mul) >> 8;
-            g = (g * pg_mul) >> 8;
-            b = (b * pb_mul) >> 8;
+            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
+            (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
-            // Scanline darkening (the key CRT effect)
-            r = (r * scan_mul) >> 8;
-            g = (g * scan_mul) >> 8;
-            b = (b * scan_mul) >> 8;
+            let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
             
-            // Vignette
-            let vig = vignette_table[table_idx] as u32;
-            r = (r * vig) >> 8;
-            g = (g * vig) >> 8;
-            b = (b * vig) >> 8;
+            unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
+        }
+    }
+}
 
-            // Shadow mask / aperture grille
-            if use_mask {
-                let (mr, mg, mb) = mask_table[table_idx];
-                r = (r as u16 * mr as u16 / 255) as u32;
-                g = (g as u16 * mg as u16 / 255) as u32;
-                b = (b as u16 * mb as u16 / 255) as u32;
+// Specialized path: mask only, no blur
+#[inline(always)]
+fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
+                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u8, u8, u8)]) {
+    for dst_y in 0..SCREEN_H {
+        let dst_row = dst_y * SCREEN_W;
+        let scan_mul = scan_muls[dst_y % 3];
+        
+        for dst_x in 0..SCREEN_W {
+            let table_idx = dst_row + dst_x;
+            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+            
+            if src_xf == 0xFFFFFFFF {
+                unsafe { *output.get_unchecked_mut(table_idx) = 0; }
+                continue;
             }
             
-            output[dst_row + dst_x] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+            let src_x0 = (src_xf >> 8) as usize;
+            let src_y0 = (src_yf >> 8) as usize;
+            let src_x1 = (src_x0 + 1).min(255);
+            let src_y1 = (src_y0 + 1).min(239);
+            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
+            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            
+            let base_offset = src_y0 * 256;
+            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+            
+            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            
+            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
+            (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
+            
+            let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
+            
+            unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
+        }
+    }
+}
+
+// Specialized path: blur only, no mask
+#[inline(always)]
+fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
+                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                      pr_mul: u32, pg_mul: u32, pb_mul: u32,
+                      blur_center: u32, blur_side: u32) {
+    for dst_y in 0..SCREEN_H {
+        let dst_row = dst_y * SCREEN_W;
+        let scan_mul = scan_muls[dst_y % 3];
+        
+        for dst_x in 0..SCREEN_W {
+            let table_idx = dst_row + dst_x;
+            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+            
+            if src_xf == 0xFFFFFFFF {
+                unsafe { *output.get_unchecked_mut(table_idx) = 0; }
+                continue;
+            }
+            
+            let src_x0 = (src_xf >> 8) as usize;
+            let src_y0 = (src_yf >> 8) as usize;
+            let src_x1 = (src_x0 + 1).min(255);
+            let src_y1 = (src_y0 + 1).min(239);
+            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
+            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            
+            let base_offset = src_y0 * 256;
+            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+            
+            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            
+            // Blur
+            if src_x0 > 0 && src_x0 < 255 {
+                let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
+                let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
+            }
+            
+            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
+            (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
+            
+            unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
+        }
+    }
+}
+
+// Specialized path: basic (no blur, no mask)
+#[inline(always)]
+fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
+                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                    pr_mul: u32, pg_mul: u32, pb_mul: u32) {
+    for dst_y in 0..SCREEN_H {
+        let dst_row = dst_y * SCREEN_W;
+        let scan_mul = scan_muls[dst_y % 3];
+        
+        for dst_x in 0..SCREEN_W {
+            let table_idx = dst_row + dst_x;
+            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+            
+            if src_xf == 0xFFFFFFFF {
+                unsafe { *output.get_unchecked_mut(table_idx) = 0; }
+                continue;
+            }
+            
+            let src_x0 = (src_xf >> 8) as usize;
+            let src_y0 = (src_yf >> 8) as usize;
+            let src_x1 = (src_x0 + 1).min(255);
+            let src_y1 = (src_y0 + 1).min(239);
+            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
+            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            
+            let base_offset = src_y0 * 256;
+            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+            
+            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            
+            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
+            (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
+            
+            unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
         }
     }
 }
@@ -5244,27 +6262,22 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 }
 
+#[inline(always)]
 fn sq_dist(x1: usize, y1: usize, x2: usize, y2: usize) -> usize {
     let dx = if x1 > x2 { x1 - x2 } else { x2 - x1 };
     let dy = if y1 > y2 { y1 - y2 } else { y2 - y1 };
     dx * dx + dy * dy
 }
 
-fn composite_screen(tv_frame: &[u32], game_output: &[u32], result: &mut Vec<u32>, window_width: usize, window_height: usize) {
-    result.resize(window_width * window_height, 0);
-    result.copy_from_slice(tv_frame);
-    let corner_r = 12usize;
-    for y in 0..SCREEN_H {
-        for x in 0..SCREEN_W {
-            let in_corner =
-                (x < corner_r && y < corner_r && sq_dist(x, y, corner_r, corner_r) > corner_r * corner_r)
-                || (x >= SCREEN_W - corner_r && y < corner_r && sq_dist(x, y, SCREEN_W - 1 - corner_r, corner_r) > corner_r * corner_r)
-                || (x < corner_r && y >= SCREEN_H - corner_r && sq_dist(x, y, corner_r, SCREEN_H - 1 - corner_r) > corner_r * corner_r)
-                || (x >= SCREEN_W - corner_r && y >= SCREEN_H - corner_r && sq_dist(x, y, SCREEN_W - 1 - corner_r, SCREEN_H - 1 - corner_r) > corner_r * corner_r);
-            if in_corner { continue; }
-            let dst = (y + SCREEN_Y) * window_width + (x + SCREEN_X);
-            result[dst] = game_output[y * SCREEN_W + x];
-        }
+fn composite_screen_fast(result: &mut [u32], game_output: &[u32], window_width: usize) {
+    // Only blit the CRT screen area onto the persistent composite buffer.
+    // The TV frame was already baked in at init time — no full-frame copy needed.
+    for src_y in 0..SCREEN_H {
+        let dst_row_start = (src_y + SCREEN_Y) * window_width + SCREEN_X;
+        let src_row_start = src_y * SCREEN_W;
+        let dst_slice = &mut result[dst_row_start..dst_row_start + SCREEN_W];
+        let src_slice = &game_output[src_row_start..src_row_start + SCREEN_W];
+        dst_slice.copy_from_slice(src_slice);
     }
 }
 
@@ -5273,34 +6286,54 @@ fn build_glare_table() -> Vec<u8> {
 
     for y in 0..SCREEN_H {
         for x in 0..SCREEN_W {
-            // Normalized coordinates (-1 to 1)
-            let fx = (x as f64 / SCREEN_W as f64) * 2.0 - 1.0;
-            let fy = (y as f64 / SCREEN_H as f64) * 2.0 - 1.0;
-            
-            // Layer 1: Fresnel edge brightening
-            let edge_dist = (fx.abs().max(fy.abs())).min(1.0);
-            let fresnel = ((edge_dist - 0.7).max(0.0) / 0.3).powi(2) * 18.0;
-            
-            // Layer 2a: Primary specular highlight (upper-left area)
-            let dx1 = (x as f64 - SCREEN_W as f64 * 0.28) / (SCREEN_W as f64 * 0.15);
-            let dy1 = (y as f64 - SCREEN_H as f64 * 0.22) / (SCREEN_H as f64 * 0.15);
-            let spec1 = (-(dx1 * dx1 + dy1 * dy1) / 2.0).exp() * 40.0;
-            
-            // Layer 2b: Secondary highlight (lower-right, dimmer)
-            let dx2 = (x as f64 - SCREEN_W as f64 * 0.72) / (SCREEN_W as f64 * 0.20);
-            let dy2 = (y as f64 - SCREEN_H as f64 * 0.78) / (SCREEN_H as f64 * 0.20);
-            let spec2 = (-(dx2 * dx2 + dy2 * dy2) / 2.0).exp() * 20.0;
-            
-            // Layer 3: Wide diagonal reflection band
-            let diag = (fx + fy) / 2.0_f64.sqrt();
-            let band = (-(diag * diag) * 4.0).exp() * 18.0;
-            // Fade near edges to avoid harsh cutoff
-            let edge_fade = (1.0 - edge_dist.powi(4)).max(0.0);
-            let band = band * edge_fade;
-            
+            let fx = x as f64 / SCREEN_W as f64;  // 0..1
+            let fy = y as f64 / SCREEN_H as f64;  // 0..1
+            let nx = fx * 2.0 - 1.0;  // -1..1
+            let ny = fy * 2.0 - 1.0;  // -1..1
+
+            // Edge distance for Fresnel and fading
+            let edge_dist = nx.abs().max(ny.abs()).min(1.0);
+
+            // Layer 1: Enhanced Fresnel edge reflection (Schlick approximation)
+            // Starts earlier (0.5) for more gradual glass-edge glow
+            let fresnel_t = ((edge_dist - 0.5).max(0.0) / 0.5).min(1.0);
+            let fresnel = fresnel_t.powi(3) * 22.0;
+
+            // Layer 2: Primary specular — overhead light reflecting off curved glass
+            // Elongated horizontally (like a fluorescent tube reflection)
+            let spec1_x = (fx - 0.35) / 0.18;
+            let spec1_y = (fy - 0.18) / 0.08;  // Narrow vertically = elongated highlight
+            let spec1 = (-(spec1_x * spec1_x + spec1_y * spec1_y) / 2.0).exp() * 45.0;
+
+            // Layer 3: Secondary specular — smaller, dimmer (second light or bounce)
+            let spec2_x = (fx - 0.68) / 0.12;
+            let spec2_y = (fy - 0.15) / 0.06;
+            let spec2 = (-(spec2_x * spec2_x + spec2_y * spec2_y) / 2.0).exp() * 25.0;
+
+            // Layer 4: Broad curved reflection arc (the characteristic CRT glass sweep)
+            // This is the wide, gentle arc you see on real CRT screens
+            let arc_center = 0.3 - 0.15 * nx * nx;  // Curved arc following glass curvature
+            let arc_dist = (fy - arc_center).abs();
+            let arc = (-(arc_dist * arc_dist) * 35.0).exp() * 15.0;
+            let arc_fade = (1.0 - (nx.abs() - 0.8).max(0.0) * 5.0).max(0.0);  // Fade at sides
+            let arc = arc * arc_fade;
+
+            // Layer 5: Subtle bottom-edge reflection (desk/surface bounce light)
+            let bottom_glow_t = ((fy - 0.85).max(0.0) / 0.15).min(1.0);
+            let bottom_center = (-(nx * nx) * 3.0).exp();
+            let bottom = bottom_glow_t * bottom_center * 10.0;
+
+            // Layer 6: Very faint window reflection (rectangular ghost, upper area)
+            let win_x = ((fx - 0.45).abs() < 0.15) as u8 as f64;
+            let win_y = ((fy > 0.08) && (fy < 0.35)) as u8 as f64;
+            let win_edge_x = (1.0 - ((fx - 0.45).abs() / 0.15).powi(4)).max(0.0);
+            let win_edge_y_top = ((fy - 0.08).min(0.05) / 0.05).max(0.0);
+            let win_edge_y_bot = ((0.35 - fy).min(0.05) / 0.05).max(0.0);
+            let window = win_x * win_y * win_edge_x * win_edge_y_top * win_edge_y_bot * 8.0;
+
             // Combine all layers
-            let total = (fresnel + spec1 + spec2 + band).max(0.0).min(50.0) as u8;
-            
+            let total = (fresnel + spec1 + spec2 + arc + bottom + window).max(0.0).min(70.0) as u8;
+
             // Zero out near border (glass-bezel junction has no glare)
             let in_border = x < 4 || x >= SCREEN_W - 4 || y < 4 || y >= SCREEN_H - 4;
             table[y * SCREEN_W + x] = if in_border { 0 } else { total };
@@ -5309,41 +6342,136 @@ fn build_glare_table() -> Vec<u8> {
     table
 }
 
-fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], window_width: usize, glass_intensity: u8) {
+// Enhanced glass overlay: tint + specular glare for realistic CRT glass
+fn build_glass_thickness_table() -> Vec<u16> {
+    let mut table = vec![0u16; SCREEN_W * SCREEN_H];
+    for y in 0..SCREEN_H {
+        let fy = (y as f64 / SCREEN_H as f64) * 2.0 - 1.0;
+        let edge_y = ((fy.abs() - 0.3).max(0.0) / 0.7 * 256.0) as u16;
+        for x in 0..SCREEN_W {
+            let fx = (x as f64 / SCREEN_W as f64) * 2.0 - 1.0;
+            let edge_x = ((fx.abs() - 0.3).max(0.0) / 0.7 * 256.0) as u16;
+            table[y * SCREEN_W + x] = (edge_x + edge_y) / 2;
+        }
+    }
+    table
+}
+
+fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
+    let mut table = vec![0u8; SCREEN_W * SCREEN_H];
+    if glass_intensity < 20 { return table; }
+    let base_alpha = ((glass_intensity as f64) - 20.0) * 16.0 / 80.0;
+    if base_alpha <= 0.0 { return table; }
+
+    for y in 0..SCREEN_H {
+        let fy = ((y as f64 / SCREEN_H as f64) * 2.0 - 1.0).abs();
+        let edge_boost_y = (1.0 + (fy - 0.4).max(0.0) * 2.0).min(2.5);
+        for x in 0..SCREEN_W {
+            let fx = ((x as f64 / SCREEN_W as f64) * 2.0 - 1.0).abs();
+            let edge_boost_x = (1.0 + (fx - 0.4).max(0.0) * 2.0).min(2.5);
+            let local_alpha = base_alpha * (edge_boost_x + edge_boost_y) / 2.0;
+            table[y * SCREEN_W + x] = (local_alpha as u8).min(40);
+        }
+    }
+    table
+}
+
+fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &[u16], window_width: usize, glass_intensity: u8) {
     if glass_intensity == 0 { return; }
-    let corner_r = 12usize;
+
+    const CORNER_R: usize = 12;
+    const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
     let intensity_factor = glass_intensity as u32;
-    
+
+    // Glass tint: CRT glass slightly reduces contrast and adds warmth
+    // At intensity 100: ~4% contrast reduction + slight warm shift
+    let tint_strength = intensity_factor * 10 / 100;  // 0-10 range
+
+    let corner_x_max = SCREEN_W - CORNER_R;
+    let corner_y_max = SCREEN_H - CORNER_R;
+
     for y in 0..SCREEN_H {
         let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
         let glare_row = y * SCREEN_W;
+
+        let in_corner_y_top = y < CORNER_R;
+        let in_corner_y_bottom = y >= corner_y_max;
+
         for x in 0..SCREEN_W {
-            let in_corner =
-                (x < corner_r && y < corner_r && sq_dist(x, y, corner_r, corner_r) > corner_r * corner_r)
-                || (x >= SCREEN_W - corner_r && y < corner_r && sq_dist(x, y, SCREEN_W - 1 - corner_r, corner_r) > corner_r * corner_r)
-                || (x < corner_r && y >= SCREEN_H - corner_r && sq_dist(x, y, corner_r, SCREEN_H - 1 - corner_r) > corner_r * corner_r)
-                || (x >= SCREEN_W - corner_r && y >= SCREEN_H - corner_r && sq_dist(x, y, SCREEN_W - 1 - corner_r, SCREEN_H - 1 - corner_r) > corner_r * corner_r);
-            if in_corner { continue; }
+            // Corner rounding check (keep existing logic)
+            if (in_corner_y_top || in_corner_y_bottom) && (x < CORNER_R || x >= corner_x_max) {
+                let (cx, cy) = if x < CORNER_R {
+                    if in_corner_y_top { (CORNER_R, CORNER_R) } else { (CORNER_R, SCREEN_H - 1 - CORNER_R) }
+                } else {
+                    if in_corner_y_top { (SCREEN_W - 1 - CORNER_R, CORNER_R) } else { (SCREEN_W - 1 - CORNER_R, SCREEN_H - 1 - CORNER_R) }
+                };
+                if sq_dist(x, y, cx, cy) > CORNER_R_SQ { continue; }
+            }
 
-            let glare_base = glare_table[glare_row + x] as u32;
-            if glare_base == 0 { continue; }
+            let idx = buf_row + x;
+            let pixel = unsafe { *buffer.get_unchecked(idx) };
+            let mut r = (pixel >> 16) & 0xFF;
+            let mut g = (pixel >> 8) & 0xFF;
+            let mut b = pixel & 0xFF;
 
-            let pixel = buffer[buf_row + x];
-            let r = (pixel >> 16) & 0xFF;
-            let g = (pixel >> 8) & 0xFF;
-            let b = pixel & 0xFF;
-            
-            // Calculate brightness (0-255)
-            let brightness = (r + g + b) / 3;
-            
-            // Glare more visible on darker content, scaled by glass intensity
-            let glare = glare_base * intensity_factor * (200_u32.saturating_sub(brightness)) / 20000;
-            
-            let r = (r + glare).min(255);
-            let g = (g + glare).min(255);
-            let b = (b + glare).min(255);
+            // Glass tint: slight contrast reduction + warm color shift from glass
+            // Real CRT glass absorbs some light, especially at edges (thicker glass)
+            if tint_strength > 0 {
+                let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_row + x) } as u32;
+                let tint = tint_strength * thickness / 256;
 
-            buffer[buf_row + x] = (r << 16) | (g << 8) | b;
+                // Pull toward a neutral grey (reduces contrast) with slight warm bias
+                let grey = ((r + g + b) * 171) >> 9;          // /3 via multiply-shift
+                r = r + ((grey.saturating_sub(r) * tint * 205) >> 13);   // /40 via multiply-shift
+                g = g + ((grey.saturating_sub(g) * tint * 182) >> 13);   // /45 via multiply-shift
+                b = b.saturating_sub((tint * 171) >> 9);       // /3 via multiply-shift
+            }
+
+            // Specular glare overlay
+            let glare_base = unsafe { *glare_table.get_unchecked(glare_row + x) as u32 };
+            if glare_base > 0 {
+                let brightness = ((r + g + b) * 171) >> 9;    // /3 via multiply-shift
+                let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(brightness)) * 29) >> 19;  // /18000 via multiply-shift
+
+                // Glare is slightly warm (real reflections pick up room light color)
+                r = (r + glare + ((glare * 171) >> 11)).min(255);   // glare/12 via multiply-shift
+                g = (g + glare).min(255);
+                b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);  // glare/15 via multiply-shift
+            }
+
+            unsafe { *buffer.get_unchecked_mut(idx) = (r << 16) | (g << 8) | b; }
+        }
+    }
+}
+
+/// Internal reflection: thick CRT glass creates a faint ghost image
+/// shifted slightly diagonally. More visible near screen edges.
+#[inline]
+fn apply_internal_ghost(buffer: &mut [u32], source_copy: &[u32], ghost_alpha_table: &[u8], window_width: usize) {
+    let shift_x: usize = 3;
+    let shift_y: usize = 2;
+
+    for y in 0..SCREEN_H.saturating_sub(shift_y) {
+        let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
+        let src_row = (y + shift_y + SCREEN_Y) * window_width + SCREEN_X;
+        let alpha_row = y * SCREEN_W;
+
+        for x in 0..SCREEN_W.saturating_sub(shift_x) {
+            let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(alpha_row + x) } as u32;
+            if local_alpha == 0 { continue; }
+
+            let idx = buf_row + x;
+            let src_idx = src_row + x + shift_x;
+
+            let pixel = unsafe { *buffer.get_unchecked(idx) };
+            let ghost_pixel = unsafe { *source_copy.get_unchecked(src_idx) };
+
+            let inv_alpha = 256 - local_alpha;
+            let r = (((pixel >> 16) & 0xFF) * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8;
+            let g = (((pixel >> 8) & 0xFF) * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8;
+            let b = ((pixel & 0xFF) * inv_alpha + (ghost_pixel & 0xFF) * local_alpha) >> 8;
+
+            unsafe { *buffer.get_unchecked_mut(idx) = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255); }
         }
     }
 }
@@ -5384,6 +6512,8 @@ fn build_ca_table(width: usize, height: usize, glass_intensity: u8) -> CaTable {
     CaTable { shifts }
 }
 
+// Optimized: Use unsafe for bounds-checked accesses, inline function
+#[inline]
 fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaTable, width: usize, height: usize) {
     let w = width as i32;
     let h = height as i32;
@@ -5391,7 +6521,7 @@ fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaT
     for y in 0..height {
         let row = y * width;
         for x in 0..width {
-            let (sx, sy) = ca_table.shifts[row + x];
+            let (sx, sy) = unsafe { *ca_table.shifts.get_unchecked(row + x) };
             if sx == 0 && sy == 0 { continue; }
 
             let r_x = ((x as i32) - sx as i32).clamp(0, w - 1) as usize;
@@ -5399,11 +6529,11 @@ fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaT
             let b_x = ((x as i32) + sx as i32).clamp(0, w - 1) as usize;
             let b_y = ((y as i32) + sy as i32).clamp(0, h - 1) as usize;
 
-            let r = (source[r_y * width + r_x] >> 16) & 0xFF;
-            let g = (source[row + x] >> 8) & 0xFF;
-            let b = source[b_y * width + b_x] & 0xFF;
+            let r = unsafe { (*source.get_unchecked(r_y * width + r_x) >> 16) & 0xFF };
+            let g = unsafe { (*source.get_unchecked(row + x) >> 8) & 0xFF };
+            let b = unsafe { *source.get_unchecked(b_y * width + b_x) & 0xFF };
 
-            buffer[row + x] = (r << 16) | (g << 8) | b;
+            unsafe { *buffer.get_unchecked_mut(row + x) = (r << 16) | (g << 8) | b; }
         }
     }
 }

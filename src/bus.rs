@@ -100,8 +100,9 @@ impl Bus {
         self.cpu_ram.to_vec()
     }
 
+    #[inline(always)]
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
-        // Game Genie interception
+        // Game Genie interception - fast path when no cheats active
         if addr >= 0x8000 && !self.cheats.is_empty() {
             for cheat in &self.cheats {
                 if cheat.enabled && cheat.address == addr {
@@ -135,6 +136,7 @@ impl Bus {
         self.cartridge.mapper.set_sram(data);
     }
 
+    #[inline(always)]
     pub fn cpu_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0x07FF) as usize] = data,
@@ -182,10 +184,12 @@ impl Bus {
     }
 
     // DMA transfer handling
+    #[inline]
     pub fn dma_active(&self) -> bool {
         self.dma_transfer
     }
 
+    #[inline]
     pub fn dma_tick(&mut self, odd_cycle: bool) {
         if self.dma_dummy {
             if odd_cycle {
@@ -202,6 +206,7 @@ impl Bus {
             if self.dma_addr == 0 {
                 self.dma_transfer = false;
                 self.dma_dummy = true;
+                self.ppu.mark_oam_dirty();
             }
         }
     }
@@ -216,6 +221,7 @@ impl Bus {
         self.apu.tick();
     }
     
+    #[inline]
     pub fn service_dmc_dma(&mut self) {
         if self.apu.dmc.dma_request {
             let addr = self.apu.dmc.dma_address;
@@ -226,10 +232,12 @@ impl Bus {
         }
     }
 
+    #[inline]
     pub fn dmc_stall_active(&self) -> bool {
         self.dmc_stall_cycles > 0
     }
 
+    #[inline]
     pub fn dmc_stall_tick(&mut self) {
         self.dmc_stall_cycles -= 1;
     }

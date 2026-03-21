@@ -14,16 +14,16 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: nes-emulator.exe
-            asset_name: nes-emulator-windows-x64.exe
+            artifact_name: oxidenes.exe
+            asset_name: oxidenes-windows-x64.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: nes-emulator
-            asset_name: nes-emulator-linux-x64
+            artifact_name: oxidenes
+            asset_name: oxidenes-linux-x64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: nes-emulator
-            asset_name: nes-emulator-macos-arm64
+            artifact_name: oxidenes
+            asset_name: oxidenes-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: nes-emulator-windows-installer
+          name: oxidenes-windows-installer
           path: installer/Output/*.exe
 
   release:
@@ -73,7 +73,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/nes-emulator-windows-x64.exe/*
-            artifacts/nes-emulator-linux-x64/*
-            artifacts/nes-emulator-macos-arm64/*
-            artifacts/nes-emulator-windows-installer/*
+            artifacts/oxidenes-windows-x64.exe/*
+            artifacts/oxidenes-linux-x64/*
+            artifacts/oxidenes-macos-arm64/*
+            artifacts/oxidenes-windows-installer/*

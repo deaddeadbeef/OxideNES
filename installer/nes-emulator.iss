@@ -1,5 +1,5 @@
 ; ============================================================================
-; NES Emulator — Inno Setup Installer Script
+; OxideNES — Inno Setup Installer Script
 ; ============================================================================
 ; Build:
 ;   1. cargo build --release
@@ -10,7 +10,7 @@
 #define MyAppName      "NES Emulator"
 #define MyAppVersion   "0.1.0"
 #define MyAppPublisher "nes-emulator contributors"
-#define MyAppURL       "https://github.com/user/nes-emulator"
+#define MyAppURL       "https://github.com/deaddeadbeef/OxideNES"
 #define MyAppExeName   "nes-emulator.exe"
 #define MyAppRoot      ".."
 
@@ -27,7 +27,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile={#MyAppRoot}\LICENSE
 OutputDir=Output
-OutputBaseFilename=nes-emulator-{#MyAppVersion}-setup
+OutputBaseFilename=oxidenes-{#MyAppVersion}-setup
 Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern

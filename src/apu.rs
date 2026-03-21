@@ -38,6 +38,7 @@ impl Envelope {
         Envelope { start: false, loop_flag: false, constant_volume: false, volume: 0, decay_level: 0, divider: 0 }
     }
     
+    #[inline]
     fn clock(&mut self) {
         if self.start {
             self.start = false;
@@ -55,6 +56,7 @@ impl Envelope {
         }
     }
     
+    #[inline]
     fn output(&self) -> u8 {
         if self.constant_volume { self.volume } else { self.decay_level }
     }
@@ -92,6 +94,7 @@ impl Sweep {
         current < 8 || (self.shift > 0 && self.target_period(current) > 0x7FF)
     }
     
+    #[inline]
     fn clock(&mut self, timer_period: &mut u16) {
         let target = self.target_period(*timer_period);
         if self.divider == 0 && self.enabled && !self.muting(*timer_period) && self.shift > 0 {
@@ -127,6 +130,7 @@ impl PulseChannel {
         }
     }
     
+    #[inline]
     fn clock_timer(&mut self) {
         if self.timer == 0 {
             self.timer = self.timer_period;
@@ -136,6 +140,7 @@ impl PulseChannel {
         }
     }
     
+    #[inline]
     fn output(&self) -> u8 {
         if !self.enabled || self.length_counter == 0 || self.sweep.muting(self.timer_period)
             || DUTY_TABLE[self.duty as usize][self.duty_pos as usize] == 0 {
@@ -198,6 +203,7 @@ impl TriangleChannel {
         }
     }
     
+    #[inline]
     fn clock_timer(&mut self) {
         if self.timer == 0 {
             self.timer = self.timer_period;
@@ -209,6 +215,7 @@ impl TriangleChannel {
         }
     }
     
+    #[inline]
     fn clock_linear_counter(&mut self) {
         if self.linear_counter_reload_flag {
             self.linear_counter = self.linear_counter_reload;
@@ -220,6 +227,7 @@ impl TriangleChannel {
         }
     }
     
+    #[inline]
     fn output(&self) -> u8 {
         if !self.enabled || self.length_counter == 0 || self.linear_counter == 0 || self.timer_period < 2 {
             0
@@ -269,6 +277,7 @@ impl NoiseChannel {
         }
     }
     
+    #[inline]
     fn clock_timer(&mut self) {
         if self.timer == 0 {
             self.timer = self.timer_period;
@@ -281,6 +290,7 @@ impl NoiseChannel {
         }
     }
     
+    #[inline]
     fn output(&self) -> u8 {
         if !self.enabled || self.length_counter == 0 || self.shift_register & 1 != 0 {
             0
@@ -368,6 +378,7 @@ impl DmcChannel {
         }
     }
     
+    #[inline]
     fn tick(&mut self) {
         if self.timer > 0 {
             self.timer -= 1;
@@ -472,6 +483,7 @@ impl DmcChannel {
         }
     }
     
+    #[inline]
     fn output(&self) -> u8 {
         self.output_level
     }
@@ -512,6 +524,7 @@ pub struct Apu {
 
     // Pre-computed mixer lookup tables
     pulse_table: [i32; 31],
+    tnd_table: [i32; 203],
 
 
     // Reusable read buffer for end_frame
@@ -534,6 +547,24 @@ impl Apu {
             pulse_table[i as usize] = (v * 32000.0) as i32;
         }
 
+        // Pre-compute TND mixer lookup table
+        // Index = 3 * triangle + 2 * noise + dmc
+        // This encodes the weighted contribution of each channel
+        // Max index: 3*15 + 2*15 + 127 = 202
+        let mut tnd_table = [0i32; 203];
+        for tri in 0..=15 {
+            for noise in 0..=15 {
+                for dmc in 0..=127 {
+                    let index = 3 * tri + 2 * noise + dmc;
+                    if index > 0 && index < 203 {
+                        let tnd_sum = tri as f64 / 8227.0 + noise as f64 / 12241.0 + dmc as f64 / 22638.0;
+                        let v = 159.79 / (1.0 / tnd_sum + 100.0);
+                        tnd_table[index] = (v * 32000.0) as i32;
+                    }
+                }
+            }
+        }
+
         Apu {
             pulse1: PulseChannel::new(true),
             pulse2: PulseChannel::new(false),
@@ -552,6 +583,7 @@ impl Apu {
             sample_buffer: Vec::with_capacity(2048),
             external_audio: 0.0,
             pulse_table,
+            tnd_table,
             read_buf: vec![0i16; 4096],  // pre-allocate
         }
     }
@@ -614,6 +646,7 @@ impl Apu {
         }
     }
     
+    #[inline]
     fn clock_quarter_frame(&mut self) {
         self.pulse1.envelope.clock();
         self.pulse2.envelope.clock();
@@ -621,6 +654,7 @@ impl Apu {
         self.noise.envelope.clock();
     }
     
+    #[inline]
     fn clock_half_frame(&mut self) {
         // Length counters
         if self.pulse1.length_counter > 0 && !self.pulse1.length_halt {
@@ -640,6 +674,7 @@ impl Apu {
         self.pulse2.sweep.clock(&mut self.pulse2.timer_period);
     }
     
+    #[inline]
     pub fn tick(&mut self) {
         // Triangle clocks every CPU cycle
         self.triangle.clock_timer();
@@ -705,28 +740,21 @@ impl Apu {
     
     // Mix channels to an integer amplitude value for blip_buf
     // blip_buf works with i32 deltas
+    #[inline]
     fn mix_output(&self) -> i32 {
         let p1 = self.pulse1.output() as usize;
         let p2 = self.pulse2.output() as usize;
         let tri = self.triangle.output() as usize;
         let noise = self.noise.output() as usize;
-        let dmc = self.dmc.output() as f64;
+        let dmc = self.dmc.output() as usize;
 
         // Pulse channels use pre-computed table
         let pulse_out = self.pulse_table[(p1 + p2).min(30)];
         
-        // TND channels using safer formula to prevent NaN
-        let tnd_out = if tri > 0 || noise > 0 || dmc > 0.0 {
-            let tnd_sum = tri as f64 / 8227.0 + noise as f64 / 12241.0 + dmc / 22638.0;
-            if tnd_sum > 0.0 {
-                let tnd = 159.79 / (1.0 / tnd_sum + 100.0);
-                (tnd * 32000.0) as i32
-            } else {
-                0
-            }
-        } else {
-            0
-        };
+        // TND channels use pre-computed table
+        // Index = 3 * triangle + 2 * noise + dmc
+        let tnd_index = (3 * tri + 2 * noise + dmc).min(202);
+        let tnd_out = self.tnd_table[tnd_index];
 
         let ext_out = self.ext_output();
 
@@ -734,6 +762,7 @@ impl Apu {
     }
 
     // External/mapper expansion audio contribution, scaled to match internal amplitude
+    #[inline]
     fn ext_output(&self) -> i32 {
         (self.external_audio * 32000.0) as i32
     }

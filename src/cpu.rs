@@ -58,10 +58,12 @@ impl Cpu {
 
     // ── Flag helpers ────────────────────────────────────────────────
 
+    #[inline(always)]
     pub fn get_flag(&self, flag: u8) -> bool {
         (self.status & flag) != 0
     }
 
+    #[inline(always)]
     pub fn set_flag(&mut self, flag: u8, value: bool) {
         if value {
             self.status |= flag;
@@ -70,6 +72,7 @@ impl Cpu {
         }
     }
 
+    #[inline(always)]
     fn update_zero_negative(&mut self, value: u8) {
         self.set_flag(ZERO, value == 0);
         self.set_flag(NEGATIVE, value & 0x80 != 0);
@@ -77,21 +80,25 @@ impl Cpu {
 
     // ── Stack operations ────────────────────────────────────────────
 
+    #[inline]
     fn push(&mut self, bus: &mut Bus, value: u8) {
         bus.cpu_write(0x0100 | self.sp as u16, value);
         self.sp = self.sp.wrapping_sub(1);
     }
 
+    #[inline]
     fn pull(&mut self, bus: &mut Bus) -> u8 {
         self.sp = self.sp.wrapping_add(1);
         bus.cpu_read(0x0100 | self.sp as u16)
     }
 
+    #[inline]
     fn push16(&mut self, bus: &mut Bus, value: u16) {
         self.push(bus, (value >> 8) as u8);
         self.push(bus, (value & 0xFF) as u8);
     }
 
+    #[inline]
     fn pull16(&mut self, bus: &mut Bus) -> u16 {
         let lo = self.pull(bus) as u16;
         let hi = self.pull(bus) as u16;
@@ -142,6 +149,7 @@ impl Cpu {
 
     // ── Addressing modes ────────────────────────────────────────────
 
+    #[inline]
     fn get_operand_address(&mut self, bus: &mut Bus, mode: AddressingMode) -> (u16, bool) {
         match mode {
             AddressingMode::Immediate => {
@@ -232,6 +240,7 @@ impl Cpu {
 
     // ── Clock ───────────────────────────────────────────────────────
 
+    #[inline]
     pub fn clock(&mut self, bus: &mut Bus) {
         if bus.dma_active() {
             bus.dma_tick(self.total_cycles % 2 == 1);
@@ -281,6 +290,7 @@ impl Cpu {
 
     // ── Instruction helpers ─────────────────────────────────────────
 
+    #[inline]
     fn adc(&mut self, value: u8) {
         let carry = if self.get_flag(CARRY) { 1u16 } else { 0u16 };
         let sum = self.a as u16 + value as u16 + carry;
@@ -291,22 +301,26 @@ impl Cpu {
         self.update_zero_negative(self.a);
     }
 
+    #[inline]
     fn sbc(&mut self, value: u8) {
         self.adc(!value);
     }
 
+    #[inline]
     fn compare(&mut self, reg: u8, value: u8) {
         let result = reg.wrapping_sub(value);
         self.set_flag(CARRY, reg >= value);
         self.update_zero_negative(result);
     }
 
+    #[inline]
     fn asl_acc(&mut self) {
         self.set_flag(CARRY, self.a & 0x80 != 0);
         self.a <<= 1;
         self.update_zero_negative(self.a);
     }
 
+    #[inline]
     fn asl_mem(&mut self, bus: &mut Bus, addr: u16) {
         let mut value = bus.cpu_read(addr);
         self.set_flag(CARRY, value & 0x80 != 0);
@@ -315,12 +329,14 @@ impl Cpu {
         self.update_zero_negative(value);
     }
 
+    #[inline]
     fn lsr_acc(&mut self) {
         self.set_flag(CARRY, self.a & 0x01 != 0);
         self.a >>= 1;
         self.update_zero_negative(self.a);
     }
 
+    #[inline]
     fn lsr_mem(&mut self, bus: &mut Bus, addr: u16) {
         let mut value = bus.cpu_read(addr);
         self.set_flag(CARRY, value & 0x01 != 0);
@@ -329,6 +345,7 @@ impl Cpu {
         self.update_zero_negative(value);
     }
 
+    #[inline]
     fn rol_acc(&mut self) {
         let old_carry = self.get_flag(CARRY) as u8;
         self.set_flag(CARRY, self.a & 0x80 != 0);
@@ -336,6 +353,7 @@ impl Cpu {
         self.update_zero_negative(self.a);
     }
 
+    #[inline]
     fn rol_mem(&mut self, bus: &mut Bus, addr: u16) {
         let old_carry = self.get_flag(CARRY) as u8;
         let mut value = bus.cpu_read(addr);
@@ -345,6 +363,7 @@ impl Cpu {
         self.update_zero_negative(value);
     }
 
+    #[inline]
     fn ror_acc(&mut self) {
         let old_carry = self.get_flag(CARRY) as u8;
         self.set_flag(CARRY, self.a & 0x01 != 0);
@@ -352,6 +371,7 @@ impl Cpu {
         self.update_zero_negative(self.a);
     }
 
+    #[inline]
     fn ror_mem(&mut self, bus: &mut Bus, addr: u16) {
         let old_carry = self.get_flag(CARRY) as u8;
         let mut value = bus.cpu_read(addr);
@@ -361,6 +381,7 @@ impl Cpu {
         self.update_zero_negative(value);
     }
 
+    #[inline]
     fn branch(&mut self, condition: bool, addr: u16, page_crossed: bool) {
         if condition {
             self.cycles += 1;

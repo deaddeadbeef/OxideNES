@@ -22,6 +22,370 @@ pub trait Mapper {
     fn load_state(&mut self, _data: &[u8]) {}
 }
 
+// Enum dispatch wrapper for performance - eliminates vtable indirection
+pub enum MapperEnum {
+    Mapper000(Mapper000),
+    Mapper001(Mapper001),
+    Mapper002(Mapper002),
+    Mapper003(Mapper003),
+    Mapper004(Mapper004),
+    Mapper005(Mapper005),
+    Mapper007(Mapper007),
+    Mapper009(Mapper009),
+    Mapper010(Mapper010),
+    Mapper011(Mapper011),
+    Mapper019(Mapper019),
+    Mapper024(MapperVRC6), // VRC6a
+    Mapper026(MapperVRC6), // VRC6b
+    Mapper034(Mapper034),
+    Mapper066(Mapper066),
+    Mapper069(Mapper069),
+    Mapper071(Mapper071),
+    Mapper079(Mapper079),
+    Mapper085(Mapper085),
+    Mapper206(Mapper206),
+}
+
+impl MapperEnum {
+    #[inline]
+    pub fn read_prg(&self, addr: u16) -> u8 {
+        match self {
+            MapperEnum::Mapper000(m) => m.read_prg(addr),
+            MapperEnum::Mapper001(m) => m.read_prg(addr),
+            MapperEnum::Mapper002(m) => m.read_prg(addr),
+            MapperEnum::Mapper003(m) => m.read_prg(addr),
+            MapperEnum::Mapper004(m) => m.read_prg(addr),
+            MapperEnum::Mapper005(m) => m.read_prg(addr),
+            MapperEnum::Mapper007(m) => m.read_prg(addr),
+            MapperEnum::Mapper009(m) => m.read_prg(addr),
+            MapperEnum::Mapper010(m) => m.read_prg(addr),
+            MapperEnum::Mapper011(m) => m.read_prg(addr),
+            MapperEnum::Mapper019(m) => m.read_prg(addr),
+            MapperEnum::Mapper024(m) => m.read_prg(addr),
+            MapperEnum::Mapper026(m) => m.read_prg(addr),
+            MapperEnum::Mapper034(m) => m.read_prg(addr),
+            MapperEnum::Mapper066(m) => m.read_prg(addr),
+            MapperEnum::Mapper069(m) => m.read_prg(addr),
+            MapperEnum::Mapper071(m) => m.read_prg(addr),
+            MapperEnum::Mapper079(m) => m.read_prg(addr),
+            MapperEnum::Mapper085(m) => m.read_prg(addr),
+            MapperEnum::Mapper206(m) => m.read_prg(addr),
+        }
+    }
+
+    #[inline]
+    pub fn write_prg(&mut self, addr: u16, data: u8) {
+        match self {
+            MapperEnum::Mapper000(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper001(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper002(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper003(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper004(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper005(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper007(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper009(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper010(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper011(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper019(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper024(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper026(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper034(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper066(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper069(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper071(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper079(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper085(m) => m.write_prg(addr, data),
+            MapperEnum::Mapper206(m) => m.write_prg(addr, data),
+        }
+    }
+
+    #[inline]
+    pub fn read_chr(&self, addr: u16) -> u8 {
+        match self {
+            MapperEnum::Mapper000(m) => m.read_chr(addr),
+            MapperEnum::Mapper001(m) => m.read_chr(addr),
+            MapperEnum::Mapper002(m) => m.read_chr(addr),
+            MapperEnum::Mapper003(m) => m.read_chr(addr),
+            MapperEnum::Mapper004(m) => m.read_chr(addr),
+            MapperEnum::Mapper005(m) => m.read_chr(addr),
+            MapperEnum::Mapper007(m) => m.read_chr(addr),
+            MapperEnum::Mapper009(m) => m.read_chr(addr),
+            MapperEnum::Mapper010(m) => m.read_chr(addr),
+            MapperEnum::Mapper011(m) => m.read_chr(addr),
+            MapperEnum::Mapper019(m) => m.read_chr(addr),
+            MapperEnum::Mapper024(m) => m.read_chr(addr),
+            MapperEnum::Mapper026(m) => m.read_chr(addr),
+            MapperEnum::Mapper034(m) => m.read_chr(addr),
+            MapperEnum::Mapper066(m) => m.read_chr(addr),
+            MapperEnum::Mapper069(m) => m.read_chr(addr),
+            MapperEnum::Mapper071(m) => m.read_chr(addr),
+            MapperEnum::Mapper079(m) => m.read_chr(addr),
+            MapperEnum::Mapper085(m) => m.read_chr(addr),
+            MapperEnum::Mapper206(m) => m.read_chr(addr),
+        }
+    }
+
+    #[inline]
+    pub fn write_chr(&mut self, addr: u16, data: u8) {
+        match self {
+            MapperEnum::Mapper000(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper001(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper002(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper003(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper004(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper005(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper007(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper009(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper010(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper011(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper019(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper024(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper026(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper034(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper066(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper069(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper071(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper079(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper085(m) => m.write_chr(addr, data),
+            MapperEnum::Mapper206(m) => m.write_chr(addr, data),
+        }
+    }
+
+    #[inline]
+    pub fn mirroring(&self) -> crate::cartridge::Mirroring {
+        match self {
+            MapperEnum::Mapper000(m) => m.mirroring(),
+            MapperEnum::Mapper001(m) => m.mirroring(),
+            MapperEnum::Mapper002(m) => m.mirroring(),
+            MapperEnum::Mapper003(m) => m.mirroring(),
+            MapperEnum::Mapper004(m) => m.mirroring(),
+            MapperEnum::Mapper005(m) => m.mirroring(),
+            MapperEnum::Mapper007(m) => m.mirroring(),
+            MapperEnum::Mapper009(m) => m.mirroring(),
+            MapperEnum::Mapper010(m) => m.mirroring(),
+            MapperEnum::Mapper011(m) => m.mirroring(),
+            MapperEnum::Mapper019(m) => m.mirroring(),
+            MapperEnum::Mapper024(m) => m.mirroring(),
+            MapperEnum::Mapper026(m) => m.mirroring(),
+            MapperEnum::Mapper034(m) => m.mirroring(),
+            MapperEnum::Mapper066(m) => m.mirroring(),
+            MapperEnum::Mapper069(m) => m.mirroring(),
+            MapperEnum::Mapper071(m) => m.mirroring(),
+            MapperEnum::Mapper079(m) => m.mirroring(),
+            MapperEnum::Mapper085(m) => m.mirroring(),
+            MapperEnum::Mapper206(m) => m.mirroring(),
+        }
+    }
+
+    #[inline]
+    pub fn clock_scanline(&mut self) {
+        match self {
+            MapperEnum::Mapper000(m) => m.clock_scanline(),
+            MapperEnum::Mapper001(m) => m.clock_scanline(),
+            MapperEnum::Mapper002(m) => m.clock_scanline(),
+            MapperEnum::Mapper003(m) => m.clock_scanline(),
+            MapperEnum::Mapper004(m) => m.clock_scanline(),
+            MapperEnum::Mapper005(m) => m.clock_scanline(),
+            MapperEnum::Mapper007(m) => m.clock_scanline(),
+            MapperEnum::Mapper009(m) => m.clock_scanline(),
+            MapperEnum::Mapper010(m) => m.clock_scanline(),
+            MapperEnum::Mapper011(m) => m.clock_scanline(),
+            MapperEnum::Mapper019(m) => m.clock_scanline(),
+            MapperEnum::Mapper024(m) => m.clock_scanline(),
+            MapperEnum::Mapper026(m) => m.clock_scanline(),
+            MapperEnum::Mapper034(m) => m.clock_scanline(),
+            MapperEnum::Mapper066(m) => m.clock_scanline(),
+            MapperEnum::Mapper069(m) => m.clock_scanline(),
+            MapperEnum::Mapper071(m) => m.clock_scanline(),
+            MapperEnum::Mapper079(m) => m.clock_scanline(),
+            MapperEnum::Mapper085(m) => m.clock_scanline(),
+            MapperEnum::Mapper206(m) => m.clock_scanline(),
+        }
+    }
+
+    #[inline]
+    pub fn irq_pending(&self) -> bool {
+        match self {
+            MapperEnum::Mapper000(m) => m.irq_pending(),
+            MapperEnum::Mapper001(m) => m.irq_pending(),
+            MapperEnum::Mapper002(m) => m.irq_pending(),
+            MapperEnum::Mapper003(m) => m.irq_pending(),
+            MapperEnum::Mapper004(m) => m.irq_pending(),
+            MapperEnum::Mapper005(m) => m.irq_pending(),
+            MapperEnum::Mapper007(m) => m.irq_pending(),
+            MapperEnum::Mapper009(m) => m.irq_pending(),
+            MapperEnum::Mapper010(m) => m.irq_pending(),
+            MapperEnum::Mapper011(m) => m.irq_pending(),
+            MapperEnum::Mapper019(m) => m.irq_pending(),
+            MapperEnum::Mapper024(m) => m.irq_pending(),
+            MapperEnum::Mapper026(m) => m.irq_pending(),
+            MapperEnum::Mapper034(m) => m.irq_pending(),
+            MapperEnum::Mapper066(m) => m.irq_pending(),
+            MapperEnum::Mapper069(m) => m.irq_pending(),
+            MapperEnum::Mapper071(m) => m.irq_pending(),
+            MapperEnum::Mapper079(m) => m.irq_pending(),
+            MapperEnum::Mapper085(m) => m.irq_pending(),
+            MapperEnum::Mapper206(m) => m.irq_pending(),
+        }
+    }
+
+    #[inline]
+    pub fn irq_clear(&mut self) {
+        match self {
+            MapperEnum::Mapper000(m) => m.irq_clear(),
+            MapperEnum::Mapper001(m) => m.irq_clear(),
+            MapperEnum::Mapper002(m) => m.irq_clear(),
+            MapperEnum::Mapper003(m) => m.irq_clear(),
+            MapperEnum::Mapper004(m) => m.irq_clear(),
+            MapperEnum::Mapper005(m) => m.irq_clear(),
+            MapperEnum::Mapper007(m) => m.irq_clear(),
+            MapperEnum::Mapper009(m) => m.irq_clear(),
+            MapperEnum::Mapper010(m) => m.irq_clear(),
+            MapperEnum::Mapper011(m) => m.irq_clear(),
+            MapperEnum::Mapper019(m) => m.irq_clear(),
+            MapperEnum::Mapper024(m) => m.irq_clear(),
+            MapperEnum::Mapper026(m) => m.irq_clear(),
+            MapperEnum::Mapper034(m) => m.irq_clear(),
+            MapperEnum::Mapper066(m) => m.irq_clear(),
+            MapperEnum::Mapper069(m) => m.irq_clear(),
+            MapperEnum::Mapper071(m) => m.irq_clear(),
+            MapperEnum::Mapper079(m) => m.irq_clear(),
+            MapperEnum::Mapper085(m) => m.irq_clear(),
+            MapperEnum::Mapper206(m) => m.irq_clear(),
+        }
+    }
+
+    #[inline]
+    pub fn audio_output(&self) -> f32 {
+        match self {
+            MapperEnum::Mapper000(m) => m.audio_output(),
+            MapperEnum::Mapper001(m) => m.audio_output(),
+            MapperEnum::Mapper002(m) => m.audio_output(),
+            MapperEnum::Mapper003(m) => m.audio_output(),
+            MapperEnum::Mapper004(m) => m.audio_output(),
+            MapperEnum::Mapper005(m) => m.audio_output(),
+            MapperEnum::Mapper007(m) => m.audio_output(),
+            MapperEnum::Mapper009(m) => m.audio_output(),
+            MapperEnum::Mapper010(m) => m.audio_output(),
+            MapperEnum::Mapper011(m) => m.audio_output(),
+            MapperEnum::Mapper019(m) => m.audio_output(),
+            MapperEnum::Mapper024(m) => m.audio_output(),
+            MapperEnum::Mapper026(m) => m.audio_output(),
+            MapperEnum::Mapper034(m) => m.audio_output(),
+            MapperEnum::Mapper066(m) => m.audio_output(),
+            MapperEnum::Mapper069(m) => m.audio_output(),
+            MapperEnum::Mapper071(m) => m.audio_output(),
+            MapperEnum::Mapper079(m) => m.audio_output(),
+            MapperEnum::Mapper085(m) => m.audio_output(),
+            MapperEnum::Mapper206(m) => m.audio_output(),
+        }
+    }
+
+    #[inline]
+    pub fn get_sram(&self) -> Vec<u8> {
+        match self {
+            MapperEnum::Mapper000(m) => m.get_sram(),
+            MapperEnum::Mapper001(m) => m.get_sram(),
+            MapperEnum::Mapper002(m) => m.get_sram(),
+            MapperEnum::Mapper003(m) => m.get_sram(),
+            MapperEnum::Mapper004(m) => m.get_sram(),
+            MapperEnum::Mapper005(m) => m.get_sram(),
+            MapperEnum::Mapper007(m) => m.get_sram(),
+            MapperEnum::Mapper009(m) => m.get_sram(),
+            MapperEnum::Mapper010(m) => m.get_sram(),
+            MapperEnum::Mapper011(m) => m.get_sram(),
+            MapperEnum::Mapper019(m) => m.get_sram(),
+            MapperEnum::Mapper024(m) => m.get_sram(),
+            MapperEnum::Mapper026(m) => m.get_sram(),
+            MapperEnum::Mapper034(m) => m.get_sram(),
+            MapperEnum::Mapper066(m) => m.get_sram(),
+            MapperEnum::Mapper069(m) => m.get_sram(),
+            MapperEnum::Mapper071(m) => m.get_sram(),
+            MapperEnum::Mapper079(m) => m.get_sram(),
+            MapperEnum::Mapper085(m) => m.get_sram(),
+            MapperEnum::Mapper206(m) => m.get_sram(),
+        }
+    }
+
+    #[inline]
+    pub fn set_sram(&mut self, data: &[u8]) {
+        match self {
+            MapperEnum::Mapper000(m) => m.set_sram(data),
+            MapperEnum::Mapper001(m) => m.set_sram(data),
+            MapperEnum::Mapper002(m) => m.set_sram(data),
+            MapperEnum::Mapper003(m) => m.set_sram(data),
+            MapperEnum::Mapper004(m) => m.set_sram(data),
+            MapperEnum::Mapper005(m) => m.set_sram(data),
+            MapperEnum::Mapper007(m) => m.set_sram(data),
+            MapperEnum::Mapper009(m) => m.set_sram(data),
+            MapperEnum::Mapper010(m) => m.set_sram(data),
+            MapperEnum::Mapper011(m) => m.set_sram(data),
+            MapperEnum::Mapper019(m) => m.set_sram(data),
+            MapperEnum::Mapper024(m) => m.set_sram(data),
+            MapperEnum::Mapper026(m) => m.set_sram(data),
+            MapperEnum::Mapper034(m) => m.set_sram(data),
+            MapperEnum::Mapper066(m) => m.set_sram(data),
+            MapperEnum::Mapper069(m) => m.set_sram(data),
+            MapperEnum::Mapper071(m) => m.set_sram(data),
+            MapperEnum::Mapper079(m) => m.set_sram(data),
+            MapperEnum::Mapper085(m) => m.set_sram(data),
+            MapperEnum::Mapper206(m) => m.set_sram(data),
+        }
+    }
+
+    #[inline]
+    pub fn save_state(&self) -> Vec<u8> {
+        match self {
+            MapperEnum::Mapper000(m) => m.save_state(),
+            MapperEnum::Mapper001(m) => m.save_state(),
+            MapperEnum::Mapper002(m) => m.save_state(),
+            MapperEnum::Mapper003(m) => m.save_state(),
+            MapperEnum::Mapper004(m) => m.save_state(),
+            MapperEnum::Mapper005(m) => m.save_state(),
+            MapperEnum::Mapper007(m) => m.save_state(),
+            MapperEnum::Mapper009(m) => m.save_state(),
+            MapperEnum::Mapper010(m) => m.save_state(),
+            MapperEnum::Mapper011(m) => m.save_state(),
+            MapperEnum::Mapper019(m) => m.save_state(),
+            MapperEnum::Mapper024(m) => m.save_state(),
+            MapperEnum::Mapper026(m) => m.save_state(),
+            MapperEnum::Mapper034(m) => m.save_state(),
+            MapperEnum::Mapper066(m) => m.save_state(),
+            MapperEnum::Mapper069(m) => m.save_state(),
+            MapperEnum::Mapper071(m) => m.save_state(),
+            MapperEnum::Mapper079(m) => m.save_state(),
+            MapperEnum::Mapper085(m) => m.save_state(),
+            MapperEnum::Mapper206(m) => m.save_state(),
+        }
+    }
+
+    #[inline]
+    pub fn load_state(&mut self, data: &[u8]) {
+        match self {
+            MapperEnum::Mapper000(m) => m.load_state(data),
+            MapperEnum::Mapper001(m) => m.load_state(data),
+            MapperEnum::Mapper002(m) => m.load_state(data),
+            MapperEnum::Mapper003(m) => m.load_state(data),
+            MapperEnum::Mapper004(m) => m.load_state(data),
+            MapperEnum::Mapper005(m) => m.load_state(data),
+            MapperEnum::Mapper007(m) => m.load_state(data),
+            MapperEnum::Mapper009(m) => m.load_state(data),
+            MapperEnum::Mapper010(m) => m.load_state(data),
+            MapperEnum::Mapper011(m) => m.load_state(data),
+            MapperEnum::Mapper019(m) => m.load_state(data),
+            MapperEnum::Mapper024(m) => m.load_state(data),
+            MapperEnum::Mapper026(m) => m.load_state(data),
+            MapperEnum::Mapper034(m) => m.load_state(data),
+            MapperEnum::Mapper066(m) => m.load_state(data),
+            MapperEnum::Mapper069(m) => m.load_state(data),
+            MapperEnum::Mapper071(m) => m.load_state(data),
+            MapperEnum::Mapper079(m) => m.load_state(data),
+            MapperEnum::Mapper085(m) => m.load_state(data),
+            MapperEnum::Mapper206(m) => m.load_state(data),
+        }
+    }
+}
+
 pub struct Mapper000 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
@@ -45,6 +409,7 @@ impl Mapper000 {
 }
 
 impl Mapper for Mapper000 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -59,6 +424,7 @@ impl Mapper for Mapper000 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -66,10 +432,12 @@ impl Mapper for Mapper000 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         self.chr_rom[addr as usize]
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         // CHR RAM (when no CHR ROM on cart)
         if self.chr_rom.len() == 0x2000 {
@@ -77,14 +445,17 @@ impl Mapper for Mapper000 {
         }
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
     
+    #[inline]
     fn get_sram(&self) -> Vec<u8> {
         self.prg_ram.clone()
     }
     
+    #[inline]
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
@@ -141,20 +512,23 @@ impl Mapper004 {
         }
     }
     
+    #[inline]
     fn prg_bank_offset(&self, bank: usize) -> usize {
         let bank = bank % self.prg_banks;
-        bank * 0x2000
+        bank << 13  // 0x2000 = 8KB
     }
     
+    #[inline]
     fn chr_bank_offset(&self, bank: usize) -> usize {
-        let chr_banks = self.chr_rom.len() / 0x0400;
+        let chr_banks = self.chr_rom.len() >> 10;  // / 0x0400 = / 1KB
         if chr_banks == 0 { return 0; }
         let bank = bank % chr_banks;
-        bank * 0x0400
+        bank << 10  // 0x0400 = 1KB
     }
 }
 
 impl Mapper for Mapper004 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -190,6 +564,7 @@ impl Mapper for Mapper004 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -236,6 +611,7 @@ impl Mapper for Mapper004 {
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = if self.chr_inversion {
             match addr {
@@ -271,6 +647,7 @@ impl Mapper for Mapper004 {
         }
     }
     
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         // Only write if CHR RAM
         if addr < 0x2000 && self.chr_rom.len() <= 0x2000 {
@@ -278,6 +655,7 @@ impl Mapper for Mapper004 {
         }
     }
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirror_mode == 0 {
             crate::cartridge::Mirroring::Vertical
@@ -374,6 +752,7 @@ impl Mapper002 {
 }
 
 impl Mapper for Mapper002 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -390,6 +769,7 @@ impl Mapper for Mapper002 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -402,14 +782,17 @@ impl Mapper for Mapper002 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         self.chr_rom[addr as usize]
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         self.chr_rom[addr as usize] = data;
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
@@ -505,6 +888,7 @@ impl Mapper001 {
 }
 
 impl Mapper for Mapper001 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -549,6 +933,7 @@ impl Mapper for Mapper001 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -557,6 +942,7 @@ impl Mapper for Mapper001 {
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let chr_mode = self.control & 0x10 != 0;
         if self.chr_banks == 0 {
@@ -588,12 +974,14 @@ impl Mapper for Mapper001 {
         }
     }
     
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_banks == 0 {
             self.chr_rom[addr as usize] = data;
         }
     }
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.control & 3 {
             0 => crate::cartridge::Mirroring::SingleScreenLower,
@@ -658,6 +1046,7 @@ impl Mapper003 {
 }
 
 impl Mapper for Mapper003 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x8000..=0xBFFF => {
@@ -675,12 +1064,14 @@ impl Mapper for Mapper003 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
             self.chr_bank = data & 0x03; // Usually 2 bits, supporting up to 4 banks
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_rom.is_empty() {
             return 0;
@@ -695,10 +1086,12 @@ impl Mapper for Mapper003 {
         }
     }
     
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {
         // CHR ROM is read-only for CNROM
     }
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
@@ -733,6 +1126,7 @@ impl Mapper007 {
 }
 
 impl Mapper for Mapper007 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let bank = self.prg_bank as usize;
@@ -749,6 +1143,7 @@ impl Mapper for Mapper007 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
             self.prg_bank = data & 0x07; // bits 0-2: PRG bank
@@ -756,14 +1151,17 @@ impl Mapper for Mapper007 {
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         self.chr_ram[addr as usize & 0x1FFF]
     }
     
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         self.chr_ram[addr as usize & 0x1FFF] = data;
     }
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirroring_bit {
             crate::cartridge::Mirroring::SingleScreenUpper
@@ -824,6 +1222,7 @@ impl Mapper009 {
 }
 
 impl Mapper for Mapper009 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -847,6 +1246,7 @@ impl Mapper for Mapper009 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -860,6 +1260,7 @@ impl Mapper for Mapper009 {
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = match addr {
             0x0000..=0x0FFF => {
@@ -889,8 +1290,10 @@ impl Mapper for Mapper009 {
         result
     }
     
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirror_mode == 0 {
             crate::cartridge::Mirroring::Vertical
@@ -942,6 +1345,7 @@ impl Mapper011 {
 }
 
 impl Mapper for Mapper011 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
@@ -951,12 +1355,14 @@ impl Mapper for Mapper011 {
             if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
         } else { 0 }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
             self.prg_bank = (data >> 4) & 0x03;
             self.chr_bank = data & 0x0F;
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_rom.is_empty() { return 0; }
         let chr_banks = self.chr_rom.len() / 0x2000;
@@ -965,7 +1371,9 @@ impl Mapper for Mapper011 {
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
     fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
     fn load_state(&mut self, data: &[u8]) {
@@ -991,6 +1399,7 @@ impl Mapper066 {
 }
 
 impl Mapper for Mapper066 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
@@ -1000,12 +1409,14 @@ impl Mapper for Mapper066 {
             if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
         } else { 0 }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
             self.chr_bank = data & 0x03;
             self.prg_bank = (data >> 4) & 0x03;
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_rom.is_empty() { return 0; }
         let chr_banks = self.chr_rom.len() / 0x2000;
@@ -1014,7 +1425,9 @@ impl Mapper for Mapper066 {
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
     fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
     fn load_state(&mut self, data: &[u8]) {
@@ -1046,6 +1459,7 @@ impl Mapper071 {
 }
 
 impl Mapper for Mapper071 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x8000..=0xBFFF => {
@@ -1059,6 +1473,7 @@ impl Mapper for Mapper071 {
             _ => 0,
         }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x9000..=0x9FFF => {
@@ -1071,8 +1486,11 @@ impl Mapper for Mapper071 {
             _ => {}
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 { self.chr_ram[addr as usize & 0x1FFF] }
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) { self.chr_ram[addr as usize & 0x1FFF] = data; }
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_override {
             Some(true) => crate::cartridge::Mirroring::SingleScreenUpper,
@@ -1139,6 +1557,7 @@ impl Mapper069 {
 }
 
 impl Mapper for Mapper069 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => {
@@ -1170,6 +1589,7 @@ impl Mapper for Mapper069 {
         }
     }
     
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => {
@@ -1208,6 +1628,7 @@ impl Mapper for Mapper069 {
         }
     }
     
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
         if bank_idx >= 8 { return 0; }
@@ -1219,12 +1640,14 @@ impl Mapper for Mapper069 {
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
     
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_rom.len() <= 0x2000 {
             self.chr_rom[addr as usize & 0x1FFF] = data;
         }
     }
     
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_mode {
             0 => crate::cartridge::Mirroring::Vertical,
@@ -1322,6 +1745,7 @@ impl Mapper010 {
 }
 
 impl Mapper for Mapper010 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -1336,6 +1760,7 @@ impl Mapper for Mapper010 {
             _ => 0,
         }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -1348,6 +1773,7 @@ impl Mapper for Mapper010 {
             _ => {}
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = match addr {
             0x0000..=0x0FFF => if self.latch_0.get() { self.chr_bank_0_fe } else { self.chr_bank_0_fd },
@@ -1368,7 +1794,9 @@ impl Mapper for Mapper010 {
         }
         result
     }
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirror_mode == 0 { crate::cartridge::Mirroring::Vertical } else { crate::cartridge::Mirroring::Horizontal }
     }
@@ -1405,6 +1833,7 @@ impl Mapper079 {
 }
 
 impl Mapper for Mapper079 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
@@ -1414,12 +1843,14 @@ impl Mapper for Mapper079 {
             if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
         } else { 0 }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x4100 && addr <= 0x5FFF {
             self.chr_bank = data & 0x07;
             self.prg_bank = (data >> 3) & 0x01;
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_rom.is_empty() { return 0; }
         let chr_banks = self.chr_rom.len() / 0x2000;
@@ -1428,7 +1859,9 @@ impl Mapper for Mapper079 {
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
+    #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
     fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
     fn load_state(&mut self, data: &[u8]) {
@@ -1458,6 +1891,7 @@ impl Mapper206 {
 }
 
 impl Mapper for Mapper206 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x8000..=0x9FFF => {
@@ -1479,6 +1913,7 @@ impl Mapper for Mapper206 {
             _ => 0,
         }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x8000..=0x9FFF => {
@@ -1491,6 +1926,7 @@ impl Mapper for Mapper206 {
             _ => {}
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = match addr {
             0x0000..=0x03FF => (self.registers[0] & 0xFE) as usize,
@@ -1509,9 +1945,11 @@ impl Mapper for Mapper206 {
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_rom.len() <= 0x2000 { self.chr_rom[addr as usize & 0x1FFF] = data; }
     }
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
     fn save_state(&self) -> Vec<u8> {
         let mut data = vec![self.bank_select];
@@ -1553,6 +1991,7 @@ impl Mapper034 {
 }
 
 impl Mapper for Mapper034 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -1564,6 +2003,7 @@ impl Mapper for Mapper034 {
             _ => 0,
         }
     }
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
@@ -1573,12 +2013,15 @@ impl Mapper for Mapper034 {
             _ => {}
         }
     }
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         self.chr_ram[addr as usize & 0x1FFF]
     }
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         self.chr_ram[addr as usize & 0x1FFF] = data;
     }
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
     fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
     fn set_sram(&mut self, data: &[u8]) {
@@ -1719,6 +2162,7 @@ impl MapperVRC6 {
 }
 
 impl Mapper for MapperVRC6 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -1742,6 +2186,7 @@ impl Mapper for MapperVRC6 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         let addr = self.translate_addr(addr);
         match addr {
@@ -1836,6 +2281,7 @@ impl Mapper for MapperVRC6 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
         if bank_idx >= 8 { return 0; }
@@ -1847,12 +2293,14 @@ impl Mapper for MapperVRC6 {
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_rom.len() <= 0x2000 {
             self.chr_rom[addr as usize & 0x1FFF] = data;
         }
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_mode {
             0 => crate::cartridge::Mirroring::Vertical,
@@ -2100,6 +2548,7 @@ impl Mapper005 {
 }
 
 impl Mapper for Mapper005 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             // $5000-$5BFF: MMC5 internal registers
@@ -2257,6 +2706,7 @@ impl Mapper for Mapper005 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             // $5000-$5015: Audio (skip for now)
@@ -2355,6 +2805,7 @@ impl Mapper for Mapper005 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let chr_banks_1k = self.chr_rom.len() / 0x0400;
         if chr_banks_1k == 0 {
@@ -2397,6 +2848,7 @@ impl Mapper for Mapper005 {
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         // CHR RAM writes
         if self.chr_rom.len() <= 0x2000 {
@@ -2404,6 +2856,7 @@ impl Mapper for Mapper005 {
         }
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         // MMC5 nametable mapping is complex; simplify to basic modes
         match self.nametable_mapping & 0x03 {
@@ -2548,6 +3001,7 @@ impl Mapper019 {
 }
 
 impl Mapper for Mapper019 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             // $4800-$4FFF: Sound RAM data port
@@ -2590,6 +3044,7 @@ impl Mapper for Mapper019 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
             // $4800-$4FFF: Sound RAM data port
@@ -2648,6 +3103,7 @@ impl Mapper for Mapper019 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
         if bank_idx >= 8 { return 0; }
@@ -2666,6 +3122,7 @@ impl Mapper for Mapper019 {
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         let bank_idx = (addr / 0x0400) as usize;
         if bank_idx >= 8 { return; }
@@ -2679,6 +3136,7 @@ impl Mapper for Mapper019 {
         }
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_mode {
             0 => crate::cartridge::Mirroring::Vertical,
@@ -2817,6 +3275,7 @@ impl Mapper085 {
 }
 
 impl Mapper for Mapper085 {
+    #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
             0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize],
@@ -2840,6 +3299,7 @@ impl Mapper for Mapper085 {
         }
     }
 
+    #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         let addr = self.translate_addr(addr);
         match addr {
@@ -2892,6 +3352,7 @@ impl Mapper for Mapper085 {
         }
     }
 
+    #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
         if bank_idx >= 8 { return 0; }
@@ -2903,12 +3364,14 @@ impl Mapper for Mapper085 {
         if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
     }
 
+    #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_rom.len() <= 0x2000 {
             self.chr_rom[addr as usize & 0x1FFF] = data;
         }
     }
 
+    #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_mode {
             0 => crate::cartridge::Mirroring::Vertical,

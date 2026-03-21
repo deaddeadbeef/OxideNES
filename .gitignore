@@ -1,4 +1,13 @@
+# Build artifacts
 /target
+*.exe
+*.pdb
+*.dSYM
+
+# ROM files (do not distribute copyrighted ROMs)
+*.nes
+# Exception: test ROM (public domain)
+!nestest.nes
 
 # User data
 *.sav
@@ -7,8 +16,29 @@
 screenshots/
 config.json
 
-# Development artifacts  
-apu_diag*.txt
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
 
 # Inno Setup output
 installer/Output/
+
+# Development artifacts
+apu_diag*.txt
+*.log
+core
+core.*
+
+# Cargo
+# Keep Cargo.lock for binary crate (recommended)

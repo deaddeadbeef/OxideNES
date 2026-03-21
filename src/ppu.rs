@@ -51,6 +51,7 @@ pub struct Ppu {
     nmi_previous: bool,
     pub region: Region,
     open_bus: u8,
+    oam_dirty: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -122,9 +123,11 @@ impl Ppu {
             nmi_previous: false,
             region: Region::Ntsc,
             open_bus: 0,
+            oam_dirty: true,
         }
     }
 
+    #[inline(always)]
     fn mirror_vram_addr(mirroring: &Mirroring, addr: u16) -> u16 {
         let mirrored = addr & 0x2FFF;
         let vram_index = mirrored - 0x2000;
@@ -145,6 +148,7 @@ impl Ppu {
         }
     }
 
+    #[inline(always)]
     fn mirror_palette_addr(addr: u16) -> u16 {
         let addr = addr & 0x1F;
         // Mirrors of background color
@@ -154,6 +158,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     fn ppu_read(&self, addr: u16, cart: &Cartridge) -> u8 {
         match addr {
             0x0000..=0x1FFF => cart.mapper.read_chr(addr),
@@ -170,6 +175,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     fn ppu_write(&mut self, addr: u16, data: u8, cart: &mut Cartridge) {
         match addr {
             0x0000..=0x1FFF => cart.mapper.write_chr(addr, data),
@@ -238,6 +244,7 @@ impl Ppu {
             0x2004 => {
                 self.oam_data[self.oam_addr as usize] = data;
                 self.oam_addr = self.oam_addr.wrapping_add(1);
+                self.oam_dirty = true;
             }
             0x2005 => {
                 if !self.w {
@@ -269,10 +276,12 @@ impl Ppu {
         }
     }
 
+    #[inline(always)]
     fn rendering_enabled(&self) -> bool {
         self.mask & 0x18 != 0
     }
 
+    #[inline]
     fn increment_scroll_x(&mut self) {
         if !self.rendering_enabled() { return; }
         if self.v & 0x001F == 31 {
@@ -283,6 +292,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     fn increment_scroll_y(&mut self) {
         if !self.rendering_enabled() { return; }
         if self.v & 0x7000 != 0x7000 {
@@ -302,16 +312,19 @@ impl Ppu {
         }
     }
 
+    #[inline]
     fn transfer_address_x(&mut self) {
         if !self.rendering_enabled() { return; }
         self.v = (self.v & !0x041F) | (self.t & 0x041F);
     }
 
+    #[inline]
     fn transfer_address_y(&mut self) {
         if !self.rendering_enabled() { return; }
         self.v = (self.v & !0x7BE0) | (self.t & 0x7BE0);
     }
 
+    #[inline]
     fn load_background_shifters(&mut self) {
         self.bg_shifter_pattern_lo = (self.bg_shifter_pattern_lo & 0xFF00) | self.bg_next_tile_lsb as u16;
         self.bg_shifter_pattern_hi = (self.bg_shifter_pattern_hi & 0xFF00) | self.bg_next_tile_msb as u16;
@@ -319,6 +332,7 @@ impl Ppu {
         self.bg_shifter_attrib_hi = (self.bg_shifter_attrib_hi & 0xFF00) | if self.bg_next_tile_attrib & 0x02 != 0 { 0xFF } else { 0x00 };
     }
 
+    #[inline]
     fn update_shifters(&mut self) {
         if self.mask & 0x08 != 0 {
             self.bg_shifter_pattern_lo <<= 1;
@@ -338,6 +352,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub fn tick(&mut self, cart: &mut Cartridge) -> bool {
         let mut trigger_nmi = false;
 
@@ -580,8 +595,13 @@ impl Ppu {
                 }
             };
 
-            let color_addr = 0x3F00 + (palette as u16) * 4 + pixel as u16;
-            let mut color_index = self.ppu_read(color_addr, cart) as usize & 0x3F;
+            let palette_idx = (palette as usize) * 4 + pixel as usize;
+            // SAFETY: palette is 0-7 (2 bits for BG palette, or 4-7 for sprite palette)
+            // pixel is 0-3 (2 bits). So palette_idx is at most 7*4+3 = 31, which is always valid
+            // for palette_table (size = 32 elements)
+            let mut color_index = unsafe {
+                *self.palette_table.get_unchecked(palette_idx) as usize & 0x3F
+            };
 
             // Greyscale mode: AND with 0x30 to only use grey column colors
             if self.mask & 0x01 != 0 {
@@ -620,8 +640,13 @@ impl Ppu {
 
             let x = (self.cycle - 1) as usize;
             let y = self.scanline as usize;
-            if x < 256 && y < 240 {
-                self.frame_data[y * 256 + x] = color;
+            // SAFETY: We're in the visible scanline range (0-239) and visible cycle range (1-256).
+            // scanline check: self.scanline >= 0 && self.scanline < 240 (line 516)
+            // cycle check: self.cycle >= 1 && self.cycle <= 256 (line 516)
+            // Therefore: y < 240 and x < 256, making (y * 256 + x) < 61440, which is always valid
+            // for frame_data (size = 256 * 240 = 61440 elements)
+            unsafe {
+                *self.frame_data.get_unchecked_mut(y * 256 + x) = color;
             }
         }
 
@@ -656,6 +681,11 @@ impl Ppu {
         let triggered = nmi_line && !self.nmi_previous;
         self.nmi_previous = nmi_line;
         triggered
+    }
+
+    #[inline(always)]
+    pub fn mark_oam_dirty(&mut self) {
+        self.oam_dirty = true;
     }
 
     pub fn set_region(&mut self, region: Region) {

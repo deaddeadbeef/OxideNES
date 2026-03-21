@@ -35,8 +35,8 @@ impl Updater {
 
     fn check_github() -> Option<UpdateInfo> {
         let current_version = env!("CARGO_PKG_VERSION");
-        let resp = ureq::get("https://api.github.com/repos/pf-github-code/nes-emulator/releases/latest")
-            .set("User-Agent", "nes-emulator")
+        let resp = ureq::get("https://api.github.com/repos/deaddeadbeef/OxideNES/releases/latest")
+            .set("User-Agent", "oxidenes")
             .call()
             .ok()?;
         let body: String = resp.into_string().ok()?;

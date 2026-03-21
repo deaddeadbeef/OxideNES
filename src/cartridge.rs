@@ -1,4 +1,4 @@
-use crate::mapper::{Mapper, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper005, Mapper007, Mapper009, Mapper010, Mapper011, Mapper019, Mapper034, Mapper066, Mapper069, Mapper071, Mapper079, Mapper085, Mapper206, MapperVRC6};
+use crate::mapper::{MapperEnum, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper005, Mapper007, Mapper009, Mapper010, Mapper011, Mapper019, Mapper034, Mapper066, Mapper069, Mapper071, Mapper079, Mapper085, Mapper206, MapperVRC6};
 use crate::romdb::RomDatabase;
 
 const INES_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // "NES\x1a"
@@ -13,7 +13,7 @@ pub enum Mirroring {
 }
 
 pub struct Cartridge {
-    pub mapper: Box<dyn Mapper>,
+    pub mapper: MapperEnum,
     pub has_battery: bool,
     pub rom_title: Option<String>,
 }
@@ -105,27 +105,27 @@ impl Cartridge {
             Vec::new()
         };
 
-        let mapper: Box<dyn Mapper> = match mapper_id {
-            0 => Box::new(Mapper000::new(prg_rom, chr_rom, mirroring)),
-            1 => Box::new(Mapper001::new(prg_rom, chr_rom, mirroring)),
-            2 => Box::new(Mapper002::new(prg_rom, chr_rom, mirroring)),
-            3 => Box::new(Mapper003::new(prg_rom, chr_rom, mirroring)),
-            4 => Box::new(Mapper004::new(prg_rom, chr_rom, mirroring)),
-            5 => Box::new(Mapper005::new(prg_rom, chr_rom, mirroring)),
-            7 => Box::new(Mapper007::new(prg_rom, chr_rom, mirroring)),
-            9 => Box::new(Mapper009::new(prg_rom, chr_rom, mirroring)),
-            10 => Box::new(Mapper010::new(prg_rom, chr_rom, mirroring)),
-            11 => Box::new(Mapper011::new(prg_rom, chr_rom, mirroring)),
-            19 => Box::new(Mapper019::new(prg_rom, chr_rom, mirroring)),
-            24 => Box::new(MapperVRC6::new(prg_rom, chr_rom, mirroring, false)),
-            26 => Box::new(MapperVRC6::new(prg_rom, chr_rom, mirroring, true)),
-            34 => Box::new(Mapper034::new(prg_rom, chr_rom, mirroring)),
-            66 => Box::new(Mapper066::new(prg_rom, chr_rom, mirroring)),
-            69 => Box::new(Mapper069::new(prg_rom, chr_rom, mirroring)),
-            71 => Box::new(Mapper071::new(prg_rom, chr_rom, mirroring)),
-            79 => Box::new(Mapper079::new(prg_rom, chr_rom, mirroring)),
-            85 => Box::new(Mapper085::new(prg_rom, chr_rom, mirroring)),
-            206 => Box::new(Mapper206::new(prg_rom, chr_rom, mirroring)),
+        let mapper: MapperEnum = match mapper_id {
+            0 => MapperEnum::Mapper000(Mapper000::new(prg_rom, chr_rom, mirroring)),
+            1 => MapperEnum::Mapper001(Mapper001::new(prg_rom, chr_rom, mirroring)),
+            2 => MapperEnum::Mapper002(Mapper002::new(prg_rom, chr_rom, mirroring)),
+            3 => MapperEnum::Mapper003(Mapper003::new(prg_rom, chr_rom, mirroring)),
+            4 => MapperEnum::Mapper004(Mapper004::new(prg_rom, chr_rom, mirroring)),
+            5 => MapperEnum::Mapper005(Mapper005::new(prg_rom, chr_rom, mirroring)),
+            7 => MapperEnum::Mapper007(Mapper007::new(prg_rom, chr_rom, mirroring)),
+            9 => MapperEnum::Mapper009(Mapper009::new(prg_rom, chr_rom, mirroring)),
+            10 => MapperEnum::Mapper010(Mapper010::new(prg_rom, chr_rom, mirroring)),
+            11 => MapperEnum::Mapper011(Mapper011::new(prg_rom, chr_rom, mirroring)),
+            19 => MapperEnum::Mapper019(Mapper019::new(prg_rom, chr_rom, mirroring)),
+            24 => MapperEnum::Mapper024(MapperVRC6::new(prg_rom, chr_rom, mirroring, false)),
+            26 => MapperEnum::Mapper026(MapperVRC6::new(prg_rom, chr_rom, mirroring, true)),
+            34 => MapperEnum::Mapper034(Mapper034::new(prg_rom, chr_rom, mirroring)),
+            66 => MapperEnum::Mapper066(Mapper066::new(prg_rom, chr_rom, mirroring)),
+            69 => MapperEnum::Mapper069(Mapper069::new(prg_rom, chr_rom, mirroring)),
+            71 => MapperEnum::Mapper071(Mapper071::new(prg_rom, chr_rom, mirroring)),
+            79 => MapperEnum::Mapper079(Mapper079::new(prg_rom, chr_rom, mirroring)),
+            85 => MapperEnum::Mapper085(Mapper085::new(prg_rom, chr_rom, mirroring)),
+            206 => MapperEnum::Mapper206(Mapper206::new(prg_rom, chr_rom, mirroring)),
             _ => {
                 let popular = match mapper_id {
                     5 => "Castlevania III, Just Breed",

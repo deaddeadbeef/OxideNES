@@ -1,10 +1,11 @@
 [package]
-name = "nes-emulator"
+name = "oxidenes"
 version = "0.1.0"
 edition = "2021"
+authors = ["pf-github-code"]
 description = "A cycle-accurate NES emulator with CRT simulation"
 license = "MIT"
-repository = "https://github.com/user/nes-emulator"
+repository = "https://github.com/deaddeadbeef/OxideNES"
 readme = "README.md"
 keywords = ["nes", "emulator", "nintendo", "retro", "gaming"]
 categories = ["games", "emulators"]
@@ -33,4 +34,6 @@ codegen-units = 1
 strip = true
 
 [target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+es]
 winres = "0.1"

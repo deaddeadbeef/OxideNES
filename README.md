@@ -1,8 +1,14 @@
-# 🎮 NES Emulator
+# 🎮 OxideNES
+
+[![CI](https://github.com/deaddeadbeef/OxideNES/actions/workflows/ci.yml/badge.svg)](https://github.com/deaddeadbeef/OxideNES/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
 A feature-rich NES (Nintendo Entertainment System) emulator written in Rust.
 
-[Screenshot placeholder]
+> **Note:** This emulator does not include any game ROMs. You must provide your own legally obtained .nes ROM files.
+
+> *Screenshot: Launch the emulator and drop a .nes ROM file to start playing!*
 
 ## Features
 
@@ -69,13 +75,13 @@ cargo build --release
 
 ## Configuration
 
-Settings are stored in `~/.nes-emulator/config.json` and can be edited in-app via the Settings menu.
+Settings are stored in `~/.oxidenes/config.json` and can be edited in-app via the Settings menu.
 
 ## Lua Scripting
 
-Place `.lua` scripts in `~/.nes-emulator/scripts/` or load via `--script` flag:
+Place `.lua` scripts in `~/.oxidenes/scripts/` or load via `--script` flag:
 ```bash
-nes-emulator game.nes --script myscript.lua
+oxidenes game.nes --script myscript.lua
 ```
 
 ### API
@@ -89,7 +95,7 @@ nes.log(text)         -- Print to stderr
 
 ## Achievements
 
-Place achievement JSON files in `~/.nes-emulator/achievements/{rom_md5}.json`:
+Place achievement JSON files in `~/.oxidenes/achievements/{rom_md5}.json`:
 ```json
 {
     "game_title": "Game Name",
@@ -124,6 +130,16 @@ Requires [Inno Setup](https://jrsoftware.org/isinfo.php):
 ```bash
 iscc installer/nes-emulator.iss
 ```
+
+## Credits & Acknowledgments
+
+- **nestest.nes** — CPU test ROM by [Kevin Horton](http://wiki.nesdev.com/w/index.php/Emulator_tests), public domain
+- **NESdev Wiki** — Invaluable hardware documentation at [nesdev.org](https://www.nesdev.org/wiki/)
+- **Rust Crates** — [minifb](https://crates.io/crates/minifb) (windowing), [cpal](https://crates.io/crates/cpal) (audio), [gilrs](https://crates.io/crates/gilrs) (gamepad), [serde](https://crates.io/crates/serde) (config)
+
+## Legal
+
+This is a clean-room NES emulator implementation. No proprietary Nintendo code or assets are included. NES ROMs are not provided — users must supply their own legally obtained ROM files.
 
 ## License
 

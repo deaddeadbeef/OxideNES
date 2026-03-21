@@ -15,6 +15,7 @@ pub struct AchievementNotification {
     pub title: String,
     pub points: u32,
     pub frames_remaining: u32,
+    pub cached_text: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -151,10 +152,12 @@ impl AchievementEngine {
         self.unlocked_count += 1;
         self.total_points += ach.points;
 
+        let cached_text = format!("* {} (+{})", ach.title, ach.points);
         self.notifications.push(AchievementNotification {
             title: ach.title.clone(),
             points: ach.points,
             frames_remaining: 180, // 3 seconds at 60fps
+            cached_text,
         });
 
         self.save_unlock_state();
