@@ -35,5 +35,3 @@ strip = true
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
-es]
-winres = "0.1"
