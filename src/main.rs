@@ -10,17 +10,17 @@ use ringbuf::{traits::*, HeapRb};
 use gilrs::{Gilrs, Button, Axis};
 use serde::{Serialize, Deserialize};
 
-use nes_emulator::bus::Bus;
-use nes_emulator::cartridge::Cartridge;
-use nes_emulator::cpu::Cpu;
-use nes_emulator::joypad::JoypadButton;
-use nes_emulator::netplay::{NetplaySession, NetplayState};
-use nes_emulator::ppu::Region;
-use nes_emulator::scripting::ScriptEngine;
-use nes_emulator::achievements::{AchievementEngine, md5_hex};
-use nes_emulator::recording::{InputRecording, sha256};
-use nes_emulator::romdb::RomDatabase;
-use nes_emulator::updater::Updater;
+use oxidenes::bus::Bus;
+use oxidenes::cartridge::Cartridge;
+use oxidenes::cpu::Cpu;
+use oxidenes::joypad::JoypadButton;
+use oxidenes::netplay::{NetplaySession, NetplayState};
+use oxidenes::ppu::Region;
+use oxidenes::scripting::ScriptEngine;
+use oxidenes::achievements::{AchievementEngine, md5_hex};
+use oxidenes::recording::{InputRecording, sha256};
+use oxidenes::romdb::RomDatabase;
+use oxidenes::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
 const TV_WIDTH: usize = 1200;
@@ -498,7 +498,7 @@ fn cheats_dir() -> PathBuf {
     config_dir().join("cheats")
 }
 
-fn save_cheats(rom_name: &str, cheats: &[nes_emulator::bus::GameGenieCode]) {
+fn save_cheats(rom_name: &str, cheats: &[oxidenes::bus::GameGenieCode]) {
     if rom_name.is_empty() { return; }
     let dir = cheats_dir();
     let _ = fs::create_dir_all(&dir);
@@ -510,7 +510,7 @@ fn save_cheats(rom_name: &str, cheats: &[nes_emulator::bus::GameGenieCode]) {
     }
 }
 
-fn load_cheats(rom_name: &str) -> Vec<nes_emulator::bus::GameGenieCode> {
+fn load_cheats(rom_name: &str) -> Vec<oxidenes::bus::GameGenieCode> {
     if rom_name.is_empty() { return Vec::new(); }
     let path = cheats_dir().join(format!("{}.json", rom_name));
     let Ok(data) = fs::read_to_string(&path) else { return Vec::new(); };
@@ -518,7 +518,7 @@ fn load_cheats(rom_name: &str) -> Vec<nes_emulator::bus::GameGenieCode> {
     entries.iter().filter_map(|e| {
         let code_str = e.get("code")?.as_str()?;
         let enabled = e.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-        let mut code = nes_emulator::bus::GameGenieCode::decode(code_str)?;
+        let mut code = oxidenes::bus::GameGenieCode::decode(code_str)?;
         code.enabled = enabled;
         Some(code)
     }).collect()
@@ -3200,7 +3200,7 @@ fn main() {
                                     Key::Backspace => { cheat_input_buffer.pop(); }
                                     Key::Enter => {
                                         if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
-                                            if let Some(code) = nes_emulator::bus::GameGenieCode::decode(&cheat_input_buffer) {
+                                            if let Some(code) = oxidenes::bus::GameGenieCode::decode(&cheat_input_buffer) {
                                                 bus.cheats.push(code);
                                                 save_cheats(&current_rom_name, &bus.cheats);
                                                 cheat_message = Some(format!("ADDED: {}", cheat_input_buffer));

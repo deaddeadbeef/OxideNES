@@ -1,7 +1,7 @@
 use std::fs;
-use nes_emulator::bus::Bus;
-use nes_emulator::cartridge::Cartridge;
-use nes_emulator::cpu::Cpu;
+use oxidenes::bus::Bus;
+use oxidenes::cartridge::Cartridge;
+use oxidenes::cpu::Cpu;
 
 #[test]
 fn nestest_official_opcodes() {

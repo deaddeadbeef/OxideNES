@@ -956,25 +956,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nes-emulator"
-version = "0.1.0"
-dependencies = [
- "blip_buf",
- "cpal",
- "crc32fast",
- "gilrs",
- "minifb",
- "mlua",
- "ringbuf",
- "semver",
- "serde",
- "serde_json",
- "socket2",
- "ureq",
- "winres",
-]
-
-[[package]]
 name = "nix"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1108,6 +1089,25 @@ dependencies = [
  "libc",
  "libredox",
  "sdl2",
+]
+
+[[package]]
+name = "oxidenes"
+version = "0.1.0"
+dependencies = [
+ "blip_buf",
+ "cpal",
+ "crc32fast",
+ "gilrs",
+ "minifb",
+ "mlua",
+ "ringbuf",
+ "semver",
+ "serde",
+ "serde_json",
+ "socket2",
+ "ureq",
+ "winres",
 ]
 
 [[package]]
