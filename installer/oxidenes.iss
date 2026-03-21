@@ -3,15 +3,15 @@
 ; ============================================================================
 ; Build:
 ;   1. cargo build --release
-;   2. iscc installer\nes-emulator.iss
-;   Output: installer\Output\nes-emulator-0.1.0-setup.exe
+;   2. iscc installer\oxidenes.iss
+;   Output: installer\Output\oxidenes-0.1.0-setup.exe
 ; ============================================================================
 
-#define MyAppName      "NES Emulator"
+#define MyAppName      "OxideNES"
 #define MyAppVersion   "0.1.0"
-#define MyAppPublisher "nes-emulator contributors"
+#define MyAppPublisher "OxideNES contributors"
 #define MyAppURL       "https://github.com/deaddeadbeef/OxideNES"
-#define MyAppExeName   "nes-emulator.exe"
+#define MyAppExeName   "oxidenes.exe"
 #define MyAppRoot      ".."
 
 [Setup]
