@@ -2047,6 +2047,7 @@ fn main() {
     let mut ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
     let mut ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
     let mut ghost_buffer = tv_frame_bg.clone();
+    let mut audio_swap_buf: Vec<f32> = Vec::with_capacity(2048);
     // Menu framebuffer (256x240, same as NES PPU output)
     let mut menu_framebuffer = vec![0u32; 256 * 240];
 
@@ -3645,13 +3646,14 @@ fn main() {
                                 bus.apu.end_frame();
 
                                 if ff == frame_count - 1 {
-                                    let samples = bus.apu.drain_samples();
+                                    std::mem::swap(&mut audio_swap_buf, &mut bus.apu.sample_buffer);
                                     let vol = audio_volume as f32 / 100.0;
-                                    for &sample in &samples {
+                                    for &sample in &audio_swap_buf {
                                         let _ = producer.try_push(sample * vol);
                                     }
+                                    audio_swap_buf.clear();
                                 } else {
-                                    bus.apu.drain_samples();
+                                    bus.apu.sample_buffer.clear();
                                 }
                             }
 
@@ -5749,17 +5751,16 @@ fn apply_scanline_vignette(r: u32, g: u32, b: u32, scan_mul: u32, vig: u32) -> (
 fn apply_mask(r: u32, g: u32, b: u32, mr: u8, mg: u8, mb: u8, intensity: u32) -> (u32, u32, u32) {
     // intensity 0 = no mask effect, 100 = full mask effect
     // Lerp: result = original * (100 - intensity)/100 + masked * intensity/100
-    let mr32 = mr as u32;
-    let mg32 = mg as u32;
-    let mb32 = mb as u32;
-    let masked_r = (r * mr32) / 255;
-    let masked_g = (g * mg32) / 255;
-    let masked_b = (b * mb32) / 255;
+    // / 255 approx: (x * 0x8081) >> 23  — exact for 0..=65025
+    let masked_r = ((r * mr as u32) * 0x8081) >> 23;
+    let masked_g = ((g * mg as u32) * 0x8081) >> 23;
+    let masked_b = ((b * mb as u32) * 0x8081) >> 23;
     let inv = 100 - intensity;
+    // / 100 approx: (x * 1311) >> 17  — accurate for 0..=131071
     (
-        (r * inv + masked_r * intensity) / 100,
-        (g * inv + masked_g * intensity) / 100,
-        (b * inv + masked_b * intensity) / 100,
+        ((r * inv + masked_r * intensity) * 1311) >> 17,
+        ((g * inv + masked_g * intensity) * 1311) >> 17,
+        ((b * inv + masked_b * intensity) * 1311) >> 17,
     )
 }
 
