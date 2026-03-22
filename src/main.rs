@@ -2218,7 +2218,7 @@ fn main() {
     let mut glass_intensity = config.glass_intensity;
     let mut ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
     let mut ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
-    // ghost_buffer removed: ghost reads directly from composite_buffer (shifted pixels are always ahead)
+    let mut ghost_buffer = tv_frame_bg.clone();
     let mut audio_swap_buf: Vec<f32> = Vec::with_capacity(2048);
     // Menu framebuffer (256x240, same as NES PPU output)
     let mut menu_framebuffer = vec![0u32; 256 * 240];
@@ -3457,7 +3457,14 @@ fn main() {
                 composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                 if crt_enabled {
                     let do_ghost = glass_intensity > 20;
-                    apply_glass_effects(&mut composite_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
+                    if do_ghost {
+                        for y in 0..SCREEN_H {
+                            let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                            ghost_buffer[row_start..row_start + SCREEN_W]
+                                .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                        }
+                    }
+                    apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                 }
 
                 window
@@ -4501,7 +4508,14 @@ fn main() {
 
                     if crt_enabled {
                         let do_ghost = glass_intensity > 20;
-                        apply_glass_effects(&mut composite_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
+                        if do_ghost {
+                            for y in 0..SCREEN_H {
+                                let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                ghost_buffer[row_start..row_start + SCREEN_W]
+                                    .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                            }
+                        }
+                        apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                     }
                     if is_rewinding {
                         let sx = SCREEN_X;
@@ -5671,7 +5685,14 @@ fn main() {
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                         if crt_enabled {
                             let do_ghost = glass_intensity > 20;
-                            apply_glass_effects(&mut composite_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
+                            if do_ghost {
+                                for y in 0..SCREEN_H {
+                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                    ghost_buffer[row_start..row_start + SCREEN_W]
+                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                                }
+                            }
+                            apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
 
                         // Render save state thumbnail in pause menu (composite buffer)
@@ -5916,7 +5937,14 @@ fn main() {
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                         if crt_enabled {
                             let do_ghost = glass_intensity > 20;
-                            apply_glass_effects(&mut composite_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
+                            if do_ghost {
+                                for y in 0..SCREEN_H {
+                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
+                                    ghost_buffer[row_start..row_start + SCREEN_W]
+                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
+                                }
+                            }
+                            apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
                     }
 
@@ -7041,6 +7069,7 @@ fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
 /// Single pass over the screen area — eliminates one full buffer traversal.
 fn apply_glass_effects(
     buffer: &mut [u32],
+    source_copy: &[u32],  // pre-effects copy for ghost
     glare_table: &[u8],
     thickness_table: &[u16],
     ghost_alpha_table: &[u8],
@@ -7133,8 +7162,7 @@ fn apply_glass_effects(
                     let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(glare_idx) } as u32;
                     if local_alpha > 0 {
                         let src_idx = src_row + x + ghost_shift_x;
-                        // Safe: ghost reads from (y+2, x+3) — always ahead of current write pos
-                        let ghost_pixel = unsafe { *buffer.get_unchecked(src_idx) };
+                        let ghost_pixel = unsafe { *source_copy.get_unchecked(src_idx) };
                         let inv_alpha = 256 - local_alpha;
                         r = ((r * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8).min(255);
                         g = ((g * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8).min(255);
