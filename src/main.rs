@@ -6055,9 +6055,9 @@ fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32)
     let pg_delta = pg_mul as i32 - 256;
     let pb_delta = pb_mul as i32 - 256;
     let br = brightness as i32;
-    let pr = (256 + (pr_delta * br / 255)) as u32;
-    let pg = (256 + (pg_delta * br / 255)) as u32;
-    let pb = (256 + (pb_delta * br / 255)) as u32;
+    let pr = (256 + (pr_delta * br >> 8)) as u32;
+    let pg = (256 + (pg_delta * br >> 8)) as u32;
+    let pb = (256 + (pb_delta * br >> 8)) as u32;
     ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8)
 }
 
@@ -6156,9 +6156,9 @@ fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_s
                 let ng = (g + carry_g).min(255);
                 let nb = (b + carry_b).min(255);
                 unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
-                carry_r >>= 1;
-                carry_g >>= 1;
-                carry_b >>= 1;
+                carry_r >>= 2;
+                carry_g >>= 2;
+                carry_b >>= 2;
             }
 
             let brightness = ((r + g + b) * 85) >> 8;
@@ -6182,15 +6182,11 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
     let blend = (glow_strength * 64 / 100).min(64) as u32;
     if blend == 0 { return; }
     
-    // Only process scanline gap rows (row % 4 == 3) and slight dim rows (row % 4 == 2)
-    for y in 0..height {
-        if y % 4 != 3 && y % 4 != 2 { continue; }
-        
-        let factor = if y % 4 == 3 { blend } else { blend >> 1 }; // gap gets full glow, dim row gets half
-        let inv = 256 - factor;
-        
-        // Average the rows above and below
-        let above = if y > 0 { y - 1 } else { y };
+    let inv = 256 - blend;
+    
+    // Only process scanline gap rows (every 4th row) — 25% of rows
+    for y in (3..height).step_by(4) {
+        let above = y - 1;
         let below = if y + 1 < height { y + 1 } else { y };
         
         let row = y * width;
@@ -6212,10 +6208,10 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
             let avg_g = (((pa >> 8) & 0xFF) + ((pb >> 8) & 0xFF)) >> 1;
             let avg_b = ((pa & 0xFF) + (pb & 0xFF)) >> 1;
             
-            // Blend: pixel * inv + avg * factor, all >>8
-            let nr = ((r * inv + avg_r * factor) >> 8).min(255);
-            let ng = ((g * inv + avg_g * factor) >> 8).min(255);
-            let nb = ((b * inv + avg_b * factor) >> 8).min(255);
+            // Blend: pixel * inv + avg * blend, all >>8
+            let nr = ((r * inv + avg_r * blend) >> 8).min(255);
+            let ng = ((g * inv + avg_g * blend) >> 8).min(255);
+            let nb = ((b * inv + avg_b * blend) >> 8).min(255);
             
             unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
         }
