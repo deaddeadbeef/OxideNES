@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1] - 2026-03-22
+
+### Changed
+- Replaced Inno Setup installer with WiX MSI (.msi) format
+- MSI supports silent install via `msiexec /i`, desktop shortcut, .nes file association
+- Added missing Linux build dependencies for CI (libudev-dev, libx11-dev)
+- Fixed crate imports after package rename to oxidenes
+
 ## [0.1.0] - 2026-03-19
 
 ### Added
