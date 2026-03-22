@@ -384,6 +384,8 @@ struct EmulatorConfig {
     check_for_updates: bool,
     #[serde(default)]
     favorite_games: Vec<String>,
+    #[serde(default)]
+    rom_directory: Option<String>,
 }
 
 impl Default for EmulatorConfig {
@@ -397,10 +399,11 @@ impl Default for EmulatorConfig {
             region: "ntsc".to_string(),
             input_bindings: InputBindings::default(),
             glass_intensity: 60,
-            config_version: 2,
+            config_version: 3,
             crt_config: CrtConfig::default(),
             check_for_updates: true,
             favorite_games: Vec::new(),
+            rom_directory: None,
         }
     }
 }
@@ -441,6 +444,12 @@ fn load_config() -> EmulatorConfig {
                         cfg.key_bindings = None;
                     }
                     cfg.config_version = 2;
+                    migrated = true;
+                }
+                
+                if cfg.config_version < 3 {
+                    // rom_directory defaults to None via serde(default) — triggers first-run setup
+                    cfg.config_version = 3;
                     migrated = true;
                 }
                 
@@ -825,6 +834,7 @@ enum SubMenu {
     FileBrowser(FileBrowser),
     InputSettings(InputSettingsState),
     CrtSettings { selected: usize, tables_dirty: bool, value_flash: u8 },
+    FolderSetup { browser: FileBrowser, from_settings: bool },
 }
 
 struct InputSettingsState {
@@ -853,16 +863,16 @@ struct FileBrowser {
 }
 
 impl FileBrowser {
-    fn new() -> Self {
-        let home = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        let roms_dir = PathBuf::from(&home).join(".nes-emulator").join("roms");
-        let downloads = PathBuf::from(&home).join("Downloads");
-        let dir = if roms_dir.is_dir() {
-            roms_dir
-        } else if downloads.is_dir() {
-            downloads
+    fn new(start_dir: Option<&str>) -> Self {
+        let dir = if let Some(d) = start_dir {
+            let p = PathBuf::from(d);
+            if p.is_dir() {
+                p
+            } else {
+                Self::default_dir()
+            }
         } else {
-            PathBuf::from(".")
+            Self::default_dir()
         };
         let entries = scan_directory(&dir);
         FileBrowser {
@@ -872,6 +882,19 @@ impl FileBrowser {
             scroll_offset: 0,
             error_message: None,
             error_timer: 0,
+        }
+    }
+
+    fn default_dir() -> PathBuf {
+        let home = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+        let roms_dir = PathBuf::from(&home).join(".nes-emulator").join("roms");
+        let downloads = PathBuf::from(&home).join("Downloads");
+        if roms_dir.is_dir() {
+            roms_dir
+        } else if downloads.is_dir() {
+            downloads
+        } else {
+            PathBuf::from(".")
         }
     }
 
@@ -1313,6 +1336,13 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     draw_text_centered_8x8(fb, "\x11 SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
+    let rom_folder_display = if let Some(ref dir) = cfg.rom_directory {
+        let s = dir.replace('\\', "/").to_uppercase();
+        if s.len() > 17 { format!("...{}", &s[s.len()-14..]) } else { s }
+    } else {
+        "NOT SET".to_string()
+    };
+
     let settings_items = [
         format!("CRT FILTER: {}", if cfg.crt_enabled { "ON" } else { "OFF" }),
         format!("BARREL DISTORTION: {}", if cfg.barrel_distortion { "ON" } else { "OFF" }),
@@ -1322,8 +1352,9 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         "CRT SETTINGS >".to_string(),
         "INPUT SETTINGS >".to_string(),
         format!("CHECK FOR UPDATES: {}", if cfg.check_for_updates { "ON" } else { "OFF" }),
+        format!("ROM FOLDER: {}", rom_folder_display),
     ];
-    let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21];
+    let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
         let is_flashing = i == selected && value_flash > 0;
@@ -1334,12 +1365,7 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
         draw_text_8x8(fb, item, 5, row, color);
     }
 
-    draw_separator_line(fb, 23);
-
-    // Key bindings display (read-only)
-    draw_text_centered_8x8(fb, "--- KEY BINDINGS ---", 24, MENU_DARK_GRAY);
-    draw_text_8x8(fb, &format!("UP:{} DN:{} LT:{} RT:{}", cfg.input_bindings.keyboard_p1.up, cfg.input_bindings.keyboard_p1.down, cfg.input_bindings.keyboard_p1.left, cfg.input_bindings.keyboard_p1.right), 4, 25, MENU_GRAY);
-    draw_text_8x8(fb, &format!("A:{} B:{} ST:{} SE:{}", cfg.input_bindings.keyboard_p1.a, cfg.input_bindings.keyboard_p1.b, cfg.input_bindings.keyboard_p1.start, cfg.input_bindings.keyboard_p1.select), 4, 26, MENU_GRAY);
+    draw_separator_line(fb, 25);
 
     draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 26, MENU_DARK_GRAY);
     draw_text_centered_8x8(fb, "ESC TO GO BACK", 27, MENU_DARK_GRAY);
@@ -1604,6 +1630,102 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
 
     draw_separator_line(fb, 25);
     draw_text_centered_8x8(fb, "A:OPEN B:BACK F:FAV L/R:PG", 26, MENU_DARK_GRAY);
+
+    // Error overlay
+    if let Some(ref msg) = browser.error_message {
+        let msg_upper = msg.to_uppercase();
+        let box_row = 13;
+        for x in 40..216 {
+            for dy in 0..24 {
+                let y = box_row * 8 + dy;
+                if y < 240 {
+                    fb[y * 256 + x] = 0x442200;
+                }
+            }
+        }
+        draw_text_centered_8x8(fb, &msg_upper, box_row + 1, 0xFFCC44);
+    }
+}
+
+fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool) {
+    const VISIBLE_ROWS: usize = 14;
+    const FIRST_ROW: usize = 9;
+    const DIR_COLOR: u32 = 0x5C94FC;
+    const DIR_COLOR_SEL: u32 = 0x7CB4FC;
+    const HIGHLIGHT_BG: u32 = 0x3C3C8C;
+
+    for pixel in fb.iter_mut() { *pixel = MENU_BG; }
+
+    draw_double_border_top(fb, 1);
+    draw_double_border_bottom(fb, 28);
+    draw_side_borders(fb);
+
+    draw_text_centered_8x8(fb, "\x11 OXIDENES \x11", 2, MENU_GOLD);
+    draw_separator_line(fb, 3);
+
+    draw_text_centered_8x8(fb, "WELCOME!", 4, MENU_WHITE);
+    draw_text_centered_8x8(fb, "SELECT YOUR ROM FOLDER", 6, MENU_GRAY);
+
+    let path_str = truncate_path_display(&browser.current_dir, 28);
+    draw_text_8x8(fb, &path_str, 2, 7, MENU_GOLD);
+
+    draw_separator_line(fb, 8);
+
+    if browser.entries.is_empty() {
+        draw_text_centered_8x8(fb, "EMPTY FOLDER", 15, MENU_DARK_GRAY);
+    } else {
+        let start = browser.scroll_offset;
+        let end = (start + VISIBLE_ROWS).min(browser.entries.len());
+
+        for i in start..end {
+            let row = FIRST_ROW + (i - start);
+            let entry = &browser.entries[i];
+            let is_selected = i == browser.selected;
+
+            let name_upper = entry.name.to_uppercase();
+            let display_name = if name_upper.len() > 24 {
+                format!("{}...", &name_upper[..21])
+            } else {
+                name_upper
+            };
+
+            let display = if entry.is_dir {
+                format!("> {}", display_name)
+            } else {
+                format!("  {}", display_name)
+            };
+
+            if is_selected {
+                draw_highlight_bar(fb, row * 8, 8, 20, 236, HIGHLIGHT_BG);
+                if cursor_visible {
+                    draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
+                }
+                let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_DARK_GRAY };
+                draw_text_8x8(fb, &display, 3, row, color);
+            } else {
+                let color = if entry.is_dir { DIR_COLOR } else { MENU_DARK_GRAY };
+                draw_text_8x8(fb, &display, 3, row, color);
+            }
+        }
+
+        // Scroll position indicator
+        if browser.entries.len() > VISIBLE_ROWS {
+            let pos_str = format!("{}/{}", browser.selected + 1, browser.entries.len());
+            let pos_x = 28 - pos_str.len().min(8);
+            draw_text_8x8(fb, &pos_str, pos_x, 7, MENU_DARK_GRAY);
+        }
+    }
+
+    draw_separator_line(fb, 23);
+    draw_text_centered_8x8(fb, "A:OPEN  B:PARENT", 24, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "TAB: USE THIS FOLDER", 25, MENU_GOLD);
+
+    // .nes file count hint
+    let nes_count = browser.entries.iter().filter(|e| !e.is_dir).count();
+    if nes_count > 0 {
+        let hint = format!("{} .NES FILES HERE", nes_count);
+        draw_text_centered_8x8(fb, &hint, 26, MENU_DARK_GRAY);
+    }
 
     // Error overlay
     if let Some(ref msg) = browser.error_message {
@@ -2053,6 +2175,15 @@ fn main() {
 
     // State machine
     let mut emulator_state = EmulatorState::Menu(MenuState::new());
+    // Show first-run ROM folder setup if not configured
+    if config.rom_directory.is_none() {
+        if let EmulatorState::Menu(ref mut menu) = emulator_state {
+            menu.submenu = Some(SubMenu::FolderSetup {
+                browser: FileBrowser::new(None),
+                from_settings: false,
+            });
+        }
+    }
     let mut game_bus: Option<Bus> = None;
     let mut game_cpu: Option<Cpu> = None;
     let mut frame_counter: u32 = 0;
@@ -2336,7 +2467,7 @@ fn main() {
                                 }
                             } else if menu.selected == browse_idx {
                                 play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new()));
+                                menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new(config.rom_directory.as_deref())));
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 menu.transition_timer = 6;
@@ -2394,7 +2525,7 @@ fn main() {
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
-                        if input.down && *selected < 7 {
+                        if input.down && *selected < 8 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -2484,6 +2615,19 @@ fn main() {
                                     // Toggle check for updates
                                     config.check_for_updates = !config.check_for_updates;
                                     save_config(&config);
+                                }
+                                8 => {
+                                    // Open folder setup to change ROM directory
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    menu.submenu = Some(SubMenu::FolderSetup {
+                                        browser: FileBrowser::new(config.rom_directory.as_deref()),
+                                        from_settings: true,
+                                    });
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                    menu.transition_timer = 6;
+                                    menu.transition_out = false;
+                                    return;
                                 }
                                 _ => {}
                             }
@@ -3001,6 +3145,101 @@ fn main() {
                             }
                         }
                     }
+                    Some(SubMenu::FolderSetup { ref mut browser, from_settings }) => {
+                        // Update error timer
+                        if browser.error_timer > 0 {
+                            browser.error_timer -= 1;
+                            if browser.error_timer == 0 {
+                                browser.error_message = None;
+                            }
+                        }
+
+                        let count = browser.entries.len();
+                        if count > 0 {
+                            if input.up && browser.selected > 0 {
+                                browser.selected -= 1;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                                if browser.selected < browser.scroll_offset {
+                                    browser.scroll_offset = browser.selected;
+                                }
+                            }
+                            if input.down && browser.selected < count - 1 {
+                                browser.selected += 1;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if sound_cooldown == 0 {
+                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    sound_cooldown = 3;
+                                }
+                                if browser.selected >= browser.scroll_offset + 14 {
+                                    browser.scroll_offset = browser.selected.saturating_sub(13);
+                                }
+                            }
+                            if input.confirm {
+                                let entry_is_dir = browser.entries[browser.selected].is_dir;
+                                let entry_path = browser.entries[browser.selected].full_path.clone();
+                                if entry_is_dir {
+                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    browser.navigate_to(&entry_path);
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                }
+                                // Files are not selectable in folder setup mode
+                            }
+                        }
+
+                        // Determine transition action (extract data before releasing borrow)
+                        let mut folder_action: u8 = 0; // 0=none, 1=select folder, 2=back to settings
+                        let mut selected_dir = String::new();
+
+                        if input.select {
+                            selected_dir = browser.current_dir.to_string_lossy().to_string();
+                            folder_action = 1;
+                        } else if input.back || input.backspace {
+                            let parent = browser.current_dir.parent().map(|p| p.to_path_buf());
+                            if let Some(parent) = parent {
+                                if !parent.as_os_str().is_empty() {
+                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    browser.navigate_to(&parent);
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                } else if from_settings {
+                                    folder_action = 2;
+                                }
+                            } else if from_settings {
+                                folder_action = 2;
+                            }
+                        }
+
+                        // Apply transitions (borrow released by match arm end via early extraction)
+                        let fs_from_settings = from_settings;
+                        if folder_action == 1 {
+                            config.rom_directory = Some(selected_dir);
+                            save_config(&config);
+                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            if fs_from_settings {
+                                menu.submenu = Some(SubMenu::Settings { selected: 8, value_flash: 0 });
+                            } else {
+                                menu.submenu = None;
+                            }
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
+                        } else if folder_action == 2 {
+                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            menu.submenu = Some(SubMenu::Settings { selected: 8, value_flash: 0 });
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
+                        }
+                    }
                 }
 
                 // Process actions
@@ -3118,6 +3357,9 @@ fn main() {
                     Some(SubMenu::CrtSettings { selected, ref mut value_flash, .. }) => {
                         render_crt_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, *value_flash);
                         if *value_flash > 0 { *value_flash -= 1; }
+                    }
+                    Some(SubMenu::FolderSetup { ref browser, .. }) => {
+                        render_folder_setup(&mut menu_framebuffer, browser, menu.cursor_visible);
                     }
                 }
 
