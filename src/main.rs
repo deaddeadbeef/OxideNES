@@ -1929,7 +1929,7 @@ fn main() {
     let mut update_dismissed = false;
 
     let mut window = Window::new(
-        "OxideNES",
+        &format!("OxideNES v{}", env!("OXIDENES_VERSION")),
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         WindowOptions {
@@ -2062,7 +2062,7 @@ fn main() {
 
     // Fullscreen state
     let mut is_fullscreen: bool = false;
-    let mut window_title: String = "OxideNES".to_string();
+    let mut window_title: String = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
 
     // Analog stick state for hysteresis
     let mut stick_state_p1 = StickState::default();
@@ -3514,7 +3514,7 @@ fn main() {
                                     achievement_engine = AchievementEngine::new();
                                     recorder = InputRecording::new([0u8; 32]);
                                     emulator_state = EmulatorState::Menu(MenuState::new());
-                                    window_title = "OxideNES".to_string();
+                                    window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                                     window.set_title(&window_title);
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
@@ -3820,7 +3820,7 @@ fn main() {
                                 quit_hold_frames = 0;
                                 repeat_tracker = RepeatTracker::new();
                                 emulator_state = EmulatorState::Menu(MenuState::new());
-                                window_title = "OxideNES".to_string();
+                                window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                                 window.set_title(&window_title);
                                 continue;
                             }
@@ -4108,7 +4108,7 @@ fn main() {
                                         quick_overlay = false;
                                         repeat_tracker = RepeatTracker::new();
                                         emulator_state = EmulatorState::Menu(MenuState::new());
-                                        window_title = "OxideNES".to_string();
+                                        window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                                         window.set_title(&window_title);
                                         play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                         continue;
@@ -5400,7 +5400,7 @@ fn main() {
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
-                    window_title = "OxideNES".to_string();
+                    window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                     window.set_title(&window_title);
                 }
             }
