@@ -72,7 +72,15 @@ impl ScriptEngine {
             message_sink,
         }
     }
+}
 
+impl Default for ScriptEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScriptEngine {
     /// Load and execute a Lua script file. The script should register an
     /// `on_frame` callback via `nes.onframe(fn)`.
     pub fn load_script(&mut self, path: &str) -> Result<(), String> {

@@ -79,7 +79,15 @@ impl RomDatabase {
         db.load_user_db();
         db
     }
+}
 
+impl Default for RomDatabase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RomDatabase {
     pub fn lookup(&self, crc32: u32) -> Option<&RomEntry> {
         let key = format!("{:08X}", crc32);
         self.entries.get(&key)

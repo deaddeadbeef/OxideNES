@@ -20,7 +20,15 @@ impl Updater {
             checking: Arc::new(Mutex::new(false)),
         }
     }
+}
 
+impl Default for Updater {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Updater {
     pub fn check_async(&self) {
         let available = self.update_available.clone();
         let checking = self.checking.clone();

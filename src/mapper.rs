@@ -426,9 +426,8 @@ impl Mapper for Mapper000 {
 
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
-        match addr {
-            0x6000..=0x7FFF => self.prg_ram[(addr - 0x6000) as usize] = data,
-            _ => {} // ROM, ignore writes
+        if let 0x6000..=0x7FFF = addr {
+            self.prg_ram[(addr - 0x6000) as usize] = data;
         }
     }
 
@@ -1845,7 +1844,7 @@ impl Mapper for Mapper079 {
     }
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
-        if addr >= 0x4100 && addr <= 0x5FFF {
+        if (0x4100..=0x5FFF).contains(&addr) {
             self.chr_bank = data & 0x07;
             self.prg_bank = (data >> 3) & 0x01;
         }
@@ -1915,15 +1914,12 @@ impl Mapper for Mapper206 {
     }
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
-        match addr {
-            0x8000..=0x9FFF => {
-                if addr & 1 == 0 {
-                    self.bank_select = data & 0x07;
-                } else {
-                    self.registers[self.bank_select as usize] = data & 0x3F;
-                }
+        if let 0x8000..=0x9FFF = addr {
+            if addr & 1 == 0 {
+                self.bank_select = data & 0x07;
+            } else {
+                self.registers[self.bank_select as usize] = data & 0x3F;
             }
-            _ => {}
         }
     }
     #[inline]
@@ -2311,6 +2307,7 @@ impl Mapper for MapperVRC6 {
         }
     }
 
+    #[allow(clippy::manual_is_multiple_of)]
     fn clock_scanline(&mut self) {
         if !self.irq_enabled { return; }
 
@@ -2652,7 +2649,7 @@ impl Mapper for Mapper005 {
                             _ => 0,
                         }
                     }
-                    3 | _ => {
+                    _ => {
                         // Mode 3: 4 × 8KB banks
                         match addr {
                             0x8000..=0x9FFF => {
@@ -2836,7 +2833,7 @@ impl Mapper for Mapper005 {
                     _ => (self.chr_bank[7] as usize * 2) + ((addr as usize - 0x1800) / 0x0400),
                 }
             }
-            3 | _ => {
+            _ => {
                 // 1KB mode
                 let idx = (addr / 0x0400) as usize;
                 self.chr_bank[idx.min(7)] as usize

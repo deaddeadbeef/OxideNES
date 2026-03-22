@@ -126,9 +126,9 @@ impl InputRecording {
         let mut file = std::fs::File::create(path).map_err(|e| format!("Create failed: {}", e))?;
 
         // FM2 header
-        write!(file, "version 3\n").map_err(|e| format!("Write failed: {}", e))?;
-        write!(file, "emuVersion 20500\n").map_err(|e| format!("Write failed: {}", e))?;
-        write!(file, "romFilename {}\n", rom_name).map_err(|e| format!("Write failed: {}", e))?;
+        writeln!(file, "version 3").map_err(|e| format!("Write failed: {}", e))?;
+        writeln!(file, "emuVersion 20500").map_err(|e| format!("Write failed: {}", e))?;
+        writeln!(file, "romFilename {}", rom_name).map_err(|e| format!("Write failed: {}", e))?;
 
         // Each frame: |0|RLDUTSBA|........||
         // Button order: R L D U T(Start) S(Select) B A
@@ -136,7 +136,7 @@ impl InputRecording {
         for &(p1, p2) in &self.frames {
             let p1_str = buttons_to_fm2(p1);
             let p2_str = buttons_to_fm2(p2);
-            write!(file, "|0|{}|{}||\n", p1_str, p2_str).map_err(|e| format!("Write failed: {}", e))?;
+            writeln!(file, "|0|{}|{}||", p1_str, p2_str).map_err(|e| format!("Write failed: {}", e))?;
         }
 
         Ok(())

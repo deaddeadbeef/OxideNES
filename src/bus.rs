@@ -29,10 +29,10 @@ impl GameGenieCode {
                 | ((vals[1] as u16 & 0x08) << 4)
                 | (vals[4] as u16 & 0x07)
                 | (vals[3] as u16 & 0x08);
-            let replace = ((vals[1] as u8 & 0x07) << 4)
-                | ((vals[0] as u8 & 0x08) << 4)
-                | (vals[0] as u8 & 0x07)
-                | (vals[5] as u8 & 0x08);
+            let replace = ((vals[1] & 0x07) << 4)
+                | ((vals[0] & 0x08) << 4)
+                | (vals[0] & 0x07)
+                | (vals[5] & 0x08);
             Some(GameGenieCode { address, replace, compare: None, enabled: true, code_str: code.clone() })
         } else if vals.len() == 8 {
             let address = 0x8000
@@ -43,14 +43,14 @@ impl GameGenieCode {
                 | ((vals[1] as u16 & 0x08) << 4)
                 | (vals[4] as u16 & 0x07)
                 | (vals[3] as u16 & 0x08);
-            let replace = ((vals[1] as u8 & 0x07) << 4)
-                | ((vals[0] as u8 & 0x08) << 4)
-                | (vals[0] as u8 & 0x07)
-                | (vals[7] as u8 & 0x08);
-            let compare = ((vals[7] as u8 & 0x07) << 4)
-                | ((vals[6] as u8 & 0x08) << 4)
-                | (vals[6] as u8 & 0x07)
-                | (vals[5] as u8 & 0x08);
+            let replace = ((vals[1] & 0x07) << 4)
+                | ((vals[0] & 0x08) << 4)
+                | (vals[0] & 0x07)
+                | (vals[7] & 0x08);
+            let compare = ((vals[7] & 0x07) << 4)
+                | ((vals[6] & 0x08) << 4)
+                | (vals[6] & 0x07)
+                | (vals[5] & 0x08);
             Some(GameGenieCode { address, replace, compare: Some(compare), enabled: true, code_str: code.clone() })
         } else {
             None

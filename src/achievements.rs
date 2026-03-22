@@ -59,7 +59,15 @@ impl AchievementEngine {
             cache_path: None,
         }
     }
+}
 
+impl Default for AchievementEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AchievementEngine {
     /// Load achievement definitions for a ROM identified by its MD5 hash.
     /// Looks for `~/.nes-emulator/achievements/{hash}.json`.
     pub fn load_for_rom(rom_md5: &str) -> Self {

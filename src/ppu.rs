@@ -126,7 +126,15 @@ impl Ppu {
             oam_dirty: true,
         }
     }
+}
 
+impl Default for Ppu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Ppu {
     #[inline(always)]
     fn mirror_vram_addr(mirroring: &Mirroring, addr: u16) -> u16 {
         let mirrored = addr & 0x2FFF;
@@ -533,17 +541,15 @@ impl Ppu {
             let mut bg_pixel: u8 = 0;
             let mut bg_palette: u8 = 0;
 
-            if self.mask & 0x08 != 0 {
-                if self.mask & 0x02 != 0 || self.cycle > 8 {
-                    let mux = 0x8000 >> self.x;
-                    let p0 = if self.bg_shifter_pattern_lo & mux != 0 { 1 } else { 0 };
-                    let p1 = if self.bg_shifter_pattern_hi & mux != 0 { 1 } else { 0 };
-                    bg_pixel = (p1 << 1) | p0;
+            if self.mask & 0x08 != 0 && (self.mask & 0x02 != 0 || self.cycle > 8) {
+                let mux = 0x8000 >> self.x;
+                let p0 = if self.bg_shifter_pattern_lo & mux != 0 { 1 } else { 0 };
+                let p1 = if self.bg_shifter_pattern_hi & mux != 0 { 1 } else { 0 };
+                bg_pixel = (p1 << 1) | p0;
 
-                    let a0 = if self.bg_shifter_attrib_lo & mux != 0 { 1 } else { 0 };
-                    let a1 = if self.bg_shifter_attrib_hi & mux != 0 { 1 } else { 0 };
-                    bg_palette = (a1 << 1) | a0;
-                }
+                let a0 = if self.bg_shifter_attrib_lo & mux != 0 { 1 } else { 0 };
+                let a1 = if self.bg_shifter_attrib_hi & mux != 0 { 1 } else { 0 };
+                bg_palette = (a1 << 1) | a0;
             }
 
             // Sprite pixel
@@ -552,22 +558,20 @@ impl Ppu {
             let mut fg_priority: bool = false;
             self.sprite_zero_being_rendered = false;
 
-            if self.mask & 0x10 != 0 {
-                if self.mask & 0x04 != 0 || self.cycle > 8 {
-                    for i in 0..self.sprite_count as usize {
-                        if self.sprite_scanline[i].x == 0 {
-                            let p0 = if self.sprite_shifter_pattern_lo[i] & 0x80 != 0 { 1 } else { 0 };
-                            let p1 = if self.sprite_shifter_pattern_hi[i] & 0x80 != 0 { 1 } else { 0 };
-                            fg_pixel = (p1 << 1) | p0;
-                            fg_palette = (self.sprite_scanline[i].attribute & 0x03) + 4;
-                            fg_priority = self.sprite_scanline[i].attribute & 0x20 == 0;
+            if self.mask & 0x10 != 0 && (self.mask & 0x04 != 0 || self.cycle > 8) {
+                for i in 0..self.sprite_count as usize {
+                    if self.sprite_scanline[i].x == 0 {
+                        let p0 = if self.sprite_shifter_pattern_lo[i] & 0x80 != 0 { 1 } else { 0 };
+                        let p1 = if self.sprite_shifter_pattern_hi[i] & 0x80 != 0 { 1 } else { 0 };
+                        fg_pixel = (p1 << 1) | p0;
+                        fg_palette = (self.sprite_scanline[i].attribute & 0x03) + 4;
+                        fg_priority = self.sprite_scanline[i].attribute & 0x20 == 0;
 
-                            if fg_pixel != 0 {
-                                if i == 0 {
-                                    self.sprite_zero_being_rendered = true;
-                                }
-                                break;
+                        if fg_pixel != 0 {
+                            if i == 0 {
+                                self.sprite_zero_being_rendered = true;
                             }
+                            break;
                         }
                     }
                 }
@@ -580,15 +584,15 @@ impl Ppu {
                 (_, 0) => (bg_pixel, bg_palette),
                 (_, _) => {
                     // Sprite zero hit detection
-                    if self.sprite_zero_hit_possible && self.sprite_zero_being_rendered {
-                        if self.mask & 0x18 == 0x18 {
-                            if !(self.mask & 0x06 == 0x06) {
-                                if self.cycle >= 9 && self.cycle < 256 {
-                                    self.status |= 0x40;
-                                }
-                            } else if self.cycle >= 1 && self.cycle < 256 {
+                    if self.sprite_zero_hit_possible && self.sprite_zero_being_rendered
+                        && self.mask & 0x18 == 0x18
+                    {
+                        if self.mask & 0x06 != 0x06 {
+                            if self.cycle >= 9 && self.cycle < 256 {
                                 self.status |= 0x40;
                             }
+                        } else if self.cycle >= 1 && self.cycle < 256 {
+                            self.status |= 0x40;
                         }
                     }
                     if fg_priority { (fg_pixel, fg_palette) } else { (bg_pixel, bg_palette) }

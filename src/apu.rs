@@ -392,10 +392,8 @@ impl DmcChannel {
                 if self.output_level <= 125 {
                     self.output_level += 2;
                 }
-            } else {
-                if self.output_level >= 2 {
-                    self.output_level -= 2;
-                }
+            } else if self.output_level >= 2 {
+                self.output_level -= 2;
             }
             self.shift_register >>= 1;
         }
@@ -675,6 +673,7 @@ impl Apu {
     }
     
     #[inline]
+    #[allow(clippy::manual_is_multiple_of)]
     pub fn tick(&mut self) {
         // Triangle clocks every CPU cycle
         self.triangle.clock_timer();
@@ -790,6 +789,7 @@ impl Apu {
     }
 
     // ── Save state support ──────────────────────────────────────────
+    #[allow(clippy::vec_init_then_push)]
     pub fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
 

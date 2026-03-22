@@ -326,16 +326,15 @@ fn default_glass_intensity() -> u8 { 60 }
 fn default_true() -> bool { true }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Default)]
 enum CrtMaskMode {
     Off,
     ShadowMask,
     ApertureGrille,
+    #[default]
     SlotMask,
 }
 
-impl Default for CrtMaskMode {
-    fn default() -> Self { CrtMaskMode::SlotMask }
-}
 
 #[derive(Clone, Copy, PartialEq)]
 enum OsdType { None, Brightness, Contrast }
@@ -670,7 +669,7 @@ impl RewindBuffer {
 
     fn push_frame(&mut self, bus: &Bus, cpu: &Cpu) {
         self.frame_counter += 1;
-        if self.frame_counter % self.frame_skip != 0 {
+        if !self.frame_counter.is_multiple_of(self.frame_skip) {
             return;
         }
         
@@ -789,7 +788,7 @@ fn screenshot_path() -> PathBuf {
 
 fn save_screenshot(frame_data: &[u32]) -> Option<String> {
     let path = screenshot_path();
-    let data = format!("P6\n256 240\n255\n");
+    let data = "P6\n256 240\n255\n".to_string();
     let mut bytes = data.into_bytes();
     for &pixel in frame_data.iter().take(256 * 240) {
         bytes.push(((pixel >> 16) & 0xFF) as u8);
@@ -807,6 +806,7 @@ fn save_screenshot(frame_data: &[u32]) -> Option<String> {
 // Emulator state machine
 // =====================================================================
 
+#[allow(clippy::large_enum_variant)]
 enum EmulatorState {
     Menu(MenuState),
     Game,
@@ -837,6 +837,7 @@ impl MenuState {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum SubMenu {
     Settings { selected: usize, value_flash: u8 },
     FileBrowser(FileBrowser),
@@ -1045,6 +1046,7 @@ fn draw_char_8x8(fb: &mut [u32], ch: char, tile_x: usize, tile_y: usize, color: 
     let glyph = get_font_glyph(ch);
     let px = tile_x * 8;
     let py = tile_y * 8;
+    #[allow(clippy::needless_range_loop)]
     for row in 0..8 {
         let bits = glyph[row];
         let y = py + row;
@@ -1113,11 +1115,10 @@ fn draw_double_border_bottom(fb: &mut [u32], tile_row: usize) {
 fn draw_separator_line(fb: &mut [u32], tile_row: usize) {
     let y = tile_row * 8 + 4;
     for x in 24..232 {
-        if x % 4 < 2 {
-            if y < 240 {
+        if x % 4 < 2
+            && y < 240 {
                 fb[y * 256 + x] = MENU_DARK_GRAY;
             }
-        }
     }
 }
 
@@ -1154,8 +1155,8 @@ fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) 
     // fade_level 0=full brightness, 8=nearly black
     let brightness = (255u32).saturating_sub(fade_level as u32 * 30); // 255, 225, 195... down to 15
     for pixel in fb[..width * height].iter_mut() {
-        let r = ((*pixel >> 16) & 0xFF) * brightness >> 8;
-        let g = ((*pixel >> 8) & 0xFF) * brightness >> 8;
+        let r = (((*pixel >> 16) & 0xFF) * brightness) >> 8;
+        let g = (((*pixel >> 8) & 0xFF) * brightness) >> 8;
         let b = ((*pixel & 0xFF) * brightness) >> 8;
         *pixel = (r << 16) | (g << 8) | b;
     }
@@ -1181,7 +1182,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
         .collect();
     let total_favs = valid_favorites.len();
     let per_page = 5usize;
-    let total_pages = if total_favs == 0 { 0 } else { (total_favs + per_page - 1) / per_page };
+    let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
     let page = menu.favorites_page.min(total_pages.saturating_sub(1));
     let page_start = page * per_page;
     let page_end = (page_start + per_page).min(total_favs);
@@ -1250,6 +1251,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
             draw_text_centered_8x8(fb, "BROWSE TO PLAY!", current_row, MENU_DARK_GRAY);
             current_row += 1;
         } else {
+            #[allow(clippy::needless_range_loop)]
             for i in 0..recent_count {
                 let row = current_row;
                 if row >= 24 { break; }
@@ -1778,7 +1780,7 @@ fn build_vignette_table_with_strength(strength: u8) -> Vec<u16> {
             let fx = (x as f32 / SCREEN_W as f32) - 0.5;
             let fy = (y as f32 / SCREEN_H as f32) - 0.5;
             let v = 1.0 - (fx * fx + fy * fy) * 1.5 * scale;
-            table[y * SCREEN_W + x] = (v.max(0.3).min(1.0) * 256.0) as u16;
+            table[y * SCREEN_W + x] = (v.clamp(0.3, 1.0) * 256.0) as u16;
         }
     }
     table
@@ -1911,13 +1913,13 @@ impl RepeatTracker {
                 false // Initial delay: 20 frames (~333ms) — no repeat
             } else if *counter <= 50 {
                 // Slow phase: every 6 frames (~10/sec)
-                (*counter - 20) % 6 == 0
+                (*counter - 20).is_multiple_of(6)
             } else if *counter <= 90 {
                 // Medium phase: every 3 frames (~20/sec)
-                (*counter - 50) % 3 == 0
+                (*counter - 50).is_multiple_of(3)
             } else {
                 // Fast phase: every 2 frames (~30/sec)
-                (*counter - 90) % 2 == 0
+                (*counter - 90).is_multiple_of(2)
             }
         } else {
             *counter = 0;
@@ -2410,7 +2412,7 @@ fn main() {
     while window.is_open() {
         let mut next_state: Option<EmulatorState> = None;
         
-        if sound_cooldown > 0 { sound_cooldown -= 1; }
+        sound_cooldown = sound_cooldown.saturating_sub(1);
 
         match emulator_state {
             EmulatorState::Menu(ref mut menu) => {
@@ -2435,14 +2437,13 @@ fn main() {
                             .collect();
                         let total_favs = valid_favorites.len();
                         let per_page = 5usize;
-                        let total_pages = if total_favs == 0 { 0 } else { (total_favs + per_page - 1) / per_page };
+                        let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
                         let page = menu.favorites_page.min(total_pages.saturating_sub(1));
                         let page_start = page * per_page;
                         let page_end = (page_start + per_page).min(total_favs);
                         let fav_count = page_end - page_start;
                         let recent_non_fav: Vec<String> = config.recent_games.iter()
-                            .filter(|p| !config.favorite_games.contains(p))
-                            .map(|p| p.clone())
+                            .filter(|p| !config.favorite_games.contains(p)).cloned()
                             .collect();
                         let max_recent = 8usize;
                         let recent_count = recent_non_fav.len().min(max_recent);
@@ -2509,7 +2510,7 @@ fn main() {
                                     let new_total = config.favorite_games.iter()
                                         .filter(|p| std::path::Path::new(p.as_str()).exists())
                                         .count();
-                                    let new_pages = if new_total == 0 { 0 } else { (new_total + per_page - 1) / per_page };
+                                    let new_pages = if new_total == 0 { 0 } else { new_total.div_ceil(per_page) };
                                     if menu.favorites_page >= new_pages && menu.favorites_page > 0 {
                                         menu.favorites_page -= 1;
                                     }
@@ -2612,11 +2613,10 @@ fn main() {
                                     save_config(&config);
                                 }
                                 2 => {
-                                    if input.right || input.confirm {
-                                        if glass_intensity < 100 {
+                                    if (input.right || input.confirm)
+                                        && glass_intensity < 100 {
                                             glass_intensity = (glass_intensity + 5).min(100);
                                         }
-                                    }
                                     if input.left {
                                         glass_intensity = glass_intensity.saturating_sub(5);
                                     }
@@ -2627,11 +2627,10 @@ fn main() {
                                     *value_flash = 8;
                                 }
                                 3 => {
-                                    if input.right || input.confirm {
-                                        if audio_volume < 100 {
+                                    if (input.right || input.confirm)
+                                        && audio_volume < 100 {
                                             audio_volume = (audio_volume + 5).min(100);
                                         }
-                                    }
                                     if input.left {
                                         audio_volume = audio_volume.saturating_sub(5);
                                     }
@@ -3382,7 +3381,7 @@ fn main() {
                                         }
                                     }
                                     Err(e) => {
-                                        let msg = format!("{}", e);
+                                        let msg = e.to_string();
                                         if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                             browser.error_message = Some(msg.clone());
                                             browser.error_timer = 180;
@@ -4038,13 +4037,12 @@ fn main() {
                         };
 
                         // Recording: capture current joypad state after input handling
-                        if !quick_overlay {
-                            if recorder.is_recording() {
+                        if !quick_overlay
+                            && recorder.is_recording() {
                                 let p1 = joypad_to_byte(bus, 1);
                                 let p2 = joypad_to_byte(bus, 2);
                                 recorder.record_frame(p1, p2);
                             }
-                        }
 
                         // Playback: override joypad input from recording
                         if recorder.is_playing() {
@@ -4734,7 +4732,7 @@ fn main() {
                         ];
                         // SAFETY: all bytes are ASCII digits or ':', guaranteed valid UTF-8
                         let tc = unsafe { std::str::from_utf8_unchecked(&tc_buf) };
-                        draw_text(&mut composite_buffer, &tc, osd_x + 8, osd_y + 10, 0x00DDDD, WINDOW_WIDTH);
+                        draw_text(&mut composite_buffer, tc, osd_x + 8, osd_y + 10, 0x00DDDD, WINDOW_WIDTH);
                     }
 
                     // Overlay message display
@@ -4767,7 +4765,7 @@ fn main() {
                         osd_timer -= 1;
 
                         // Fade: full brightness for first 90 frames, then fade over last 30
-                        let alpha = if osd_timer > 30 { 255u32 } else { osd_timer as u32 * 255 / 30 };
+                        let alpha = if osd_timer > 30 { 255u32 } else { osd_timer * 255 / 30 };
 
                         if osd_type != OsdType::None {
                             // CRT TV OSD: thin green phosphor pipes ||||||----- spanning full screen width
@@ -4790,14 +4788,14 @@ fn main() {
                             let bar_x = osd_left + (available_w - total_w) / 2;
 
                             // Green phosphor colors
-                            let bright_g = (alpha * 0xFF >> 8) as u32;
-                            let bright_b = (alpha * 0x30 >> 8) as u32;
+                            let bright_g = (alpha * 0xFF) >> 8;
+                            let bright_b = (alpha * 0x30) >> 8;
 
-                            let dim_g = (alpha * 0x40 >> 8) as u32;
-                            let dim_b = (alpha * 0x10 >> 8) as u32;
+                            let dim_g = (alpha * 0x40) >> 8;
+                            let dim_b = (alpha * 0x10) >> 8;
 
-                            let icon_g = (alpha * 0xDD >> 8) as u32;
-                            let icon_b = (alpha * 0x20 >> 8) as u32;
+                            let icon_g = (alpha * 0xDD) >> 8;
+                            let icon_b = (alpha * 0x20) >> 8;
                             let icon_color = (icon_g << 8) | icon_b;
 
                             // === Draw icon (pixel art) to the left of the bar ===
@@ -4892,7 +4890,7 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (0u32 * alpha + bg_r * inv) >> 8;
+                                                let r = (bg_r * inv) >> 8;
                                                 let g = (bright_g * alpha + bg_g * inv) >> 8;
                                                 let b = (bright_b * alpha + bg_b * inv) >> 8;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
@@ -4911,7 +4909,7 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (0u32 * alpha + bg_r * inv) >> 8;
+                                                let r = (bg_r * inv) >> 8;
                                                 let g = (dim_g * alpha + bg_g * inv) >> 8;
                                                 let b = (dim_b * alpha + bg_b * inv) >> 8;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
@@ -4954,9 +4952,9 @@ fn main() {
                                         let idx = y * WINDOW_WIDTH + x;
                                         if idx < composite_buffer.len() {
                                             let p = composite_buffer[idx];
-                                            let r = ((p >> 16) & 0xFF) * 154 >> 8;
-                                            let g = ((p >> 8) & 0xFF) * 154 >> 8;
-                                            let b = (p & 0xFF) * 154 >> 8;
+                                            let r = (((p >> 16) & 0xFF) * 154) >> 8;
+                                            let g = (((p >> 8) & 0xFF) * 154) >> 8;
+                                            let b = ((p & 0xFF) * 154) >> 8;
                                             composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                         }
                                     }
@@ -4984,7 +4982,7 @@ fn main() {
                                     }
                                 }
                             }
-                            draw_text(&mut composite_buffer, &text, nx, notify_y, 0xF8D878, WINDOW_WIDTH);
+                            draw_text(&mut composite_buffer, text, nx, notify_y, 0xF8D878, WINDOW_WIDTH);
                             notify_y += 14;
                         }
                     }
@@ -5271,7 +5269,7 @@ fn main() {
                             NetplayState::Connecting => "NETPLAY  (...)".to_string(),
                             _ => "NETPLAY".to_string(),
                         };
-                        let script_status = if script_engine.as_ref().map_or(false, |s| s.active) {
+                        let script_status = if script_engine.as_ref().is_some_and(|s| s.active) {
                             "RELOAD SCRIPT"
                         } else {
                             "LOAD SCRIPT"
@@ -5559,7 +5557,7 @@ fn main() {
                             let title = if achievement_engine.game_title.is_empty() {
                                 "ACHIEVEMENTS".to_string()
                             } else {
-                                format!("{}", achievement_engine.game_title)
+                                achievement_engine.game_title.to_string()
                             };
                             draw_text_centered_8x8(&mut menu_framebuffer, &title, ab_top + 1, MENU_GOLD);
 
@@ -5590,8 +5588,8 @@ fn main() {
                         // Controls reference page overlay
                         if controls_submenu {
                             // Fill entire framebuffer for full-screen reference page
-                            for i in 0..256 * 240 {
-                                menu_framebuffer[i] = MENU_BG;
+                            for pixel in menu_framebuffer.iter_mut().take(256 * 240) {
+                                *pixel = MENU_BG;
                             }
 
                             // Title
@@ -6089,7 +6087,7 @@ fn stick_to_dpad(
 
 fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, input_bindings: &InputBindings, stick_state_p1: &mut StickState, stick_state_p2: &mut StickState) -> (bool, bool, bool, bool) {
     let keys = window.get_keys();
-    let turbo_active = (frame_counter / 2) % 2 == 0; // ~15Hz: ON 2 frames, OFF 2 frames
+    let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
 
     // Player 1 - Keyboard
     let kb1 = &input_bindings.keyboard_p1;
@@ -6104,22 +6102,22 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     let p1_key_turbo_a = string_to_key(&kb1.turbo_a);
     let p1_key_turbo_b = string_to_key(&kb1.turbo_b);
 
-    let mut p1_up = p1_key_up.map_or(false, |k| keys.contains(&k));
-    let mut p1_down = p1_key_down.map_or(false, |k| keys.contains(&k));
-    let mut p1_left = p1_key_left.map_or(false, |k| keys.contains(&k));
-    let mut p1_right = p1_key_right.map_or(false, |k| keys.contains(&k));
-    let mut p1_a = p1_key_a.map_or(false, |k| keys.contains(&k));
-    let mut p1_b = p1_key_b.map_or(false, |k| keys.contains(&k));
-    let mut p1_start = p1_key_start.map_or(false, |k| keys.contains(&k));
-    let mut p1_select = p1_key_select.map_or(false, |k| keys.contains(&k));
+    let mut p1_up = p1_key_up.is_some_and(|k| keys.contains(&k));
+    let mut p1_down = p1_key_down.is_some_and(|k| keys.contains(&k));
+    let mut p1_left = p1_key_left.is_some_and(|k| keys.contains(&k));
+    let mut p1_right = p1_key_right.is_some_and(|k| keys.contains(&k));
+    let mut p1_a = p1_key_a.is_some_and(|k| keys.contains(&k));
+    let mut p1_b = p1_key_b.is_some_and(|k| keys.contains(&k));
+    let mut p1_start = p1_key_start.is_some_and(|k| keys.contains(&k));
+    let mut p1_select = p1_key_select.is_some_and(|k| keys.contains(&k));
     let mut l_trigger = false;
     let mut r_trigger = false;
 
     // P1 turbo buttons
-    if p1_key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
+    if p1_key_turbo_a.is_some_and(|k| keys.contains(&k)) && turbo_active {
         p1_a = true;
     }
-    if p1_key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
+    if p1_key_turbo_b.is_some_and(|k| keys.contains(&k)) && turbo_active {
         p1_b = true;
     }
 
@@ -6136,20 +6134,20 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     let p2_key_turbo_a = string_to_key(&kb2.turbo_a);
     let p2_key_turbo_b = string_to_key(&kb2.turbo_b);
 
-    let mut p2_up = p2_key_up.map_or(false, |k| keys.contains(&k));
-    let mut p2_down = p2_key_down.map_or(false, |k| keys.contains(&k));
-    let mut p2_left = p2_key_left.map_or(false, |k| keys.contains(&k));
-    let mut p2_right = p2_key_right.map_or(false, |k| keys.contains(&k));
-    let mut p2_a = p2_key_a.map_or(false, |k| keys.contains(&k));
-    let mut p2_b = p2_key_b.map_or(false, |k| keys.contains(&k));
-    let mut p2_start = p2_key_start.map_or(false, |k| keys.contains(&k));
-    let mut p2_select = p2_key_select.map_or(false, |k| keys.contains(&k));
+    let mut p2_up = p2_key_up.is_some_and(|k| keys.contains(&k));
+    let mut p2_down = p2_key_down.is_some_and(|k| keys.contains(&k));
+    let mut p2_left = p2_key_left.is_some_and(|k| keys.contains(&k));
+    let mut p2_right = p2_key_right.is_some_and(|k| keys.contains(&k));
+    let mut p2_a = p2_key_a.is_some_and(|k| keys.contains(&k));
+    let mut p2_b = p2_key_b.is_some_and(|k| keys.contains(&k));
+    let mut p2_start = p2_key_start.is_some_and(|k| keys.contains(&k));
+    let mut p2_select = p2_key_select.is_some_and(|k| keys.contains(&k));
 
     // P2 turbo buttons
-    if p2_key_turbo_a.map_or(false, |k| keys.contains(&k)) && turbo_active {
+    if p2_key_turbo_a.is_some_and(|k| keys.contains(&k)) && turbo_active {
         p2_a = true;
     }
-    if p2_key_turbo_b.map_or(false, |k| keys.contains(&k)) && turbo_active {
+    if p2_key_turbo_b.is_some_and(|k| keys.contains(&k)) && turbo_active {
         p2_b = true;
     }
 
@@ -6314,7 +6312,7 @@ fn apply_blur_3tap(r: u32, g: u32, b: u32, left: u32, right: u32, blur_center: u
 const fn isqrt_const(n: u32) -> u32 {
     if n == 0 { return 0; }
     let mut x = n;
-    let mut y = (x + 1) / 2;
+    let mut y = x.div_ceil(2);
     while y < x {
         x = y;
         y = (x + n / x) / 2;
@@ -6355,9 +6353,9 @@ fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32)
     let pg_delta = pg_mul as i32 - 256;
     let pb_delta = pb_mul as i32 - 256;
     let br = brightness as i32;
-    let pr = (256 + (pr_delta * br >> 8)) as u32;
-    let pg = (256 + (pg_delta * br >> 8)) as u32;
-    let pb = (256 + (pb_delta * br >> 8)) as u32;
+    let pr = (256 + ((pr_delta * br) >> 8)) as u32;
+    let pg = (256 + ((pg_delta * br) >> 8)) as u32;
+    let pb = (256 + ((pb_delta * br) >> 8)) as u32;
     ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8)
 }
 
@@ -6468,7 +6466,7 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
     if glow_strength == 0 || height < 8 { return; }
     
     // glow_strength 0-100 → blend factor 0-64
-    let blend = (glow_strength * 64 / 100).min(64) as u32;
+    let blend = (glow_strength * 64 / 100).min(64);
     if blend == 0 { return; }
     
     let inv = 256 - blend;
@@ -6578,6 +6576,7 @@ fn apply_gamma_brightness_contrast(buffer: &mut [u32], len: usize, brightness: i
 
 // Specialized path: full pipeline with blur and mask
 #[inline(always)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                    pr_mul: u32, pg_mul: u32, pb_mul: u32,
@@ -6599,8 +6598,8 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             let src_y0 = (src_yf >> 8) as usize;
             let src_x1 = (src_x0 + 1).min(255);
             let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
-            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
             
             let base_offset = src_y0 * 256;
             let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
@@ -6631,6 +6630,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 
 // Specialized path: mask only, no blur
 #[inline(always)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                      pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u16, u16, u16)]) {
@@ -6651,8 +6651,8 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             let src_y0 = (src_yf >> 8) as usize;
             let src_x1 = (src_x0 + 1).min(255);
             let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
-            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
             
             let base_offset = src_y0 * 256;
             let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
@@ -6676,6 +6676,7 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
 
 // Specialized path: blur only, no mask
 #[inline(always)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                       distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                       pr_mul: u32, pg_mul: u32, pb_mul: u32,
@@ -6697,8 +6698,8 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
             let src_y0 = (src_yf >> 8) as usize;
             let src_x1 = (src_x0 + 1).min(255);
             let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
-            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
             
             let base_offset = src_y0 * 256;
             let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
@@ -6726,6 +6727,7 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
 
 // Specialized path: basic (no blur, no mask)
 #[inline(always)]
+#[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                     pr_mul: u32, pg_mul: u32, pb_mul: u32) {
@@ -6746,8 +6748,8 @@ fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]
             let src_y0 = (src_yf >> 8) as usize;
             let src_x1 = (src_x0 + 1).min(255);
             let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { (src_xf & 0xFF) as u32 };
-            let frac_y = if src_y0 >= 239 { 0 } else { (src_yf & 0xFF) as u32 };
+            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
             
             let base_offset = src_y0 * 256;
             let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
@@ -6805,10 +6807,7 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
             let ly = y - tv_y1;
             
             // Rounded corner check
-            let in_corner = (lx < corner_r && ly < corner_r) ||
-                           (lx >= tv_w - corner_r && ly < corner_r) ||
-                           (lx < corner_r && ly >= tv_h - corner_r) ||
-                           (lx >= tv_w - corner_r && ly >= tv_h - corner_r);
+            let in_corner = (ly >= tv_h - corner_r || ly < corner_r) && (lx >= tv_w - corner_r || lx < corner_r);
             
             if in_corner {
                 let cx = if lx < corner_r { corner_r } else { tv_w - corner_r };
@@ -6885,7 +6884,7 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     
     for y in by1..by2 {
         for x in bx1..bx2 {
-            if y >= SCREEN_Y && y < SCREEN_Y + SCREEN_H && x >= SCREEN_X && x < SCREEN_X + SCREEN_W {
+            if (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y) && (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x) {
                 continue; // Don't touch screen area
             }
             if y < TV_HEIGHT && x < WINDOW_WIDTH {
@@ -6980,8 +6979,8 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
 
 #[inline(always)]
 fn sq_dist(x1: usize, y1: usize, x2: usize, y2: usize) -> usize {
-    let dx = if x1 > x2 { x1 - x2 } else { x2 - x1 };
-    let dy = if y1 > y2 { y1 - y2 } else { y2 - y1 };
+    let dx = x1.abs_diff(x2);
+    let dy = y1.abs_diff(y2);
     dx * dx + dy * dy
 }
 
@@ -7048,10 +7047,10 @@ fn build_glare_table() -> Vec<u8> {
             let window = win_x * win_y * win_edge_x * win_edge_y_top * win_edge_y_bot * 8.0;
 
             // Combine all layers
-            let total = (fresnel + spec1 + spec2 + arc + bottom + window).max(0.0).min(70.0) as u8;
+            let total = (fresnel + spec1 + spec2 + arc + bottom + window).clamp(0.0, 70.0) as u8;
 
             // Zero out near border (glass-bezel junction has no glare)
-            let in_border = x < 4 || x >= SCREEN_W - 4 || y < 4 || y >= SCREEN_H - 4;
+            let in_border = !(4..SCREEN_W - 4).contains(&x) || !(4..SCREEN_H - 4).contains(&y);
             table[y * SCREEN_W + x] = if in_border { 0 } else { total };
         }
     }
@@ -7094,6 +7093,7 @@ fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
 
 /// Combined glass effects: tint + specular glare + internal ghost reflection.
 /// Single pass over the screen area — eliminates one full buffer traversal.
+#[allow(clippy::too_many_arguments)]
 fn apply_glass_effects(
     buffer: &mut [u32],
     source_copy: &[u32],  // pre-effects copy for ghost
@@ -7142,8 +7142,10 @@ fn apply_glass_effects(
             if (in_corner_y_top || in_corner_y_bottom) && (x < CORNER_R || x >= corner_x_max) {
                 let (cx, cy) = if x < CORNER_R {
                     if in_corner_y_top { (CORNER_R, CORNER_R) } else { (CORNER_R, SCREEN_H - 1 - CORNER_R) }
+                } else if in_corner_y_top {
+                    (SCREEN_W - 1 - CORNER_R, CORNER_R)
                 } else {
-                    if in_corner_y_top { (SCREEN_W - 1 - CORNER_R, CORNER_R) } else { (SCREEN_W - 1 - CORNER_R, SCREEN_H - 1 - CORNER_R) }
+                    (SCREEN_W - 1 - CORNER_R, SCREEN_H - 1 - CORNER_R)
                 };
                 if sq_dist(x, y, cx, cy) > CORNER_R_SQ { continue; }
             }
@@ -7300,6 +7302,7 @@ fn get_small_glyph(ch: char) -> [u8; 5] {
     }
 }
 
+#[allow(clippy::ptr_arg)]
 fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, color: u32, stride: usize) {
     let mut cursor_x = start_x;
     for ch in text.chars() {
@@ -7319,6 +7322,7 @@ fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, c
     }
 }
 
+#[allow(clippy::ptr_arg)]
 fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h: usize) {
     // Simple dark shelf/stand below TV
     for y in tv_h..win_h {

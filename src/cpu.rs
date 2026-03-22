@@ -55,8 +55,15 @@ impl Cpu {
             irq_pending: false,
         }
     }
+}
 
-    // ── Flag helpers ────────────────────────────────────────────────
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Cpu {
 
     #[inline(always)]
     pub fn get_flag(&self, flag: u8) -> bool {

@@ -51,7 +51,15 @@ impl NetplaySession {
             last_remote_input: 0,
         }
     }
+}
 
+impl Default for NetplaySession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NetplaySession {
     pub fn host(&mut self, port: u16) -> Result<(), String> {
         let addr: SocketAddr = format!("0.0.0.0:{}", port)
             .parse()
@@ -136,9 +144,7 @@ impl NetplaySession {
             return Some(input);
         }
 
-        if self.socket.is_none() {
-            return None;
-        }
+        self.socket.as_ref()?;
 
         let mut buf = [0u8; 64];
         let mut packets: Vec<(Vec<u8>, SocketAddr)> = Vec::new();
@@ -262,6 +268,7 @@ impl NetplaySession {
 
     /// Encode local input bits from individual button booleans.
     /// Bit layout matches NES joypad: A B Sel St U D L R
+    #[allow(clippy::too_many_arguments)]
     pub fn encode_input(a: bool, b: bool, select: bool, start: bool, up: bool, down: bool, left: bool, right: bool) -> u8 {
         let mut bits = 0u8;
         if a { bits |= 1 << 0; }
