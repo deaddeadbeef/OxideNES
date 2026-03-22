@@ -330,10 +330,11 @@ enum CrtMaskMode {
     Off,
     ShadowMask,
     ApertureGrille,
+    SlotMask,
 }
 
 impl Default for CrtMaskMode {
-    fn default() -> Self { CrtMaskMode::Off }
+    fn default() -> Self { CrtMaskMode::SlotMask }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -356,7 +357,7 @@ impl Default for CrtConfig {
             vignette_strength: 20,
             blur_amount: 0,
             curvature_strength: 15,
-            mask_mode: CrtMaskMode::ShadowMask,
+            mask_mode: CrtMaskMode::SlotMask,
             mask_intensity: 50,
         }
     }
@@ -1390,6 +1391,7 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
         CrtMaskMode::Off => "OFF",
         CrtMaskMode::ShadowMask => "SHADOW MASK",
         CrtMaskMode::ApertureGrille => "APERTURE GRILLE",
+        CrtMaskMode::SlotMask => "SLOT MASK",
     };
 
     let items: [(& str, String); 9] = [
@@ -1830,6 +1832,35 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
                         0 => (255, 180, 180),  // R stripe
                         1 => (180, 255, 180),  // G stripe
                         2 => (180, 180, 255),  // B stripe
+                        _ => unreachable!(),
+                    };
+                    table[y * SCREEN_W + x] = (r, g, b);
+                }
+            }
+        }
+        CrtMaskMode::SlotMask => {
+            // Slot mask: 3-wide RGB groups with vertical offset every 2 rows
+            // Most common consumer TV pattern — groups of RGB phosphor triads
+            // arranged in a brick-like offset pattern
+            for y in 0..SCREEN_H {
+                let row_in_cell = y % 3;
+                let col_offset = if (y / 3) % 2 == 0 { 0 } else { 2 };
+                for x in 0..SCREEN_W {
+                    let col_in_cell = (x + col_offset) % 6;
+                    let (r, g, b) = match row_in_cell {
+                        0 | 1 => {
+                            // Active phosphor rows
+                            match col_in_cell {
+                                0 | 1 => (255, 180, 180),  // R slot
+                                2 | 3 => (180, 255, 180),  // G slot
+                                4 | 5 => (180, 180, 255),  // B slot
+                                _ => unreachable!(),
+                            }
+                        }
+                        2 => {
+                            // Dark gap row between slot groups
+                            (160, 160, 160)
+                        }
                         _ => unreachable!(),
                     };
                     table[y * SCREEN_W + x] = (r, g, b);
@@ -2694,9 +2725,10 @@ fn main() {
                                 6 => {
                                     // Cycle mask mode
                                     config.crt_config.mask_mode = match config.crt_config.mask_mode {
-                                        CrtMaskMode::Off => if input.right { CrtMaskMode::ShadowMask } else { CrtMaskMode::ApertureGrille },
+                                        CrtMaskMode::Off => if input.right { CrtMaskMode::ShadowMask } else { CrtMaskMode::SlotMask },
                                         CrtMaskMode::ShadowMask => if input.right { CrtMaskMode::ApertureGrille } else { CrtMaskMode::Off },
-                                        CrtMaskMode::ApertureGrille => if input.right { CrtMaskMode::Off } else { CrtMaskMode::ShadowMask },
+                                        CrtMaskMode::ApertureGrille => if input.right { CrtMaskMode::SlotMask } else { CrtMaskMode::ShadowMask },
+                                        CrtMaskMode::SlotMask => if input.right { CrtMaskMode::Off } else { CrtMaskMode::ApertureGrille },
                                     };
                                     mask_table = build_mask_table(&config.crt_config.mask_mode);
                                     *tables_dirty = true;
@@ -3254,6 +3286,7 @@ fn main() {
                                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                                     // Phosphor bloom — bright pixels glow into neighbors
                                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                                    apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                                 } else {
                                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                                 }
@@ -3375,6 +3408,7 @@ fn main() {
                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                     // Phosphor bloom — bright pixels glow into neighbors
                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                    apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                     // Apply chromatic aberration to crt_buffer (screen area only)
                     if glass_intensity > 30 {
                         ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -4392,6 +4426,7 @@ fn main() {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                         // Phosphor bloom — bright pixels glow into neighbors
                         apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                        apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         // Apply chromatic aberration to crt_buffer (screen area only)
                         if glass_intensity > 30 {
                             ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -5368,6 +5403,7 @@ fn main() {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                             // Phosphor bloom — bright pixels glow into neighbors
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             // Apply chromatic aberration to crt_buffer (screen area only)
                             if glass_intensity > 30 {
                                 ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
@@ -5620,6 +5656,7 @@ fn main() {
                         if crt_enabled {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             if glass_intensity > 30 {
                                 ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
                                 apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
@@ -5977,9 +6014,51 @@ fn apply_blur_3tap(r: u32, g: u32, b: u32, left: u32, right: u32, blur_center: u
     (r, g, b)
 }
 
+/// Integer square root for const context
+const fn isqrt_const(n: u32) -> u32 {
+    if n == 0 { return 0; }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
+/// CRT gamma lookup table — precomputed for γ2.2 (inverse gamma for display)
+/// Maps input luminance to CRT output: out = (in/255)^(1/2.2) * 255
+/// Brightens midtones slightly to simulate how CRT electron guns respond to voltage.
+/// Using sqrt approximation: (1/2.2) ≈ 0.4545 ≈ 90% sqrt + 10% linear
+const GAMMA_TABLE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        let sq = isqrt_const(i as u32 * 255);
+        let lin = i as u32;
+        let val = (sq * 230 + lin * 26) / 256; // ~90% sqrt curve, 10% linear
+        table[i] = if val > 255 { 255 } else { val as u8 };
+        i += 1;
+    }
+    table
+};
+
 #[inline(always)]
 fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32) -> (u32, u32, u32) {
-    ((r * pr_mul) >> 8, (g * pg_mul) >> 8, (b * pb_mul) >> 8)
+    // Brightness-dependent warmth: bright pixels get full warmth shift,
+    // dark pixels stay neutral (mimics phosphor heating on consumer TVs)
+    let brightness = ((r + g + b) * 85) >> 8; // fast /3, range 0-255
+    // Interpolate: at brightness=0 use 256 (neutral), at 255 use full pr/pg/pb_mul
+    // delta = (mul - 256), which can be negative for green/blue channels
+    // mul_actual = 256 + delta * brightness / 255
+    let pr_delta = pr_mul as i32 - 256;
+    let pg_delta = pg_mul as i32 - 256;
+    let pb_delta = pb_mul as i32 - 256;
+    let br = brightness as i32;
+    let pr = (256 + (pr_delta * br / 255)) as u32;
+    let pg = (256 + (pg_delta * br / 255)) as u32;
+    let pb = (256 + (pb_delta * br / 255)) as u32;
+    ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8)
 }
 
 #[inline(always)]
@@ -6011,8 +6090,8 @@ fn pack_rgb(r: u32, g: u32, b: u32) -> u32 {
     (r.min(255) << 16) | (g.min(255) << 8) | b.min(255)
 }
 
-/// Phosphor bloom: simple horizontal-only glow for bright pixels.
-/// Single forward pass — no allocations, cache-friendly, ~630K pixel reads.
+/// Phosphor bloom: horizontal glow for bright pixels.
+/// Forward + backward pass — no allocations, cache-friendly.
 #[inline]
 fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_strength: u32) {
     if bloom_strength == 0 { return; }
@@ -6055,6 +6134,90 @@ fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_s
                 carry_g = (g * excess * bleed) >> 16;
                 carry_b = (b * excess * bleed) >> 16;
             }
+        }
+    }
+
+    // Backward pass (right→left) — makes glow symmetric
+    for y in 0..height {
+        let row = y * width;
+        let mut carry_r: u32 = 0;
+        let mut carry_g: u32 = 0;
+        let mut carry_b: u32 = 0;
+
+        for x in (0..width).rev() {
+            let idx = row + x;
+            let pixel = unsafe { *buffer.get_unchecked(idx) };
+            let r = (pixel >> 16) & 0xFF;
+            let g = (pixel >> 8) & 0xFF;
+            let b = pixel & 0xFF;
+
+            if carry_r | carry_g | carry_b != 0 {
+                let nr = (r + carry_r).min(255);
+                let ng = (g + carry_g).min(255);
+                let nb = (b + carry_b).min(255);
+                unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
+                carry_r >>= 1;
+                carry_g >>= 1;
+                carry_b >>= 1;
+            }
+
+            let brightness = ((r + g + b) * 85) >> 8;
+            if brightness > threshold {
+                let excess = brightness - threshold;
+                carry_r = (r * excess * bleed) >> 16;
+                carry_g = (g * excess * bleed) >> 16;
+                carry_b = (b * excess * bleed) >> 16;
+            }
+        }
+    }
+}
+
+/// Inter-scanline phosphor glow: bright rows bleed into dark scanline gap rows.
+/// Only processes gap rows (every 4th row starting at row 3) — very cheap.
+#[inline]
+fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_strength: u32) {
+    if glow_strength == 0 || height < 8 { return; }
+    
+    // glow_strength 0-100 → blend factor 0-64
+    let blend = (glow_strength * 64 / 100).min(64) as u32;
+    if blend == 0 { return; }
+    
+    // Only process scanline gap rows (row % 4 == 3) and slight dim rows (row % 4 == 2)
+    for y in 0..height {
+        if y % 4 != 3 && y % 4 != 2 { continue; }
+        
+        let factor = if y % 4 == 3 { blend } else { blend >> 1 }; // gap gets full glow, dim row gets half
+        let inv = 256 - factor;
+        
+        // Average the rows above and below
+        let above = if y > 0 { y - 1 } else { y };
+        let below = if y + 1 < height { y + 1 } else { y };
+        
+        let row = y * width;
+        let above_row = above * width;
+        let below_row = below * width;
+        
+        for x in 0..width {
+            let idx = row + x;
+            let pixel = unsafe { *buffer.get_unchecked(idx) };
+            let r = (pixel >> 16) & 0xFF;
+            let g = (pixel >> 8) & 0xFF;
+            let b = pixel & 0xFF;
+            
+            let pa = unsafe { *buffer.get_unchecked(above_row + x) };
+            let pb = unsafe { *buffer.get_unchecked(below_row + x) };
+            
+            // Average of above and below
+            let avg_r = (((pa >> 16) & 0xFF) + ((pb >> 16) & 0xFF)) >> 1;
+            let avg_g = (((pa >> 8) & 0xFF) + ((pb >> 8) & 0xFF)) >> 1;
+            let avg_b = ((pa & 0xFF) + (pb & 0xFF)) >> 1;
+            
+            // Blend: pixel * inv + avg * factor, all >>8
+            let nr = ((r * inv + avg_r * factor) >> 8).min(255);
+            let ng = ((g * inv + avg_g * factor) >> 8).min(255);
+            let nb = ((b * inv + avg_b * factor) >> 8).min(255);
+            
+            unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
         }
     }
 }
@@ -6139,6 +6302,11 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
             
+            // Apply CRT gamma — crushes darks, enriches midtones
+            r = GAMMA_TABLE[r.min(255) as usize] as u32;
+            g = GAMMA_TABLE[g.min(255) as usize] as u32;
+            b = GAMMA_TABLE[b.min(255) as usize] as u32;
+            
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
                 let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
@@ -6191,6 +6359,11 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
             
+            // Apply CRT gamma — crushes darks, enriches midtones
+            r = GAMMA_TABLE[r.min(255) as usize] as u32;
+            g = GAMMA_TABLE[g.min(255) as usize] as u32;
+            b = GAMMA_TABLE[b.min(255) as usize] as u32;
+            
             (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
@@ -6236,6 +6409,11 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            
+            // Apply CRT gamma — crushes darks, enriches midtones
+            r = GAMMA_TABLE[r.min(255) as usize] as u32;
+            g = GAMMA_TABLE[g.min(255) as usize] as u32;
+            b = GAMMA_TABLE[b.min(255) as usize] as u32;
             
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
@@ -6285,6 +6463,11 @@ fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            
+            // Apply CRT gamma — crushes darks, enriches midtones
+            r = GAMMA_TABLE[r.min(255) as usize] as u32;
+            g = GAMMA_TABLE[g.min(255) as usize] as u32;
+            b = GAMMA_TABLE[b.min(255) as usize] as u32;
             
             (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
