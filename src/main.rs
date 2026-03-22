@@ -2065,6 +2065,15 @@ fn get_screen_resolution() -> (usize, usize) {
 }
 
 fn main() {
+    // Boost Windows timer resolution for smooth frame pacing
+    #[cfg(target_os = "windows")]
+    {
+        extern "system" {
+            fn timeBeginPeriod(uPeriod: u32) -> u32;
+        }
+        unsafe { timeBeginPeriod(1); }
+    }
+
     // CLI flags (handle before any initialization)
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
@@ -2115,7 +2124,8 @@ fn main() {
     .expect("Failed to create window");
 
     let target_fps = if config.region == "pal" { 50 } else { 60 };
-    window.set_target_fps(target_fps);
+    let frame_duration_ns: u64 = 1_000_000_000 / target_fps as u64;
+    window.set_target_fps(target_fps);  // Keep as safety fallback
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().ok();
@@ -2310,6 +2320,7 @@ fn main() {
     let mut fps_timer = std::time::Instant::now();
     let mut fps_frames: u32 = 0;
     let mut fps_display: String = String::new();
+    let mut frame_start = std::time::Instant::now();
 
     // Achievement system state
     let mut achievement_engine = AchievementEngine::new();
@@ -5965,6 +5976,24 @@ fn main() {
         // Apply deferred state transitions
         if let Some(new_state) = next_state {
             emulator_state = new_state;
+        }
+
+        // === Hybrid frame pacer: sleep coarse + spin-wait precise ===
+        {
+            let elapsed = frame_start.elapsed();
+            let target = std::time::Duration::from_nanos(frame_duration_ns);
+            if elapsed < target {
+                let remaining = target - elapsed;
+                // Sleep for most of the remaining time (leave 2ms for spin-wait)
+                if remaining > std::time::Duration::from_millis(2) {
+                    std::thread::sleep(remaining - std::time::Duration::from_millis(2));
+                }
+                // Spin-wait for precise timing
+                while frame_start.elapsed() < target {
+                    std::hint::spin_loop();
+                }
+            }
+            frame_start = std::time::Instant::now();
         }
     }
 }
