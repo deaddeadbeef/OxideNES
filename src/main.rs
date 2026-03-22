@@ -3458,11 +3458,9 @@ fn main() {
                 if crt_enabled {
                     let do_ghost = glass_intensity > 20;
                     if do_ghost {
-                        for y in 0..SCREEN_H {
-                            let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
-                            ghost_buffer[row_start..row_start + SCREEN_W]
-                                .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
-                        }
+                        let start = SCREEN_Y * WINDOW_WIDTH;
+                        let end = (SCREEN_Y + SCREEN_H) * WINDOW_WIDTH;
+                        ghost_buffer[start..end].copy_from_slice(&composite_buffer[start..end]);
                     }
                     apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                 }
@@ -4509,11 +4507,9 @@ fn main() {
                     if crt_enabled {
                         let do_ghost = glass_intensity > 20;
                         if do_ghost {
-                            for y in 0..SCREEN_H {
-                                let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
-                                ghost_buffer[row_start..row_start + SCREEN_W]
-                                    .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
-                            }
+                            let start = SCREEN_Y * WINDOW_WIDTH;
+                            let end = (SCREEN_Y + SCREEN_H) * WINDOW_WIDTH;
+                            ghost_buffer[start..end].copy_from_slice(&composite_buffer[start..end]);
                         }
                         apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                     }
@@ -4720,7 +4716,13 @@ fn main() {
                         let mm = (display_s / 60) % 100;
                         let ss = display_s % 60;
                         let ff = tc_total % 60;
-                        let tc = format!("{:02}:{:02}:{:02}", mm, ss, ff);
+                        let tc_buf: [u8; 8] = [
+                            b'0' + (mm / 10) as u8, b'0' + (mm % 10) as u8, b':',
+                            b'0' + (ss / 10) as u8, b'0' + (ss % 10) as u8, b':',
+                            b'0' + (ff / 10) as u8, b'0' + (ff % 10) as u8,
+                        ];
+                        // SAFETY: all bytes are ASCII digits or ':', guaranteed valid UTF-8
+                        let tc = unsafe { std::str::from_utf8_unchecked(&tc_buf) };
                         draw_text(&mut composite_buffer, &tc, osd_x + 8, osd_y + 10, 0x00DDDD, WINDOW_WIDTH);
                     }
 
@@ -5686,11 +5688,9 @@ fn main() {
                         if crt_enabled {
                             let do_ghost = glass_intensity > 20;
                             if do_ghost {
-                                for y in 0..SCREEN_H {
-                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
-                                    ghost_buffer[row_start..row_start + SCREEN_W]
-                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
-                                }
+                                let start = SCREEN_Y * WINDOW_WIDTH;
+                                let end = (SCREEN_Y + SCREEN_H) * WINDOW_WIDTH;
+                                ghost_buffer[start..end].copy_from_slice(&composite_buffer[start..end]);
                             }
                             apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
@@ -5938,11 +5938,9 @@ fn main() {
                         if crt_enabled {
                             let do_ghost = glass_intensity > 20;
                             if do_ghost {
-                                for y in 0..SCREEN_H {
-                                    let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
-                                    ghost_buffer[row_start..row_start + SCREEN_W]
-                                        .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
-                                }
+                                let start = SCREEN_Y * WINDOW_WIDTH;
+                                let end = (SCREEN_Y + SCREEN_H) * WINDOW_WIDTH;
+                                ghost_buffer[start..end].copy_from_slice(&composite_buffer[start..end]);
                             }
                             apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
@@ -7134,7 +7132,7 @@ fn apply_glass_effects(
 
             // Glass tint: slight contrast reduction + warm color shift from glass
             // Real CRT glass absorbs some light, especially at edges (thicker glass)
-            if tint_strength > 0 {
+            if tint_strength > 1 {
                 let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_idx) } as u32;
                 let tint = tint_strength * thickness / 256;
 
