@@ -30,7 +30,7 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libudev-dev
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
@@ -52,5 +52,5 @@ jobs:
         with:
           components: clippy
       - name: Install Linux dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libudev-dev
       - run: cargo clippy -- -D warnings
