@@ -44,10 +44,8 @@ jobs:
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
         run: |
-          New-Item -ItemType Directory -Force -Path target\release | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\oxidenes.exe" "target\release\oxidenes.exe"
-          choco install innosetup -y
-          iscc installer\oxidenes.iss
+          cargo install cargo-wix
+          cargo wix --target ${{ matrix.target }} --nocapture
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -60,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: oxidenes-windows-installer
-          path: installer/Output/*.exe
+          path: target/wix/*.msi
 
   release:
     needs: build
