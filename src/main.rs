@@ -351,13 +351,13 @@ struct CrtConfig {
 impl Default for CrtConfig {
     fn default() -> Self {
         Self {
-            scanline_intensity: 30,
+            scanline_intensity: 40,
             phosphor_warmth: 30,
             vignette_strength: 20,
             blur_amount: 0,
             curvature_strength: 15,
             mask_mode: CrtMaskMode::ShadowMask,
-            mask_intensity: 25,
+            mask_intensity: 50,
         }
     }
 }
@@ -1137,7 +1137,7 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
-    draw_text_centered_8x8(fb, "\x11 NES EMULATOR \x11", 2, MENU_GOLD);
+    draw_text_centered_8x8(fb, "\x11 OXIDENES \x11", 2, MENU_GOLD);
     draw_separator_line(fb, 3);
 
     let mut current_row: usize = 4;
@@ -5823,9 +5823,9 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     let si = crt_cfg.scanline_intensity as u32;
     let scan_muls: [u32; 4] = [
         255,                                    // row 0: full bright
-        255 - (si * 10 / 100),                  // row 1: very slight dim
-        255 - (si * 10 / 100),                  // row 2: very slight dim
-        255 - si.min(255) * 45 / 100,           // row 3: scanline gap (moderate dim)
+        255 - (si * 15 / 100),                  // row 1: slight dim
+        255 - (si * 25 / 100),                  // row 2: moderate dim
+        255 - si.min(255) * 55 / 100,           // row 3: scanline gap (stronger)
     ];
 
     let pw = crt_cfg.phosphor_warmth as u32;
