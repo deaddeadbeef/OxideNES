@@ -345,6 +345,7 @@ struct CrtConfig {
     blur_amount: u8,          // 0-100, default 0
     curvature_strength: u8,   // 0-100, default 15
     mask_mode: CrtMaskMode,
+    mask_intensity: u8,       // 0-100, how strongly the mask pattern shows
 }
 
 impl Default for CrtConfig {
@@ -356,6 +357,7 @@ impl Default for CrtConfig {
             blur_amount: 0,
             curvature_strength: 15,
             mask_mode: CrtMaskMode::ShadowMask,
+            mask_intensity: 25,
         }
     }
 }
@@ -1364,7 +1366,7 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
         CrtMaskMode::ApertureGrille => "APERTURE GRILLE",
     };
 
-    let items: [(& str, String); 8] = [
+    let items: [(& str, String); 9] = [
         ("SCANLINES:", format_slider_bar(crt.scanline_intensity)),
         ("PHOSPHOR:", format_slider_bar(crt.phosphor_warmth)),
         ("VIGNETTE:", format_slider_bar(crt.vignette_strength)),
@@ -1372,9 +1374,10 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
         ("CURVATURE:", format_slider_bar(crt.curvature_strength)),
         ("GLASS:", format_slider_bar(cfg.glass_intensity)),
         ("MASK:", mask_name.to_string()),
+        ("MASK INT:", format_slider_bar(crt.mask_intensity)),
         ("BACK", String::new()),
     ];
-    let rows = [7, 9, 11, 13, 15, 17, 19, 22];
+    let rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
     for (i, ((label, value), &row)) in items.iter().zip(rows.iter()).enumerate() {
         let is_flashing = i == selected && value_flash > 0;
@@ -1684,13 +1687,13 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
                 for x in 0..SCREEN_W {
                     let col_in_cell = (x + col_offset) % 3;
                     let (r, g, b) = match (row_in_cell, col_in_cell) {
-                        (0, 0) => (255, 50, 50),   // R bright
-                        (0, 1) => (50, 255, 50),   // G bright
-                        (0, 2) => (50, 50, 255),   // B bright
-                        (1, 0) => (180, 30, 30),   // R dim
-                        (1, 1) => (30, 180, 30),   // G dim
-                        (1, 2) => (30, 30, 180),   // B dim
-                        _ => (128, 128, 128),
+                        (0, 0) => (255, 180, 180),  // R bright — off channels at 70%
+                        (0, 1) => (180, 255, 180),  // G bright
+                        (0, 2) => (180, 180, 255),  // B bright
+                        (1, 0) => (220, 160, 160),  // R dim
+                        (1, 1) => (160, 220, 160),  // G dim
+                        (1, 2) => (160, 160, 220),  // B dim
+                        _ => (200, 200, 200),
                     };
                     table[y * SCREEN_W + x] = (r, g, b);
                 }
@@ -1702,9 +1705,9 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
             for y in 0..SCREEN_H {
                 for x in 0..SCREEN_W {
                     let (r, g, b) = match x % 3 {
-                        0 => (255, 30, 30),    // R stripe
-                        1 => (30, 255, 30),    // G stripe
-                        2 => (30, 30, 255),    // B stripe
+                        0 => (255, 180, 180),  // R stripe
+                        1 => (180, 255, 180),  // G stripe
+                        2 => (180, 180, 255),  // B stripe
                         _ => unreachable!(),
                     };
                     table[y * SCREEN_W + x] = (r, g, b);
@@ -2504,7 +2507,7 @@ fn main() {
                                 sound_cooldown = 3;
                             }
                         }
-                        if input.down && *selected < 7 {
+                        if input.down && *selected < 8 {
                             *selected += 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -2553,13 +2556,17 @@ fn main() {
                                     mask_table = build_mask_table(&config.crt_config.mask_mode);
                                     *tables_dirty = true;
                                 }
+                                7 => {
+                                    config.crt_config.mask_intensity = (config.crt_config.mask_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    *tables_dirty = true;
+                                }
                                 _ => {}
                             }
                             play_menu_sound(&mut producer, MenuSound::Adjust, actual_sample_rate, audio_volume as f32 / 100.0);
                             save_config(&config);
                             *value_flash = 8;
                         }
-                        if input.confirm && *selected == 7 {
+                        if input.confirm && *selected == 8 {
                             // BACK
                             input_back_crt = true;
                         }
@@ -4000,14 +4007,14 @@ fn main() {
                         // L+R Quick Overlay toggle
                         if l_held && r_held {
                             quick_overlay_lr_frames += 1;
-                            if quick_overlay_lr_frames == 3 && !quick_overlay {
-                                // Open overlay after 3 frames debounce
+                            if quick_overlay_lr_frames == 20 && !quick_overlay {
+                                // Open overlay after 20 frames debounce (~333ms)
                                 quick_overlay = true;
                                 quick_overlay_selected = 0;
                                 play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                             }
                         } else {
-                            if quick_overlay_lr_frames > 0 && quick_overlay_lr_frames < 3 {
+                            if quick_overlay_lr_frames > 0 && quick_overlay_lr_frames < 20 {
                                 // Short tap — ignore
                             }
                             quick_overlay_lr_frames = 0;
@@ -5739,8 +5746,21 @@ fn apply_scanline_vignette(r: u32, g: u32, b: u32, scan_mul: u32, vig: u32) -> (
 }
 
 #[inline(always)]
-fn apply_mask(r: u32, g: u32, b: u32, mr: u8, mg: u8, mb: u8) -> (u32, u32, u32) {
-    ((r * mr as u32) / 255, (g * mg as u32) / 255, (b * mb as u32) / 255)
+fn apply_mask(r: u32, g: u32, b: u32, mr: u8, mg: u8, mb: u8, intensity: u32) -> (u32, u32, u32) {
+    // intensity 0 = no mask effect, 100 = full mask effect
+    // Lerp: result = original * (100 - intensity)/100 + masked * intensity/100
+    let mr32 = mr as u32;
+    let mg32 = mg as u32;
+    let mb32 = mb as u32;
+    let masked_r = (r * mr32) / 255;
+    let masked_g = (g * mg32) / 255;
+    let masked_b = (b * mb32) / 255;
+    let inv = 100 - intensity;
+    (
+        (r * inv + masked_r * intensity) / 100,
+        (g * inv + masked_g * intensity) / 100,
+        (b * inv + masked_b * intensity) / 100,
+    )
 }
 
 #[inline(always)]
@@ -5818,17 +5838,18 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     let use_blur = blur_side > 0;
 
     let use_mask = crt_cfg.mask_mode != CrtMaskMode::Off;
+    let mask_intensity = crt_cfg.mask_intensity as u32;
 
     // Hoist branching outside the pixel loop - create specialized paths
     if use_mask && use_blur {
         // Full pipeline: blur + mask
         crt_filter_full(input, output, vignette_table, distortion_table, 
                        &scan_muls, pr_mul, pg_mul, pb_mul, 
-                       blur_center, blur_side, mask_table);
+                       blur_center, blur_side, mask_table, mask_intensity);
     } else if use_mask {
         // Mask but no blur
         crt_filter_masked(input, output, vignette_table, distortion_table, 
-                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table);
+                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table, mask_intensity);
     } else if use_blur {
         // Blur but no mask
         crt_filter_blurred(input, output, vignette_table, distortion_table, 
@@ -5846,7 +5867,7 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
 fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                    pr_mul: u32, pg_mul: u32, pb_mul: u32,
-                   blur_center: u32, blur_side: u32, mask_table: &[(u8, u8, u8)]) {
+                   blur_center: u32, blur_side: u32, mask_table: &[(u8, u8, u8)], mask_intensity: u32) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -5887,7 +5908,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
             let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb, mask_intensity);
             
             unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
         }
@@ -5898,7 +5919,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 #[inline(always)]
 fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u8, u8, u8)]) {
+                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u8, u8, u8)], mask_intensity: u32) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -5932,7 +5953,7 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
             let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb, mask_intensity);
             
             unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
         }
