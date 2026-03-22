@@ -4763,60 +4763,136 @@ fn main() {
                         };
 
                         if osd_type != OsdType::None {
-                            let bar_width = 200usize;
-                            let bar_height = 8usize;
-                            let label_y = SCREEN_Y + SCREEN_H - 45;
-                            let bar_y = SCREEN_Y + SCREEN_H - 32;
-                            let bar_x = SCREEN_X + (SCREEN_W - bar_width) / 2;
-                            let center_x = SCREEN_X + SCREEN_W / 2;
+                            let num_segments: usize = 20;
+                            let seg_w: usize = 10;
+                            let seg_gap: usize = 2;
+                            let seg_h: usize = 12;
+                            let seg_stride = seg_w + seg_gap;
+                            let total_bar_w = num_segments * seg_stride;
 
-                            // Draw label centered above bar
-                            let text_x = center_x.saturating_sub(label.len() * 4 / 2);
-                            let label_color = ((alpha * 0xCC / 255) << 16) | ((alpha * 0xCC / 255) << 8) | (alpha * 0xCC / 255);
+                            let bar_y = SCREEN_Y + SCREEN_H - 30;
+                            let label_y = bar_y - 14;
+                            let bar_x = SCREEN_X + (SCREEN_W - total_bar_w) / 2;
+
+                            // Background box (darken existing pixels)
+                            let bg_pad = 6usize;
+                            let bg_x0 = bar_x.saturating_sub(bg_pad);
+                            let bg_y0 = label_y.saturating_sub(bg_pad);
+                            let bg_x1 = (bar_x + total_bar_w + 50 + bg_pad).min(WINDOW_WIDTH);
+                            let bg_y1 = (bar_y + seg_h + bg_pad).min(WINDOW_HEIGHT);
+                            for y in bg_y0..bg_y1 {
+                                for x in bg_x0..bg_x1 {
+                                    let idx = y * WINDOW_WIDTH + x;
+                                    if idx < composite_buffer.len() {
+                                        // Darken to ~25% brightness for that CRT OSD look
+                                        let p = composite_buffer[idx];
+                                        let dimmed = (p >> 2) & 0x3F3F3F;
+                                        if alpha >= 255 {
+                                            composite_buffer[idx] = dimmed;
+                                        } else {
+                                            // Blend between original and dimmed based on alpha
+                                            let r0 = (p >> 16) & 0xFF;
+                                            let g0 = (p >> 8) & 0xFF;
+                                            let b0 = p & 0xFF;
+                                            let r1 = (dimmed >> 16) & 0xFF;
+                                            let g1 = (dimmed >> 8) & 0xFF;
+                                            let b1 = dimmed & 0xFF;
+                                            let inv = 255 - alpha;
+                                            let r = (r1 * alpha + r0 * inv) / 255;
+                                            let g = (g1 * alpha + g0 * inv) / 255;
+                                            let b = (b1 * alpha + b0 * inv) / 255;
+                                            composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Label text (golden amber)
+                            let text_x = bar_x + (total_bar_w / 2).saturating_sub(label.len() * 4 / 2);
+                            let lr = alpha * 0xFF / 255;
+                            let lg = alpha * 0xC0 / 255;
+                            let lb = alpha * 0x40 / 255;
+                            let label_color = (lr << 16) | (lg << 8) | lb;
                             draw_text(&mut composite_buffer, label, text_x, label_y, label_color, WINDOW_WIDTH);
 
-                            // Draw bar background (dark gray)
-                            let bg_color = (alpha * 0x33 / 255) << 16 | (alpha * 0x33 / 255) << 8 | (alpha * 0x33 / 255);
-                            for y in bar_y..(bar_y + bar_height).min(WINDOW_HEIGHT) {
-                                for x in bar_x..(bar_x + bar_width).min(WINDOW_WIDTH) {
-                                    let idx = y * WINDOW_WIDTH + x;
-                                    if idx < composite_buffer.len() {
-                                        composite_buffer[idx] = bg_color;
+                            // Segments
+                            let filled_count = (((osd_value + 50) as usize) * num_segments / 100).min(num_segments);
+
+                            let fr = alpha * 0xFF / 255;
+                            let fg = alpha * 0xB0 / 255;
+                            let fb = alpha * 0x20 / 255;
+                            let filled_color = (fr << 16) | (fg << 8) | fb;
+
+                            let dr = alpha * 0x55 / 255;
+                            let dg = alpha * 0x40 / 255;
+                            let db = alpha * 0x10 / 255;
+                            let dim_color = (dr << 16) | (dg << 8) | db;
+
+                            for i in 0..num_segments {
+                                let sx = bar_x + i * seg_stride;
+                                if i < filled_count {
+                                    // Filled segment: solid rectangle
+                                    for y in bar_y..(bar_y + seg_h).min(WINDOW_HEIGHT) {
+                                        for x in sx..(sx + seg_w).min(WINDOW_WIDTH) {
+                                            let idx = y * WINDOW_WIDTH + x;
+                                            if idx < composite_buffer.len() {
+                                                composite_buffer[idx] = filled_color;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Empty segment: outline only (1px border)
+                                    for y in bar_y..(bar_y + seg_h).min(WINDOW_HEIGHT) {
+                                        for x in sx..(sx + seg_w).min(WINDOW_WIDTH) {
+                                            let is_border = y == bar_y || y == bar_y + seg_h - 1 || x == sx || x == sx + seg_w - 1;
+                                            if is_border {
+                                                let idx = y * WINDOW_WIDTH + x;
+                                                if idx < composite_buffer.len() {
+                                                    composite_buffer[idx] = dim_color;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            // Fill level: map -50..+50 to 0..bar_width
-                            let fill_width = ((osd_value + 50) as usize * bar_width) / 100;
-
-                            // Fill color: warm amber/orange for that CRT TV feel
-                            let fill_r = alpha * 0xFF / 255;
-                            let fill_g = alpha * 0xA0 / 255;
-                            let fill_b = alpha * 0x20 / 255;
-                            let fill_color = (fill_r << 16) | (fill_g << 8) | fill_b;
-
-                            for y in bar_y..(bar_y + bar_height).min(WINDOW_HEIGHT) {
-                                for x in bar_x..(bar_x + fill_width).min(bar_x + bar_width).min(WINDOW_WIDTH) {
-                                    let idx = y * WINDOW_WIDTH + x;
-                                    if idx < composite_buffer.len() {
-                                        composite_buffer[idx] = fill_color;
-                                    }
-                                }
-                            }
-
-                            // Draw value text right of bar
-                            let val_text = format!("{:+}", osd_value);
-                            let val_x = bar_x + bar_width + 8;
-                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 1, label_color, WINDOW_WIDTH);
-
-                            // Draw center marker (thin white tick at 0 position)
-                            let center_mark_x = bar_x + bar_width / 2;
-                            for y in (bar_y.saturating_sub(2))..(bar_y + bar_height + 2).min(WINDOW_HEIGHT) {
-                                let idx = y * WINDOW_WIDTH + center_mark_x;
+                            // Center tick mark (at segment 10 boundary = zero point)
+                            let center_x = bar_x + 10 * seg_stride - seg_gap / 2;
+                            let tick_color = label_color;
+                            for dy in 0..3usize {
+                                let ty = bar_y.saturating_sub(3) + dy;
+                                let idx = ty * WINDOW_WIDTH + center_x;
                                 if idx < composite_buffer.len() {
-                                    composite_buffer[idx] = (alpha << 16) | (alpha << 8) | alpha;
+                                    composite_buffer[idx] = tick_color;
+                                }
+                                // Small triangle: wider at top
+                                if dy == 0 {
+                                    for offset in [1usize, 2] {
+                                        if center_x + offset < WINDOW_WIDTH {
+                                            let idx2 = ty * WINDOW_WIDTH + center_x + offset;
+                                            if idx2 < composite_buffer.len() { composite_buffer[idx2] = tick_color; }
+                                        }
+                                        if center_x >= offset {
+                                            let idx3 = ty * WINDOW_WIDTH + center_x - offset;
+                                            if idx3 < composite_buffer.len() { composite_buffer[idx3] = tick_color; }
+                                        }
+                                    }
+                                } else if dy == 1 {
+                                    if center_x + 1 < WINDOW_WIDTH {
+                                        let idx2 = ty * WINDOW_WIDTH + center_x + 1;
+                                        if idx2 < composite_buffer.len() { composite_buffer[idx2] = tick_color; }
+                                    }
+                                    if center_x >= 1 {
+                                        let idx3 = ty * WINDOW_WIDTH + center_x - 1;
+                                        if idx3 < composite_buffer.len() { composite_buffer[idx3] = tick_color; }
+                                    }
                                 }
                             }
+
+                            // Value text to the right
+                            let val_text = format!("{:+}", osd_value);
+                            let val_x = bar_x + total_bar_w + 8;
+                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 2, label_color, WINDOW_WIDTH);
                         }
                     }
 
