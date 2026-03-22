@@ -1676,56 +1676,36 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
     match mode {
         CrtMaskMode::Off => {} // all (255,255,255) — no effect
         CrtMaskMode::ShadowMask => {
-            // Realistic shadow mask: 3×3 repeating phosphor triads with gaps
-            // Each "pixel" has R, G, B phosphor dots arranged in a triad
-            // with dark gaps between them (like a real shadow mask)
+            // Shadow mask: 3×2 repeating phosphor triads with half-cell row offset
+            // Finer pattern — each dot is 1 output pixel wide
             for y in 0..SCREEN_H {
-                let row_in_cell = y % 3;
-                let row_shift = (y / 3) % 2; // Alternate rows offset by half a cell
+                let row_in_cell = y % 2;
+                let col_offset = if (y / 2) % 2 == 0 { 0 } else { 1 };
                 for x in 0..SCREEN_W {
-                    let col = (x + row_shift * 2) % 6; // 6-wide pattern with half-cell offset
-                    let (r, g, b) = match (row_in_cell, col) {
-                        // Top row of triad
-                        (0, 0) => (240, 60, 60),   // R dot
-                        (0, 1) => (180, 80, 60),   // R-G transition
-                        (0, 2) => (60, 240, 60),   // G dot
-                        (0, 3) => (60, 180, 80),   // G-B transition
-                        (0, 4) => (60, 60, 240),   // B dot
-                        (0, 5) => (120, 60, 180),  // B-R transition
-                        // Middle row - brightest, phosphors at full
-                        (1, 0) => (255, 40, 40),   // R dot center
-                        (1, 1) => (160, 100, 40),  // gap
-                        (1, 2) => (40, 255, 40),   // G dot center
-                        (1, 3) => (40, 160, 100),  // gap
-                        (1, 4) => (40, 40, 255),   // B dot center
-                        (1, 5) => (100, 40, 160),  // gap
-                        // Bottom row - fading
-                        (2, 0) => (200, 80, 80),   // R fading
-                        (2, 1) => (140, 100, 80),  // inter-dot gap
-                        (2, 2) => (80, 200, 80),   // G fading
-                        (2, 3) => (80, 140, 100),  // inter-dot gap
-                        (2, 4) => (80, 80, 200),   // B fading
-                        (2, 5) => (100, 80, 140),  // inter-dot gap
-                        _ => (255, 255, 255),
+                    let col_in_cell = (x + col_offset) % 3;
+                    let (r, g, b) = match (row_in_cell, col_in_cell) {
+                        (0, 0) => (255, 50, 50),   // R bright
+                        (0, 1) => (50, 255, 50),   // G bright
+                        (0, 2) => (50, 50, 255),   // B bright
+                        (1, 0) => (180, 30, 30),   // R dim
+                        (1, 1) => (30, 180, 30),   // G dim
+                        (1, 2) => (30, 30, 180),   // B dim
+                        _ => (128, 128, 128),
                     };
                     table[y * SCREEN_W + x] = (r, g, b);
                 }
             }
         }
         CrtMaskMode::ApertureGrille => {
-            // Realistic aperture grille: vertical phosphor stripes with dark gaps
-            // Sony Trinitron style — thin dark lines between color stripes
+            // Aperture grille: 3-wide vertical RGB stripes (Trinitron style)
+            // Each color stripe is exactly 1 output pixel wide
             for y in 0..SCREEN_H {
                 for x in 0..SCREEN_W {
-                    let col = x % 6; // 6-wide repeating pattern
-                    let (r, g, b) = match col {
-                        0 => (255, 30, 30),    // R stripe center
-                        1 => (200, 50, 40),    // R stripe edge / gap
-                        2 => (30, 255, 30),    // G stripe center
-                        3 => (40, 200, 50),    // G stripe edge / gap
-                        4 => (30, 30, 255),    // B stripe center
-                        5 => (50, 40, 200),    // B stripe edge / gap
-                        _ => (255, 255, 255),
+                    let (r, g, b) = match x % 3 {
+                        0 => (255, 30, 30),    // R stripe
+                        1 => (30, 255, 30),    // G stripe
+                        2 => (30, 30, 255),    // B stripe
+                        _ => unreachable!(),
                     };
                     table[y * SCREEN_W + x] = (r, g, b);
                 }
@@ -1913,7 +1893,7 @@ fn main() {
     // CLI flags (handle before any initialization)
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        println!("NES Emulator v{}", env!("CARGO_PKG_VERSION"));
+        println!("OxideNES v{}", env!("CARGO_PKG_VERSION"));
         println!();
         println!("USAGE:");
         println!("    nes-emulator [OPTIONS] [ROM_FILE]");
@@ -1949,7 +1929,7 @@ fn main() {
     let mut update_dismissed = false;
 
     let mut window = Window::new(
-        "NES Emulator",
+        "OxideNES",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         WindowOptions {
@@ -2082,7 +2062,7 @@ fn main() {
 
     // Fullscreen state
     let mut is_fullscreen: bool = false;
-    let mut window_title: String = "NES Emulator".to_string();
+    let mut window_title: String = "OxideNES".to_string();
 
     // Analog stick state for hysteresis
     let mut stick_state_p1 = StickState::default();
@@ -2181,7 +2161,7 @@ fn main() {
                                 .map(|s| s.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "Unknown".to_string())
                         });
-                        window_title = format!("NES Emulator — {}", game_name);
+                        window_title = format!("OxideNES — {}", game_name);
                         window.set_title(&window_title);
                         // Initialize achievements & recording for this ROM
                         let rom_md5 = md5_hex(&rom_data);
@@ -3060,7 +3040,7 @@ fn main() {
                                                 .map(|s| s.to_string_lossy().to_string())
                                                 .unwrap_or_else(|| "Unknown".to_string())
                                         });
-                                        window_title = format!("NES Emulator — {}", game_name);
+                                        window_title = format!("OxideNES — {}", game_name);
                                         window.set_title(&window_title);
                                         // Initialize achievements & recording for this ROM
                                         let rom_md5 = md5_hex(&rom_data);
@@ -3534,7 +3514,7 @@ fn main() {
                                     achievement_engine = AchievementEngine::new();
                                     recorder = InputRecording::new([0u8; 32]);
                                     emulator_state = EmulatorState::Menu(MenuState::new());
-                                    window_title = "NES Emulator".to_string();
+                                    window_title = "OxideNES".to_string();
                                     window.set_title(&window_title);
                                     play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                     continue;
@@ -3840,7 +3820,7 @@ fn main() {
                                 quit_hold_frames = 0;
                                 repeat_tracker = RepeatTracker::new();
                                 emulator_state = EmulatorState::Menu(MenuState::new());
-                                window_title = "NES Emulator".to_string();
+                                window_title = "OxideNES".to_string();
                                 window.set_title(&window_title);
                                 continue;
                             }
@@ -4128,7 +4108,7 @@ fn main() {
                                         quick_overlay = false;
                                         repeat_tracker = RepeatTracker::new();
                                         emulator_state = EmulatorState::Menu(MenuState::new());
-                                        window_title = "NES Emulator".to_string();
+                                        window_title = "OxideNES".to_string();
                                         window.set_title(&window_title);
                                         play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                                         continue;
@@ -5420,7 +5400,7 @@ fn main() {
                     }
                 } else {
                     next_state = Some(EmulatorState::Menu(MenuState::new()));
-                    window_title = "NES Emulator".to_string();
+                    window_title = "OxideNES".to_string();
                     window.set_title(&window_title);
                 }
             }
@@ -5821,10 +5801,11 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
 
     // Pre-compute all coefficients once
     let si = crt_cfg.scanline_intensity as u32;
-    let scan_muls: [u32; 3] = [
-        255,
-        255 - (si * 20 / 100),
-        255 - (si * 65 / 100).min(255),
+    let scan_muls: [u32; 4] = [
+        255,                                    // row 0: full bright
+        255 - (si * 10 / 100),                  // row 1: very slight dim
+        255 - (si * 10 / 100),                  // row 2: very slight dim
+        255 - si.min(255) * 45 / 100,           // row 3: scanline gap (moderate dim)
     ];
 
     let pw = crt_cfg.phosphor_warmth as u32;
@@ -5863,12 +5844,12 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
 // Specialized path: full pipeline with blur and mask
 #[inline(always)]
 fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                   distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                   distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                    pr_mul: u32, pg_mul: u32, pb_mul: u32,
                    blur_center: u32, blur_side: u32, mask_table: &[(u8, u8, u8)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 3];
+        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -5916,11 +5897,11 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 // Specialized path: mask only, no blur
 #[inline(always)]
 fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                      pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u8, u8, u8)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 3];
+        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -5961,12 +5942,12 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
 // Specialized path: blur only, no mask
 #[inline(always)]
 fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                       pr_mul: u32, pg_mul: u32, pb_mul: u32,
                       blur_center: u32, blur_side: u32) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 3];
+        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -6011,11 +5992,11 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
 // Specialized path: basic (no blur, no mask)
 #[inline(always)]
 fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 3],
+                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                     pr_mul: u32, pg_mul: u32, pb_mul: u32) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 3];
+        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
