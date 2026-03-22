@@ -337,6 +337,9 @@ impl Default for CrtMaskMode {
     fn default() -> Self { CrtMaskMode::SlotMask }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum OsdType { None, Brightness, Contrast }
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct CrtConfig {
@@ -347,6 +350,8 @@ struct CrtConfig {
     curvature_strength: u8,   // 0-100, default 15
     mask_mode: CrtMaskMode,
     mask_intensity: u8,       // 0-100, how strongly the mask pattern shows
+    brightness: i8,           // -50 to +50, default 0 (applied after CRT filter)
+    contrast: i8,             // -50 to +50, default 0 (applied after CRT filter)
 }
 
 impl Default for CrtConfig {
@@ -359,6 +364,8 @@ impl Default for CrtConfig {
             curvature_strength: 15,
             mask_mode: CrtMaskMode::SlotMask,
             mask_intensity: 50,
+            brightness: 0,
+            contrast: 0,
         }
     }
 }
@@ -1394,7 +1401,7 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
         CrtMaskMode::SlotMask => "SLOT MASK",
     };
 
-    let items: [(& str, String); 9] = [
+    let items: [(&str, String); 11] = [
         ("SCANLINES:", format_slider_bar(crt.scanline_intensity)),
         ("PHOSPHOR:", format_slider_bar(crt.phosphor_warmth)),
         ("VIGNETTE:", format_slider_bar(crt.vignette_strength)),
@@ -1403,6 +1410,8 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
         ("GLASS:", format_slider_bar(cfg.glass_intensity)),
         ("MASK:", mask_name.to_string()),
         ("MASK INT:", format_slider_bar(crt.mask_intensity)),
+        ("BRIGHTNESS:", format!("{:+}", crt.brightness)),
+        ("CONTRAST:", format!("{:+}", crt.contrast)),
         ("BACK", String::new()),
     ];
     let rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
@@ -1798,10 +1807,20 @@ fn build_distortion_table_with_curvature(curvature: u8) -> Vec<(u32, u32)> {
     table
 }
 
-fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
-    let mut table = vec![(255u8, 255u8, 255u8); SCREEN_W * SCREEN_H];
+fn build_mask_table(mode: &CrtMaskMode, mask_intensity: u8) -> Vec<(u16, u16, u16)> {
+    let intensity = mask_intensity as u32;
+    let inv = 100 - intensity;
+
+    // Pre-bake mask value with intensity lerp into a >>8 friendly multiplier.
+    // result = (255 * inv + mask_val * intensity) / 100, clamped to 0..=256
+    // Per-pixel apply becomes just: (channel * mul) >> 8
+    let bake = |mask_val: u8| -> u16 {
+        ((255u32 * inv + mask_val as u32 * intensity) / 100).min(256) as u16
+    };
+
+    let mut table = vec![(256u16, 256u16, 256u16); SCREEN_W * SCREEN_H];
     match mode {
-        CrtMaskMode::Off => {} // all (255,255,255) — no effect
+        CrtMaskMode::Off => {} // all (256,256,256) — no effect
         CrtMaskMode::ShadowMask => {
             // Shadow mask: 3×2 repeating phosphor triads with half-cell row offset
             // Finer pattern — each dot is 1 output pixel wide
@@ -1819,7 +1838,7 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
                         (1, 2) => (160, 160, 220),  // B dim
                         _ => (200, 200, 200),
                     };
-                    table[y * SCREEN_W + x] = (r, g, b);
+                    table[y * SCREEN_W + x] = (bake(r), bake(g), bake(b));
                 }
             }
         }
@@ -1834,7 +1853,7 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
                         2 => (180, 180, 255),  // B stripe
                         _ => unreachable!(),
                     };
-                    table[y * SCREEN_W + x] = (r, g, b);
+                    table[y * SCREEN_W + x] = (bake(r), bake(g), bake(b));
                 }
             }
         }
@@ -1863,7 +1882,7 @@ fn build_mask_table(mode: &CrtMaskMode) -> Vec<(u8, u8, u8)> {
                         }
                         _ => unreachable!(),
                     };
-                    table[y * SCREEN_W + x] = (r, g, b);
+                    table[y * SCREEN_W + x] = (bake(r), bake(g), bake(b));
                 }
             }
         }
@@ -2192,7 +2211,7 @@ fn main() {
     let flat_distortion_table = build_flat_distortion_table();
     let glare_table = build_glare_table();
     let glass_thickness_table = build_glass_thickness_table();
-    let mut mask_table = build_mask_table(&config.crt_config.mask_mode);
+    let mut mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
@@ -2222,6 +2241,9 @@ fn main() {
     let mut repeat_tracker = RepeatTracker::new();
     let mut overlay_message: Option<String> = None;
     let mut overlay_timer: u32 = 0;
+    let mut osd_type: OsdType = OsdType::None;
+    let mut osd_value: i32 = 0;
+    let mut osd_timer: u32 = 0;
     let mut sound_cooldown: u32 = 0;
     let mut cached_net_text: String = String::new();
     let mut cached_net_ping: u32 = u32::MAX;
@@ -2730,12 +2752,25 @@ fn main() {
                                         CrtMaskMode::ApertureGrille => if input.right { CrtMaskMode::SlotMask } else { CrtMaskMode::ShadowMask },
                                         CrtMaskMode::SlotMask => if input.right { CrtMaskMode::Off } else { CrtMaskMode::ApertureGrille },
                                     };
-                                    mask_table = build_mask_table(&config.crt_config.mask_mode);
+                                    mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
                                     *tables_dirty = true;
                                 }
                                 7 => {
                                     config.crt_config.mask_intensity = (config.crt_config.mask_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
                                     *tables_dirty = true;
+                                }
+                                8 => {
+                                    config.crt_config.brightness = (config.crt_config.brightness as i16 + delta).clamp(-50, 50) as i8;
+                                    osd_type = OsdType::Brightness;
+                                    osd_value = config.crt_config.brightness as i32;
+                                    osd_timer = 120;
+                                }
+                                9 => {
+                                    config.crt_config.contrast = (config.crt_config.contrast as i16 + delta).clamp(-50, 50) as i8;
+                                    osd_type = OsdType::Contrast;
+                                    osd_value = config.crt_config.contrast as i32;
+                                    osd_timer = 120;
                                 }
                                 _ => {}
                             }
@@ -3284,6 +3319,7 @@ fn main() {
                                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                                 if crt_enabled {
                                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                                    apply_gamma_brightness_contrast(&mut crt_buffer, SCREEN_W * SCREEN_H, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                                     // Phosphor bloom — bright pixels glow into neighbors
                                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                                     apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -3406,6 +3442,7 @@ fn main() {
                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                 if crt_enabled {
                     crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                    apply_gamma_brightness_contrast(&mut crt_buffer, SCREEN_W * SCREEN_H, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                     // Phosphor bloom — bright pixels glow into neighbors
                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                     apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -3419,16 +3456,15 @@ fn main() {
                 }
                 composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                 if crt_enabled {
-                    apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
-                    // Internal ghost reflection from thick CRT glass
-                    if glass_intensity > 20 {
+                    let do_ghost = glass_intensity > 20;
+                    if do_ghost {
                         for y in 0..SCREEN_H {
                             let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
                             ghost_buffer[row_start..row_start + SCREEN_W]
                                 .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
                         }
-                        apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
                     }
+                    apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                 }
 
                 window
@@ -4252,6 +4288,36 @@ fn main() {
                             overlay_timer = 90; // 1.5 seconds
                         }
 
+                        // Brightness/Contrast OSD hotkeys
+                        if window.is_key_pressed(Key::Minus, KeyRepeat::Yes) {
+                            config.crt_config.brightness = (config.crt_config.brightness as i16 - 5).clamp(-50, 50) as i8;
+                            save_config(&config);
+                            osd_type = OsdType::Brightness;
+                            osd_value = config.crt_config.brightness as i32;
+                            osd_timer = 120;
+                        }
+                        if window.is_key_pressed(Key::Equal, KeyRepeat::Yes) {
+                            config.crt_config.brightness = (config.crt_config.brightness as i16 + 5).clamp(-50, 50) as i8;
+                            save_config(&config);
+                            osd_type = OsdType::Brightness;
+                            osd_value = config.crt_config.brightness as i32;
+                            osd_timer = 120;
+                        }
+                        if window.is_key_pressed(Key::LeftBracket, KeyRepeat::Yes) {
+                            config.crt_config.contrast = (config.crt_config.contrast as i16 - 5).clamp(-50, 50) as i8;
+                            save_config(&config);
+                            osd_type = OsdType::Contrast;
+                            osd_value = config.crt_config.contrast as i32;
+                            osd_timer = 120;
+                        }
+                        if window.is_key_pressed(Key::RightBracket, KeyRepeat::Yes) {
+                            config.crt_config.contrast = (config.crt_config.contrast as i16 + 5).clamp(-50, 50) as i8;
+                            save_config(&config);
+                            osd_type = OsdType::Contrast;
+                            osd_value = config.crt_config.contrast as i32;
+                            osd_timer = 120;
+                        }
+
                         // Shift+R toggle recording
                         if window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift) {
                             if window.is_key_pressed(Key::R, KeyRepeat::No) {
@@ -4424,6 +4490,7 @@ fn main() {
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                        apply_gamma_brightness_contrast(&mut crt_buffer, SCREEN_W * SCREEN_H, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                         // Phosphor bloom — bright pixels glow into neighbors
                         apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -4440,16 +4507,15 @@ fn main() {
                     composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
 
                     if crt_enabled {
-                        apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
-                        // Internal ghost reflection from thick CRT glass
-                        if glass_intensity > 20 {
+                        let do_ghost = glass_intensity > 20;
+                        if do_ghost {
                             for y in 0..SCREEN_H {
                                 let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
                                 ghost_buffer[row_start..row_start + SCREEN_W]
                                     .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
                             }
-                            apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
                         }
+                        apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                     }
                     if is_rewinding {
                         let sx = SCREEN_X;
@@ -4680,6 +4746,77 @@ fn main() {
                         }
                         if overlay_timer == 0 {
                             overlay_message = None;
+                        }
+                    }
+
+                    // === CRT OSD Bar (brightness/contrast) ===
+                    if osd_timer > 0 {
+                        osd_timer -= 1;
+
+                        // Fade: full brightness for first 90 frames, then fade over last 30
+                        let alpha = if osd_timer > 30 { 255u32 } else { osd_timer as u32 * 255 / 30 };
+
+                        let label = match osd_type {
+                            OsdType::Brightness => "BRIGHTNESS",
+                            OsdType::Contrast => "CONTRAST",
+                            OsdType::None => "",
+                        };
+
+                        if osd_type != OsdType::None {
+                            let bar_width = 200usize;
+                            let bar_height = 8usize;
+                            let label_y = SCREEN_Y + SCREEN_H - 45;
+                            let bar_y = SCREEN_Y + SCREEN_H - 32;
+                            let bar_x = SCREEN_X + (SCREEN_W - bar_width) / 2;
+                            let center_x = SCREEN_X + SCREEN_W / 2;
+
+                            // Draw label centered above bar
+                            let text_x = center_x.saturating_sub(label.len() * 4 / 2);
+                            let label_color = ((alpha * 0xCC / 255) << 16) | ((alpha * 0xCC / 255) << 8) | (alpha * 0xCC / 255);
+                            draw_text(&mut composite_buffer, label, text_x, label_y, label_color, WINDOW_WIDTH);
+
+                            // Draw bar background (dark gray)
+                            let bg_color = (alpha * 0x33 / 255) << 16 | (alpha * 0x33 / 255) << 8 | (alpha * 0x33 / 255);
+                            for y in bar_y..(bar_y + bar_height).min(WINDOW_HEIGHT) {
+                                for x in bar_x..(bar_x + bar_width).min(WINDOW_WIDTH) {
+                                    let idx = y * WINDOW_WIDTH + x;
+                                    if idx < composite_buffer.len() {
+                                        composite_buffer[idx] = bg_color;
+                                    }
+                                }
+                            }
+
+                            // Fill level: map -50..+50 to 0..bar_width
+                            let fill_width = ((osd_value + 50) as usize * bar_width) / 100;
+
+                            // Fill color: warm amber/orange for that CRT TV feel
+                            let fill_r = alpha * 0xFF / 255;
+                            let fill_g = alpha * 0xA0 / 255;
+                            let fill_b = alpha * 0x20 / 255;
+                            let fill_color = (fill_r << 16) | (fill_g << 8) | fill_b;
+
+                            for y in bar_y..(bar_y + bar_height).min(WINDOW_HEIGHT) {
+                                for x in bar_x..(bar_x + fill_width).min(bar_x + bar_width).min(WINDOW_WIDTH) {
+                                    let idx = y * WINDOW_WIDTH + x;
+                                    if idx < composite_buffer.len() {
+                                        composite_buffer[idx] = fill_color;
+                                    }
+                                }
+                            }
+
+                            // Draw value text right of bar
+                            let val_text = format!("{:+}", osd_value);
+                            let val_x = bar_x + bar_width + 8;
+                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 1, label_color, WINDOW_WIDTH);
+
+                            // Draw center marker (thin white tick at 0 position)
+                            let center_mark_x = bar_x + bar_width / 2;
+                            for y in (bar_y.saturating_sub(2))..(bar_y + bar_height + 2).min(WINDOW_HEIGHT) {
+                                let idx = y * WINDOW_WIDTH + center_mark_x;
+                                if idx < composite_buffer.len() {
+                                    composite_buffer[idx] = (alpha << 16) | (alpha << 8) | alpha;
+                                }
+                            }
                         }
                     }
 
@@ -5401,6 +5538,7 @@ fn main() {
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                            apply_gamma_brightness_contrast(&mut crt_buffer, SCREEN_W * SCREEN_H, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                             // Phosphor bloom — bright pixels glow into neighbors
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -5414,16 +5552,15 @@ fn main() {
                         }
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                         if crt_enabled {
-                            apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
-                            // Internal ghost reflection from thick CRT glass
-                            if glass_intensity > 20 {
+                            let do_ghost = glass_intensity > 20;
+                            if do_ghost {
                                 for y in 0..SCREEN_H {
                                     let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
                                     ghost_buffer[row_start..row_start + SCREEN_W]
                                         .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
                                 }
-                                apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
                             }
+                            apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
 
                         // Render save state thumbnail in pause menu (composite buffer)
@@ -5655,6 +5792,7 @@ fn main() {
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
                             crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table);
+                            apply_gamma_brightness_contrast(&mut crt_buffer, SCREEN_W * SCREEN_H, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             if glass_intensity > 30 {
@@ -5666,15 +5804,15 @@ fn main() {
                         }
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
                         if crt_enabled {
-                            apply_screen_glare(&mut composite_buffer, &glare_table, &glass_thickness_table, WINDOW_WIDTH, glass_intensity);
-                            if glass_intensity > 20 {
+                            let do_ghost = glass_intensity > 20;
+                            if do_ghost {
                                 for y in 0..SCREEN_H {
                                     let row_start = (y + SCREEN_Y) * WINDOW_WIDTH + SCREEN_X;
                                     ghost_buffer[row_start..row_start + SCREEN_W]
                                         .copy_from_slice(&composite_buffer[row_start..row_start + SCREEN_W]);
                                 }
-                                apply_internal_ghost(&mut composite_buffer, &ghost_buffer, &ghost_alpha_table, WINDOW_WIDTH);
                             }
+                            apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
                     }
 
@@ -6045,6 +6183,10 @@ const GAMMA_TABLE: [u8; 256] = {
 
 #[inline(always)]
 fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32) -> (u32, u32, u32) {
+    // Fast path: no warmth applied
+    if pr_mul == 256 && pg_mul == 256 && pb_mul == 256 {
+        return (r, g, b);
+    }
     // Brightness-dependent warmth: bright pixels get full warmth shift,
     // dark pixels stay neutral (mimics phosphor heating on consumer TVs)
     let brightness = ((r + g + b) * 85) >> 8; // fast /3, range 0-255
@@ -6069,20 +6211,9 @@ fn apply_scanline_vignette(r: u32, g: u32, b: u32, scan_mul: u32, vig: u32) -> (
 }
 
 #[inline(always)]
-fn apply_mask(r: u32, g: u32, b: u32, mr: u8, mg: u8, mb: u8, intensity: u32) -> (u32, u32, u32) {
-    // intensity 0 = no mask effect, 100 = full mask effect
-    // Lerp: result = original * (100 - intensity)/100 + masked * intensity/100
-    // / 255 approx: (x * 0x8081) >> 23  — exact for 0..=65025
-    let masked_r = ((r * mr as u32) * 0x8081) >> 23;
-    let masked_g = ((g * mg as u32) * 0x8081) >> 23;
-    let masked_b = ((b * mb as u32) * 0x8081) >> 23;
-    let inv = 100 - intensity;
-    // / 100 approx: (x * 1311) >> 17  — accurate for 0..=131071
-    (
-        ((r * inv + masked_r * intensity) * 1311) >> 17,
-        ((g * inv + masked_g * intensity) * 1311) >> 17,
-        ((b * inv + masked_b * intensity) * 1311) >> 17,
-    )
+fn apply_mask(r: u32, g: u32, b: u32, mr: u16, mg: u16, mb: u16) -> (u32, u32, u32) {
+    // Pre-baked mask: just multiply and shift. 3 ops instead of 12.
+    ((r * mr as u32) >> 8, (g * mg as u32) >> 8, (b * mb as u32) >> 8)
 }
 
 #[inline(always)]
@@ -6218,7 +6349,7 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
     }
 }
 
-fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u8, u8, u8)]) {
+fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u16, u16, u16)]) {
     output.resize(SCREEN_W * SCREEN_H, 0);
 
     // Pre-compute all coefficients once
@@ -6240,18 +6371,17 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     let use_blur = blur_side > 0;
 
     let use_mask = crt_cfg.mask_mode != CrtMaskMode::Off;
-    let mask_intensity = crt_cfg.mask_intensity as u32;
 
     // Hoist branching outside the pixel loop - create specialized paths
     if use_mask && use_blur {
         // Full pipeline: blur + mask
         crt_filter_full(input, output, vignette_table, distortion_table, 
                        &scan_muls, pr_mul, pg_mul, pb_mul, 
-                       blur_center, blur_side, mask_table, mask_intensity);
+                       blur_center, blur_side, mask_table);
     } else if use_mask {
         // Mask but no blur
         crt_filter_masked(input, output, vignette_table, distortion_table, 
-                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table, mask_intensity);
+                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table);
     } else if use_blur {
         // Blur but no mask
         crt_filter_blurred(input, output, vignette_table, distortion_table, 
@@ -6264,12 +6394,36 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     }
 }
 
+/// Combined gamma + brightness + contrast in a single sequential pass.
+/// One LUT lookup per channel, one pass over the buffer — much faster than
+/// random-access lookups inside the distortion loop.
+#[inline]
+fn apply_gamma_brightness_contrast(buffer: &mut [u32], len: usize, brightness: i32, contrast: i32) {
+    // Build combined LUT: gamma → contrast → brightness
+    let mut lut = [0u8; 256];
+    let con_scale = 256 + (contrast * 256 / 50);
+    
+    for i in 0..256 {
+        let gamma_val = GAMMA_TABLE[i] as i32;
+        let val = (((gamma_val - 128) * con_scale) >> 8) + 128 + brightness * 255 / 50;
+        lut[i] = val.clamp(0, 255) as u8;
+    }
+    
+    for i in 0..len {
+        let pixel = unsafe { *buffer.get_unchecked(i) };
+        let r = lut[((pixel >> 16) & 0xFF) as usize] as u32;
+        let g = lut[((pixel >> 8) & 0xFF) as usize] as u32;
+        let b = lut[(pixel & 0xFF) as usize] as u32;
+        unsafe { *buffer.get_unchecked_mut(i) = (r << 16) | (g << 8) | b; }
+    }
+}
+
 // Specialized path: full pipeline with blur and mask
 #[inline(always)]
 fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
                    pr_mul: u32, pg_mul: u32, pb_mul: u32,
-                   blur_center: u32, blur_side: u32, mask_table: &[(u8, u8, u8)], mask_intensity: u32) {
+                   blur_center: u32, blur_side: u32, mask_table: &[(u16, u16, u16)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -6297,11 +6451,6 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
-            
-            // Apply CRT gamma — crushes darks, enriches midtones
-            r = GAMMA_TABLE[r.min(255) as usize] as u32;
-            g = GAMMA_TABLE[g.min(255) as usize] as u32;
-            b = GAMMA_TABLE[b.min(255) as usize] as u32;
             
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
@@ -6315,7 +6464,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
             let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb, mask_intensity);
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
             
             unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
         }
@@ -6326,7 +6475,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 #[inline(always)]
 fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u8, u8, u8)], mask_intensity: u32) {
+                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u16, u16, u16)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -6355,17 +6504,12 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
             
-            // Apply CRT gamma — crushes darks, enriches midtones
-            r = GAMMA_TABLE[r.min(255) as usize] as u32;
-            g = GAMMA_TABLE[g.min(255) as usize] as u32;
-            b = GAMMA_TABLE[b.min(255) as usize] as u32;
-            
             (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
             let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb, mask_intensity);
+            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
             
             unsafe { *output.get_unchecked_mut(table_idx) = pack_rgb(r, g, b); }
         }
@@ -6405,11 +6549,6 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
-            
-            // Apply CRT gamma — crushes darks, enriches midtones
-            r = GAMMA_TABLE[r.min(255) as usize] as u32;
-            g = GAMMA_TABLE[g.min(255) as usize] as u32;
-            b = GAMMA_TABLE[b.min(255) as usize] as u32;
             
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
@@ -6459,11 +6598,6 @@ fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
             let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
-            
-            // Apply CRT gamma — crushes darks, enriches midtones
-            r = GAMMA_TABLE[r.min(255) as usize] as u32;
-            g = GAMMA_TABLE[g.min(255) as usize] as u32;
-            b = GAMMA_TABLE[b.min(255) as usize] as u32;
             
             (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
@@ -6800,7 +6934,18 @@ fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
     table
 }
 
-fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &[u16], window_width: usize, glass_intensity: u8) {
+/// Combined glass effects: tint + specular glare + internal ghost reflection.
+/// Single pass over the screen area — eliminates one full buffer traversal.
+fn apply_glass_effects(
+    buffer: &mut [u32],
+    source_copy: &[u32],  // pre-effects copy for ghost
+    glare_table: &[u8],
+    thickness_table: &[u16],
+    ghost_alpha_table: &[u8],
+    window_width: usize,
+    glass_intensity: u8,
+    do_ghost: bool,
+) {
     if glass_intensity == 0 { return; }
 
     const CORNER_R: usize = 12;
@@ -6814,12 +6959,25 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &
     let corner_x_max = SCREEN_W - CORNER_R;
     let corner_y_max = SCREEN_H - CORNER_R;
 
+    // Ghost parameters
+    let ghost_shift_x: usize = 3;
+    let ghost_shift_y: usize = 2;
+    let ghost_h = SCREEN_H.saturating_sub(ghost_shift_y);
+    let ghost_w = SCREEN_W.saturating_sub(ghost_shift_x);
+
     for y in 0..SCREEN_H {
         let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
         let glare_row = y * SCREEN_W;
 
         let in_corner_y_top = y < CORNER_R;
         let in_corner_y_bottom = y >= corner_y_max;
+
+        // Ghost source row (shifted)
+        let ghost_src_row = if do_ghost && y < ghost_h {
+            Some((y + ghost_shift_y + SCREEN_Y) * window_width + SCREEN_X)
+        } else {
+            None
+        };
 
         for x in 0..SCREEN_W {
             // Corner rounding check (keep existing logic)
@@ -6832,6 +6990,11 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &
                 if sq_dist(x, y, cx, cy) > CORNER_R_SQ { continue; }
             }
 
+            let glare_idx = glare_row + x;
+
+            // Specular glare overlay — read early for skip optimization
+            let glare_base = unsafe { *glare_table.get_unchecked(glare_idx) as u32 };
+
             let idx = buf_row + x;
             let pixel = unsafe { *buffer.get_unchecked(idx) };
             let mut r = (pixel >> 16) & 0xFF;
@@ -6841,7 +7004,7 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &
             // Glass tint: slight contrast reduction + warm color shift from glass
             // Real CRT glass absorbs some light, especially at edges (thicker glass)
             if tint_strength > 0 {
-                let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_row + x) } as u32;
+                let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_idx) } as u32;
                 let tint = tint_strength * thickness / 256;
 
                 // Pull toward a neutral grey (reduces contrast) with slight warm bias
@@ -6852,7 +7015,6 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &
             }
 
             // Specular glare overlay
-            let glare_base = unsafe { *glare_table.get_unchecked(glare_row + x) as u32 };
             if glare_base > 0 {
                 let brightness = ((r + g + b) * 171) >> 9;    // /3 via multiply-shift
                 let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(brightness)) * 29) >> 19;  // /18000 via multiply-shift
@@ -6863,39 +7025,22 @@ fn apply_screen_glare(buffer: &mut [u32], glare_table: &[u8], thickness_table: &
                 b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);  // glare/15 via multiply-shift
             }
 
+            // Ghost reflection: thick CRT glass creates a faint shifted image
+            if let Some(src_row) = ghost_src_row {
+                if x < ghost_w {
+                    let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(glare_idx) } as u32;
+                    if local_alpha > 0 {
+                        let src_idx = src_row + x + ghost_shift_x;
+                        let ghost_pixel = unsafe { *source_copy.get_unchecked(src_idx) };
+                        let inv_alpha = 256 - local_alpha;
+                        r = ((r * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8).min(255);
+                        g = ((g * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8).min(255);
+                        b = ((b * inv_alpha + (ghost_pixel & 0xFF) * local_alpha) >> 8).min(255);
+                    }
+                }
+            }
+
             unsafe { *buffer.get_unchecked_mut(idx) = (r << 16) | (g << 8) | b; }
-        }
-    }
-}
-
-/// Internal reflection: thick CRT glass creates a faint ghost image
-/// shifted slightly diagonally. More visible near screen edges.
-#[inline]
-fn apply_internal_ghost(buffer: &mut [u32], source_copy: &[u32], ghost_alpha_table: &[u8], window_width: usize) {
-    let shift_x: usize = 3;
-    let shift_y: usize = 2;
-
-    for y in 0..SCREEN_H.saturating_sub(shift_y) {
-        let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
-        let src_row = (y + shift_y + SCREEN_Y) * window_width + SCREEN_X;
-        let alpha_row = y * SCREEN_W;
-
-        for x in 0..SCREEN_W.saturating_sub(shift_x) {
-            let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(alpha_row + x) } as u32;
-            if local_alpha == 0 { continue; }
-
-            let idx = buf_row + x;
-            let src_idx = src_row + x + shift_x;
-
-            let pixel = unsafe { *buffer.get_unchecked(idx) };
-            let ghost_pixel = unsafe { *source_copy.get_unchecked(src_idx) };
-
-            let inv_alpha = 256 - local_alpha;
-            let r = (((pixel >> 16) & 0xFF) * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8;
-            let g = (((pixel >> 8) & 0xFF) * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8;
-            let b = ((pixel & 0xFF) * inv_alpha + (ghost_pixel & 0xFF) * local_alpha) >> 8;
-
-            unsafe { *buffer.get_unchecked_mut(idx) = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255); }
         }
     }
 }

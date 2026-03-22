@@ -36,6 +36,7 @@ installer/Output/
 
 # Development artifacts
 apu_diag*.txt
+perf_output.txt
 *.log
 core
 core.*
