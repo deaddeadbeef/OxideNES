@@ -4763,136 +4763,122 @@ fn main() {
                         };
 
                         if osd_type != OsdType::None {
-                            let num_segments: usize = 20;
-                            let seg_w: usize = 10;
-                            let seg_gap: usize = 2;
-                            let seg_h: usize = 12;
-                            let seg_stride = seg_w + seg_gap;
-                            let total_bar_w = num_segments * seg_stride;
+                            // Classic CRT TV OSD: green phosphor pipes |||||||------
+                            let num_bars: usize = 20;
+                            let bar_w: usize = 3;    // each pipe is 3px wide
+                            let bar_gap: usize = 3;  // gap between pipes
+                            let bar_h: usize = 16;   // pipe height
+                            let dash_h: usize = 2;   // dash thickness for empty slots
+                            let bar_stride = bar_w + bar_gap;
+                            let total_w = num_bars * bar_stride;
 
-                            let bar_y = SCREEN_Y + SCREEN_H - 30;
-                            let label_y = bar_y - 14;
-                            let bar_x = SCREEN_X + (SCREEN_W - total_bar_w) / 2;
+                            let bar_y = SCREEN_Y + SCREEN_H - 34;
+                            let label_y = bar_y - 12;
+                            let bar_x = SCREEN_X + (SCREEN_W - total_w) / 2;
 
-                            // Background box (darken existing pixels)
-                            let bg_pad = 6usize;
-                            let bg_x0 = bar_x.saturating_sub(bg_pad);
-                            let bg_y0 = label_y.saturating_sub(bg_pad);
-                            let bg_x1 = (bar_x + total_bar_w + 50 + bg_pad).min(WINDOW_WIDTH);
-                            let bg_y1 = (bar_y + seg_h + bg_pad).min(WINDOW_HEIGHT);
-                            for y in bg_y0..bg_y1 {
-                                for x in bg_x0..bg_x1 {
-                                    let idx = y * WINDOW_WIDTH + x;
-                                    if idx < composite_buffer.len() {
-                                        // Darken to ~25% brightness for that CRT OSD look
-                                        let p = composite_buffer[idx];
-                                        let dimmed = (p >> 2) & 0x3F3F3F;
-                                        if alpha >= 255 {
-                                            composite_buffer[idx] = dimmed;
-                                        } else {
-                                            // Blend between original and dimmed based on alpha
-                                            let r0 = (p >> 16) & 0xFF;
-                                            let g0 = (p >> 8) & 0xFF;
-                                            let b0 = p & 0xFF;
-                                            let r1 = (dimmed >> 16) & 0xFF;
-                                            let g1 = (dimmed >> 8) & 0xFF;
-                                            let b1 = dimmed & 0xFF;
-                                            let inv = 255 - alpha;
-                                            let r = (r1 * alpha + r0 * inv) / 255;
-                                            let g = (g1 * alpha + g0 * inv) / 255;
-                                            let b = (b1 * alpha + b0 * inv) / 255;
-                                            composite_buffer[idx] = (r << 16) | (g << 8) | b;
-                                        }
-                                    }
-                                }
-                            }
+                            // Green phosphor colors (like classic CRT OSD)
+                            let bright_r = 0u32;
+                            let bright_g = (alpha * 0xFF / 255) as u32;
+                            let bright_b = (alpha * 0x30 / 255) as u32;
+                            let dim_r = 0u32;
+                            let dim_g = (alpha * 0x40 / 255) as u32;
+                            let dim_b = (alpha * 0x10 / 255) as u32;
 
-                            // Label text (golden amber)
-                            let text_x = bar_x + (total_bar_w / 2).saturating_sub(label.len() * 4 / 2);
-                            let lr = alpha * 0xFF / 255;
-                            let lg = alpha * 0xC0 / 255;
-                            let lb = alpha * 0x40 / 255;
-                            let label_color = (lr << 16) | (lg << 8) | lb;
+                            let label_r = 0u32;
+                            let label_g = (alpha * 0xDD / 255) as u32;
+                            let label_b = (alpha * 0x20 / 255) as u32;
+                            let label_color = (label_r << 16) | (label_g << 8) | label_b;
+
+                            // Label text centered above
+                            let text_x = bar_x + (total_w / 2).saturating_sub(label.len() * 4 / 2);
                             draw_text(&mut composite_buffer, label, text_x, label_y, label_color, WINDOW_WIDTH);
 
-                            // Segments
-                            let filled_count = (((osd_value + 50) as usize) * num_segments / 100).min(num_segments);
+                            // Filled count: map -50..+50 to 0..20
+                            let filled_count = (((osd_value + 50) as usize) * num_bars / 100).min(num_bars);
 
-                            let fr = alpha * 0xFF / 255;
-                            let fg = alpha * 0xB0 / 255;
-                            let fb = alpha * 0x20 / 255;
-                            let filled_color = (fr << 16) | (fg << 8) | fb;
-
-                            let dr = alpha * 0x55 / 255;
-                            let dg = alpha * 0x40 / 255;
-                            let db = alpha * 0x10 / 255;
-                            let dim_color = (dr << 16) | (dg << 8) | db;
-
-                            for i in 0..num_segments {
-                                let sx = bar_x + i * seg_stride;
+                            // Draw bars: filled = bright green vertical pipes, empty = dim horizontal dashes
+                            for i in 0..num_bars {
+                                let sx = bar_x + i * bar_stride;
                                 if i < filled_count {
-                                    // Filled segment: solid rectangle
-                                    for y in bar_y..(bar_y + seg_h).min(WINDOW_HEIGHT) {
-                                        for x in sx..(sx + seg_w).min(WINDOW_WIDTH) {
+                                    // Filled pipe: "|" — vertical bar, alpha-blended onto game
+                                    for y in bar_y..(bar_y + bar_h).min(WINDOW_HEIGHT) {
+                                        for x in sx..(sx + bar_w).min(WINDOW_WIDTH) {
                                             let idx = y * WINDOW_WIDTH + x;
                                             if idx < composite_buffer.len() {
-                                                composite_buffer[idx] = filled_color;
+                                                // Alpha-blend green onto existing pixel
+                                                let bg = composite_buffer[idx];
+                                                let bg_r = (bg >> 16) & 0xFF;
+                                                let bg_g = (bg >> 8) & 0xFF;
+                                                let bg_b = bg & 0xFF;
+                                                let inv = 255 - alpha;
+                                                let r = (bright_r * alpha + bg_r * inv) / 255;
+                                                let g = (bright_g * alpha + bg_g * inv) / 255;
+                                                let b = (bright_b * alpha + bg_b * inv) / 255;
+                                                composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
                                     }
                                 } else {
-                                    // Empty segment: outline only (1px border)
-                                    for y in bar_y..(bar_y + seg_h).min(WINDOW_HEIGHT) {
-                                        for x in sx..(sx + seg_w).min(WINDOW_WIDTH) {
-                                            let is_border = y == bar_y || y == bar_y + seg_h - 1 || x == sx || x == sx + seg_w - 1;
-                                            if is_border {
-                                                let idx = y * WINDOW_WIDTH + x;
-                                                if idx < composite_buffer.len() {
-                                                    composite_buffer[idx] = dim_color;
-                                                }
+                                    // Empty dash: "-" — thin horizontal line at vertical center
+                                    let dash_y = bar_y + bar_h / 2 - dash_h / 2;
+                                    for y in dash_y..(dash_y + dash_h).min(WINDOW_HEIGHT) {
+                                        for x in sx..(sx + bar_w).min(WINDOW_WIDTH) {
+                                            let idx = y * WINDOW_WIDTH + x;
+                                            if idx < composite_buffer.len() {
+                                                // Alpha-blend dim green onto existing pixel
+                                                let bg = composite_buffer[idx];
+                                                let bg_r = (bg >> 16) & 0xFF;
+                                                let bg_g = (bg >> 8) & 0xFF;
+                                                let bg_b = bg & 0xFF;
+                                                let inv = 255 - alpha;
+                                                let r = (dim_r * alpha + bg_r * inv) / 255;
+                                                let g = (dim_g * alpha + bg_g * inv) / 255;
+                                                let b = (dim_b * alpha + bg_b * inv) / 255;
+                                                composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
                                     }
                                 }
                             }
 
-                            // Center tick mark (at segment 10 boundary = zero point)
-                            let center_x = bar_x + 10 * seg_stride - seg_gap / 2;
-                            let tick_color = label_color;
-                            for dy in 0..3usize {
-                                let ty = bar_y.saturating_sub(3) + dy;
-                                let idx = ty * WINDOW_WIDTH + center_x;
-                                if idx < composite_buffer.len() {
-                                    composite_buffer[idx] = tick_color;
-                                }
-                                // Small triangle: wider at top
-                                if dy == 0 {
-                                    for offset in [1usize, 2] {
-                                        if center_x + offset < WINDOW_WIDTH {
-                                            let idx2 = ty * WINDOW_WIDTH + center_x + offset;
-                                            if idx2 < composite_buffer.len() { composite_buffer[idx2] = tick_color; }
-                                        }
-                                        if center_x >= offset {
-                                            let idx3 = ty * WINDOW_WIDTH + center_x - offset;
-                                            if idx3 < composite_buffer.len() { composite_buffer[idx3] = tick_color; }
-                                        }
-                                    }
-                                } else if dy == 1 {
-                                    if center_x + 1 < WINDOW_WIDTH {
-                                        let idx2 = ty * WINDOW_WIDTH + center_x + 1;
-                                        if idx2 < composite_buffer.len() { composite_buffer[idx2] = tick_color; }
-                                    }
-                                    if center_x >= 1 {
-                                        let idx3 = ty * WINDOW_WIDTH + center_x - 1;
-                                        if idx3 < composite_buffer.len() { composite_buffer[idx3] = tick_color; }
+                            // Center tick at zero point (between bar 9 and 10)
+                            let center_x = bar_x + 10 * bar_stride - bar_gap / 2;
+                            for dy in 0..4usize {
+                                let ty = bar_y.saturating_sub(4) + dy;
+                                if ty < WINDOW_HEIGHT {
+                                    let idx = ty * WINDOW_WIDTH + center_x;
+                                    if idx < composite_buffer.len() {
+                                        composite_buffer[idx] = label_color;
                                     }
                                 }
                             }
 
                             // Value text to the right
                             let val_text = format!("{:+}", osd_value);
-                            let val_x = bar_x + total_bar_w + 8;
-                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 2, label_color, WINDOW_WIDTH);
+                            let val_x = bar_x + total_w + 8;
+                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 4, label_color, WINDOW_WIDTH);
+
+                            // === Apply CRT scanline effect to the OSD region ===
+                            // Darken every other row in the OSD area to simulate CRT scanlines
+                            let osd_region_x0 = text_x.saturating_sub(4);
+                            let osd_region_x1 = (val_x + val_text.len() * 4 + 4).min(WINDOW_WIDTH);
+                            let osd_region_y0 = label_y.saturating_sub(2);
+                            let osd_region_y1 = (bar_y + bar_h + 2).min(WINDOW_HEIGHT);
+                            for y in osd_region_y0..osd_region_y1 {
+                                if y % 2 == 1 {
+                                    // Darken odd rows by ~40% for scanline effect
+                                    for x in osd_region_x0..osd_region_x1 {
+                                        let idx = y * WINDOW_WIDTH + x;
+                                        if idx < composite_buffer.len() {
+                                            let p = composite_buffer[idx];
+                                            let r = ((p >> 16) & 0xFF) * 60 / 100;
+                                            let g = ((p >> 8) & 0xFF) * 60 / 100;
+                                            let b = (p & 0xFF) * 60 / 100;
+                                            composite_buffer[idx] = (r << 16) | (g << 8) | b;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
