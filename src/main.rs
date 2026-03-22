@@ -4756,56 +4756,120 @@ fn main() {
                         // Fade: full brightness for first 90 frames, then fade over last 30
                         let alpha = if osd_timer > 30 { 255u32 } else { osd_timer as u32 * 255 / 30 };
 
-                        let label = match osd_type {
-                            OsdType::Brightness => "BRIGHTNESS",
-                            OsdType::Contrast => "CONTRAST",
-                            OsdType::None => "",
-                        };
-
                         if osd_type != OsdType::None {
-                            // Classic CRT TV OSD: green phosphor pipes spanning full screen width
-                            let pad: usize = 20;
-                            let osd_left = SCREEN_X + pad;
-                            let osd_right = SCREEN_X + SCREEN_W - pad;
+                            // CRT TV OSD: thin green phosphor pipes ||||||----- spanning full screen width
+                            let pad: usize = 40;
+                            let icon_space: usize = 30; // space for icon on the left
+                            let val_space: usize = 40;  // space for value on the right
+                            let osd_left = SCREEN_X + pad + icon_space;
+                            let osd_right = SCREEN_X + SCREEN_W - pad - val_space;
                             let available_w = osd_right - osd_left;
 
-                            let num_bars: usize = 30;
-                            let bar_gap: usize = 4;
-                            let total_gaps = (num_bars - 1) * bar_gap;
-                            let bar_w = (available_w - total_gaps) / num_bars;
+                            let num_bars: usize = 50;
+                            let bar_w: usize = 2;      // thin pipes
+                            let bar_gap: usize = ((available_w - num_bars * bar_w) / (num_bars - 1)).max(2);
                             let bar_stride = bar_w + bar_gap;
                             let total_w = num_bars * bar_stride - bar_gap;
-                            let bar_h: usize = 24;
-                            let dash_h: usize = 3;
+                            let bar_h: usize = 28;
+                            let dash_h: usize = 2;
 
-                            let bar_y = SCREEN_Y + SCREEN_H - 50;
-                            let label_y = bar_y - 18;
+                            let bar_y = SCREEN_Y + SCREEN_H - 52;
                             let bar_x = osd_left + (available_w - total_w) / 2;
 
                             // Green phosphor colors
                             let bright_g = (alpha * 0xFF / 255) as u32;
                             let bright_b = (alpha * 0x30 / 255) as u32;
-                            let bright_color_raw = (0u32, bright_g, bright_b);
 
                             let dim_g = (alpha * 0x40 / 255) as u32;
                             let dim_b = (alpha * 0x10 / 255) as u32;
-                            let dim_color_raw = (0u32, dim_g, dim_b);
 
-                            let label_g = (alpha * 0xDD / 255) as u32;
-                            let label_b = (alpha * 0x20 / 255) as u32;
-                            let label_color = (label_g << 8) | label_b;
+                            let icon_g = (alpha * 0xDD / 255) as u32;
+                            let icon_b = (alpha * 0x20 / 255) as u32;
+                            let icon_color = (icon_g << 8) | icon_b;
 
-                            // Label text centered above
-                            let text_x = bar_x + (total_w / 2).saturating_sub(label.len() * 4 / 2);
-                            draw_text(&mut composite_buffer, label, text_x, label_y, label_color, WINDOW_WIDTH);
+                            // === Draw icon (pixel art) to the left of the bar ===
+                            let icon_x = bar_x - icon_space;
+                            let icon_y = bar_y + bar_h / 2 - 7; // center vertically with bar
 
-                            // Filled count: map -50..+50 to 0..30
+                            // Helper closure to set a pixel with bounds checking
+                            let set_px = |buf: &mut [u32], px: usize, py: usize, color: u32| {
+                                if px < WINDOW_WIDTH && py < WINDOW_HEIGHT {
+                                    let idx = py * WINDOW_WIDTH + px;
+                                    if idx < buf.len() {
+                                        buf[idx] = color;
+                                    }
+                                }
+                            };
+
+                            match osd_type {
+                                OsdType::Brightness => {
+                                    // Sun icon: 13x13 pixel art
+                                    // Center dot (3x3)
+                                    for dy in 0..3usize {
+                                        for dx in 0..3usize {
+                                            set_px(&mut composite_buffer, icon_x + 5 + dx, icon_y + 5 + dy, icon_color);
+                                        }
+                                    }
+                                    // Circle (radius ~4)
+                                    let circle_pts: [(usize, usize); 16] = [
+                                        (6,2),(7,2),(8,3),(9,4),(9,5),(9,6),(9,7),(8,8),
+                                        (7,9),(6,9),(5,8),(4,9),(3,8),(2,7),(2,6),(2,5),
+                                    ];
+                                    let circle_pts2: [(usize, usize); 4] = [
+                                        (2,4),(3,3),(4,2),(5,2),
+                                    ];
+                                    for &(dx,dy) in circle_pts.iter().chain(circle_pts2.iter()) {
+                                        set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                    }
+                                    // Rays (8 directions, 2px each)
+                                    let rays: [(i32, i32); 8] = [
+                                        (0,-1),(0,1),(-1,0),(1,0),
+                                        (-1,-1),(1,-1),(-1,1),(1,1),
+                                    ];
+                                    for &(rdx, rdy) in &rays {
+                                        for dist in 5..7i32 {
+                                            let rx = (6i32 + rdx * dist) as usize;
+                                            let ry = (6i32 + rdy * dist) as usize;
+                                            set_px(&mut composite_buffer, icon_x + rx, icon_y + ry, icon_color);
+                                        }
+                                    }
+                                }
+                                OsdType::Contrast => {
+                                    // Half-circle icon: 13x13 pixel art
+                                    // Draw circle outline
+                                    let outline: [(usize,usize); 24] = [
+                                        (5,0),(6,0),(7,0),
+                                        (8,1),(9,2),(10,3),
+                                        (10,4),(10,5),(10,6),(10,7),(10,8),
+                                        (9,9),(8,10),(7,11),(6,11),(5,11),
+                                        (4,10),(3,9),(2,8),(2,7),(2,6),(2,5),(2,4),
+                                        (3,2),
+                                    ];
+                                    let outline2: [(usize,usize); 2] = [(4,1),(3,3)];
+                                    for &(dx,dy) in outline.iter().chain(outline2.iter()) {
+                                        set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                    }
+                                    // Fill left half (x <= 6)
+                                    for dy in 1..11usize {
+                                        let x_start = match dy {
+                                            1 => 4, 2 => 3, 3 => 3, 9 => 3, 10 => 4,
+                                            _ => 2,
+                                        };
+                                        for dx in x_start..7usize {
+                                            set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                        }
+                                    }
+                                }
+                                OsdType::None => {}
+                            }
+
+                            // === Draw bars ===
                             let filled_count = (((osd_value + 50) as usize) * num_bars / 100).min(num_bars);
 
                             for i in 0..num_bars {
                                 let sx = bar_x + i * bar_stride;
                                 if i < filled_count {
-                                    // Filled pipe: bright green vertical bar, alpha-blended
+                                    // Filled: thin bright green vertical pipe |
                                     for y in bar_y..(bar_y + bar_h).min(WINDOW_HEIGHT) {
                                         for x in sx..(sx + bar_w).min(WINDOW_WIDTH) {
                                             let idx = y * WINDOW_WIDTH + x;
@@ -4815,15 +4879,15 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (bright_color_raw.0 * alpha + bg_r * inv) / 255;
-                                                let g = (bright_color_raw.1 * alpha + bg_g * inv) / 255;
-                                                let b = (bright_color_raw.2 * alpha + bg_b * inv) / 255;
+                                                let r = (0u32 * alpha + bg_r * inv) / 255;
+                                                let g = (bright_g * alpha + bg_g * inv) / 255;
+                                                let b = (bright_b * alpha + bg_b * inv) / 255;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
                                     }
                                 } else {
-                                    // Empty: dim horizontal dash at vertical center
+                                    // Empty: thin dim horizontal dash - at vertical center
                                     let dash_y = bar_y + bar_h / 2 - dash_h / 2;
                                     for y in dash_y..(dash_y + dash_h).min(WINDOW_HEIGHT) {
                                         for x in sx..(sx + bar_w).min(WINDOW_WIDTH) {
@@ -4834,9 +4898,9 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (dim_color_raw.0 * alpha + bg_r * inv) / 255;
-                                                let g = (dim_color_raw.1 * alpha + bg_g * inv) / 255;
-                                                let b = (dim_color_raw.2 * alpha + bg_b * inv) / 255;
+                                                let r = (0u32 * alpha + bg_r * inv) / 255;
+                                                let g = (dim_g * alpha + bg_g * inv) / 255;
+                                                let b = (dim_b * alpha + bg_b * inv) / 255;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
@@ -4844,37 +4908,32 @@ fn main() {
                                 }
                             }
 
-                            // Center tick at zero point (between segment 14 and 15 for 30 segments)
+                            // Center tick at zero point
                             let center_seg = num_bars / 2;
-                            let center_x = bar_x + center_seg * bar_stride - bar_gap / 2;
+                            let center_x = bar_x + center_seg * bar_stride;
                             for dy in 0..5usize {
                                 let ty = bar_y.saturating_sub(5) + dy;
                                 if ty < WINDOW_HEIGHT && center_x < WINDOW_WIDTH {
                                     let idx = ty * WINDOW_WIDTH + center_x;
                                     if idx < composite_buffer.len() {
-                                        composite_buffer[idx] = label_color;
+                                        composite_buffer[idx] = icon_color;
                                     }
-                                    // Make tick 3px wide
                                     if center_x + 1 < WINDOW_WIDTH {
                                         let idx2 = ty * WINDOW_WIDTH + center_x + 1;
-                                        if idx2 < composite_buffer.len() { composite_buffer[idx2] = label_color; }
-                                    }
-                                    if center_x >= 1 {
-                                        let idx3 = ty * WINDOW_WIDTH + center_x - 1;
-                                        if idx3 < composite_buffer.len() { composite_buffer[idx3] = label_color; }
+                                        if idx2 < composite_buffer.len() { composite_buffer[idx2] = icon_color; }
                                     }
                                 }
                             }
 
-                            // Value text to the right of the bar
+                            // Value text to the right
                             let val_text = format!("{:+}", osd_value);
                             let val_x = bar_x + total_w + 10;
-                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 8, label_color, WINDOW_WIDTH);
+                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 10, icon_color, WINDOW_WIDTH);
 
                             // CRT scanline effect over OSD region
-                            let osd_region_x0 = osd_left.saturating_sub(4);
-                            let osd_region_x1 = (osd_right + 4).min(WINDOW_WIDTH);
-                            let osd_region_y0 = label_y.saturating_sub(4);
+                            let osd_region_x0 = (SCREEN_X + pad).saturating_sub(4);
+                            let osd_region_x1 = (SCREEN_X + SCREEN_W - pad + 4).min(WINDOW_WIDTH);
+                            let osd_region_y0 = bar_y.saturating_sub(8);
                             let osd_region_y1 = (bar_y + bar_h + 4).min(WINDOW_HEIGHT);
                             for y in osd_region_y0..osd_region_y1 {
                                 if y % 2 == 1 {
