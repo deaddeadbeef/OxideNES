@@ -6782,7 +6782,7 @@ fn scale_simple(input: &[u32], output: &mut Vec<u32>) {
 
 fn build_tv_frame(frame: &mut Vec<u32>) {
     frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
-    
+
     // ===== WALL BACKGROUND =====
     for y in 0..TV_HEIGHT {
         for x in 0..WINDOW_WIDTH {
@@ -6791,188 +6791,333 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
             frame[idx] = (0x1A + noise) << 16 | (0x18 + noise) << 8 | (0x16 + noise);
         }
     }
-    
-    // ===== TV OUTER SHELL (rounded rectangle) =====
+
+    // ===== TV OUTER SHELL (silver plastic) =====
     let tv_x1: usize = 50;
     let tv_y1: usize = 15;
     let tv_x2: usize = WINDOW_WIDTH - 50;
     let tv_y2: usize = TV_HEIGHT - 15;
     let tv_w = tv_x2 - tv_x1;
     let tv_h = tv_y2 - tv_y1;
-    let corner_r: usize = 20;
-    
+    let corner_r: usize = 18;
+
+    // The bottom panel starts below the screen area
+    let panel_y = SCREEN_Y + SCREEN_H + 20; // panel divider Y
+
     for y in tv_y1..tv_y2 {
         for x in tv_x1..tv_x2 {
             let lx = x - tv_x1;
             let ly = y - tv_y1;
-            
+
             // Rounded corner check
             let in_corner = (ly >= tv_h - corner_r || ly < corner_r) && (lx >= tv_w - corner_r || lx < corner_r);
-            
             if in_corner {
                 let cx = if lx < corner_r { corner_r } else { tv_w - corner_r };
                 let cy = if ly < corner_r { corner_r } else { tv_h - corner_r };
                 let dx = lx as f32 - cx as f32;
                 let dy = ly as f32 - cy as f32;
                 if (dx * dx + dy * dy).sqrt() > corner_r as f32 {
-                    continue; // Outside rounded corner
+                    continue;
                 }
             }
-            
-            // Vertical gradient for 3D depth (lighter at top)
+
+            // Silver plastic color with vertical gradient for 3D depth
             let vert_t = ly as f32 / tv_h as f32;
-            let base_r = (0x38 as f32 * (1.0 - vert_t * 0.4)) as u32;
-            let base_g = (0x38 as f32 * (1.0 - vert_t * 0.4)) as u32;
-            let base_b = (0x3C as f32 * (1.0 - vert_t * 0.4)) as u32;
-            
-            // Subtle plastic texture noise
+            // Lighter at top (light from above), darker at bottom
+            let silver_base: f32 = if y < panel_y { 0xA8 as f32 } else { 0x98 as f32 };
+            let gradient = silver_base * (1.0 - vert_t * 0.25);
+
+            // Horizontal gradient for edge lighting (lighter center, darker edges)
+            let horiz_t = (lx as f32 / tv_w as f32 - 0.5).abs() * 2.0; // 0 at center, 1 at edges
+            let horiz_dim = 1.0 - horiz_t * 0.08;
+
+            let base = (gradient * horiz_dim) as u32;
+            // Slight warm tint for silver plastic
+            let r = base.min(255);
+            let g = base.min(255);
+            let b = (base + 4).min(255); // very slight cool tint
+
+            // Plastic texture noise
             let noise = ((x.wrapping_mul(31) ^ y.wrapping_mul(17)) % 3) as u32;
-            let r = base_r.saturating_add(noise).min(255);
-            let g = base_g.saturating_add(noise).min(255);
-            let b = base_b.saturating_add(noise).min(255);
-            
+            let r = r.saturating_add(noise).min(255);
+            let g = g.saturating_add(noise).min(255);
+            let b = b.saturating_add(noise).min(255);
+
             frame[y * WINDOW_WIDTH + x] = (r << 16) | (g << 8) | b;
         }
     }
-    
-    // ===== EDGE HIGHLIGHTS (3D depth on shell) =====
-    // Top edge highlight (light catch from above)
+
+    // ===== EDGE HIGHLIGHTS (3D silver bevel) =====
+    // Top edge: bright highlight (light catch)
     for x in (tv_x1 + corner_r)..(tv_x2 - corner_r) {
         for dy in 0..3 {
             let y = tv_y1 + dy;
-            let brightness = (50 - dy * 15) as u32;
+            let brightness = (40 - dy * 12) as u32;
             let idx = y * WINDOW_WIDTH + x;
-            let p = frame[idx];
-            let r = (((p >> 16) & 0xFF) + brightness).min(255);
-            let g = (((p >> 8) & 0xFF) + brightness).min(255);
-            let b = ((p & 0xFF) + brightness).min(255);
-            frame[idx] = (r << 16) | (g << 8) | b;
+            if idx < frame.len() {
+                let p = frame[idx];
+                let r = (((p >> 16) & 0xFF) + brightness).min(255);
+                let g = (((p >> 8) & 0xFF) + brightness).min(255);
+                let b = ((p & 0xFF) + brightness).min(255);
+                frame[idx] = (r << 16) | (g << 8) | b;
+            }
         }
     }
-    // Left edge highlight
+    // Left edge: subtle highlight
     for y in (tv_y1 + corner_r)..(tv_y2 - corner_r) {
         for dx in 0..2 {
             let x = tv_x1 + dx;
-            let brightness = (30 - dx * 15) as u32;
+            let brightness = (25 - dx * 12) as u32;
             let idx = y * WINDOW_WIDTH + x;
-            let p = frame[idx];
-            let r = (((p >> 16) & 0xFF) + brightness).min(255);
-            let g = (((p >> 8) & 0xFF) + brightness).min(255);
-            let b = ((p & 0xFF) + brightness).min(255);
-            frame[idx] = (r << 16) | (g << 8) | b;
+            if idx < frame.len() {
+                let p = frame[idx];
+                let r = (((p >> 16) & 0xFF) + brightness).min(255);
+                let g = (((p >> 8) & 0xFF) + brightness).min(255);
+                let b = ((p & 0xFF) + brightness).min(255);
+                frame[idx] = (r << 16) | (g << 8) | b;
+            }
         }
     }
-    // Bottom/right edges darker (shadow)
+    // Bottom/right: shadow
     for x in (tv_x1 + corner_r)..(tv_x2 - corner_r) {
-        for dy in 0..2 {
+        for dy in 0..3 {
             let y = tv_y2 - 1 - dy;
             let idx = y * WINDOW_WIDTH + x;
-            let p = frame[idx];
-            let r = ((p >> 16) & 0xFF).saturating_sub(20);
-            let g = ((p >> 8) & 0xFF).saturating_sub(20);
-            let b = (p & 0xFF).saturating_sub(20);
-            frame[idx] = (r << 16) | (g << 8) | b;
+            if idx < frame.len() {
+                let p = frame[idx];
+                let dim = 25 - dy * 8;
+                let r = ((p >> 16) & 0xFF).saturating_sub(dim as u32);
+                let g = ((p >> 8) & 0xFF).saturating_sub(dim as u32);
+                let b = (p & 0xFF).saturating_sub(dim as u32);
+                frame[idx] = (r << 16) | (g << 8) | b;
+            }
         }
     }
-    
-    // ===== SCREEN BEZEL (inset shadow around screen) =====
+    for y in (tv_y1 + corner_r)..(tv_y2 - corner_r) {
+        for dx in 0..2 {
+            let x = tv_x2 - 1 - dx;
+            let idx = y * WINDOW_WIDTH + x;
+            if idx < frame.len() {
+                let p = frame[idx];
+                let r = ((p >> 16) & 0xFF).saturating_sub(20);
+                let g = ((p >> 8) & 0xFF).saturating_sub(20);
+                let b = (p & 0xFF).saturating_sub(20);
+                frame[idx] = (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+
+    // ===== SCREEN BEZEL (dark recessed border around screen) =====
     let bezel_pad: usize = 12;
     let bx1 = SCREEN_X - bezel_pad;
     let by1 = SCREEN_Y - bezel_pad;
     let bx2 = SCREEN_X + SCREEN_W + bezel_pad;
     let by2 = SCREEN_Y + SCREEN_H + bezel_pad;
-    
+
     for y in by1..by2 {
         for x in bx1..bx2 {
             if (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y) && (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x) {
-                continue; // Don't touch screen area
+                continue;
             }
             if y < TV_HEIGHT && x < WINDOW_WIDTH {
-                // Inset effect: top/left darker, bottom/right lighter
                 let dist_top = (y - by1) as f32;
                 let dist_left = (x - bx1) as f32;
                 let dist_bottom = (by2 - 1 - y) as f32;
                 let dist_right = (bx2 - 1 - x) as f32;
-                
                 let min_dist = dist_top.min(dist_left).min(dist_bottom).min(dist_right);
                 let depth = (min_dist / bezel_pad as f32).min(1.0);
-                
-                // Dark inset
-                let base = 0x18 as f32;
-                let shade = base + (depth * 10.0);
-                let r = shade as u32;
-                let g = shade as u32;
-                let b = (shade + 2.0) as u32;
-                frame[y * WINDOW_WIDTH + x] = (r << 16) | (g << 8) | b;
+                let shade = 0x10 as f32 + depth * 0x14 as f32;
+                let v = shade as u32;
+                frame[y * WINDOW_WIDTH + x] = (v << 16) | (v << 8) | v;
             }
         }
     }
-    
-    // ===== GLASS EDGE (crisp 2px border around screen) =====
-    let glass_color: u32 = 0x080808;
+
+    // ===== GLASS EDGE (crisp 2px border) =====
+    let glass_color: u32 = 0x060606;
     for x in (SCREEN_X - 2)..(SCREEN_X + SCREEN_W + 2) {
         for dy in 0..2 {
-            // Top glass edge
             let y = SCREEN_Y - 2 + dy;
             if y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-            // Bottom glass edge
             let y = SCREEN_Y + SCREEN_H + dy;
             if y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
         }
     }
     for y in (SCREEN_Y - 2)..(SCREEN_Y + SCREEN_H + 2) {
         for dx in 0..2 {
-            // Left glass edge
             let x = SCREEN_X - 2 + dx;
             if x < WINDOW_WIDTH && y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-            // Right glass edge
             let x = SCREEN_X + SCREEN_W + dx;
             if x < WINDOW_WIDTH && y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
         }
     }
-    
-    // ===== ACCENT LINE (subtle brand area below screen) =====
-    let accent_y = SCREEN_Y + SCREEN_H + bezel_pad + 20;
-    let accent_w: usize = 200;
-    let accent_x = SCREEN_X + (SCREEN_W - accent_w) / 2;
-    if accent_y < TV_HEIGHT {
-        for x in accent_x..(accent_x + accent_w) {
-            frame[accent_y * WINDOW_WIDTH + x] = 0x4A4A4E;
-        }
-    }
-    
-    // ===== POWER INDICATOR (tiny green dot, bottom-left) =====
-    let led_x = tv_x1 + 60;
-    let led_y = tv_y2 - 30;
-    if led_y < TV_HEIGHT {
-        for dy in 0..3usize {
-            for dx in 0..3usize {
-                let x = led_x + dx;
-                let y = led_y + dy;
-                if y < TV_HEIGHT && x < WINDOW_WIDTH {
-                    // Bright green center, dimmer edges
-                    let dist = ((dx as f32 - 1.0).powi(2) + (dy as f32 - 1.0).powi(2)).sqrt();
-                    if dist < 1.5 {
-                        let g = (0x80 as f32 * (1.0 - dist / 2.0)) as u32;
-                        frame[y * WINDOW_WIDTH + x] = (g.min(255)) << 8;
-                    }
+
+    // ===== PANEL DIVIDER LINE (separates upper bezel from bottom panel) =====
+    if panel_y < tv_y2 {
+        for x in (tv_x1 + 5)..(tv_x2 - 5) {
+            let idx = panel_y * WINDOW_WIDTH + x;
+            if idx < frame.len() {
+                frame[idx] = 0x7A7A7E; // Light gray line
+            }
+            // Shadow below line
+            if panel_y + 1 < TV_HEIGHT {
+                let idx2 = (panel_y + 1) * WINDOW_WIDTH + x;
+                if idx2 < frame.len() {
+                    frame[idx2] = 0x686868;
                 }
             }
         }
     }
+
+    // ===== SPEAKER GRILLE (left side of bottom panel) =====
+    let grille_x1 = tv_x1 + 30;
+    let grille_x2 = tv_x1 + 220;
+    let grille_y1 = panel_y + 15;
+    let grille_y2 = tv_y2 - 25;
     
+    for y in grille_y1..grille_y2.min(TV_HEIGHT) {
+        for x in grille_x1..grille_x2.min(WINDOW_WIDTH) {
+            let row = (y - grille_y1) % 4;
+            if row == 0 || row == 1 {
+                // Grille slot: dark horizontal lines
+                let idx = y * WINDOW_WIDTH + x;
+                if idx < frame.len() {
+                    frame[idx] = 0x505054;
+                }
+            }
+        }
+    }
+
+    // ===== RCA INPUT JACKS (4 colored circles) =====
+    let jack_colors: [(u32, usize); 4] = [
+        (0xD0D040, 6),  // Yellow (video) 
+        (0xE0E0E0, 6),  // White (audio L)
+        (0xD04040, 6),  // Red (audio R)
+        (0x40A0D0, 6),  // Blue (S-video)
+    ];
+    let jack_start_x = grille_x2 + 40;
+    let jack_y = (grille_y1 + grille_y2) / 2;
+
+    for (i, &(color, radius)) in jack_colors.iter().enumerate() {
+        let cx = jack_start_x + i * 30;
+        let cy = jack_y;
+        // Outer ring (dark)
+        for dy in 0..(radius * 2 + 4) {
+            for dx in 0..(radius * 2 + 4) {
+                let px = cx + dx - radius - 2;
+                let py = cy + dy - radius - 2;
+                if px < WINDOW_WIDTH && py < TV_HEIGHT {
+                    let ddx = px as f32 - cx as f32;
+                    let ddy = py as f32 - cy as f32;
+                    let dist = (ddx * ddx + ddy * ddy).sqrt();
+                    if dist <= (radius + 2) as f32 && dist > radius as f32 {
+                        frame[py * WINDOW_WIDTH + px] = 0x303030;
+                    } else if dist <= radius as f32 {
+                        // Inner colored circle
+                        let bright = 1.0 - dist / (radius as f32 * 1.5);
+                        let cr = ((color >> 16) & 0xFF) as f32 * bright;
+                        let cg = ((color >> 8) & 0xFF) as f32 * bright;
+                        let cb = (color & 0xFF) as f32 * bright;
+                        frame[py * WINDOW_WIDTH + px] = ((cr as u32) << 16) | ((cg as u32) << 8) | (cb as u32);
+                    }
+                }
+            }
+        }
+        // Center hole (black)
+        for dy in 0..3usize {
+            for dx in 0..3usize {
+                let px = cx + dx - 1;
+                let py = cy + dy - 1;
+                if px < WINDOW_WIDTH && py < TV_HEIGHT {
+                    frame[py * WINDOW_WIDTH + px] = 0x0A0A0A;
+                }
+            }
+        }
+    }
+
+    // ===== CONTROL BUTTONS (7 rectangular buttons) =====
+    let btn_start_x = jack_start_x + 170;
+    let btn_y1 = jack_y - 8;
+    let btn_y2 = jack_y + 8;
+    let btn_w: usize = 14;
+    let btn_gap: usize = 6;
+
+    for i in 0..7usize {
+        let bx = btn_start_x + i * (btn_w + btn_gap);
+        // Button body (slightly darker silver)
+        for y in btn_y1..btn_y2.min(TV_HEIGHT) {
+            for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
+                let idx = y * WINDOW_WIDTH + x;
+                if idx < frame.len() {
+                    frame[idx] = 0x787880;
+                }
+            }
+        }
+        // Button highlight (top edge)
+        for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
+            let idx = btn_y1 * WINDOW_WIDTH + x;
+            if idx < frame.len() {
+                frame[idx] = 0x909098;
+            }
+        }
+        // Button shadow (bottom edge)
+        if btn_y2 - 1 < TV_HEIGHT {
+            for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
+                let idx = (btn_y2 - 1) * WINDOW_WIDTH + x;
+                if idx < frame.len() {
+                    frame[idx] = 0x606068;
+                }
+            }
+        }
+    }
+
+    // ===== BRAND BADGE (small rectangle, right side of panel) =====
+    let badge_x = tv_x2 - 120;
+    let badge_y = jack_y - 6;
+    let badge_w: usize = 50;
+    let badge_h: usize = 12;
+    for y in badge_y..(badge_y + badge_h).min(TV_HEIGHT) {
+        for x in badge_x..(badge_x + badge_w).min(WINDOW_WIDTH) {
+            let idx = y * WINDOW_WIDTH + x;
+            if idx < frame.len() {
+                frame[idx] = 0x8A8A90;
+            }
+        }
+    }
+
+    // ===== POWER LED (green dot, near buttons) =====
+    let led_x = btn_start_x - 20;
+    let led_y = jack_y;
+    for dy in 0..4usize {
+        for dx in 0..4usize {
+            let px = led_x + dx;
+            let py = led_y + dy - 2;
+            if px < WINDOW_WIDTH && py < TV_HEIGHT {
+                let ddx = dx as f32 - 1.5;
+                let ddy = dy as f32 - 1.5;
+                let dist = (ddx * ddx + ddy * ddy).sqrt();
+                if dist < 2.0 {
+                    let g = (0xA0 as f32 * (1.0 - dist / 3.0)) as u32;
+                    frame[py * WINDOW_WIDTH + px] = g.min(255) << 8;
+                }
+            }
+        }
+    }
+
     // ===== DROP SHADOW (below TV onto wall) =====
-    for dy in 0..8usize {
+    for dy in 0..10usize {
         let y = tv_y2 + dy;
         if y >= TV_HEIGHT { break; }
-        let alpha = (8 - dy) as f32 / 12.0;
-        for x in (tv_x1 + 10)..(tv_x2 - 10) {
+        let alpha = (10 - dy) as f32 / 14.0;
+        for x in (tv_x1 + 8)..(tv_x2 - 8) {
             let idx = y * WINDOW_WIDTH + x;
-            let p = frame[idx];
-            let r = ((((p >> 16) & 0xFF) as f32) * (1.0 - alpha)) as u32;
-            let g = ((((p >> 8) & 0xFF) as f32) * (1.0 - alpha)) as u32;
-            let b = (((p & 0xFF) as f32) * (1.0 - alpha)) as u32;
-            frame[idx] = (r << 16) | (g << 8) | b;
+            if idx < frame.len() {
+                let p = frame[idx];
+                let r = ((((p >> 16) & 0xFF) as f32) * (1.0 - alpha)) as u32;
+                let g = ((((p >> 8) & 0xFF) as f32) * (1.0 - alpha)) as u32;
+                let b = (((p & 0xFF) as f32) * (1.0 - alpha)) as u32;
+                frame[idx] = (r << 16) | (g << 8) | b;
+            }
         }
     }
 }
