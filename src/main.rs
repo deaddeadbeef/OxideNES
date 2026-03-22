@@ -1154,9 +1154,9 @@ fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) 
     // fade_level 0=full brightness, 8=nearly black
     let brightness = (255u32).saturating_sub(fade_level as u32 * 30); // 255, 225, 195... down to 15
     for pixel in fb[..width * height].iter_mut() {
-        let r = ((*pixel >> 16) & 0xFF) * brightness / 255;
-        let g = ((*pixel >> 8) & 0xFF) * brightness / 255;
-        let b = (*pixel & 0xFF) * brightness / 255;
+        let r = ((*pixel >> 16) & 0xFF) * brightness >> 8;
+        let g = ((*pixel >> 8) & 0xFF) * brightness >> 8;
+        let b = ((*pixel & 0xFF) * brightness) >> 8;
         *pixel = (r << 16) | (g << 8) | b;
     }
 }
@@ -4777,14 +4777,14 @@ fn main() {
                             let bar_x = osd_left + (available_w - total_w) / 2;
 
                             // Green phosphor colors
-                            let bright_g = (alpha * 0xFF / 255) as u32;
-                            let bright_b = (alpha * 0x30 / 255) as u32;
+                            let bright_g = (alpha * 0xFF >> 8) as u32;
+                            let bright_b = (alpha * 0x30 >> 8) as u32;
 
-                            let dim_g = (alpha * 0x40 / 255) as u32;
-                            let dim_b = (alpha * 0x10 / 255) as u32;
+                            let dim_g = (alpha * 0x40 >> 8) as u32;
+                            let dim_b = (alpha * 0x10 >> 8) as u32;
 
-                            let icon_g = (alpha * 0xDD / 255) as u32;
-                            let icon_b = (alpha * 0x20 / 255) as u32;
+                            let icon_g = (alpha * 0xDD >> 8) as u32;
+                            let icon_b = (alpha * 0x20 >> 8) as u32;
                             let icon_color = (icon_g << 8) | icon_b;
 
                             // === Draw icon (pixel art) to the left of the bar ===
@@ -4879,9 +4879,9 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (0u32 * alpha + bg_r * inv) / 255;
-                                                let g = (bright_g * alpha + bg_g * inv) / 255;
-                                                let b = (bright_b * alpha + bg_b * inv) / 255;
+                                                let r = (0u32 * alpha + bg_r * inv) >> 8;
+                                                let g = (bright_g * alpha + bg_g * inv) >> 8;
+                                                let b = (bright_b * alpha + bg_b * inv) >> 8;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
@@ -4898,9 +4898,9 @@ fn main() {
                                                 let bg_g = (bg >> 8) & 0xFF;
                                                 let bg_b = bg & 0xFF;
                                                 let inv = 255 - alpha;
-                                                let r = (0u32 * alpha + bg_r * inv) / 255;
-                                                let g = (dim_g * alpha + bg_g * inv) / 255;
-                                                let b = (dim_b * alpha + bg_b * inv) / 255;
+                                                let r = (0u32 * alpha + bg_r * inv) >> 8;
+                                                let g = (dim_g * alpha + bg_g * inv) >> 8;
+                                                let b = (dim_b * alpha + bg_b * inv) >> 8;
                                                 composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                             }
                                         }
@@ -4941,9 +4941,9 @@ fn main() {
                                         let idx = y * WINDOW_WIDTH + x;
                                         if idx < composite_buffer.len() {
                                             let p = composite_buffer[idx];
-                                            let r = ((p >> 16) & 0xFF) * 60 / 100;
-                                            let g = ((p >> 8) & 0xFF) * 60 / 100;
-                                            let b = (p & 0xFF) * 60 / 100;
+                                            let r = ((p >> 16) & 0xFF) * 154 >> 8;
+                                            let g = ((p >> 8) & 0xFF) * 154 >> 8;
+                                            let b = (p & 0xFF) * 154 >> 8;
                                             composite_buffer[idx] = (r << 16) | (g << 8) | b;
                                         }
                                     }
@@ -6257,21 +6257,20 @@ fn blend_bilinear_rgb(p00: u32, p10: u32, p01: u32, p11: u32, frac_x: u32, frac_
     let inv_fx = 256 - frac_x;
     let inv_fy = 256 - frac_y;
     
-    // Process all channels in parallel using bit shifts
-    let r = ((p00 >> 16) & 0xFF) * inv_fx * inv_fy
+    let r = (((p00 >> 16) & 0xFF) * inv_fx * inv_fy
             + ((p10 >> 16) & 0xFF) * frac_x * inv_fy
             + ((p01 >> 16) & 0xFF) * inv_fx * frac_y
-            + ((p11 >> 16) & 0xFF) * frac_x * frac_y >> 16;
+            + ((p11 >> 16) & 0xFF) * frac_x * frac_y) >> 16;
     
-    let g = ((p00 >> 8) & 0xFF) * inv_fx * inv_fy
+    let g = (((p00 >> 8) & 0xFF) * inv_fx * inv_fy
             + ((p10 >> 8) & 0xFF) * frac_x * inv_fy
             + ((p01 >> 8) & 0xFF) * inv_fx * frac_y
-            + ((p11 >> 8) & 0xFF) * frac_x * frac_y >> 16;
+            + ((p11 >> 8) & 0xFF) * frac_x * frac_y) >> 16;
     
-    let b = (p00 & 0xFF) * inv_fx * inv_fy
+    let b = ((p00 & 0xFF) * inv_fx * inv_fy
             + (p10 & 0xFF) * frac_x * inv_fy
             + (p01 & 0xFF) * inv_fx * frac_y
-            + (p11 & 0xFF) * frac_x * frac_y >> 16;
+            + (p11 & 0xFF) * frac_x * frac_y) >> 16;
     
     (r, g, b)
 }
