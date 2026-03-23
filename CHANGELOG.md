@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.6] - 2026-03-23
+
+### Changed
+- Redesigned CRT TV bezel with thinner, proportional frame matching real vintage CRT TVs
+- Game screen enlarged from 820×616 to 960×720 (integer 3× NES vertical scale)
+- Screen now fills ~80% of TV face (was ~53%)
+- Window size reduced from 1200×1060 to 1100×954 for better 1080p compatibility
+- Proportionally resized all TV elements (speaker grille, RCA jacks, buttons, badge)
+- Console shelf panel reduced from 160px to 110px
+
 ## [0.1.5] - 2026-03-23
 
 ### Added
