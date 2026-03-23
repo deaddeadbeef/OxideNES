@@ -3624,6 +3624,8 @@ fn main() {
                                             // Sync port in join address
                                             if let Some(colon_pos) = netplay_ip_input.rfind(':') {
                                                 netplay_ip_input = format!("{}:{}", &netplay_ip_input[..colon_pos], p);
+                                            } else {
+                                                netplay_ip_input = format!("{}:{}", netplay_ip_input, p);
                                             }
                                         } else {
                                             // Invalid port, restore from current
@@ -3701,18 +3703,21 @@ fn main() {
                                     1 => { // Host
                                         if let Ok(p) = netplay_port_input.parse::<u16>() {
                                             netplay.port = p;
-                                        }
-                                        match netplay.host() {
-                                            Ok(()) => {
-                                                overlay_message = Some(format!("HOSTING ON PORT {}", netplay.port));
-                                                overlay_timer = 120;
-                                                netplay_submenu = false;
-                                                paused = false;
+                                            match netplay.host() {
+                                                Ok(()) => {
+                                                    overlay_message = Some(format!("HOSTING ON PORT {}", netplay.port));
+                                                    overlay_timer = 120;
+                                                    netplay_submenu = false;
+                                                    paused = false;
+                                                }
+                                                Err(e) => {
+                                                    overlay_message = Some(format!("HOST FAILED: {}", e));
+                                                    overlay_timer = 120;
+                                                }
                                             }
-                                            Err(e) => {
-                                                overlay_message = Some(format!("HOST FAILED: {}", e));
-                                                overlay_timer = 120;
-                                            }
+                                        } else {
+                                            overlay_message = Some("INVALID PORT".to_string());
+                                            overlay_timer = 120;
                                         }
                                         play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }

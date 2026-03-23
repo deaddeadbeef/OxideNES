@@ -392,15 +392,15 @@ mod tests {
         // Host on random port
         let mut host = NetplaySession::new();
         host.port = 0;
-        host.host().unwrap();
-        let host_port = match host.socket.as_ref().unwrap().local_addr() {
+        host.host().expect("host should bind");
+        let host_port = match host.socket.as_ref().expect("host socket should exist").local_addr() {
             Ok(addr) => addr.port(),
             Err(_) => return, // Skip if we can't get port
         };
 
         // Client joins
         let mut client = NetplaySession::new();
-        client.join(&format!("127.0.0.1:{}", host_port)).unwrap();
+        client.join(&format!("127.0.0.1:{}", host_port)).expect("client should connect");
         assert_eq!(client.state, NetplayState::Connecting);
 
         // Give the OS a moment, then have host receive the join
@@ -414,7 +414,9 @@ mod tests {
         assert_eq!(client.state, NetplayState::Connected);
 
         // Exchange an input packet
-        host.peer_addr = Some(format!("127.0.0.1:{}", client.socket.as_ref().unwrap().local_addr().unwrap().port()).parse().unwrap());
+        let client_port = client.socket.as_ref().expect("client socket should exist")
+            .local_addr().expect("client should have local addr").port();
+        host.peer_addr = Some(format!("127.0.0.1:{}", client_port).parse().expect("valid socket addr"));
         host.send_input(1, 0b00000001, 0x12345678);
 
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -454,7 +456,7 @@ mod tests {
     fn test_host_uses_configured_port() {
         let mut session = NetplaySession::new();
         session.port = 0;
-        session.host().unwrap();
+        session.host().expect("host should bind");
         match &session.state {
             NetplayState::Hosting { port } => assert_ne!(*port, 7777),
             other => panic!("Expected Hosting, got {:?}", other),
