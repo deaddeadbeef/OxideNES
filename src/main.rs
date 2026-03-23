@@ -29,9 +29,9 @@ const CONSOLE_HEIGHT: usize = 160;
 const WINDOW_WIDTH: usize = TV_WIDTH;
 const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT;
 const SCREEN_W: usize = 820;
-const SCREEN_H: usize = 769;
+const SCREEN_H: usize = 616;
 const SCREEN_X: usize = 190;
-const SCREEN_Y: usize = 50;
+const SCREEN_Y: usize = 190;
 
 // NES menu colors
 const MENU_BG: u32 = 0x0C0C3C;
@@ -6802,7 +6802,7 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     let corner_r: usize = 18;
 
     // The bottom panel starts below the screen area
-    let panel_y = SCREEN_Y + SCREEN_H + 20; // panel divider Y
+    let panel_y = SCREEN_Y + SCREEN_H + 8; // panel divider Y
 
     for y in tv_y1..tv_y2 {
         for x in tv_x1..tv_x2 {
