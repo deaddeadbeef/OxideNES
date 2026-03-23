@@ -23,15 +23,15 @@ use oxidenes::romdb::RomDatabase;
 use oxidenes::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
-const TV_WIDTH: usize = 1200;
-const TV_HEIGHT: usize = 900;
-const CONSOLE_HEIGHT: usize = 160;
+const TV_WIDTH: usize = 1100;
+const TV_HEIGHT: usize = 844;
+const CONSOLE_HEIGHT: usize = 110;
 const WINDOW_WIDTH: usize = TV_WIDTH;
 const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT;
-const SCREEN_W: usize = 820;
-const SCREEN_H: usize = 616;
-const SCREEN_X: usize = 190;
-const SCREEN_Y: usize = 190;
+const SCREEN_W: usize = 960;
+const SCREEN_H: usize = 720;
+const SCREEN_X: usize = 70;
+const SCREEN_Y: usize = 50;
 
 // NES menu colors
 const MENU_BG: u32 = 0x0C0C3C;
@@ -6871,16 +6871,16 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== TV OUTER SHELL (silver plastic) =====
-    let tv_x1: usize = 50;
-    let tv_y1: usize = 15;
-    let tv_x2: usize = WINDOW_WIDTH - 50;
-    let tv_y2: usize = TV_HEIGHT - 15;
+    let tv_x1: usize = 25;
+    let tv_y1: usize = 12;
+    let tv_x2: usize = WINDOW_WIDTH - 25;
+    let tv_y2: usize = TV_HEIGHT - 12;
     let tv_w = tv_x2 - tv_x1;
     let tv_h = tv_y2 - tv_y1;
-    let corner_r: usize = 18;
+    let corner_r: usize = 14;
 
     // The bottom panel starts below the screen area
-    let panel_y = SCREEN_Y + SCREEN_H + 8; // panel divider Y
+    let panel_y = SCREEN_Y + SCREEN_H + 6; // panel divider Y
 
     for y in tv_y1..tv_y2 {
         for x in tv_x1..tv_x2 {
@@ -6986,7 +6986,7 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== SCREEN BEZEL (dark recessed border around screen) =====
-    let bezel_pad: usize = 12;
+    let bezel_pad: usize = 8;
     let bx1 = SCREEN_X - bezel_pad;
     let by1 = SCREEN_Y - bezel_pad;
     let bx2 = SCREEN_X + SCREEN_W + bezel_pad;
@@ -7048,10 +7048,10 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== SPEAKER GRILLE (left side of bottom panel) =====
-    let grille_x1 = tv_x1 + 30;
-    let grille_x2 = tv_x1 + 220;
-    let grille_y1 = panel_y + 15;
-    let grille_y2 = tv_y2 - 25;
+    let grille_x1 = tv_x1 + 20;
+    let grille_x2 = tv_x1 + 160;
+    let grille_y1 = panel_y + 10;
+    let grille_y2 = tv_y2 - 14;
     
     for y in grille_y1..grille_y2.min(TV_HEIGHT) {
         for x in grille_x1..grille_x2.min(WINDOW_WIDTH) {
@@ -7068,16 +7068,16 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
 
     // ===== RCA INPUT JACKS (4 colored circles) =====
     let jack_colors: [(u32, usize); 4] = [
-        (0xD0D040, 6),  // Yellow (video) 
-        (0xE0E0E0, 6),  // White (audio L)
-        (0xD04040, 6),  // Red (audio R)
-        (0x40A0D0, 6),  // Blue (S-video)
+        (0xD0D040, 5),  // Yellow (video) 
+        (0xE0E0E0, 5),  // White (audio L)
+        (0xD04040, 5),  // Red (audio R)
+        (0x40A0D0, 5),  // Blue (S-video)
     ];
-    let jack_start_x = grille_x2 + 40;
+    let jack_start_x = grille_x2 + 30;
     let jack_y = (grille_y1 + grille_y2) / 2;
 
     for (i, &(color, radius)) in jack_colors.iter().enumerate() {
-        let cx = jack_start_x + i * 30;
+        let cx = jack_start_x + i * 26;
         let cy = jack_y;
         // Outer ring (dark)
         for dy in 0..(radius * 2 + 4) {
@@ -7114,11 +7114,11 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== CONTROL BUTTONS (7 rectangular buttons) =====
-    let btn_start_x = jack_start_x + 170;
-    let btn_y1 = jack_y - 8;
-    let btn_y2 = jack_y + 8;
-    let btn_w: usize = 14;
-    let btn_gap: usize = 6;
+    let btn_start_x = jack_start_x + 130;
+    let btn_y1 = jack_y - 6;
+    let btn_y2 = jack_y + 6;
+    let btn_w: usize = 12;
+    let btn_gap: usize = 5;
 
     for i in 0..7usize {
         let bx = btn_start_x + i * (btn_w + btn_gap);
@@ -7150,10 +7150,10 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== BRAND BADGE (small rectangle, right side of panel) =====
-    let badge_x = tv_x2 - 120;
-    let badge_y = jack_y - 6;
-    let badge_w: usize = 50;
-    let badge_h: usize = 12;
+    let badge_x = tv_x2 - 90;
+    let badge_y = jack_y - 5;
+    let badge_w: usize = 45;
+    let badge_h: usize = 10;
     for y in badge_y..(badge_y + badge_h).min(TV_HEIGHT) {
         for x in badge_x..(badge_x + badge_w).min(WINDOW_WIDTH) {
             let idx = y * WINDOW_WIDTH + x;
@@ -7164,7 +7164,7 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== POWER LED (green dot, near buttons) =====
-    let led_x = btn_start_x - 20;
+    let led_x = btn_start_x - 16;
     let led_y = jack_y;
     for dy in 0..4usize {
         for dx in 0..4usize {
@@ -7183,11 +7183,11 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
     }
 
     // ===== DROP SHADOW (below TV onto wall) =====
-    for dy in 0..10usize {
+    for dy in 0..8usize {
         let y = tv_y2 + dy;
         if y >= TV_HEIGHT { break; }
-        let alpha = (10 - dy) as f32 / 14.0;
-        for x in (tv_x1 + 8)..(tv_x2 - 8) {
+        let alpha = (8 - dy) as f32 / 12.0;
+        for x in (tv_x1 + 6)..(tv_x2 - 6) {
             let idx = y * WINDOW_WIDTH + x;
             if idx < frame.len() {
                 let p = frame[idx];
@@ -7329,7 +7329,7 @@ fn apply_glass_effects(
 ) {
     if glass_intensity == 0 { return; }
 
-    const CORNER_R: usize = 12;
+    const CORNER_R: usize = 10;
     const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
     let intensity_factor = glass_intensity as u32;
 
@@ -7554,8 +7554,8 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
             if idx < frame.len() {
                 let dy = y - tv_h;
                 // Gradient: darker at top (shadow from TV), lighter below
-                let shadow = if dy < 20 {
-                    (20 - dy) as f32 / 30.0
+                let shadow = if dy < 15 {
+                    (15 - dy) as f32 / 22.0
                 } else {
                     0.0
                 };
@@ -7578,7 +7578,7 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
     // Front edge highlight (thin light line at very bottom)
     let edge_y = win_h - 2;
     if edge_y * win_w < frame.len() {
-        for x in 100..(win_w - 100) {
+        for x in 80..(win_w - 80) {
             let idx = edge_y * win_w + x;
             if idx < frame.len() {
                 frame[idx] = 0x3A3A40;
