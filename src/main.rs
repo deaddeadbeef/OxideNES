@@ -2297,6 +2297,8 @@ fn main() {
     let mut netplay_selected: usize = 0;
     let mut netplay_ip_input: String = "127.0.0.1:7777".to_string();
     let mut netplay_ip_editing: bool = false;
+    let mut netplay_port_input: String = "7777".to_string();
+    let mut netplay_editing_port: bool = false;
 
     // Lua scripting state
     let mut script_engine: Option<ScriptEngine> = None;
@@ -3601,7 +3603,42 @@ fn main() {
                         }
                     } else if paused && netplay_submenu {
                         // Netplay submenu input handling
-                        if netplay_ip_editing {
+                        if netplay_editing_port {
+                            // Port text input mode
+                            for key in &window.get_keys_pressed(KeyRepeat::Yes) {
+                                match key {
+                                    Key::Key0 | Key::NumPad0 => { if netplay_port_input.len() < 5 { netplay_port_input.push('0'); } }
+                                    Key::Key1 | Key::NumPad1 => { if netplay_port_input.len() < 5 { netplay_port_input.push('1'); } }
+                                    Key::Key2 | Key::NumPad2 => { if netplay_port_input.len() < 5 { netplay_port_input.push('2'); } }
+                                    Key::Key3 | Key::NumPad3 => { if netplay_port_input.len() < 5 { netplay_port_input.push('3'); } }
+                                    Key::Key4 | Key::NumPad4 => { if netplay_port_input.len() < 5 { netplay_port_input.push('4'); } }
+                                    Key::Key5 | Key::NumPad5 => { if netplay_port_input.len() < 5 { netplay_port_input.push('5'); } }
+                                    Key::Key6 | Key::NumPad6 => { if netplay_port_input.len() < 5 { netplay_port_input.push('6'); } }
+                                    Key::Key7 | Key::NumPad7 => { if netplay_port_input.len() < 5 { netplay_port_input.push('7'); } }
+                                    Key::Key8 | Key::NumPad8 => { if netplay_port_input.len() < 5 { netplay_port_input.push('8'); } }
+                                    Key::Key9 | Key::NumPad9 => { if netplay_port_input.len() < 5 { netplay_port_input.push('9'); } }
+                                    Key::Backspace => { netplay_port_input.pop(); }
+                                    Key::Enter => {
+                                        if let Ok(p) = netplay_port_input.parse::<u16>() {
+                                            netplay.port = p;
+                                            // Sync port in join address
+                                            if let Some(colon_pos) = netplay_ip_input.rfind(':') {
+                                                netplay_ip_input = format!("{}:{}", &netplay_ip_input[..colon_pos], p);
+                                            }
+                                        } else {
+                                            // Invalid port, restore from current
+                                            netplay_port_input = format!("{}", netplay.port);
+                                        }
+                                        netplay_editing_port = false;
+                                    }
+                                    Key::Escape => {
+                                        netplay_port_input = format!("{}", netplay.port);
+                                        netplay_editing_port = false;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else if netplay_ip_editing {
                             // IP address text input mode
                             for key in &window.get_keys_pressed(KeyRepeat::Yes) {
                                 match key {
@@ -3648,7 +3685,7 @@ fn main() {
                                     sound_cooldown = 3;
                                 }
                             }
-                            if input.down && netplay_selected < 3 {
+                            if input.down && netplay_selected < 4 {
                                 netplay_selected += 1;
                                 if sound_cooldown == 0 {
                                     play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
@@ -3658,6 +3695,9 @@ fn main() {
                             if input.confirm {
                                 match netplay_selected {
                                     0 => { // Host
+                                        if let Ok(p) = netplay_port_input.parse::<u16>() {
+                                            netplay.port = p;
+                                        }
                                         match netplay.host() {
                                             Ok(()) => {
                                                 overlay_message = Some(format!("HOSTING ON PORT {}", netplay.port));
@@ -3686,6 +3726,10 @@ fn main() {
                                     3 => { // Input delay toggle (cycle 1-5)
                                         netplay.input_delay = if netplay.input_delay >= 5 { 1 } else { netplay.input_delay + 1 };
                                         play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    4 => { // Port
+                                        netplay_editing_port = true;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
                                     _ => {}
                                 }
@@ -4057,6 +4101,9 @@ fn main() {
 
                         // Netplay: exchange inputs with remote peer
                         if netplay.is_connected() {
+                            if netplay.should_send_keepalive() {
+                                netplay.send_keepalive();
+                            }
                             netplay.frame_num = netplay.frame_num.wrapping_add(1);
 
                             // Encode local input (from whichever player we are)
@@ -4129,6 +4176,9 @@ fn main() {
                             }
                         } else if netplay.state != NetplayState::Disconnected {
                             // Still hosting/connecting - poll for handshake packets
+                            if netplay.should_send_keepalive() {
+                                netplay.send_keepalive();
+                            }
                             let _ = netplay.receive_input();
                             if netplay.is_connected() {
                                 overlay_message = Some(format!("NETPLAY CONNECTED (P{})", netplay.local_player + 1));
@@ -5477,7 +5527,8 @@ fn main() {
 
                             let host_label = format!("HOST (PORT {})", netplay.port);
                             let delay_str = format!("INPUT DELAY: {}", netplay.input_delay);
-                            let np_items: [&str; 4] = [&host_label, "JOIN...", "DISCONNECT", &delay_str];
+                            let port_str = format!("PORT: {}", netplay_port_input);
+                            let np_items: [&str; 5] = [&host_label, "JOIN...", "DISCONNECT", &delay_str, &port_str];
                             for (i, item) in np_items.iter().enumerate() {
                                 let row = nb_top + 4 + i * 2;
                                 let is_sel = i == netplay_selected;
@@ -5504,6 +5555,23 @@ fn main() {
                                 draw_text_8x8(&mut menu_framebuffer, "IP:PORT:", 9, nb_top + 5, 0xF8D878);
                                 let ip_display = if netplay_ip_input.is_empty() { "_" } else { &netplay_ip_input };
                                 draw_text_8x8(&mut menu_framebuffer, ip_display, 9, nb_top + 7, 0xFCFCFC);
+                            }
+
+                            // Port input overlay when editing
+                            if netplay_editing_port {
+                                let port_y = (nb_top + 13) * 8;
+                                for dy in 0..16 {
+                                    for dx in 0..80 {
+                                        let x = 88 + dx;
+                                        let y = port_y + dy;
+                                        if y < 240 && x < 256 {
+                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                        }
+                                    }
+                                }
+                                draw_text_8x8(&mut menu_framebuffer, "PORT:", 12, nb_top + 13, 0xF8D878);
+                                let port_display = if netplay_port_input.is_empty() { "_" } else { &netplay_port_input };
+                                draw_text_8x8(&mut menu_framebuffer, port_display, 18, nb_top + 13, 0xFCFCFC);
                             }
 
                             draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:SELECT", nb_bottom - 1, MENU_DARK_GRAY);

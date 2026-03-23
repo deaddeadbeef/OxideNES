@@ -1,14 +1,16 @@
 use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 // Packet magic bytes
 const MAGIC_INPUT: [u8; 2] = [0x4E, 0x50]; // "NP" - input packet
 const MAGIC_HOST: [u8; 2] = [0x4E, 0x48];  // "NH" - host welcome
 const MAGIC_JOIN: [u8; 2] = [0x4E, 0x43];  // "NC" - client join request
 const MAGIC_ACCEPT: [u8; 2] = [0x4E, 0x41]; // "NA" - host accept
+const MAGIC_KEEPALIVE: [u8; 2] = [0x4E, 0x4B]; // "NK" - keepalive heartbeat
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2);
 
-const INPUT_PACKET_SIZE: usize = 15; // 2 magic + 8 frame + 1 input + 4 checksum
+const INPUT_PACKET_SIZE: usize = 15;// 2 magic + 8 frame + 1 input + 4 checksum
 
 #[derive(Debug, PartialEq)]
 pub enum NetplayState {
@@ -33,6 +35,7 @@ pub struct NetplaySession {
     pub ping_ms: u32,
     ping_sent: Option<Instant>,
     last_remote_input: u8,
+    pub last_keepalive: Instant,
 }
 
 impl NetplaySession {
@@ -51,6 +54,7 @@ impl NetplaySession {
             ping_ms: 0,
             ping_sent: None,
             last_remote_input: 0,
+            last_keepalive: Instant::now(),
         }
     }
 }
@@ -197,9 +201,26 @@ impl NetplaySession {
         self.last_remote_input
     }
 
+    pub fn should_send_keepalive(&self) -> bool {
+        self.last_keepalive.elapsed() >= KEEPALIVE_INTERVAL
+    }
+
+    pub fn send_keepalive(&mut self) {
+        if self.is_connected() || matches!(self.state, NetplayState::Hosting { .. }) {
+            if let (Some(socket), Some(peer)) = (&self.socket, &self.peer_addr) {
+                let _ = socket.send_to(&MAGIC_KEEPALIVE, peer);
+            }
+        }
+        self.last_keepalive = Instant::now();
+    }
+
     fn handle_packet(&mut self, data: &[u8], src: SocketAddr) {
         if data.len() < 2 {
             return;
+        }
+
+        if data[0] == MAGIC_KEEPALIVE[0] && data[1] == MAGIC_KEEPALIVE[1] {
+            return; // Keepalive acknowledged, no action needed
         }
 
         match (data[0], data[1]) {
@@ -405,6 +426,23 @@ mod tests {
     }
 
     #[test]
+    fn test_keepalive_timing() {
+        let mut session = NetplaySession::new();
+        assert!(!session.should_send_keepalive());
+        session.last_keepalive = Instant::now() - Duration::from_secs(3);
+        assert!(session.should_send_keepalive());
+    }
+
+    #[test]
+    fn test_send_keepalive_resets_timer() {
+        let mut session = NetplaySession::new();
+        session.last_keepalive = Instant::now() - Duration::from_secs(3);
+        assert!(session.should_send_keepalive());
+        session.send_keepalive();
+        assert!(!session.should_send_keepalive());
+    }
+
+    #[test]
     fn test_configurable_port() {
         let mut session = NetplaySession::new();
         assert_eq!(session.port, 7777);
@@ -423,4 +461,5 @@ mod tests {
         }
         session.disconnect();
     }
+
 }
