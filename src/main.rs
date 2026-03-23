@@ -5475,8 +5475,9 @@ fn main() {
                             let status_color = if netplay.is_connected() { 0x44FF44u32 } else { MENU_GRAY };
                             draw_text_centered_8x8(&mut menu_framebuffer, netplay.status_text(), nb_top + 2, status_color);
 
+                            let host_label = format!("HOST (PORT {})", netplay.port);
                             let delay_str = format!("INPUT DELAY: {}", netplay.input_delay);
-                            let np_items: [&str; 4] = ["HOST (PORT 7777)", "JOIN...", "DISCONNECT", &delay_str];
+                            let np_items: [&str; 4] = [&host_label, "JOIN...", "DISCONNECT", &delay_str];
                             for (i, item) in np_items.iter().enumerate() {
                                 let row = nb_top + 4 + i * 2;
                                 let is_sel = i == netplay_selected;
