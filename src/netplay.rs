@@ -22,6 +22,7 @@ pub enum NetplayState {
 pub struct NetplaySession {
     socket: Option<UdpSocket>,
     peer_addr: Option<SocketAddr>,
+    pub port: u16,
     pub local_player: u8,
     pub input_delay: u8,
     local_inputs: VecDeque<u8>,
@@ -39,6 +40,7 @@ impl NetplaySession {
         Self {
             socket: None,
             peer_addr: None,
+            port: 7777,
             local_player: 0,
             input_delay: 2,
             local_inputs: VecDeque::new(),
@@ -60,8 +62,8 @@ impl Default for NetplaySession {
 }
 
 impl NetplaySession {
-    pub fn host(&mut self, port: u16) -> Result<(), String> {
-        let addr: SocketAddr = format!("0.0.0.0:{}", port)
+    pub fn host(&mut self) -> Result<(), String> {
+        let addr: SocketAddr = format!("0.0.0.0:{}", self.port)
             .parse()
             .map_err(|e| format!("Invalid address: {}", e))?;
         let socket = UdpSocket::bind(addr).map_err(|e| format!("Bind failed: {}", e))?;
@@ -70,7 +72,7 @@ impl NetplaySession {
             .map_err(|e| format!("Non-blocking failed: {}", e))?;
         self.socket = Some(socket);
         self.local_player = 0; // Host is P1
-        self.state = NetplayState::Hosting { port };
+        self.state = NetplayState::Hosting { port: self.port };
         self.frame_num = 0;
         self.local_inputs.clear();
         self.remote_inputs.clear();
@@ -343,7 +345,8 @@ mod tests {
     fn test_host_and_disconnect() {
         let mut session = NetplaySession::new();
         // Host on a random high port
-        let result = session.host(0); // port 0 = OS picks
+        session.port = 0;
+        let result = session.host(); // port 0 = OS picks
         assert!(result.is_ok());
         assert!(matches!(session.state, NetplayState::Hosting { .. }));
         assert_eq!(session.local_player, 0);
@@ -357,7 +360,8 @@ mod tests {
     fn test_status_text() {
         let mut session = NetplaySession::new();
         assert_eq!(session.status_text(), "DISCONNECTED");
-        let _ = session.host(0);
+        session.port = 0;
+        let _ = session.host();
         assert_eq!(session.status_text(), "HOSTING... WAITING");
         session.disconnect();
     }
@@ -366,7 +370,8 @@ mod tests {
     fn test_loopback_connection() {
         // Host on random port
         let mut host = NetplaySession::new();
-        host.host(0).unwrap();
+        host.port = 0;
+        host.host().unwrap();
         let host_port = match host.socket.as_ref().unwrap().local_addr() {
             Ok(addr) => addr.port(),
             Err(_) => return, // Skip if we can't get port
@@ -397,5 +402,25 @@ mod tests {
 
         host.disconnect();
         client.disconnect();
+    }
+
+    #[test]
+    fn test_configurable_port() {
+        let mut session = NetplaySession::new();
+        assert_eq!(session.port, 7777);
+        session.port = 8080;
+        assert_eq!(session.port, 8080);
+    }
+
+    #[test]
+    fn test_host_uses_configured_port() {
+        let mut session = NetplaySession::new();
+        session.port = 0;
+        session.host().unwrap();
+        match &session.state {
+            NetplayState::Hosting { port } => assert_ne!(*port, 7777),
+            other => panic!("Expected Hosting, got {:?}", other),
+        }
+        session.disconnect();
     }
 }

@@ -3658,9 +3658,9 @@ fn main() {
                             if input.confirm {
                                 match netplay_selected {
                                     0 => { // Host
-                                        match netplay.host(7777) {
+                                        match netplay.host() {
                                             Ok(()) => {
-                                                overlay_message = Some("HOSTING ON PORT 7777".to_string());
+                                                overlay_message = Some(format!("HOSTING ON PORT {}", netplay.port));
                                                 overlay_timer = 120;
                                                 netplay_submenu = false;
                                                 paused = false;
