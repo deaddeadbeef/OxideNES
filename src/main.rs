@@ -3694,7 +3694,11 @@ fn main() {
                             }
                             if input.confirm {
                                 match netplay_selected {
-                                    0 => { // Host
+                                    0 => { // Port
+                                        netplay_editing_port = true;
+                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    }
+                                    1 => { // Host
                                         if let Ok(p) = netplay_port_input.parse::<u16>() {
                                             netplay.port = p;
                                         }
@@ -3712,24 +3716,20 @@ fn main() {
                                         }
                                         play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
-                                    1 => { // Join
+                                    2 => { // Join
                                         netplay_ip_editing = true;
                                         play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
-                                    2 => { // Disconnect
+                                    3 => { // Disconnect
                                         netplay.disconnect();
                                         overlay_message = Some("NETPLAY DISCONNECTED".to_string());
                                         overlay_timer = 90;
                                         netplay_submenu = false;
                                         play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
-                                    3 => { // Input delay toggle (cycle 1-5)
+                                    4 => { // Input delay toggle (cycle 1-5)
                                         netplay.input_delay = if netplay.input_delay >= 5 { 1 } else { netplay.input_delay + 1 };
                                         play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
-                                    }
-                                    4 => { // Port
-                                        netplay_editing_port = true;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
                                     }
                                     _ => {}
                                 }
@@ -5527,8 +5527,12 @@ fn main() {
 
                             let host_label = format!("HOST (PORT {})", netplay.port);
                             let delay_str = format!("INPUT DELAY: {}", netplay.input_delay);
-                            let port_str = format!("PORT: {}", netplay_port_input);
-                            let np_items: [&str; 5] = [&host_label, "JOIN...", "DISCONNECT", &delay_str, &port_str];
+                            let port_str = if netplay_editing_port {
+                                format!("PORT: {}_", netplay_port_input)
+                            } else {
+                                format!("PORT: {}", netplay_port_input)
+                            };
+                            let np_items: [&str; 5] = [&port_str, &host_label, "JOIN...", "DISCONNECT", &delay_str];
                             for (i, item) in np_items.iter().enumerate() {
                                 let row = nb_top + 4 + i * 2;
                                 let is_sel = i == netplay_selected;
@@ -5542,7 +5546,7 @@ fn main() {
 
                             // IP input overlay when editing
                             if netplay_ip_editing {
-                                let ip_y = (nb_top + 5) * 8;
+                                let ip_y = (nb_top + 9) * 8;
                                 for dy in 0..16 {
                                     for dx in 0..128 {
                                         let x = 64 + dx;
@@ -5552,14 +5556,14 @@ fn main() {
                                         }
                                     }
                                 }
-                                draw_text_8x8(&mut menu_framebuffer, "IP:PORT:", 9, nb_top + 5, 0xF8D878);
+                                draw_text_8x8(&mut menu_framebuffer, "IP:PORT:", 9, nb_top + 9, 0xF8D878);
                                 let ip_display = if netplay_ip_input.is_empty() { "_" } else { &netplay_ip_input };
-                                draw_text_8x8(&mut menu_framebuffer, ip_display, 9, nb_top + 7, 0xFCFCFC);
+                                draw_text_8x8(&mut menu_framebuffer, ip_display, 9, nb_top + 11, 0xFCFCFC);
                             }
 
                             // Port input overlay when editing
                             if netplay_editing_port {
-                                let port_y = (nb_top + 13) * 8;
+                                let port_y = (nb_top + 5) * 8;
                                 for dy in 0..16 {
                                     for dx in 0..80 {
                                         let x = 88 + dx;
@@ -5569,9 +5573,9 @@ fn main() {
                                         }
                                     }
                                 }
-                                draw_text_8x8(&mut menu_framebuffer, "PORT:", 12, nb_top + 13, 0xF8D878);
+                                draw_text_8x8(&mut menu_framebuffer, "PORT:", 12, nb_top + 5, 0xF8D878);
                                 let port_display = if netplay_port_input.is_empty() { "_" } else { &netplay_port_input };
-                                draw_text_8x8(&mut menu_framebuffer, port_display, 18, nb_top + 13, 0xFCFCFC);
+                                draw_text_8x8(&mut menu_framebuffer, port_display, 18, nb_top + 5, 0xFCFCFC);
                             }
 
                             draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:SELECT", nb_bottom - 1, MENU_DARK_GRAY);
