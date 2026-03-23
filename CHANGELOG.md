@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Configurable netplay port (default remains 7777, changeable via in-game menu)
+- Keepalive heartbeat every 2 seconds to prevent firewall UDP timeout
+- Port picker in netplay submenu (digit entry with validation)
+
+### Changed
+- `host()` now uses the configured port instead of hardcoded 7777
+- Default join address syncs when port is changed
+- Host menu label shows currently configured port
+
 ## [0.1.4] - 2026-03-23
 
 ### Added
