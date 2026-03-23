@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.5] - 2026-03-23
 
 ### Added
 - Configurable netplay port (default remains 7777, changeable via in-game menu)
