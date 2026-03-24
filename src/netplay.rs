@@ -464,4 +464,27 @@ mod tests {
         session.disconnect();
     }
 
+    #[test]
+    fn test_handle_short_packet_does_not_panic() {
+        let mut session = NetplaySession::new();
+        session.port = 0;
+        session.host().expect("host should bind");
+
+        let src: SocketAddr = "127.0.0.1:9999".parse().unwrap();
+
+        // Empty packet
+        session.handle_packet(&[], src);
+        // 1-byte packet
+        session.handle_packet(&[0x4E], src);
+        // Short input packet (magic matches but truncated)
+        session.handle_packet(&MAGIC_INPUT, src);
+        session.handle_packet(&[0x4E, 0x50, 0x00], src);
+        // Just under INPUT_PACKET_SIZE (14 bytes instead of 15)
+        session.handle_packet(&[0x4E, 0x50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], src);
+
+        // None of the above should have produced remote input
+        assert!(session.remote_inputs.is_empty());
+        session.disconnect();
+    }
+
 }

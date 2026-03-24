@@ -27,6 +27,7 @@ impl ScriptEngine {
         lua.globals().set("require", mlua::Value::Nil).ok();
         lua.globals().set("loadfile", mlua::Value::Nil).ok();
         lua.globals().set("dofile", mlua::Value::Nil).ok();
+        lua.globals().set("debug", mlua::Value::Nil).ok();
         lua.globals().set("package", mlua::Value::Nil).ok();
 
         let pixel_sink = Rc::new(RefCell::new(Vec::new()));

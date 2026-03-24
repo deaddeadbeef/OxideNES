@@ -32,12 +32,18 @@ impl Updater {
     pub fn check_async(&self) {
         let available = self.update_available.clone();
         let checking = self.checking.clone();
-        *checking.lock().unwrap() = true;
+        if let Ok(mut c) = checking.lock() {
+            *c = true;
+        }
 
         thread::spawn(move || {
             let result = Self::check_github();
-            *available.lock().unwrap() = result;
-            *checking.lock().unwrap() = false;
+            if let Ok(mut a) = available.lock() {
+                *a = result;
+            }
+            if let Ok(mut c) = checking.lock() {
+                *c = false;
+            }
         });
     }
 

@@ -69,6 +69,10 @@ impl Cartridge {
         let has_trainer = flags6 & 0x04 != 0;
         let prg_start = 16 + if has_trainer { 512 } else { 0 };
 
+        if rom_data.len() < prg_start {
+            return Err("Invalid ROM: file too short for trainer data".to_string());
+        }
+
         // Compute CRC32 of ROM data (excluding header) for database lookup
         let crc = crc32fast::hash(&rom_data[prg_start..]);
         let mut rom_title: Option<String> = None;
