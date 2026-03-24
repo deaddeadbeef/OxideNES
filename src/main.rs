@@ -3419,9 +3419,9 @@ fn main() {
                         // Show update banner if available and not dismissed
                         if !update_dismissed {
                             if let Some(info) = updater.get_update() {
-                                let banner = format!("UPDATE: {}", info.version);
-                                draw_text_centered_8x8(&mut menu_framebuffer, &banner, 28, MENU_GOLD);
-                                draw_text_centered_8x8(&mut menu_framebuffer, "U:DOWNLOAD  ESC:DISMISS", 29, MENU_DARK_GRAY);
+                                let banner = format!("v{}", info.version);
+                                let banner_x = 32 - banner.len() - 1;
+                                draw_text_8x8(&mut menu_framebuffer, &banner, banner_x, 29, MENU_DARK_GRAY);
                             }
                         }
                     }
