@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.7] - 2026-03-24
+
+### Fixed
+- Crash on malformed GitHub API response in auto-updater (replaced unwrap with graceful error handling)
+- Crash on corrupt/truncated ROM files with trainer flag (added bounds check before CRC hash)
+- Moved version label to subtle lower-right corner (shows v0.x.y instead of prominent UPDATE banner)
+
+### Security
+- Restricted Lua scripting sandbox (removed debug library access)
+- Added packet length validation tests for netplay (confirmed existing guards are safe)
+
+### Changed
+- Redesigned CRT TV bezel with thinner, proportional frame matching real vintage CRT TVs
+- Game screen enlarged from 820×616 to 960×720 (integer 3× NES vertical scale)
+- Screen fills ~80% of TV face (was ~53%), window reduced to 1100×954
+
 ## [0.1.6] - 2026-03-23
 
 ### Changed
