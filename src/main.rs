@@ -6416,28 +6416,6 @@ const GAMMA_TABLE: [u8; 256] = {
 };
 
 #[inline(always)]
-fn apply_phosphor(r: u32, g: u32, b: u32, pr_mul: u32, pg_mul: u32, pb_mul: u32) -> (u32, u32, u32) {
-    // Fast path: no warmth applied
-    if pr_mul == 256 && pg_mul == 256 && pb_mul == 256 {
-        return (r, g, b);
-    }
-    // Brightness-dependent warmth: bright pixels get full warmth shift,
-    // dark pixels stay neutral (mimics phosphor heating on consumer TVs)
-    let brightness = ((r + g + b) * 85) >> 8; // fast /3, range 0-255
-    // Interpolate: at brightness=0 use 256 (neutral), at 255 use full pr/pg/pb_mul
-    // delta = (mul - 256), which can be negative for green/blue channels
-    // mul_actual = 256 + delta * brightness / 255
-    let pr_delta = pr_mul as i32 - 256;
-    let pg_delta = pg_mul as i32 - 256;
-    let pb_delta = pb_mul as i32 - 256;
-    let br = brightness as i32;
-    let pr = (256 + ((pr_delta * br) >> 8)) as u32;
-    let pg = (256 + ((pg_delta * br) >> 8)) as u32;
-    let pb = (256 + ((pb_delta * br) >> 8)) as u32;
-    ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8)
-}
-
-#[inline(always)]
 fn apply_scanline_vignette(r: u32, g: u32, b: u32, scan_mul: u32, vig: u32) -> (u32, u32, u32) {
     // Combine scanline and vignette in one multiplication to reduce ops
     let combined = (scan_mul * vig) >> 8;
@@ -6465,9 +6443,10 @@ fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_s
     let bleed = (bloom_strength * 16 / 100).min(15); // 0-15 range
     if bleed == 0 { return; }
 
-    // Single horizontal forward pass only — fast, cache-friendly, good enough visually
     for y in 0..height {
         let row = y * width;
+
+        // Forward pass (left→right)
         let mut carry_r: u32 = 0;
         let mut carry_g: u32 = 0;
         let mut carry_b: u32 = 0;
@@ -6479,20 +6458,17 @@ fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_s
             let g = (pixel >> 8) & 0xFF;
             let b = pixel & 0xFF;
 
-            // Apply carry from previous bright pixel
             if carry_r | carry_g | carry_b != 0 {
                 let nr = (r + carry_r).min(255);
                 let ng = (g + carry_g).min(255);
                 let nb = (b + carry_b).min(255);
                 unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
-                // Decay carry quickly
                 carry_r >>= 1;
                 carry_g >>= 1;
                 carry_b >>= 1;
             }
 
-            // Bright pixels generate new carry
-            let brightness = ((r + g + b) * 85) >> 8; // fast /3 approximation
+            let brightness = ((r + g + b) * 85) >> 8;
             if brightness > threshold {
                 let excess = brightness - threshold;
                 carry_r = (r * excess * bleed) >> 16;
@@ -6500,14 +6476,11 @@ fn apply_phosphor_bloom(buffer: &mut [u32], width: usize, height: usize, bloom_s
                 carry_b = (b * excess * bleed) >> 16;
             }
         }
-    }
 
-    // Backward pass (right→left) — makes glow symmetric
-    for y in 0..height {
-        let row = y * width;
-        let mut carry_r: u32 = 0;
-        let mut carry_g: u32 = 0;
-        let mut carry_b: u32 = 0;
+        // Backward pass (right→left) — same row, still in L1 cache
+        carry_r = 0;
+        carry_g = 0;
+        carry_b = 0;
 
         for x in (0..width).rev() {
             let idx = row + x;
@@ -6600,6 +6573,25 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     let pg_mul = 256 - (pw * 8 / 100);
     let pb_mul = 256 - (pw * 36 / 100);
 
+    // Pre-compute phosphor warmth LUT: brightness → (pr, pg, pb) multiplier
+    let phosphor_lut: [(u32, u32, u32); 256] = {
+        let mut lut = [(256u32, 256u32, 256u32); 256];
+        if pw > 0 {
+            let pr_delta = pr_mul as i32 - 256;
+            let pg_delta = pg_mul as i32 - 256;
+            let pb_delta = pb_mul as i32 - 256;
+            for br in 0..256u32 {
+                let bri = br as i32;
+                lut[br as usize] = (
+                    (256 + ((pr_delta * bri) >> 8)) as u32,
+                    (256 + ((pg_delta * bri) >> 8)) as u32,
+                    (256 + ((pb_delta * bri) >> 8)) as u32,
+                );
+            }
+        }
+        lut
+    };
+
     let blur_side = (25u32 * crt_cfg.blur_amount as u32) / 40;
     let blur_center = 256 - blur_side * 2;
     let use_blur = blur_side > 0;
@@ -6610,21 +6602,21 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     if use_mask && use_blur {
         // Full pipeline: blur + mask
         crt_filter_full(input, output, vignette_table, distortion_table, 
-                       &scan_muls, pr_mul, pg_mul, pb_mul, 
+                       &scan_muls, &phosphor_lut, 
                        blur_center, blur_side, mask_table);
     } else if use_mask {
         // Mask but no blur
         crt_filter_masked(input, output, vignette_table, distortion_table, 
-                         &scan_muls, pr_mul, pg_mul, pb_mul, mask_table);
+                         &scan_muls, &phosphor_lut, mask_table);
     } else if use_blur {
         // Blur but no mask
         crt_filter_blurred(input, output, vignette_table, distortion_table, 
-                          &scan_muls, pr_mul, pg_mul, pb_mul, 
+                          &scan_muls, &phosphor_lut, 
                           blur_center, blur_side);
     } else {
         // Basic pipeline: no blur, no mask
         crt_filter_basic(input, output, vignette_table, distortion_table, 
-                        &scan_muls, pr_mul, pg_mul, pb_mul);
+                        &scan_muls, &phosphor_lut);
     }
 }
 
@@ -6657,7 +6649,7 @@ fn apply_gamma_brightness_contrast(buffer: &mut [u32], len: usize, brightness: i
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                   pr_mul: u32, pg_mul: u32, pb_mul: u32,
+                   phosphor_lut: &[(u32, u32, u32); 256],
                    blur_center: u32, blur_side: u32, mask_table: &[(u16, u16, u16)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
@@ -6685,7 +6677,11 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
-            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+            } else {
+                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+            };
             
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
@@ -6694,7 +6690,9 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
                 (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
             }
             
-            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let brightness = ((r + g + b) * 85) >> 8;
+            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+            (r, g, b) = ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
@@ -6711,7 +6709,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                     pr_mul: u32, pg_mul: u32, pb_mul: u32, mask_table: &[(u16, u16, u16)]) {
+                     phosphor_lut: &[(u32, u32, u32); 256], mask_table: &[(u16, u16, u16)]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -6738,9 +6736,15 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
-            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+            } else {
+                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+            };
             
-            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let brightness = ((r + g + b) * 85) >> 8;
+            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+            (r, g, b) = ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
@@ -6757,7 +6761,7 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                       distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                      pr_mul: u32, pg_mul: u32, pb_mul: u32,
+                      phosphor_lut: &[(u32, u32, u32); 256],
                       blur_center: u32, blur_side: u32) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
@@ -6785,7 +6789,11 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
             let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
-            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+            } else {
+                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+            };
             
             // Blur
             if src_x0 > 0 && src_x0 < 255 {
@@ -6794,7 +6802,9 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
                 (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
             }
             
-            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let brightness = ((r + g + b) * 85) >> 8;
+            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+            (r, g, b) = ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
@@ -6808,7 +6818,7 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
-                    pr_mul: u32, pg_mul: u32, pb_mul: u32) {
+                    phosphor_lut: &[(u32, u32, u32); 256]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
         let scan_mul = scan_muls[dst_y % 4];
@@ -6835,9 +6845,15 @@ fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]
             let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
             let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
             
-            let (mut r, mut g, mut b) = blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y);
+            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+            } else {
+                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+            };
             
-            (r, g, b) = apply_phosphor(r, g, b, pr_mul, pg_mul, pb_mul);
+            let brightness = ((r + g + b) * 85) >> 8;
+            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+            (r, g, b) = ((r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8);
             let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
             (r, g, b) = apply_scanline_vignette(r, g, b, scan_mul, vig);
             
@@ -7319,7 +7335,7 @@ fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
 #[allow(clippy::too_many_arguments)]
 fn apply_glass_effects(
     buffer: &mut [u32],
-    source_copy: &[u32],  // pre-effects copy for ghost
+    source_copy: &[u32],
     glare_table: &[u8],
     thickness_table: &[u16],
     ghost_alpha_table: &[u8],
@@ -7330,21 +7346,48 @@ fn apply_glass_effects(
     if glass_intensity == 0 { return; }
 
     const CORNER_R: usize = 10;
-    const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
     let intensity_factor = glass_intensity as u32;
-
-    // Glass tint: CRT glass slightly reduces contrast and adds warmth
-    // At intensity 100: ~4% contrast reduction + slight warm shift
-    let tint_strength = intensity_factor * 10 / 100;  // 0-10 range
-
+    let tint_strength = intensity_factor * 10 / 100;
     let corner_x_max = SCREEN_W - CORNER_R;
     let corner_y_max = SCREEN_H - CORNER_R;
-
-    // Ghost parameters
     let ghost_shift_x: usize = 3;
     let ghost_shift_y: usize = 2;
     let ghost_h = SCREEN_H.saturating_sub(ghost_shift_y);
     let ghost_w = SCREEN_W.saturating_sub(ghost_shift_x);
+
+    // Monomorphize on do_ghost so compiler eliminates dead ghost code
+    if do_ghost {
+        glass_inner_loop(buffer, source_copy, glare_table, thickness_table, ghost_alpha_table,
+            window_width, intensity_factor, tint_strength, true,
+            corner_x_max, corner_y_max, ghost_shift_x, ghost_shift_y, ghost_h, ghost_w);
+    } else {
+        glass_inner_loop(buffer, source_copy, glare_table, thickness_table, ghost_alpha_table,
+            window_width, intensity_factor, tint_strength, false,
+            corner_x_max, corner_y_max, ghost_shift_x, ghost_shift_y, ghost_h, ghost_w);
+    }
+}
+
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn glass_inner_loop(
+    buffer: &mut [u32],
+    source_copy: &[u32],
+    glare_table: &[u8],
+    thickness_table: &[u16],
+    ghost_alpha_table: &[u8],
+    window_width: usize,
+    intensity_factor: u32,
+    tint_strength: u32,
+    do_ghost: bool,
+    corner_x_max: usize,
+    corner_y_max: usize,
+    ghost_shift_x: usize,
+    ghost_shift_y: usize,
+    ghost_h: usize,
+    ghost_w: usize,
+) {
+    const CORNER_R: usize = 10;
+    const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
 
     for y in 0..SCREEN_H {
         let buf_row = (y + SCREEN_Y) * window_width + SCREEN_X;
@@ -7353,7 +7396,6 @@ fn apply_glass_effects(
         let in_corner_y_top = y < CORNER_R;
         let in_corner_y_bottom = y >= corner_y_max;
 
-        // Ghost source row (shifted)
         let ghost_src_row = if do_ghost && y < ghost_h {
             Some((y + ghost_shift_y + SCREEN_Y) * window_width + SCREEN_X)
         } else {
@@ -7361,7 +7403,6 @@ fn apply_glass_effects(
         };
 
         for x in 0..SCREEN_W {
-            // Corner rounding check (keep existing logic)
             if (in_corner_y_top || in_corner_y_bottom) && (x < CORNER_R || x >= corner_x_max) {
                 let (cx, cy) = if x < CORNER_R {
                     if in_corner_y_top { (CORNER_R, CORNER_R) } else { (CORNER_R, SCREEN_H - 1 - CORNER_R) }
@@ -7374,8 +7415,6 @@ fn apply_glass_effects(
             }
 
             let glare_idx = glare_row + x;
-
-            // Specular glare overlay — read early for skip optimization
             let glare_base = unsafe { *glare_table.get_unchecked(glare_idx) as u32 };
 
             let idx = buf_row + x;
@@ -7384,31 +7423,26 @@ fn apply_glass_effects(
             let mut g = (pixel >> 8) & 0xFF;
             let mut b = pixel & 0xFF;
 
-            // Glass tint: slight contrast reduction + warm color shift from glass
-            // Real CRT glass absorbs some light, especially at edges (thicker glass)
+            // Compute brightness once for both tint and glare
+            let grey = ((r + g + b) * 171) >> 9;
+
             if tint_strength > 1 {
                 let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_idx) } as u32;
                 let tint = tint_strength * thickness / 256;
 
-                // Pull toward a neutral grey (reduces contrast) with slight warm bias
-                let grey = ((r + g + b) * 171) >> 9;          // /3 via multiply-shift
-                r = r + ((grey.saturating_sub(r) * tint * 205) >> 13);   // /40 via multiply-shift
-                g = g + ((grey.saturating_sub(g) * tint * 182) >> 13);   // /45 via multiply-shift
-                b = b.saturating_sub((tint * 171) >> 9);       // /3 via multiply-shift
+                r = r + ((grey.saturating_sub(r) * tint * 205) >> 13);
+                g = g + ((grey.saturating_sub(g) * tint * 182) >> 13);
+                b = b.saturating_sub((tint * 171) >> 9);
             }
 
-            // Specular glare overlay
             if glare_base > 0 {
-                let brightness = ((r + g + b) * 171) >> 9;    // /3 via multiply-shift
-                let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(brightness)) * 29) >> 19;  // /18000 via multiply-shift
+                let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(grey)) * 29) >> 19;
 
-                // Glare is slightly warm (real reflections pick up room light color)
-                r = (r + glare + ((glare * 171) >> 11)).min(255);   // glare/12 via multiply-shift
+                r = (r + glare + ((glare * 171) >> 11)).min(255);
                 g = (g + glare).min(255);
-                b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);  // glare/15 via multiply-shift
+                b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);
             }
 
-            // Ghost reflection: thick CRT glass creates a faint shifted image
             if let Some(src_row) = ghost_src_row {
                 if x < ghost_w {
                     let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(glare_idx) } as u32;
