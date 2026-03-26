@@ -763,6 +763,9 @@ impl Apu {
     // External/mapper expansion audio contribution, scaled to match internal amplitude
     #[inline]
     fn ext_output(&self) -> i32 {
+        if self.external_audio == 0.0 {
+            return 0;
+        }
         (self.external_audio * 32000.0) as i32
     }
     

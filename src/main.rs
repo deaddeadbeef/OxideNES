@@ -673,7 +673,8 @@ impl RewindBuffer {
             return;
         }
         
-        let mut snapshot = Vec::new();
+        let estimated_size = 512 + bus.ppu.frame_data.len() * 4; // CPU state + bus state + frame data
+        let mut snapshot = Vec::with_capacity(estimated_size);
         let cpu_state = cpu.save_state();
         snapshot.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
         snapshot.extend(cpu_state);
@@ -683,9 +684,11 @@ impl RewindBuffer {
         // Store PPU frame buffer for smooth rewind playback
         let frame = &bus.ppu.frame_data;
         snapshot.extend_from_slice(&(frame.len() as u32).to_le_bytes());
-        for pixel in frame.iter() {
-            snapshot.extend_from_slice(&pixel.to_le_bytes());
-        }
+        // Bulk copy: reinterpret u32 slice as bytes (safe on same-endian round-trip)
+        let frame_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 4)
+        };
+        snapshot.extend_from_slice(frame_bytes);
         
         self.total_bytes += snapshot.len();
         self.snapshots.push_back(snapshot);
@@ -702,7 +705,7 @@ impl RewindBuffer {
 
     fn pop_frame(&mut self, bus: &mut Bus, cpu: &mut Cpu) -> bool {
         if let Some(snapshot) = self.snapshots.pop_back() {
-            self.total_bytes -= snapshot.len();
+            self.total_bytes = self.total_bytes.saturating_sub(snapshot.len());
             let mut pos = 0;
             if pos + 4 > snapshot.len() { return false; }
             let cpu_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
@@ -723,11 +726,9 @@ impl RewindBuffer {
                 pos += 4;
                 if pos + frame_len * 4 <= snapshot.len() {
                     bus.ppu.frame_data.resize(frame_len, 0);
-                    for i in 0..frame_len {
-                        let off = pos + i * 4;
-                        bus.ppu.frame_data[i] = u32::from_le_bytes([
-                            snapshot[off], snapshot[off+1], snapshot[off+2], snapshot[off+3]
-                        ]);
+                    let src = &snapshot[pos..pos + frame_len * 4];
+                    for (pixel, chunk) in bus.ppu.frame_data.iter_mut().zip(src.chunks_exact(4)) {
+                        *pixel = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                     }
                 }
             }
@@ -2127,7 +2128,7 @@ fn main() {
 
     let target_fps = if config.region == "pal" { 50 } else { 60 };
     let frame_duration_ns: u64 = 1_000_000_000 / target_fps as u64;
-    window.set_target_fps(target_fps);  // Keep as safety fallback
+    window.set_target_fps(0);  // Disabled: custom hybrid pacer handles timing
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().ok();
@@ -2376,6 +2377,7 @@ fn main() {
                         // Load persisted Game Genie cheats for this ROM
                         if let Some(ref mut bus) = game_bus {
                             bus.cheats = load_cheats(&current_rom_name);
+                            bus.update_cheats_cache();
                         }
                     }
                     Err(e) => {
@@ -3380,6 +3382,7 @@ fn main() {
                                         // Load persisted Game Genie cheats for this ROM
                                         if let Some(ref mut bus) = game_bus {
                                             bus.cheats = load_cheats(&current_rom_name);
+                                            bus.update_cheats_cache();
                                         }
                                     }
                                     Err(e) => {
@@ -3460,14 +3463,14 @@ fn main() {
                     apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                     // Apply chromatic aberration to crt_buffer (screen area only)
                     if glass_intensity > 30 {
-                        ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
-                        apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                        apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                        std::mem::swap(&mut crt_buffer, &mut ca_temp);
                     }
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
                 composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
-                if crt_enabled {
+                if crt_enabled && glass_intensity > 0 {
                     let do_ghost = glass_intensity > 20;
                     if do_ghost {
                         let start = SCREEN_Y * WINDOW_WIDTH;
@@ -3512,6 +3515,7 @@ fn main() {
                                         if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
                                             if let Some(code) = oxidenes::bus::GameGenieCode::decode(&cheat_input_buffer) {
                                                 bus.cheats.push(code);
+                                                bus.update_cheats_cache();
                                                 save_cheats(&current_rom_name, &bus.cheats);
                                                 cheat_message = Some(format!("ADDED: {}", cheat_input_buffer));
                                                 cheat_message_timer = 120;
@@ -3555,6 +3559,7 @@ fn main() {
                                 if cheats_selected < bus.cheats.len() {
                                     // Toggle cheat on/off
                                     bus.cheats[cheats_selected].enabled = !bus.cheats[cheats_selected].enabled;
+                                    bus.update_cheats_cache();
                                     save_cheats(&current_rom_name, &bus.cheats);
                                     play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
                                 } else if cheats_selected == bus.cheats.len() {
@@ -3565,6 +3570,7 @@ fn main() {
                                 } else {
                                     // CLEAR ALL
                                     bus.cheats.clear();
+                                    bus.update_cheats_cache();
                                     save_cheats(&current_rom_name, &bus.cheats);
                                     cheats_selected = 0;
                                     cheat_message = Some("ALL CHEATS CLEARED".to_string());
@@ -3575,6 +3581,7 @@ fn main() {
                             if input.backspace && cheats_selected < bus.cheats.len() {
                                 // Delete individual cheat with Backspace
                                 bus.cheats.remove(cheats_selected);
+                                bus.update_cheats_cache();
                                 save_cheats(&current_rom_name, &bus.cheats);
                                 if cheats_selected >= bus.cheats.len() + 2 {
                                     cheats_selected = (bus.cheats.len() + 1).max(0);
@@ -4308,7 +4315,7 @@ fn main() {
                                     },
                                 ).expect("Failed to create window");
                             }
-                            window.set_target_fps(target_fps);
+                            window.set_target_fps(0);  // Disabled: custom hybrid pacer handles timing
                             overlay_message = Some(if is_fullscreen { "FULLSCREEN".to_string() } else { "WINDOWED".to_string() });
                             overlay_timer = 60;
                         }
@@ -4558,8 +4565,8 @@ fn main() {
                         apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         // Apply chromatic aberration to crt_buffer (screen area only)
                         if glass_intensity > 30 {
-                            ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
-                            apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                            apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                            std::mem::swap(&mut crt_buffer, &mut ca_temp);
                         }
                     } else {
                         scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
@@ -4568,7 +4575,7 @@ fn main() {
                     // Composite game output into TV frame
                     composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
 
-                    if crt_enabled {
+                    if crt_enabled && glass_intensity > 0 {
                         let do_ghost = glass_intensity > 20;
                         if do_ghost {
                             let start = SCREEN_Y * WINDOW_WIDTH;
@@ -5765,14 +5772,14 @@ fn main() {
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             // Apply chromatic aberration to crt_buffer (screen area only)
                             if glass_intensity > 30 {
-                                ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
-                                apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                std::mem::swap(&mut crt_buffer, &mut ca_temp);
                             }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
-                        if crt_enabled {
+                        if crt_enabled && glass_intensity > 0 {
                             let do_ghost = glass_intensity > 20;
                             if do_ghost {
                                 let start = SCREEN_Y * WINDOW_WIDTH;
@@ -5782,7 +5789,7 @@ fn main() {
                             apply_glass_effects(&mut composite_buffer, &ghost_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost);
                         }
 
-                        // Render save state thumbnail in pause menu (composite buffer)
+                        // Render save state thumbnail in pause menu(composite buffer)
                         // Position thumbnail to the right of the pause menu box
                         let thumb_scale = 2usize;
                         let thumb_w = 64 * thumb_scale;
@@ -6015,14 +6022,14 @@ fn main() {
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             if glass_intensity > 30 {
-                                ca_temp.copy_from_slice(&crt_buffer[..SCREEN_W * SCREEN_H]);
-                                apply_chromatic_aberration(&mut crt_buffer, &ca_temp, &ca_table, SCREEN_W, SCREEN_H);
+                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                std::mem::swap(&mut crt_buffer, &mut ca_temp);
                             }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
                         composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
-                        if crt_enabled {
+                        if crt_enabled && glass_intensity > 0 {
                             let do_ghost = glass_intensity > 20;
                             if do_ghost {
                                 let start = SCREEN_Y * WINDOW_WIDTH;
@@ -6069,7 +6076,14 @@ fn main() {
                     std::hint::spin_loop();
                 }
             }
-            frame_start = std::time::Instant::now();
+            let now = std::time::Instant::now();
+            let next = frame_start + std::time::Duration::from_nanos(frame_duration_ns);
+            frame_start = match now.checked_duration_since(next) {
+                // More than 3 frames behind: reset to prevent burst catch-up
+                Some(behind) if behind > std::time::Duration::from_nanos(frame_duration_ns * 3) => now,
+                // Normal case: advance to ideal next frame time (additive timing)
+                _ => next,
+            };
         }
     }
 }
@@ -6547,9 +6561,9 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
             let avg_b = ((pa & 0xFF) + (pb & 0xFF)) >> 1;
             
             // Blend: pixel * inv + avg * blend, all >>8
-            let nr = ((r * inv + avg_r * blend) >> 8).min(255);
-            let ng = ((g * inv + avg_g * blend) >> 8).min(255);
-            let nb = ((b * inv + avg_b * blend) >> 8).min(255);
+            let nr = (r * inv + avg_r * blend) >> 8;
+            let ng = (g * inv + avg_g * blend) >> 8;
+            let nb = (b * inv + avg_b * blend) >> 8;
             
             unsafe { *buffer.get_unchecked_mut(idx) = (nr << 16) | (ng << 8) | nb; }
         }
@@ -6625,6 +6639,9 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
 /// random-access lookups inside the distortion loop.
 #[inline]
 fn apply_gamma_brightness_contrast(buffer: &mut [u32], len: usize, brightness: i32, contrast: i32) {
+    if brightness == 0 && contrast == 0 {
+        return;
+    }
     // Build combined LUT: gamma → contrast → brightness
     let mut lut = [0u8; 256];
     let con_scale = 256 + (contrast * 256 / 50);

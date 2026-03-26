@@ -52,6 +52,8 @@ pub struct Ppu {
     pub region: Region,
     open_bus: u8,
     oam_dirty: bool,
+    greyscale: bool,
+    emphasis: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -124,6 +126,8 @@ impl Ppu {
             region: Region::Ntsc,
             open_bus: 0,
             oam_dirty: true,
+            greyscale: false,
+            emphasis: 0,
         }
     }
 }
@@ -247,7 +251,11 @@ impl Ppu {
                     // Trigger NMI if in vblank
                 }
             }
-            0x2001 => self.mask = data,
+            0x2001 => {
+                self.mask = data;
+                self.greyscale = data & 0x01 != 0;
+                self.emphasis = (data >> 5) & 0x07;
+            }
             0x2003 => self.oam_addr = data,
             0x2004 => {
                 self.oam_data[self.oam_addr as usize] = data;
@@ -608,7 +616,7 @@ impl Ppu {
             };
 
             // Greyscale mode: AND with 0x30 to only use grey column colors
-            if self.mask & 0x01 != 0 {
+            if self.greyscale {
                 color_index &= 0x30;
             }
 
@@ -616,7 +624,7 @@ impl Ppu {
 
             // Color emphasis: attenuate non-emphasized channels
             // On NTSC NES, emphasis bits dim the OTHER channels
-            let emphasis = (self.mask >> 5) & 0x07;
+            let emphasis = self.emphasis;
             if emphasis != 0 {
                 let mut r = (color >> 16) & 0xFF;
                 let mut g = (color >> 8) & 0xFF;
@@ -782,6 +790,8 @@ impl Ppu {
         // Registers and state
         self.ctrl = data[pos]; pos += 1;
         self.mask = data[pos]; pos += 1;
+        self.greyscale = self.mask & 0x01 != 0;
+        self.emphasis = (self.mask >> 5) & 0x07;
         self.status = data[pos]; pos += 1;
         self.oam_addr = data[pos]; pos += 1;
         self.scroll_x = data[pos]; pos += 1;

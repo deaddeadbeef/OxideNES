@@ -73,6 +73,7 @@ pub struct Bus {
     dma_dummy: bool,
     dmc_stall_cycles: u8,
     pub cheats: Vec<GameGenieCode>,
+    has_enabled_cheats: bool,
 }
 
 impl Bus {
@@ -92,6 +93,7 @@ impl Bus {
             dma_dummy: true,
             dmc_stall_cycles: 0,
             cheats: Vec::new(),
+            has_enabled_cheats: false,
         }
     }
 
@@ -100,10 +102,15 @@ impl Bus {
         self.cpu_ram.to_vec()
     }
 
+    /// Recalculate the `has_enabled_cheats` cache after any cheat modification.
+    pub fn update_cheats_cache(&mut self) {
+        self.has_enabled_cheats = self.cheats.iter().any(|c| c.enabled);
+    }
+
     #[inline(always)]
     pub fn cpu_read(&mut self, addr: u16) -> u8 {
         // Game Genie interception - fast path when no cheats active
-        if addr >= 0x8000 && !self.cheats.is_empty() {
+        if addr >= 0x8000 && self.has_enabled_cheats {
             for cheat in &self.cheats {
                 if cheat.enabled && cheat.address == addr {
                     let original = self.cartridge.mapper.read_prg(addr);

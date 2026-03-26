@@ -478,6 +478,9 @@ pub struct Mapper004 {
     // PRG banking
     prg_banks: usize,
     
+    // CHR banking (cached)
+    chr_bank_count: usize,
+    
     // IRQ
     irq_counter: u8,
     irq_reload: u8,
@@ -493,15 +496,18 @@ impl Mapper004 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x2000; // 8KB banks
         let has_chr_ram = chr_rom.is_empty();
+        let chr_data = if has_chr_ram { vec![0; 0x2000] } else { chr_rom };
+        let chr_bank_count = chr_data.len() >> 10; // / 0x0400 = 1KB banks
         Mapper004 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: chr_data,
             prg_ram: vec![0; 0x2000],
             bank_select: 0,
             prg_bank_mode: false,
             chr_inversion: false,
             registers: [0; 8],
             prg_banks,
+            chr_bank_count,
             irq_counter: 0,
             irq_reload: 0,
             irq_enabled: false,
@@ -519,7 +525,7 @@ impl Mapper004 {
     
     #[inline]
     fn chr_bank_offset(&self, bank: usize) -> usize {
-        let chr_banks = self.chr_rom.len() >> 10;  // / 0x0400 = / 1KB
+        let chr_banks = self.chr_bank_count;
         if chr_banks == 0 { return 0; }
         let bank = bank % chr_banks;
         bank << 10  // 0x0400 = 1KB
@@ -1029,17 +1035,20 @@ pub struct Mapper003 {
     mirroring: crate::cartridge::Mirroring,
     chr_bank: u8,
     prg_banks: usize,
+    chr_banks: usize,
 }
 
 impl Mapper003 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
+        let chr_banks = chr_rom.len() / 0x2000;
         Mapper003 {
             prg_rom,
             chr_rom,
             mirroring,
             chr_bank: 0,
             prg_banks,
+            chr_banks,
         }
     }
 }
@@ -1075,7 +1084,7 @@ impl Mapper for Mapper003 {
         if self.chr_rom.is_empty() {
             return 0;
         }
-        let chr_banks = self.chr_rom.len() / 0x2000;
+        let chr_banks = self.chr_banks;
         let bank = (self.chr_bank as usize) % chr_banks;
         let offset = bank * 0x2000 + (addr as usize);
         if offset < self.chr_rom.len() {

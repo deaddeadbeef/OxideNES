@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.9] - 2026-03-26
+
+### Performance
+- Optimized frame pacer with additive timing to eliminate cumulative drift
+- Disabled redundant minifb frame limiter (custom hybrid pacer handles timing exclusively)
+- Added early exits for CRT phosphor bloom, scanline glow, and gamma/brightness when parameters are zero
+- Eliminated chromatic aberration temp buffer copy (~1ms/frame savings via buffer swap)
+- Removed redundant `.min(255)` bounds checks in scanline glow (mathematically proven safe)
+- Added call-site guards for glass effects when intensity is zero
+- Optimized rewind buffer with bulk byte serialization and pre-allocated snapshots
+- Vectorization-friendly rewind deserialization using `chunks_exact` iterator pattern
+- Cached PPU greyscale and emphasis flags (eliminates per-pixel mask recomputation)
+- Added PPU color emphasis early exit for 61,440 pixels/frame
+- Cached Mapper003 CHR bank count (eliminates division on ~200K CHR reads/frame)
+- Added Bus cheat loop short-circuit with cached `has_enabled_cheats` flag
+- Added APU external audio fast path (skips FP multiply when output is zero)
+
 ## [0.1.7] - 2026-03-24
 
 ### Fixed
