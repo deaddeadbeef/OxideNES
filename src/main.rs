@@ -6549,6 +6549,7 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u16, u16, u16)], brightness: i32, contrast: i32) {
     output.resize(SCREEN_W * SCREEN_H, 0);
 
