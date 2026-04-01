@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0] - 2026-04-01
+
+### Performance
+- SWAR bilinear interpolation: packs R+B channels into single u32 register, reducing per-pixel multiply count from 12 to 8
+- Fused gamma/brightness/contrast LUT into CRT filter loop (eliminates separate 691K-pixel pass)
+- Merged phosphor warmth × scanline/vignette into single multiply-shift stage (saves 6 ops/pixel)
+- Eliminated ghost buffer memcpy (~2.7MB/frame) by reading ghost pixels directly from CRT output buffer
+
 ## [0.1.9] - 2026-03-26
 
 ### Performance
