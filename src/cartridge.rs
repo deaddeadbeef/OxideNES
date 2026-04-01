@@ -18,6 +18,15 @@ pub struct Cartridge {
     pub rom_title: Option<String>,
 }
 
+impl std::fmt::Debug for Cartridge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cartridge")
+            .field("has_battery", &self.has_battery)
+            .field("rom_title", &self.rom_title)
+            .finish()
+    }
+}
+
 impl Cartridge {
     pub fn new(rom_data: &[u8]) -> Result<Self, String> {
         Self::new_with_romdb(rom_data, None)
