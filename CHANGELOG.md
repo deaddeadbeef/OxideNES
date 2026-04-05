@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1] - 2026-04-02
+## [0.2.1] - 2026-04-05
 
 ### Performance
 - Precomputed fused scanline × vignette lookup table (`sv_table`) eliminating per-pixel multiply+shift in CRT hot loop
