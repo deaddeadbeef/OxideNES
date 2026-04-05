@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1] - 2026-04-02
+
+### Performance
+- Precomputed fused scanline × vignette lookup table (`sv_table`) eliminating per-pixel multiply+shift in CRT hot loop
+
+### Fixed
+- CRT live-preview regression: scanline and vignette sliders now immediately rebuild `sv_table` so the preview is never stale
+
 ## [0.2.0] - 2026-04-01
 
 ### Performance

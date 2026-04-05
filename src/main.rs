@@ -1787,6 +1787,48 @@ fn build_vignette_table_with_strength(strength: u8) -> Vec<u16> {
     table
 }
 
+/// Precompute fused scanline × vignette table.
+/// `sv_table[dst_y * SCREEN_W + dst_x]` stores `(scan_muls[dst_y % 4] * vig) >> 8`
+/// as a `u8`, so the hot loop only does one table load instead of a multiply+shift.
+fn build_sv_table(vignette_table: &[u16], scanline_intensity: u8) -> Vec<u8> {
+    let si = scanline_intensity as u32;
+    let scan_muls: [u32; 4] = [
+        255,
+        255 - (si * 15 / 100),
+        255 - (si * 25 / 100),
+        255 - si.min(255) * 55 / 100,
+    ];
+    let mut sv_table = vec![0u8; SCREEN_W * SCREEN_H];
+    for dst_y in 0..SCREEN_H {
+        let scan_mul = scan_muls[dst_y % 4];
+        let row_base = dst_y * SCREEN_W;
+        for dst_x in 0..SCREEN_W {
+            let idx = row_base + dst_x;
+            let vig = vignette_table[idx] as u32;
+            sv_table[idx] = ((scan_mul * vig) >> 8) as u8;
+        }
+    }
+    sv_table
+}
+
+/// Immediately rebuild sv_table after a scanline_intensity slider change.
+/// Called on every slider tick so the CRT live preview is never stale.
+fn apply_scanline_intensity_change(sv_table: &mut Vec<u8>, vignette_table: &[u16], new_intensity: u8) {
+    *sv_table = build_sv_table(vignette_table, new_intensity);
+}
+
+/// Immediately rebuild vignette_table and sv_table after a vignette_strength slider change.
+/// Both tables must be rebuilt together because sv_table depends on vignette_table.
+fn apply_vignette_strength_change(
+    sv_table: &mut Vec<u8>,
+    vignette_table: &mut Vec<u16>,
+    new_strength: u8,
+    scanline_intensity: u8,
+) {
+    *vignette_table = build_vignette_table_with_strength(new_strength);
+    *sv_table = build_sv_table(vignette_table, scanline_intensity);
+}
+
 fn build_distortion_table_with_curvature(curvature: u8) -> Vec<(u32, u32)> {
     let mut table = Vec::with_capacity(SCREEN_W * SCREEN_H);
     let amount = curvature as f32 / 3333.0;
@@ -2219,6 +2261,8 @@ fn main() {
 
     // Pre-compute vignette lookup table (configurable strength)
     let mut vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
+    // Pre-compute fused scanline×vignette table (avoids per-pixel multiply in hot loop)
+    let mut sv_table = build_sv_table(&vignette_table, config.crt_config.scanline_intensity);
     // Pre-compute barrel distortion lookup table (configurable curvature)
     let mut distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
     let flat_distortion_table = build_flat_distortion_table();
@@ -2732,6 +2776,7 @@ fn main() {
                             match *selected {
                                 0 => {
                                     config.crt_config.scanline_intensity = (config.crt_config.scanline_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    apply_scanline_intensity_change(&mut sv_table, &vignette_table, config.crt_config.scanline_intensity);
                                     *tables_dirty = true;
                                 }
                                 1 => {
@@ -2740,6 +2785,7 @@ fn main() {
                                 }
                                 2 => {
                                     config.crt_config.vignette_strength = (config.crt_config.vignette_strength as i16 + delta).clamp(0, 100) as u8;
+                                    apply_vignette_strength_change(&mut sv_table, &mut vignette_table, config.crt_config.vignette_strength, config.crt_config.scanline_intensity);
                                     *tables_dirty = true;
                                 }
                                 3 => {
@@ -2799,6 +2845,7 @@ fn main() {
                             if *tables_dirty {
                                 vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
                                 distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
+                                sv_table = build_sv_table(&vignette_table, config.crt_config.scanline_intensity);
                             }
                             play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
                             menu.submenu = Some(SubMenu::Settings { selected: 5, value_flash: 0 });
@@ -3331,7 +3378,7 @@ fn main() {
                                 draw_text_centered_8x8(&mut menu_framebuffer, "LOADING...", 15, 0xF8D878);
                                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                                 if crt_enabled {
-                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                                     // Phosphor bloom — bright pixels glow into neighbors
                                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                                     apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -3454,7 +3501,7 @@ fn main() {
                 // Apply CRT filter pipeline (same as game!)
                 let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                 if crt_enabled {
-                    crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                    crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                     // Phosphor bloom — bright pixels glow into neighbors
                     apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                     apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -4550,7 +4597,7 @@ fn main() {
                     // ALWAYS render (even when paused - shows frozen frame)
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                     if crt_enabled {
-                        crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                        crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                         // Phosphor bloom — bright pixels glow into neighbors
                         apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -5751,7 +5798,7 @@ fn main() {
                         // Now pass through CRT filter (same as menu rendering)
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
-                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                            crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                             // Phosphor bloom — bright pixels glow into neighbors
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -5997,7 +6044,7 @@ fn main() {
                         // Pass through CRT filter (same as pause menu rendering)
                         let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
                         if crt_enabled {
-                            crt_filter(&menu_framebuffer, &mut crt_buffer, &vignette_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                            crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
                             apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                             if glass_intensity > 30 {
@@ -6550,7 +6597,7 @@ fn apply_scanline_glow(buffer: &mut [u32], width: usize, height: usize, glow_str
 }
 
 #[allow(clippy::too_many_arguments)]
-fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u16, u16, u16)], brightness: i32, contrast: i32) {
+fn crt_filter(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8], distortion_table: &[(u32, u32)], crt_cfg: &CrtConfig, mask_table: &[(u16, u16, u16)], brightness: i32, contrast: i32) {
     output.resize(SCREEN_W * SCREEN_H, 0);
 
     // Build combined gamma + brightness + contrast LUT (fused from separate pass)
@@ -6566,15 +6613,6 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
         }
         lut
     };
-
-    // Pre-compute all coefficients once
-    let si = crt_cfg.scanline_intensity as u32;
-    let scan_muls: [u32; 4] = [
-        255,                                    // row 0: full bright
-        255 - (si * 15 / 100),                  // row 1: slight dim
-        255 - (si * 25 / 100),                  // row 2: moderate dim
-        255 - si.min(255) * 55 / 100,           // row 3: scanline gap (stronger)
-    ];
 
     let pw = crt_cfg.phosphor_warmth as u32;
     let pr_mul = 256 + (pw * 24 / 100);
@@ -6609,22 +6647,22 @@ fn crt_filter(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], dist
     // Hoist branching outside the pixel loop - create specialized paths
     if use_mask && use_blur {
         // Full pipeline: blur + mask
-        crt_filter_full(input, output, vignette_table, distortion_table, 
-                       &scan_muls, &phosphor_lut, 
+        crt_filter_full(input, output, sv_table, distortion_table, 
+                       &phosphor_lut, 
                        blur_center, blur_side, mask_table, &gamma_lut);
     } else if use_mask {
         // Mask but no blur
-        crt_filter_masked(input, output, vignette_table, distortion_table, 
-                         &scan_muls, &phosphor_lut, mask_table, &gamma_lut);
+        crt_filter_masked(input, output, sv_table, distortion_table, 
+                         &phosphor_lut, mask_table, &gamma_lut);
     } else if use_blur {
         // Blur but no mask
-        crt_filter_blurred(input, output, vignette_table, distortion_table, 
-                          &scan_muls, &phosphor_lut, 
+        crt_filter_blurred(input, output, sv_table, distortion_table, 
+                          &phosphor_lut, 
                           blur_center, blur_side, &gamma_lut);
     } else {
         // Basic pipeline: no blur, no mask
-        crt_filter_basic(input, output, vignette_table, distortion_table, 
-                        &scan_muls, &phosphor_lut, &gamma_lut);
+        crt_filter_basic(input, output, sv_table, distortion_table, 
+                        &phosphor_lut, &gamma_lut);
     }
 }
 
@@ -6659,13 +6697,12 @@ fn apply_gamma_brightness_contrast(buffer: &mut [u32], len: usize, brightness: i
 // Specialized path: full pipeline with blur and mask
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
-fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                   distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
+fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8], 
+                   distortion_table: &[(u32, u32)],
                    phosphor_lut: &[(u32, u32, u32); 256],
                    blur_center: u32, blur_side: u32, mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -6704,8 +6741,7 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
             
             let brightness = ((r + g + b) * 85) >> 8;
             let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
-            let sv = (scan_mul * vig) >> 8;
+            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
             r = (r * ((pr * sv) >> 8)) >> 8;
             g = (g * ((pg * sv) >> 8)) >> 8;
             b = (b * ((pb * sv) >> 8)) >> 8;
@@ -6724,12 +6760,11 @@ fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16],
 // Specialized path: mask only, no blur
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
-fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                     distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
+fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8], 
+                     distortion_table: &[(u32, u32)],
                      phosphor_lut: &[(u32, u32, u32); 256], mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -6761,8 +6796,7 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
             
             let brightness = ((r + g + b) * 85) >> 8;
             let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
-            let sv = (scan_mul * vig) >> 8;
+            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
             r = (r * ((pr * sv) >> 8)) >> 8;
             g = (g * ((pg * sv) >> 8)) >> 8;
             b = (b * ((pb * sv) >> 8)) >> 8;
@@ -6781,13 +6815,12 @@ fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16
 // Specialized path: blur only, no mask
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
-fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                      distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
+fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8], 
+                      distortion_table: &[(u32, u32)],
                       phosphor_lut: &[(u32, u32, u32); 256],
                       blur_center: u32, blur_side: u32, gamma_lut: &[u8; 256]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -6826,8 +6859,7 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
             
             let brightness = ((r + g + b) * 85) >> 8;
             let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
-            let sv = (scan_mul * vig) >> 8;
+            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
             r = (r * ((pr * sv) >> 8)) >> 8;
             g = (g * ((pg * sv) >> 8)) >> 8;
             b = (b * ((pb * sv) >> 8)) >> 8;
@@ -6843,12 +6875,11 @@ fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u1
 // Specialized path: basic (no blur, no mask)
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
-fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16], 
-                    distortion_table: &[(u32, u32)], scan_muls: &[u32; 4],
+fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8], 
+                    distortion_table: &[(u32, u32)],
                     phosphor_lut: &[(u32, u32, u32); 256], gamma_lut: &[u8; 256]) {
     for dst_y in 0..SCREEN_H {
         let dst_row = dst_y * SCREEN_W;
-        let scan_mul = scan_muls[dst_y % 4];
         
         for dst_x in 0..SCREEN_W {
             let table_idx = dst_row + dst_x;
@@ -6880,8 +6911,7 @@ fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, vignette_table: &[u16]
             
             let brightness = ((r + g + b) * 85) >> 8;
             let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let vig = unsafe { *vignette_table.get_unchecked(table_idx) as u32 };
-            let sv = (scan_mul * vig) >> 8;
+            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
             r = (r * ((pr * sv) >> 8)) >> 8;
             g = (g * ((pg * sv) >> 8)) >> 8;
             b = (b * ((pb * sv) >> 8)) >> 8;
@@ -7692,5 +7722,139 @@ fn recordings_dir() -> Option<PathBuf> {
     #[cfg(not(windows))]
     {
         std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: compute scan_muls from scanline_intensity (mirrors crt_filter logic).
+    fn make_scan_muls(scanline_intensity: u8) -> [u32; 4] {
+        let si = scanline_intensity as u32;
+        [
+            255,
+            255 - (si * 15 / 100),
+            255 - (si * 25 / 100),
+            255 - si.min(255) * 55 / 100,
+        ]
+    }
+
+    // ── TEST 1: sv_table has the correct number of entries ──────────────────
+    #[test]
+    fn sv_table_correct_size() {
+        let vignette = build_vignette_table_with_strength(20);
+        let sv = build_sv_table(&vignette, 40);
+        assert_eq!(sv.len(), SCREEN_W * SCREEN_H,
+            "sv_table must have exactly SCREEN_W * SCREEN_H entries");
+    }
+
+    // ── TEST 2: sv_table matches (scan_mul * vig) >> 8 at sampled pixels ───
+    #[test]
+    fn sv_table_matches_old_formula_sampled() {
+        let strength: u8 = 20;
+        let scanline_intensity: u8 = 40;
+        let vignette = build_vignette_table_with_strength(strength);
+        let sv = build_sv_table(&vignette, scanline_intensity);
+        let scan_muls = make_scan_muls(scanline_intensity);
+
+        // Sample pixels across all 4 scanline phases and various x positions
+        let samples: &[(usize, usize)] = &[
+            (0, 0), (0, 479), (0, 959),
+            (1, 0), (1, 200), (1, 959),
+            (2, 0), (2, 480), (2, 959),
+            (3, 0), (3, 719), (3, 959),
+            (100, 300), (240, 500), (400, 0), (719, 959),
+        ];
+        for &(dst_y, dst_x) in samples {
+            let idx = dst_y * SCREEN_W + dst_x;
+            let vig = vignette[idx] as u32;
+            let scan_mul = scan_muls[dst_y % 4];
+            let expected = ((scan_mul * vig) >> 8) as u8;
+            assert_eq!(
+                sv[idx], expected,
+                "sv_table mismatch at ({dst_y}, {dst_x}): got {}, expected {expected}",
+                sv[idx]
+            );
+        }
+    }
+
+    // ── TEST 3: sv_table exhaustive at scanline_intensity = 0 ───────────────
+    // When si=0, all scan_muls are 255; sv = (255 * vig) >> 8.
+    #[test]
+    fn sv_table_zero_intensity_exhaustive() {
+        let vignette = build_vignette_table_with_strength(30);
+        let sv = build_sv_table(&vignette, 0);
+        let scan_muls = make_scan_muls(0);
+
+        for idx in 0..SCREEN_W * SCREEN_H {
+            let dst_y = idx / SCREEN_W;
+            let vig = vignette[idx] as u32;
+            let scan_mul = scan_muls[dst_y % 4];
+            let expected = ((scan_mul * vig) >> 8) as u8;
+            assert_eq!(sv[idx], expected, "mismatch at idx {idx}");
+        }
+    }
+
+    // ── TEST 4: sv_table at max scanline intensity (100) ────────────────────
+    #[test]
+    fn sv_table_max_intensity_sampled() {
+        let vignette = build_vignette_table_with_strength(50);
+        let sv = build_sv_table(&vignette, 100);
+        let scan_muls = make_scan_muls(100);
+
+        for dst_y in [0usize, 1, 2, 3, 720 - 4, 720 - 3, 720 - 2, 720 - 1] {
+            for dst_x in [0usize, 1, 480, 958, 959] {
+                let idx = dst_y * SCREEN_W + dst_x;
+                let vig = vignette[idx] as u32;
+                let scan_mul = scan_muls[dst_y % 4];
+                let expected = ((scan_mul * vig) >> 8) as u8;
+                assert_eq!(
+                    sv[idx], expected,
+                    "sv_table max-intensity mismatch at ({dst_y}, {dst_x})"
+                );
+            }
+        }
+    }
+
+    // ── TEST 5: live-preview regression – scanline_intensity slider ──────────
+    // Before the fix, sv_table was only rebuilt on menu-exit (input.back).
+    // apply_scanline_intensity_change encapsulates the immediate rebuild that
+    // must happen on every slider tick.
+    #[test]
+    fn sv_table_live_preview_scanline_intensity_change() {
+        let vignette = build_vignette_table_with_strength(20);
+        let mut sv = build_sv_table(&vignette, 40); // initial state
+
+        // Simulate slider move: 40 → 60.  The fix calls this helper immediately
+        // in the slider handler instead of deferring until menu exit.
+        apply_scanline_intensity_change(&mut sv, &vignette, 60);
+
+        let expected = build_sv_table(&vignette, 60);
+        assert_eq!(sv, expected,
+            "sv_table must immediately reflect new scanline_intensity for live preview");
+    }
+
+    // ── TEST 6: live-preview regression – vignette_strength slider ───────────
+    // Same regression: vignette_table (and therefore sv_table) was stale during
+    // live preview.  apply_vignette_strength_change must rebuild both at once.
+    #[test]
+    fn sv_table_live_preview_vignette_strength_change() {
+        let mut vignette = build_vignette_table_with_strength(20);
+        let scanline_intensity = 40u8;
+        let mut sv = build_sv_table(&vignette, scanline_intensity); // initial state
+
+        // Simulate slider move: vignette strength 20 → 50.
+        apply_vignette_strength_change(&mut sv, &mut vignette, 50, scanline_intensity);
+
+        let expected_vignette = build_vignette_table_with_strength(50);
+        let expected_sv = build_sv_table(&expected_vignette, scanline_intensity);
+        assert_eq!(sv, expected_sv,
+            "sv_table must immediately reflect new vignette_strength for live preview");
+        assert_eq!(vignette, expected_vignette,
+            "vignette_table must immediately reflect new vignette_strength for live preview");
     }
 }
