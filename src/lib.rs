@@ -11,3 +11,4 @@ pub mod achievements;
 pub mod recording;
 pub mod romdb;
 pub mod updater;
+pub mod rendering;
