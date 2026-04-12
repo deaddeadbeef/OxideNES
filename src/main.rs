@@ -2363,11 +2363,14 @@ fn main() {
         }
     }
 
-    let mut show_fps = false;
+    let mut overlay_level = PerfOverlayLevel::Off;
     let mut show_help = false;
     let mut fps_timer = std::time::Instant::now();
     let mut fps_frames: u32 = 0;
     let mut fps_display: String = String::new();
+    let mut detail_display: String = String::new();
+    let mut perf_snapshot = PerfSnapshot::default();
+    let mut detail_tick: u32 = 0;
     let mut frame_start = std::time::Instant::now();
 
     // Achievement system state
@@ -4318,11 +4321,24 @@ fn main() {
                             }
                         }
 
-                        // F10 FPS counter toggle
+                        // F10 perf overlay cycle: Off -> Basic -> Detailed -> Off
                         if window.is_key_pressed(Key::F10, KeyRepeat::No) {
-                            show_fps = !show_fps;
-                            if !show_fps {
+                            let prev_level = overlay_level;
+                            overlay_level = overlay_level.next();
+                            if overlay_level == PerfOverlayLevel::Off {
                                 fps_display.clear();
+                                detail_display.clear();
+                            }
+                            if should_prime_detail_sampling(prev_level, overlay_level) {
+                                detail_tick = 59;
+                                detail_display.clear();
+                            }
+                            // Reset fps state when enabling from Off so the first
+                            // displayed measurement window starts fresh, not with
+                            // stale elapsed time from when the overlay was hidden.
+                            if should_reset_fps_on_transition(prev_level, overlay_level) {
+                                fps_frames = 0;
+                                fps_timer = std::time::Instant::now();
                             }
                         }
 
@@ -4595,9 +4611,26 @@ fn main() {
                     }
 
                     // ALWAYS render (even when paused - shows frozen frame)
+                    // Detailed perf overlay: sample render-stage timings once per ~60 frames (≈1 s).
+                    // The Option<Instant> pattern has zero cost when do_detail_sample is false.
+                    let do_detail_sample = overlay_level == PerfOverlayLevel::Detailed && {
+                        detail_tick = detail_tick.wrapping_add(1);
+                        detail_tick % 60 == 0
+                    };
                     let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+
+                    // Stage 1: CRT filter (or passthrough scale)
+                    let t_crt = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
                     if crt_enabled {
                         crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                    } else {
+                        scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
+                    }
+                    if let Some(t) = t_crt { perf_snapshot.crt_us = t.elapsed().as_micros() as u32; }
+
+                    // Stage 2: Post-process (bloom + glow + chromatic aberration)
+                    let t_bloom = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                    if crt_enabled {
                         // Phosphor bloom — bright pixels glow into neighbors
                         apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
                         apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
@@ -4606,17 +4639,24 @@ fn main() {
                             apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
                             std::mem::swap(&mut crt_buffer, &mut ca_temp);
                         }
-                    } else {
-                        scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
                     }
+                    if let Some(t) = t_bloom { perf_snapshot.bloom_us = t.elapsed().as_micros() as u32; }
 
-                    // Composite game output into TV frame
+                    // Stage 3: Composite game output into TV frame
+                    let t_composite = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
                     composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                    if let Some(t) = t_composite { perf_snapshot.composite_us = t.elapsed().as_micros() as u32; }
 
+                    // Stage 4: Glass / bezel effects
+                    let t_glass = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
                     if crt_enabled && glass_intensity > 0 {
                         let do_ghost = glass_intensity > 20;
                         apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
                     }
+                    if let Some(t) = t_glass { perf_snapshot.glass_us = t.elapsed().as_micros() as u32; }
+
+                    // Latch detailed display string once per sample
+                    if do_detail_sample { fmt_detail_line(&mut detail_display, &perf_snapshot); }
                     if is_rewinding {
                         let sx = SCREEN_X;
                         let sy = SCREEN_Y;
@@ -4774,8 +4814,10 @@ fn main() {
                         }
                     }
 
+                    let has_rewind_bar = !paused && is_rewinding && !rewind_buffer.snapshots.is_empty();
+
                     // Rewind buffer HUD bar (VCR style, top-right)
-                    if !paused && is_rewinding && !rewind_buffer.snapshots.is_empty() {
+                    if has_rewind_bar {
                         let rewind_pct = (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
                         let bar_w: usize = 60;
                         let bar_h: usize = 4;
@@ -5129,19 +5171,27 @@ fn main() {
                         }
                     }
 
-                    // FPS counter
-                    if show_fps {
+                    // Performance overlay (F10 cycles Off -> Basic -> Detailed -> Off)
+                    if overlay_level != PerfOverlayLevel::Off {
+                        let has_transport_hud = !paused && (recorder.is_recording() || recorder.is_playing());
                         fps_frames += 1;
                         let elapsed = fps_timer.elapsed().as_secs_f64();
                         if elapsed >= 1.0 {
-                            fps_display = format!("FPS: {}", fps_frames);
+                            let avg_ms = (elapsed * 1000.0 / fps_frames as f64) as f32;
+                            fmt_basic_line(&mut fps_display, fps_frames, avg_ms);
                             fps_frames = 0;
                             fps_timer = std::time::Instant::now();
                         }
                         if !fps_display.is_empty() {
-                            let fx = SCREEN_X + SCREEN_W - fps_display.len() * 8 - 8;
-                            let fy = SCREEN_Y + 8;
+                            let fx = SCREEN_X + SCREEN_W - fps_display.len() * 4 - 8;
+                            let fy = perf_basic_overlay_y(has_rewind_bar);
                             draw_text(&mut composite_buffer, &fps_display, fx, fy, 0x00FF00, WINDOW_WIDTH);
+                        }
+                        // Detailed: show sampled stage breakdown below the FPS line
+                        if overlay_level == PerfOverlayLevel::Detailed && !detail_display.is_empty() {
+                            let dx = SCREEN_X + 8;
+                            let dy = perf_detail_overlay_y(has_transport_hud);
+                            draw_text(&mut composite_buffer, &detail_display, dx, dy, 0xFFAA00, WINDOW_WIDTH);
                         }
                     }
 
@@ -5227,7 +5277,7 @@ fn main() {
                         help_y += 12;
                         draw_text(&mut composite_buffer, "F8  SCREENSHOT", help_x, help_y, color, WINDOW_WIDTH);
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F10  FPS COUNTER", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(&mut composite_buffer, "F10 PERF OVERLAY", help_x, help_y, color, WINDOW_WIDTH);
                         help_y += 12;
                         draw_text(&mut composite_buffer, "F12  THIS HELP", help_x, help_y, dim, WINDOW_WIDTH);
                         help_y += 24;
@@ -7726,6 +7776,102 @@ fn recordings_dir() -> Option<PathBuf> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Performance overlay helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Three-state performance overlay toggled by F10.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PerfOverlayLevel {
+    /// Overlay hidden.
+    Off,
+    /// Basic: FPS + average frame time.
+    Basic,
+    /// Detailed: Basic line + sampled render-stage breakdown (≈once per second).
+    Detailed,
+}
+
+impl PerfOverlayLevel {
+    /// Advance to the next level in the cycle: Off → Basic → Detailed → Off.
+    fn next(self) -> Self {
+        match self {
+            PerfOverlayLevel::Off      => PerfOverlayLevel::Basic,
+            PerfOverlayLevel::Basic    => PerfOverlayLevel::Detailed,
+            PerfOverlayLevel::Detailed => PerfOverlayLevel::Off,
+        }
+    }
+}
+
+/// Cached render-stage timings (microseconds) from the last detail sample.
+/// All fields default to 0; only populated when Detailed mode is active.
+#[derive(Default, Clone, Debug)]
+struct PerfSnapshot {
+    /// CRT filter (or scale_simple when CRT is off).
+    crt_us: u32,
+    /// Phosphor bloom + scanline glow + chromatic aberration (CRT only).
+    bloom_us: u32,
+    /// composite_screen_fast.
+    composite_us: u32,
+    /// apply_glass_effects (0 when glass is off).
+    glass_us: u32,
+}
+
+/// Write the basic overlay line into `buf` without allocating.
+/// Format: `"FPS:60 16.7ms"`
+fn fmt_basic_line(buf: &mut String, fps: u32, frame_ms: f32) {
+    use std::fmt::Write;
+    buf.clear();
+    let _ = write!(buf, "FPS:{fps} {frame_ms:.1}ms");
+}
+
+/// Write the detailed stage breakdown into `buf` without allocating.
+/// Format: `"C:1234 B:567 CS:234 GL:891"` (all values in µs)
+fn fmt_detail_line(buf: &mut String, snap: &PerfSnapshot) {
+
+    use std::fmt::Write;
+    buf.clear();
+    let _ = write!(
+        buf,
+        "C:{} B:{} CS:{} GL:{}",
+        snap.crt_us, snap.bloom_us, snap.composite_us, snap.glass_us,
+    );
+}
+
+/// Returns `true` when the overlay is transitioning from `Off` to a visible
+/// level (`Basic` or `Detailed`).
+///
+/// Callers **must** reset `fps_timer` and `fps_frames` when this returns `true`
+/// so that the first displayed FPS measurement window starts fresh.  Without
+/// the reset, elapsed time that accumulated while the overlay was hidden would
+/// produce garbage values such as `"FPS:1 60000.0ms"`.
+fn should_reset_fps_on_transition(prev: PerfOverlayLevel, next: PerfOverlayLevel) -> bool {
+    prev == PerfOverlayLevel::Off && next != PerfOverlayLevel::Off
+}
+
+/// Returns `true` when entering Detailed mode from a non-Detailed state.
+///
+/// Callers should prime `detail_tick` so the first Detailed frame samples
+/// immediately instead of waiting ~60 frames and showing a blank/stale line.
+fn should_prime_detail_sampling(prev: PerfOverlayLevel, next: PerfOverlayLevel) -> bool {
+    prev != PerfOverlayLevel::Detailed && next == PerfOverlayLevel::Detailed
+}
+
+/// Chooses the y-position for the Basic FPS row.
+///
+/// When the rewind bar is visible, move the FPS line down one row so both
+/// overlays remain readable.
+fn perf_basic_overlay_y(has_rewind_bar: bool) -> usize {
+    SCREEN_Y + if has_rewind_bar { 20 } else { 8 }
+}
+
+/// Chooses the y-position for the Detailed metrics row.
+///
+/// REC/PLAY already occupies the second overlay row, so Detailed metrics move
+/// down one line when that transport HUD is visible.
+fn perf_detail_overlay_y(has_transport_hud: bool) -> usize {
+    SCREEN_Y + if has_transport_hud { 32 } else { 20 }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Unit tests
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
@@ -7818,6 +7964,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── TEST: PerfOverlayLevel cycling ──────────────────────────────────────
+    #[test]
+    fn perf_overlay_level_cycles_correctly() {
+        assert_eq!(PerfOverlayLevel::Off.next(), PerfOverlayLevel::Basic,
+            "Off -> Basic");
+        assert_eq!(PerfOverlayLevel::Basic.next(), PerfOverlayLevel::Detailed,
+            "Basic -> Detailed");
+        assert_eq!(PerfOverlayLevel::Detailed.next(), PerfOverlayLevel::Off,
+            "Detailed -> Off (wraps)");
+        // Full round-trip
+        let level = PerfOverlayLevel::Off;
+        let level = level.next(); // Basic
+        let level = level.next(); // Detailed
+        let level = level.next(); // Off again
+        assert_eq!(level, PerfOverlayLevel::Off, "three cycles returns to Off");
+    }
+
+    // ── TEST: fmt_basic_line formatting and string reuse ────────────────────
+    #[test]
+    fn fmt_basic_line_correct() {
+        let mut buf = String::new();
+        fmt_basic_line(&mut buf, 60, 16.7);
+        assert_eq!(buf, "FPS:60 16.7ms");
+
+        // Reuses same allocation — clears then writes
+        fmt_basic_line(&mut buf, 30, 33.3);
+        assert_eq!(buf, "FPS:30 33.3ms");
+
+        // Edge: 0 fps, 0ms
+        fmt_basic_line(&mut buf, 0, 0.0);
+        assert_eq!(buf, "FPS:0 0.0ms");
+    }
+
+    // ── TEST: Off-to-visible overlay transition must signal fps reset ────────
+    // This test was written BEFORE the fix existed.
+    // Root cause: fps_timer was not reset when F10 cycled Off->Basic, causing
+    // stale elapsed time to produce garbage values on first display (e.g. "FPS:1 60000.0ms").
+    #[test]
+    fn perf_overlay_off_to_visible_requires_fps_reset() {
+        // Off -> Basic is the transition where stale time accumulates
+        assert!(
+            should_reset_fps_on_transition(PerfOverlayLevel::Off, PerfOverlayLevel::Basic),
+            "Off->Basic must signal fps reset to prevent stale elapsed time"
+        );
+        // Basic -> Detailed must NOT reset: fps_timer was already running
+        assert!(
+            !should_reset_fps_on_transition(PerfOverlayLevel::Basic, PerfOverlayLevel::Detailed),
+            "Basic->Detailed must not reset (timer was already running)"
+        );
+        // Turning overlay off does not require reset
+        assert!(
+            !should_reset_fps_on_transition(PerfOverlayLevel::Basic, PerfOverlayLevel::Off),
+            "Basic->Off must not reset"
+        );
+        assert!(
+            !should_reset_fps_on_transition(PerfOverlayLevel::Detailed, PerfOverlayLevel::Off),
+            "Detailed->Off must not reset"
+        );
+        // Off -> Off is a no-op
+        assert!(
+            !should_reset_fps_on_transition(PerfOverlayLevel::Off, PerfOverlayLevel::Off),
+            "Off->Off must not reset"
+        );
+    }
+
+    // ── TEST: fmt_detail_line formatting and string reuse ───────────────────
+    #[test]
+    fn fmt_detail_line_correct() {
+        let mut buf = String::new();
+        let snap = PerfSnapshot {
+            crt_us: 1234,
+            bloom_us: 567,
+            composite_us: 234,
+            glass_us: 891,
+        };
+        fmt_detail_line(&mut buf, &snap);
+        assert_eq!(buf, "C:1234 B:567 CS:234 GL:891");
+
+        // Reuses same allocation — clears then writes
+        let snap2 = PerfSnapshot::default();
+        fmt_detail_line(&mut buf, &snap2);
+        assert_eq!(buf, "C:0 B:0 CS:0 GL:0");
+    }
+
+    // ── TEST: entering Detailed primes an immediate detail sample ───────────
+    #[test]
+    fn entering_detailed_primes_detail_sampling() {
+        assert!(
+            should_prime_detail_sampling(PerfOverlayLevel::Basic, PerfOverlayLevel::Detailed),
+            "Basic->Detailed must prime detail sampling so the first Detailed frame is not blank"
+        );
+        assert!(
+            !should_prime_detail_sampling(PerfOverlayLevel::Detailed, PerfOverlayLevel::Off),
+            "Detailed->Off must not prime detail sampling"
+        );
+        assert!(
+            !should_prime_detail_sampling(PerfOverlayLevel::Off, PerfOverlayLevel::Basic),
+            "Off->Basic must not prime detail sampling"
+        );
+    }
+
+    // ── TEST: detail row moves below REC/PLAY HUD when active ────────────────
+    #[test]
+    fn perf_detail_overlay_row_avoids_transport_hud() {
+        assert_eq!(perf_detail_overlay_y(false), SCREEN_Y + 20,
+            "without REC/PLAY, detail line stays on the second row");
+        assert_eq!(perf_detail_overlay_y(true), SCREEN_Y + 32,
+            "with REC/PLAY, detail line shifts down to avoid overlap");
+    }
+
+    // ── TEST: basic row moves below rewind bar when active ────────────────────
+    #[test]
+    fn perf_basic_overlay_row_avoids_rewind_bar() {
+        assert_eq!(perf_basic_overlay_y(false), SCREEN_Y + 8,
+            "without rewind bar, basic FPS line stays on the top row");
+        assert_eq!(perf_basic_overlay_y(true), SCREEN_Y + 20,
+            "with rewind bar, basic FPS line shifts down to avoid overlap");
     }
 
     // ── TEST 5: live-preview regression – scanline_intensity slider ──────────

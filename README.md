@@ -72,6 +72,7 @@ cargo build --release
 | Shift+R | Toggle Recording |
 | Shift+P | Toggle Playback |
 | Ctrl+R | Reset |
+| F10 | Performance Overlay (Off → Basic → Detailed) |
 
 ## Configuration
 
