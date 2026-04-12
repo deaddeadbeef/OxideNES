@@ -9,6 +9,8 @@ pub const SCREEN_W: usize = 960;
 pub const SCREEN_H: usize = 720;
 pub const SCREEN_X: usize = 70;
 pub const SCREEN_Y: usize = 50;
+/// Number of rows per rayon work chunk. Balances parallelism vs overhead.
+const PAR_ROWS: usize = 16;
 
 // ── CRT mask mode ────────────────────────────────────────────────────────────
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -363,57 +365,64 @@ pub fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
                    distortion_table: &[(u32, u32)],
                    phosphor_lut: &[(u32, u32, u32); 256],
                    blur_center: u32, blur_side: u32, mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W).enumerate().for_each(|(dst_y, row_output)| {
-        let dst_row = dst_y * SCREEN_W;
+    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+        let base_y = chunk_idx * PAR_ROWS;
+        let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
-        for dst_x in 0..SCREEN_W {
-            let table_idx = dst_row + dst_x;
-            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+        for local_y in 0..rows_in_chunk {
+            let dst_y = base_y + local_y;
+            let dst_row = dst_y * SCREEN_W;
+            let out_row = local_y * SCREEN_W;
 
-            if src_xf == 0xFFFFFFFF {
-                unsafe { *row_output.get_unchecked_mut(dst_x) = 0; }
-                continue;
+            for dst_x in 0..SCREEN_W {
+                let table_idx = dst_row + dst_x;
+                let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+
+                if src_xf == 0xFFFFFFFF {
+                    unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = 0; }
+                    continue;
+                }
+
+                let src_x0 = (src_xf >> 8) as usize;
+                let src_y0 = (src_yf >> 8) as usize;
+                let src_x1 = (src_x0 + 1).min(255);
+                let src_y1 = (src_y0 + 1).min(239);
+                let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+                let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
+
+                let base_offset = src_y0 * 256;
+                let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+                let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+                let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+
+                let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                    ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+                } else {
+                    blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+                };
+
+                if src_x0 > 0 && src_x0 < 255 {
+                    let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
+                    let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                    (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
+                }
+
+                let brightness = ((r + g + b) * 85) >> 8;
+                let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+                let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
+                r = (r * ((pr * sv) >> 8)) >> 8;
+                g = (g * ((pg * sv) >> 8)) >> 8;
+                b = (b * ((pb * sv) >> 8)) >> 8;
+
+                let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
+                (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
+
+                r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
+                g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
+                b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
+                unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = pack_rgb(r, g, b); }
             }
-
-            let src_x0 = (src_xf >> 8) as usize;
-            let src_y0 = (src_yf >> 8) as usize;
-            let src_x1 = (src_x0 + 1).min(255);
-            let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
-            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
-
-            let base_offset = src_y0 * 256;
-            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
-            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
-            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
-            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
-
-            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
-                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
-            } else {
-                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
-            };
-
-            if src_x0 > 0 && src_x0 < 255 {
-                let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
-                let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
-                (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
-            }
-
-            let brightness = ((r + g + b) * 85) >> 8;
-            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
-            r = (r * ((pr * sv) >> 8)) >> 8;
-            g = (g * ((pg * sv) >> 8)) >> 8;
-            b = (b * ((pb * sv) >> 8)) >> 8;
-
-            let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
-
-            r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
-            g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
-            b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
-            unsafe { *row_output.get_unchecked_mut(dst_x) = pack_rgb(r, g, b); }
         }
     });
 }
@@ -421,53 +430,60 @@ pub fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 pub fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
-                     distortion_table: &[(u32, u32)],
-                     phosphor_lut: &[(u32, u32, u32); 256], mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W).enumerate().for_each(|(dst_y, row_output)| {
-        let dst_row = dst_y * SCREEN_W;
+                      distortion_table: &[(u32, u32)],
+                      phosphor_lut: &[(u32, u32, u32); 256], mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
+    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+        let base_y = chunk_idx * PAR_ROWS;
+        let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
-        for dst_x in 0..SCREEN_W {
-            let table_idx = dst_row + dst_x;
-            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+        for local_y in 0..rows_in_chunk {
+            let dst_y = base_y + local_y;
+            let dst_row = dst_y * SCREEN_W;
+            let out_row = local_y * SCREEN_W;
 
-            if src_xf == 0xFFFFFFFF {
-                unsafe { *row_output.get_unchecked_mut(dst_x) = 0; }
-                continue;
+            for dst_x in 0..SCREEN_W {
+                let table_idx = dst_row + dst_x;
+                let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+
+                if src_xf == 0xFFFFFFFF {
+                    unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = 0; }
+                    continue;
+                }
+
+                let src_x0 = (src_xf >> 8) as usize;
+                let src_y0 = (src_yf >> 8) as usize;
+                let src_x1 = (src_x0 + 1).min(255);
+                let src_y1 = (src_y0 + 1).min(239);
+                let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+                let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
+
+                let base_offset = src_y0 * 256;
+                let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+                let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+                let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+
+                let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                    ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+                } else {
+                    blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+                };
+
+                let brightness = ((r + g + b) * 85) >> 8;
+                let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+                let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
+                r = (r * ((pr * sv) >> 8)) >> 8;
+                g = (g * ((pg * sv) >> 8)) >> 8;
+                b = (b * ((pb * sv) >> 8)) >> 8;
+
+                let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
+                (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
+
+                r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
+                g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
+                b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
+                unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = pack_rgb(r, g, b); }
             }
-
-            let src_x0 = (src_xf >> 8) as usize;
-            let src_y0 = (src_yf >> 8) as usize;
-            let src_x1 = (src_x0 + 1).min(255);
-            let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
-            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
-
-            let base_offset = src_y0 * 256;
-            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
-            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
-            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
-            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
-
-            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
-                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
-            } else {
-                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
-            };
-
-            let brightness = ((r + g + b) * 85) >> 8;
-            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
-            r = (r * ((pr * sv) >> 8)) >> 8;
-            g = (g * ((pg * sv) >> 8)) >> 8;
-            b = (b * ((pb * sv) >> 8)) >> 8;
-
-            let (mr, mg, mb) = unsafe { *mask_table.get_unchecked(table_idx) };
-            (r, g, b) = apply_mask(r, g, b, mr, mg, mb);
-
-            r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
-            g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
-            b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
-            unsafe { *row_output.get_unchecked_mut(dst_x) = pack_rgb(r, g, b); }
         }
     });
 }
@@ -475,57 +491,64 @@ pub fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 pub fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
-                      distortion_table: &[(u32, u32)],
-                      phosphor_lut: &[(u32, u32, u32); 256],
-                      blur_center: u32, blur_side: u32, gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W).enumerate().for_each(|(dst_y, row_output)| {
-        let dst_row = dst_y * SCREEN_W;
+                       distortion_table: &[(u32, u32)],
+                       phosphor_lut: &[(u32, u32, u32); 256],
+                       blur_center: u32, blur_side: u32, gamma_lut: &[u8; 256]) {
+    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+        let base_y = chunk_idx * PAR_ROWS;
+        let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
-        for dst_x in 0..SCREEN_W {
-            let table_idx = dst_row + dst_x;
-            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+        for local_y in 0..rows_in_chunk {
+            let dst_y = base_y + local_y;
+            let dst_row = dst_y * SCREEN_W;
+            let out_row = local_y * SCREEN_W;
 
-            if src_xf == 0xFFFFFFFF {
-                unsafe { *row_output.get_unchecked_mut(dst_x) = 0; }
-                continue;
+            for dst_x in 0..SCREEN_W {
+                let table_idx = dst_row + dst_x;
+                let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+
+                if src_xf == 0xFFFFFFFF {
+                    unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = 0; }
+                    continue;
+                }
+
+                let src_x0 = (src_xf >> 8) as usize;
+                let src_y0 = (src_yf >> 8) as usize;
+                let src_x1 = (src_x0 + 1).min(255);
+                let src_y1 = (src_y0 + 1).min(239);
+                let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+                let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
+
+                let base_offset = src_y0 * 256;
+                let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+                let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+                let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+
+                let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                    ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+                } else {
+                    blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+                };
+
+                if src_x0 > 0 && src_x0 < 255 {
+                    let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
+                    let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                    (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
+                }
+
+                let brightness = ((r + g + b) * 85) >> 8;
+                let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+                let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
+                r = (r * ((pr * sv) >> 8)) >> 8;
+                g = (g * ((pg * sv) >> 8)) >> 8;
+                b = (b * ((pb * sv) >> 8)) >> 8;
+
+                r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
+                g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
+                b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
+                unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = pack_rgb(r, g, b); }
             }
-
-            let src_x0 = (src_xf >> 8) as usize;
-            let src_y0 = (src_yf >> 8) as usize;
-            let src_x1 = (src_x0 + 1).min(255);
-            let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
-            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
-
-            let base_offset = src_y0 * 256;
-            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
-            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
-            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
-            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
-
-            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
-                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
-            } else {
-                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
-            };
-
-            if src_x0 > 0 && src_x0 < 255 {
-                let left = unsafe { *input.get_unchecked(base_offset + src_x0 - 1) };
-                let right = unsafe { *input.get_unchecked(base_offset + src_x1) };
-                (r, g, b) = apply_blur_3tap(r, g, b, left, right, blur_center, blur_side);
-            }
-
-            let brightness = ((r + g + b) * 85) >> 8;
-            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
-            r = (r * ((pr * sv) >> 8)) >> 8;
-            g = (g * ((pg * sv) >> 8)) >> 8;
-            b = (b * ((pb * sv) >> 8)) >> 8;
-
-            r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
-            g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
-            b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
-            unsafe { *row_output.get_unchecked_mut(dst_x) = pack_rgb(r, g, b); }
         }
     });
 }
@@ -533,50 +556,57 @@ pub fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
 #[inline(always)]
 #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
 pub fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
-                    distortion_table: &[(u32, u32)],
-                    phosphor_lut: &[(u32, u32, u32); 256], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W).enumerate().for_each(|(dst_y, row_output)| {
-        let dst_row = dst_y * SCREEN_W;
+                     distortion_table: &[(u32, u32)],
+                     phosphor_lut: &[(u32, u32, u32); 256], gamma_lut: &[u8; 256]) {
+    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+        let base_y = chunk_idx * PAR_ROWS;
+        let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
-        for dst_x in 0..SCREEN_W {
-            let table_idx = dst_row + dst_x;
-            let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+        for local_y in 0..rows_in_chunk {
+            let dst_y = base_y + local_y;
+            let dst_row = dst_y * SCREEN_W;
+            let out_row = local_y * SCREEN_W;
 
-            if src_xf == 0xFFFFFFFF {
-                unsafe { *row_output.get_unchecked_mut(dst_x) = 0; }
-                continue;
+            for dst_x in 0..SCREEN_W {
+                let table_idx = dst_row + dst_x;
+                let (src_xf, src_yf) = unsafe { *distortion_table.get_unchecked(table_idx) };
+
+                if src_xf == 0xFFFFFFFF {
+                    unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = 0; }
+                    continue;
+                }
+
+                let src_x0 = (src_xf >> 8) as usize;
+                let src_y0 = (src_yf >> 8) as usize;
+                let src_x1 = (src_x0 + 1).min(255);
+                let src_y1 = (src_y0 + 1).min(239);
+                let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
+                let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
+
+                let base_offset = src_y0 * 256;
+                let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
+                let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
+                let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
+                let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
+
+                let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
+                    ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
+                } else {
+                    blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
+                };
+
+                let brightness = ((r + g + b) * 85) >> 8;
+                let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
+                let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
+                r = (r * ((pr * sv) >> 8)) >> 8;
+                g = (g * ((pg * sv) >> 8)) >> 8;
+                b = (b * ((pb * sv) >> 8)) >> 8;
+
+                r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
+                g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
+                b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
+                unsafe { *chunk_output.get_unchecked_mut(out_row + dst_x) = pack_rgb(r, g, b); }
             }
-
-            let src_x0 = (src_xf >> 8) as usize;
-            let src_y0 = (src_yf >> 8) as usize;
-            let src_x1 = (src_x0 + 1).min(255);
-            let src_y1 = (src_y0 + 1).min(239);
-            let frac_x = if src_x0 >= 255 { 0 } else { src_xf & 0xFF };
-            let frac_y = if src_y0 >= 239 { 0 } else { src_yf & 0xFF };
-
-            let base_offset = src_y0 * 256;
-            let p00 = unsafe { *input.get_unchecked(base_offset + src_x0) };
-            let p10 = unsafe { *input.get_unchecked(base_offset + src_x1) };
-            let p01 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x0) };
-            let p11 = unsafe { *input.get_unchecked(src_y1 * 256 + src_x1) };
-
-            let (mut r, mut g, mut b) = if frac_x | frac_y == 0 {
-                ((p00 >> 16) & 0xFF, (p00 >> 8) & 0xFF, p00 & 0xFF)
-            } else {
-                blend_bilinear_rgb(p00, p10, p01, p11, frac_x, frac_y)
-            };
-
-            let brightness = ((r + g + b) * 85) >> 8;
-            let (pr, pg, pb) = unsafe { *phosphor_lut.get_unchecked(brightness as usize) };
-            let sv = unsafe { *sv_table.get_unchecked(table_idx) as u32 };
-            r = (r * ((pr * sv) >> 8)) >> 8;
-            g = (g * ((pg * sv) >> 8)) >> 8;
-            b = (b * ((pb * sv) >> 8)) >> 8;
-
-            r = unsafe { *gamma_lut.get_unchecked(r.min(255) as usize) } as u32;
-            g = unsafe { *gamma_lut.get_unchecked(g.min(255) as usize) } as u32;
-            b = unsafe { *gamma_lut.get_unchecked(b.min(255) as usize) } as u32;
-            unsafe { *row_output.get_unchecked_mut(dst_x) = pack_rgb(r, g, b); }
         }
     });
 }
@@ -645,78 +675,81 @@ pub fn glass_inner_loop(
     const CORNER_R: usize = 10;
     const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
 
-    let row_chunks: Vec<&mut [u32]> = buffer.chunks_mut(window_width)
-        .skip(SCREEN_Y)
-        .take(SCREEN_H)
-        .collect();
+    let buf_start = SCREEN_Y * window_width;
+    let buf_end = (SCREEN_Y + SCREEN_H) * window_width;
+    buffer[buf_start..buf_end].par_chunks_mut(window_width * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_buf)| {
+        let base_y = chunk_idx * PAR_ROWS;
+        let rows_in_chunk = chunk_buf.len() / window_width;
 
-    row_chunks.into_par_iter().enumerate().for_each(|(y, buf_row_slice)| {
-        let glare_row = y * SCREEN_W;
+        for local_y in 0..rows_in_chunk {
+            let y = base_y + local_y;
+            let glare_row = y * SCREEN_W;
 
-        let in_corner_y_top = y < CORNER_R;
-        let in_corner_y_bottom = y >= corner_y_max;
+            let in_corner_y_top = y < CORNER_R;
+            let in_corner_y_bottom = y >= corner_y_max;
 
-        let ghost_src_row = if do_ghost && y < ghost_h {
-            Some((y + ghost_shift_y) * ghost_stride)
-        } else {
-            None
-        };
+            let ghost_src_row = if do_ghost && y < ghost_h {
+                Some((y + ghost_shift_y) * ghost_stride)
+            } else {
+                None
+            };
 
-        for x in 0..SCREEN_W {
-            if (in_corner_y_top || in_corner_y_bottom) && (x < CORNER_R || x >= corner_x_max) {
-                let (cx, cy) = if x < CORNER_R {
-                    if in_corner_y_top { (CORNER_R, CORNER_R) } else { (CORNER_R, SCREEN_H - 1 - CORNER_R) }
-                } else if in_corner_y_top {
-                    (SCREEN_W - 1 - CORNER_R, CORNER_R)
-                } else {
-                    (SCREEN_W - 1 - CORNER_R, SCREEN_H - 1 - CORNER_R)
-                };
-                if sq_dist(x, y, cx, cy) > CORNER_R_SQ { continue; }
-            }
+            for x in 0..SCREEN_W {
+                if (in_corner_y_top || in_corner_y_bottom) && (x < CORNER_R || x >= corner_x_max) {
+                    let (cx, cy) = if x < CORNER_R {
+                        if in_corner_y_top { (CORNER_R, CORNER_R) } else { (CORNER_R, SCREEN_H - 1 - CORNER_R) }
+                    } else if in_corner_y_top {
+                        (SCREEN_W - 1 - CORNER_R, CORNER_R)
+                    } else {
+                        (SCREEN_W - 1 - CORNER_R, SCREEN_H - 1 - CORNER_R)
+                    };
+                    if sq_dist(x, y, cx, cy) > CORNER_R_SQ { continue; }
+                }
 
-            let glare_idx = glare_row + x;
-            let glare_base = unsafe { *glare_table.get_unchecked(glare_idx) as u32 };
+                let glare_idx = glare_row + x;
+                let glare_base = unsafe { *glare_table.get_unchecked(glare_idx) as u32 };
 
-            let idx = SCREEN_X + x;
-            let pixel = unsafe { *buf_row_slice.get_unchecked(idx) };
-            let mut r = (pixel >> 16) & 0xFF;
-            let mut g = (pixel >> 8) & 0xFF;
-            let mut b = pixel & 0xFF;
+                let buf_idx = local_y * window_width + SCREEN_X + x;
+                let pixel = unsafe { *chunk_buf.get_unchecked(buf_idx) };
+                let mut r = (pixel >> 16) & 0xFF;
+                let mut g = (pixel >> 8) & 0xFF;
+                let mut b = pixel & 0xFF;
 
-            let grey = ((r + g + b) * 171) >> 9;
+                let grey = ((r + g + b) * 171) >> 9;
 
-            if tint_strength > 1 {
-                let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_idx) } as u32;
-                let tint = tint_strength * thickness / 256;
+                if tint_strength > 1 {
+                    let thickness = 256 + unsafe { *thickness_table.get_unchecked(glare_idx) } as u32;
+                    let tint = tint_strength * thickness / 256;
 
-                r = r + ((grey.saturating_sub(r) * tint * 205) >> 13);
-                g = g + ((grey.saturating_sub(g) * tint * 182) >> 13);
-                b = b.saturating_sub((tint * 171) >> 9);
-            }
+                    r = r + ((grey.saturating_sub(r) * tint * 205) >> 13);
+                    g = g + ((grey.saturating_sub(g) * tint * 182) >> 13);
+                    b = b.saturating_sub((tint * 171) >> 9);
+                }
 
-            if glare_base > 0 {
-                let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(grey)) * 29) >> 19;
+                if glare_base > 0 {
+                    let glare = (glare_base * intensity_factor * (200_u32.saturating_sub(grey)) * 29) >> 19;
 
-                r = (r + glare + ((glare * 171) >> 11)).min(255);
-                g = (g + glare).min(255);
-                b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);
-            }
+                    r = (r + glare + ((glare * 171) >> 11)).min(255);
+                    g = (g + glare).min(255);
+                    b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);
+                }
 
-            if let Some(src_row) = ghost_src_row {
-                if x < ghost_w {
-                    let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(glare_idx) } as u32;
-                    if local_alpha > 0 {
-                        let src_idx = src_row + x + ghost_shift_x;
-                        let ghost_pixel = unsafe { *ghost_source.get_unchecked(src_idx) };
-                        let inv_alpha = 256 - local_alpha;
-                        r = ((r * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8).min(255);
-                        g = ((g * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8).min(255);
-                        b = ((b * inv_alpha + (ghost_pixel & 0xFF) * local_alpha) >> 8).min(255);
+                if let Some(src_row) = ghost_src_row {
+                    if x < ghost_w {
+                        let local_alpha = unsafe { *ghost_alpha_table.get_unchecked(glare_idx) } as u32;
+                        if local_alpha > 0 {
+                            let src_idx = src_row + x + ghost_shift_x;
+                            let ghost_pixel = unsafe { *ghost_source.get_unchecked(src_idx) };
+                            let inv_alpha = 256 - local_alpha;
+                            r = ((r * inv_alpha + ((ghost_pixel >> 16) & 0xFF) * local_alpha) >> 8).min(255);
+                            g = ((g * inv_alpha + ((ghost_pixel >> 8) & 0xFF) * local_alpha) >> 8).min(255);
+                            b = ((b * inv_alpha + (ghost_pixel & 0xFF) * local_alpha) >> 8).min(255);
+                        }
                     }
                 }
-            }
 
-            unsafe { *buf_row_slice.get_unchecked_mut(idx) = (r << 16) | (g << 8) | b; }
+                unsafe { *chunk_buf.get_unchecked_mut(buf_idx) = (r << 16) | (g << 8) | b; }
+            }
         }
     });
 }

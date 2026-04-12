@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OxideNES DSAT Audit — 2026-03-24</title>
+<style>
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --critical: #f85149;
+    --critical-bg: rgba(248,81,73,0.12);
+    --high: #f0883e;
+    --high-bg: rgba(240,136,62,0.12);
+    --medium: #d29922;
+    --medium-bg: rgba(210,153,34,0.12);
+    --low: #8b949e;
+    --low-bg: rgba(139,148,158,0.08);
+    --cat-crash: #f778ba;
+    --cat-ux: #a5d6ff;
+    --cat-security: #ff7b72;
+    --cat-perf: #7ee787;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1e2e 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 2rem 2.5rem 1.5rem;
+  }
+  .header-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+  .header-logo {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--critical) 0%, var(--high) 50%, var(--medium) 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 800; color: #fff;
+    box-shadow: 0 0 20px rgba(248,81,73,0.3);
+  }
+  .header h1 {
+    font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px;
+    background: linear-gradient(90deg, var(--text-primary) 60%, var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header-meta { color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem; }
+  .header-meta span { margin-right: 1.5rem; }
+
+  /* ── Container ── */
+  .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2.5rem 3rem; }
+
+  /* ── Dashboard Cards ── */
+  .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+  .card {
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem 1.5rem; position: relative; overflow: hidden; cursor: default;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+  .card:hover { transform: translateY(-2px); }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  }
+  .card.critical::before { background: var(--critical); }
+  .card.critical:hover { border-color: var(--critical); }
+  .card.high::before { background: var(--high); }
+  .card.high:hover { border-color: var(--high); }
+  .card.medium::before { background: var(--medium); }
+  .card.medium:hover { border-color: var(--medium); }
+  .card.low::before { background: var(--low); }
+  .card.low:hover { border-color: var(--low); }
+  .card-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem; }
+  .card.critical .card-label { color: var(--critical); }
+  .card.high .card-label { color: var(--high); }
+  .card.medium .card-label { color: var(--medium); }
+  .card.low .card-label { color: var(--low); }
+  .card-count { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; }
+  .card.critical .card-count { color: var(--critical); }
+  .card.high .card-count { color: var(--high); }
+  .card.medium .card-count { color: var(--medium); }
+  .card.low .card-count { color: var(--low); }
+  .card-detail { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem; }
+
+  /* ── Category Breakdown ── */
+  .breakdown { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .breakdown-card {
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1rem;
+  }
+  .breakdown-icon {
+    width: 40px; height: 40px; border-radius: 8px; display: flex;
+    align-items: center; justify-content: center; font-size: 1.2rem; flex-shrink: 0;
+  }
+  .breakdown-icon.crash { background: rgba(247,120,186,0.15); }
+  .breakdown-icon.ux { background: rgba(165,214,255,0.15); }
+  .breakdown-icon.security { background: rgba(255,123,114,0.15); }
+  .breakdown-icon.perf { background: rgba(126,231,135,0.15); }
+  .breakdown-label { font-size: 0.8rem; color: var(--text-secondary); }
+  .breakdown-count { font-size: 1.5rem; font-weight: 700; }
+
+  /* ── Severity bar ── */
+  .severity-bar-container { margin-bottom: 2rem; }
+  .severity-bar {
+    height: 10px; border-radius: 5px; overflow: hidden; display: flex;
+    background: var(--bg-tertiary);
+  }
+  .severity-bar > div { transition: width 0.5s ease; }
+  .severity-bar .seg-critical { background: var(--critical); }
+  .severity-bar .seg-high { background: var(--high); }
+  .severity-bar .seg-medium { background: var(--medium); }
+  .severity-bar .seg-low { background: var(--low); }
+  .severity-bar-legend {
+    display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-secondary);
+  }
+  .severity-bar-legend span::before {
+    content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px;
+  }
+  .legend-critical::before { background: var(--critical) !important; }
+  .legend-high::before { background: var(--high) !important; }
+  .legend-medium::before { background: var(--medium) !important; }
+  .legend-low::before { background: var(--low) !important; }
+
+  /* ── Section Headers ── */
+  .section { margin-bottom: 2.5rem; }
+  .section-header {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;
+    padding-bottom: 0.75rem; border-bottom: 1px solid var(--border);
+  }
+  .section-header h2 { font-size: 1.25rem; font-weight: 700; }
+  .section-header .badge {
+    font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 20px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge-red { background: var(--critical-bg); color: var(--critical); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-green { background: rgba(126,231,135,0.12); color: #7ee787; border: 1px solid rgba(126,231,135,0.3); }
+
+  /* ── Blocker / Quick-win cards ── */
+  .highlight-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 1rem; }
+  .highlight-card {
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem 1.5rem; border-left: 4px solid;
+  }
+  .highlight-card.blocker { border-left-color: var(--critical); }
+  .highlight-card.quickwin { border-left-color: #7ee787; }
+  .highlight-card .hl-id { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .highlight-card .hl-title { font-size: 1rem; font-weight: 600; margin: 0.35rem 0 0.5rem; }
+  .highlight-card .hl-desc { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.55; }
+  .highlight-card .hl-component {
+    display: inline-block; font-size: 0.7rem; font-family: 'SFMono-Regular', Consolas, monospace;
+    background: var(--bg-tertiary); padding: 0.15rem 0.5rem; border-radius: 4px; margin-top: 0.5rem;
+    color: var(--accent);
+  }
+  .highlight-card .hl-effort {
+    display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px;
+    margin-top: 0.5rem; margin-left: 0.5rem; background: rgba(126,231,135,0.12); color: #7ee787;
+  }
+
+  /* ── Filter bar ── */
+  .filter-bar {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+    align-items: center;
+  }
+  .filter-bar label { font-size: 0.8rem; color: var(--text-secondary); margin-right: 0.25rem; font-weight: 600; }
+  .filter-btn {
+    padding: 0.3rem 0.75rem; border-radius: 20px; border: 1px solid var(--border);
+    background: var(--bg-secondary); color: var(--text-secondary); font-size: 0.75rem;
+    cursor: pointer; font-weight: 500; transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 700; }
+  .filter-sep { width: 1px; height: 20px; background: var(--border); margin: 0 0.5rem; }
+  .search-input {
+    padding: 0.35rem 0.75rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-primary); font-size: 0.8rem;
+    outline: none; width: 220px; margin-left: auto;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-muted); }
+
+  /* ── Table ── */
+  .table-wrapper {
+    background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  thead th {
+    background: var(--bg-tertiary); text-align: left; padding: 0.75rem 1rem;
+    font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--text-secondary); border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none; white-space: nowrap; position: relative;
+  }
+  thead th:hover { color: var(--text-primary); }
+  thead th .sort-arrow { margin-left: 4px; font-size: 0.65rem; opacity: 0.4; }
+  thead th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(88,166,255,0.04); }
+  tbody td { padding: 0.7rem 1rem; vertical-align: top; }
+  .col-id { width: 100px; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+  .col-sev { width: 90px; }
+  .col-cat { width: 100px; }
+  .col-comp { width: 120px; }
+  .col-title { width: 200px; font-weight: 600; }
+  .col-impact { font-size: 0.82rem; color: var(--text-secondary); }
+
+  .sev-pill {
+    display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.6rem;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .sev-CRITICAL { background: var(--critical-bg); color: var(--critical); border: 1px solid rgba(248,81,73,0.3); }
+  .sev-HIGH { background: var(--high-bg); color: var(--high); border: 1px solid rgba(240,136,62,0.3); }
+  .sev-MEDIUM { background: var(--medium-bg); color: var(--medium); border: 1px solid rgba(210,153,34,0.3); }
+  .sev-LOW { background: var(--low-bg); color: var(--low); border: 1px solid rgba(139,148,158,0.2); }
+
+  .cat-pill {
+    display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.6rem;
+    border-radius: 4px; letter-spacing: 0.3px;
+  }
+  .cat-Crash { background: rgba(247,120,186,0.12); color: var(--cat-crash); }
+  .cat-UX { background: rgba(165,214,255,0.12); color: var(--cat-ux); }
+  .cat-Security { background: rgba(255,123,114,0.12); color: var(--cat-security); }
+  .cat-Performance { background: rgba(126,231,135,0.12); color: var(--cat-perf); }
+
+  .comp-tag {
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.78rem;
+    color: var(--accent); background: rgba(88,166,255,0.08); padding: 0.15rem 0.45rem;
+    border-radius: 3px;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.75rem;
+    border-top: 1px solid var(--border); margin-top: 1rem;
+  }
+
+  /* ── Row hidden by filter ── */
+  .row-hidden { display: none !important; }
+
+  /* ── Print styles ── */
+  @media print {
+    body { background: #fff; color: #000; }
+    .filter-bar, .search-input { display: none; }
+    .card, .table-wrapper, .highlight-card, .breakdown-card { border: 1px solid #ccc; background: #f9f9f9; }
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .dashboard { grid-template-columns: repeat(2, 1fr); }
+    .breakdown { grid-template-columns: repeat(2, 1fr); }
+    .highlight-grid { grid-template-columns: 1fr; }
+    .container { padding: 1rem; }
+    .header { padding: 1.5rem 1rem 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<div class="header">
+  <div class="header-top">
+    <div class="header-logo">D</div>
+    <div>
+      <h1>OxideNES DSAT Audit — 2026-03-24</h1>
+      <div class="header-meta">
+        <span>📋 44 findings across 4 audit domains</span>
+        <span>🔴 3 ship blockers</span>
+        <span>⚡ 12 quick wins identified</span>
+        <span>Generated by Analyst Agent</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════ SEVERITY DASHBOARD ═══════════════ -->
+<div class="dashboard">
+  <div class="card critical">
+    <div class="card-label">Critical</div>
+    <div class="card-count">3</div>
+    <div class="card-detail">Ship blockers — must fix before release</div>
+  </div>
+  <div class="card high">
+    <div class="card-label">High</div>
+    <div class="card-count">13</div>
+    <div class="card-detail">Significant user impact — fix this sprint</div>
+  </div>
+  <div class="card medium">
+    <div class="card-label">Medium</div>
+    <div class="card-count">19</div>
+    <div class="card-detail">Moderate impact — schedule for next sprint</div>
+  </div>
+  <div class="card low">
+    <div class="card-label">Low</div>
+    <div class="card-count">9</div>
+    <div class="card-detail">Minor polish — backlog</div>
+  </div>
+</div>
+
+<!-- ═══════════════ CATEGORY BREAKDOWN ═══════════════ -->
+<div class="breakdown">
+  <div class="breakdown-card">
+    <div class="breakdown-icon crash">💥</div>
+    <div><div class="breakdown-label">Crashes &amp; Error Handling</div><div class="breakdown-count">13</div></div>
+  </div>
+  <div class="breakdown-card">
+    <div class="breakdown-icon ux">🎨</div>
+    <div><div class="breakdown-label">UX Issues</div><div class="breakdown-count">14</div></div>
+  </div>
+  <div class="breakdown-card">
+    <div class="breakdown-icon security">🔒</div>
+    <div><div class="breakdown-label">Security</div><div class="breakdown-count">7</div></div>
+  </div>
+  <div class="breakdown-card">
+    <div class="breakdown-icon perf">⚡</div>
+    <div><div class="breakdown-label">Performance &amp; Rendering</div><div class="breakdown-count">10</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════ SEVERITY BAR ═══════════════ -->
+<div class="severity-bar-container">
+  <div class="severity-bar">
+    <div class="seg-critical" style="width:6.82%"></div>
+    <div class="seg-high" style="width:29.55%"></div>
+    <div class="seg-medium" style="width:43.18%"></div>
+    <div class="seg-low" style="width:20.45%"></div>
+  </div>
+  <div class="severity-bar-legend">
+    <span class="legend-critical">Critical 6.8%</span>
+    <span class="legend-high">High 29.5%</span>
+    <span class="legend-medium">Medium 43.2%</span>
+    <span class="legend-low">Low 20.5%</span>
+  </div>
+</div>
+
+<!-- ═══════════════ SHIP BLOCKERS ═══════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>🚫 Ship Blockers</h2>
+    <span class="badge badge-red">3 Critical — Must resolve before release</span>
+  </div>
+  <div class="highlight-grid">
+    <div class="highlight-card blocker">
+      <div class="hl-id">CRA-001</div>
+      <div class="hl-title">updater.rs — unwrap() on HTTP JSON parsing</div>
+      <div class="hl-desc">If GitHub API returns malformed JSON (rate limit HTML page, 500 error, network truncation), the emulator panics on the menu screen. Users see an unexplained crash on every launch when GitHub is having issues.</div>
+      <div><span class="hl-component">updater.rs:47</span></div>
+    </div>
+    <div class="highlight-card blocker">
+      <div class="hl-id">CRA-002</div>
+      <div class="hl-title">cartridge.rs — ROM loading panics on corrupted files</div>
+      <div class="hl-desc">Multiple unwrap() calls on file reads during ROM loading. Any truncated, corrupted, or misidentified .nes file crashes the emulator instead of showing a user-friendly error. This is the #1 user-facing operation.</div>
+      <div><span class="hl-component">cartridge.rs</span></div>
+    </div>
+    <div class="highlight-card blocker">
+      <div class="hl-id">SEC-001</div>
+      <div class="hl-title">Auto-updater has no binary integrity verification</div>
+      <div class="hl-desc">The updater downloads binaries from GitHub Releases over HTTPS but performs zero post-download verification — no checksums, no signatures. A compromised GitHub account or CDN MITM could deliver arbitrary executables to every user on next update.</div>
+      <div><span class="hl-component">updater.rs</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ QUICK WINS ═══════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>⚡ Quick Wins</h2>
+    <span class="badge badge-green">12 fixes — each under 10 lines of code</span>
+  </div>
+  <div class="highlight-grid">
+    <div class="highlight-card quickwin">
+      <div class="hl-id">CRA-001</div>
+      <div class="hl-title">Replace updater unwrap() with error dialog</div>
+      <div class="hl-desc">Change <code>.unwrap()</code> to <code>.unwrap_or_else()</code> with a log warning. Show "Update check failed" in OSD instead of panicking.</div>
+      <div><span class="hl-component">updater.rs:47</span><span class="hl-effort">~3 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">CRA-007</div>
+      <div class="hl-title">APU blip_buf unwrap → graceful fallback</div>
+      <div class="hl-desc">Replace <code>.unwrap()</code> on buffer creation with <code>.expect("OOM")</code> or return a Result. Only triggers on memory exhaustion.</div>
+      <div><span class="hl-component">apu.rs</span><span class="hl-effort">~2 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">CRA-008</div>
+      <div class="hl-title">FM2 export — handle read-only paths</div>
+      <div class="hl-desc">Replace <code>.unwrap()</code> on file creation with a match/if-let and show OSD error "Cannot write recording file".</div>
+      <div><span class="hl-component">recording.rs</span><span class="hl-effort">~4 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">CRA-010</div>
+      <div class="hl-title">Lua eval crash on malformed scripts</div>
+      <div class="hl-desc">Replace <code>.unwrap()</code> on <code>lua.load()</code> with error handling that logs the Lua error and disables the script.</div>
+      <div><span class="hl-component">scripting.rs</span><span class="hl-effort">~4 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">CRA-006</div>
+      <div class="hl-title">Netplay packet length validation</div>
+      <div class="hl-desc">Change <code>data.len() >= 2</code> to <code>data.len() >= 15</code> (minimum valid packet size). Reject short packets before indexing.</div>
+      <div><span class="hl-component">netplay.rs</span><span class="hl-effort">~1 line</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">UX-006</div>
+      <div class="hl-title">Persist CRT filter selection to config</div>
+      <div class="hl-desc">Add <code>crt_filter_mode</code> field to config struct and save/load it. Users currently re-select every launch.</div>
+      <div><span class="hl-component">config + main.rs</span><span class="hl-effort">~5 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">UX-008</div>
+      <div class="hl-title">Persist fullscreen state to config</div>
+      <div class="hl-desc">Save F11 fullscreen toggle to config file. Restore on next launch. Same pattern as CRT filter fix.</div>
+      <div><span class="hl-component">config + main.rs</span><span class="hl-effort">~4 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">SEC-006</div>
+      <div class="hl-title">Sanitize SRAM save file paths</div>
+      <div class="hl-desc">Strip path separators and <code>..</code> from ROM filenames before constructing SRAM paths. Prevents directory traversal.</div>
+      <div><span class="hl-component">cartridge.rs</span><span class="hl-effort">~3 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">UX-004</div>
+      <div class="hl-title">Audio fade on pause/unpause</div>
+      <div class="hl-desc">Apply a 5ms linear fade-out before pause and fade-in on resume to eliminate the audible pop/click artifact.</div>
+      <div><span class="hl-component">apu.rs / main.rs</span><span class="hl-effort">~8 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">PERF-005</div>
+      <div class="hl-title">Move update check to background thread</div>
+      <div class="hl-desc">Wrap the <code>ureq</code> update check in <code>std::thread::spawn</code> so slow/unreachable networks don't freeze the UI for up to 30 seconds.</div>
+      <div><span class="hl-component">main.rs:~2050</span><span class="hl-effort">~5 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">UX-005</div>
+      <div class="hl-title">Show error overlay on bad file drop</div>
+      <div class="hl-desc">When drag-and-drop of a non-.nes file occurs, display an OSD error instead of silently staying on the menu.</div>
+      <div><span class="hl-component">main.rs</span><span class="hl-effort">~5 lines</span></div>
+    </div>
+    <div class="highlight-card quickwin">
+      <div class="hl-id">SEC-004</div>
+      <div class="hl-title">Add ROM size sanity check</div>
+      <div class="hl-desc">Validate iNES header PRG/CHR sizes against actual file size before allocating buffers. Reject ROMs claiming >16MB.</div>
+      <div><span class="hl-component">cartridge.rs</span><span class="hl-effort">~5 lines</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ FILTER BAR ═══════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>📋 All Findings</h2>
+    <span class="badge badge-red">44 total</span>
+  </div>
+  <div class="filter-bar">
+    <label>Severity:</label>
+    <button class="filter-btn active" data-filter="severity" data-value="ALL">All</button>
+    <button class="filter-btn" data-filter="severity" data-value="CRITICAL">Critical</button>
+    <button class="filter-btn" data-filter="severity" data-value="HIGH">High</button>
+    <button class="filter-btn" data-filter="severity" data-value="MEDIUM">Medium</button>
+    <button class="filter-btn" data-filter="severity" data-value="LOW">Low</button>
+    <div class="filter-sep"></div>
+    <label>Category:</label>
+    <button class="filter-btn active" data-filter="category" data-value="ALL">All</button>
+    <button class="filter-btn" data-filter="category" data-value="Crash">Crash</button>
+    <button class="filter-btn" data-filter="category" data-value="UX">UX</button>
+    <button class="filter-btn" data-filter="category" data-value="Security">Security</button>
+    <button class="filter-btn" data-filter="category" data-value="Performance">Performance</button>
+    <input type="text" class="search-input" id="searchInput" placeholder="🔍  Search findings…">
+  </div>
+
+<!-- ═══════════════ TABLE ═══════════════ -->
+<div class="table-wrapper">
+<table id="findingsTable">
+<thead>
+<tr>
+  <th data-sort="id" class="sorted">ID <span class="sort-arrow">▲</span></th>
+  <th data-sort="severity">Severity <span class="sort-arrow">▲</span></th>
+  <th data-sort="category">Category <span class="sort-arrow">▲</span></th>
+  <th data-sort="component">Component <span class="sort-arrow">▲</span></th>
+  <th data-sort="title">Title <span class="sort-arrow">▲</span></th>
+  <th>Description</th>
+  <th>User Impact</th>
+</tr>
+</thead>
+<tbody id="findingsBody">
+<!-- Rows injected by JS from DATA array -->
+</tbody>
+</table>
+</div>
+</div>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<div class="footer">
+  OxideNES DSAT Audit Report • Generated 2026-03-24 • 4 audit domains • 44 findings<br>
+  Crash &amp; Error Handling (13) · UX (14) · Security (7) · Performance &amp; Rendering (10)
+</div>
+
+</div><!-- /container -->
+
+<!-- ═══════════════ DATA + LOGIC ═══════════════ -->
+<script>
+const DATA = [
+  // ── CRASH & ERROR HANDLING ──
+  { id:"CRA-001", severity:"CRITICAL", sevOrder:0, category:"Crash", component:"updater.rs:47",
+    title:"unwrap() on HTTP response body parsing",
+    desc:"If GitHub API returns malformed JSON, the emulator panics on the menu screen.",
+    impact:"Emulator crashes on launch when GitHub API is rate-limited, returns 500, or serves HTML error page. Affects every user during GitHub outages." },
+  { id:"CRA-002", severity:"CRITICAL", sevOrder:0, category:"Crash", component:"cartridge.rs",
+    title:"ROM loading panics on corrupted files",
+    desc:"Multiple unwrap() calls on file reads. A truncated or corrupted .nes file will crash instead of showing an error.",
+    impact:"Users who download bad ROM dumps or have disk corruption see an unexplained crash. The #1 user-facing operation has no error resilience." },
+  { id:"CRA-003", severity:"HIGH", sevOrder:1, category:"Crash", component:"main.rs",
+    title:"composite_screen_fast() — no bounds check on buffer index",
+    desc:"Computed buffer index (SCREEN_Y + y) * WINDOW_WIDTH + SCREEN_X + x has no bounds check. Currently safe with 960×720 constants but fragile.",
+    impact:"Silent memory corruption if screen constants are ever changed. A future refactor could introduce a hard-to-debug buffer overwrite." },
+  { id:"CRA-004", severity:"HIGH", sevOrder:1, category:"Crash", component:"ppu.rs",
+    title:"Array accesses with computed indices — no mapper validation",
+    desc:"Nametable mirroring and pattern table reads use computed indices. If a mapper returns an invalid bank, index panic.",
+    impact:"Panics when loading ROMs with unusual or buggy mapper implementations. Users see a crash with no helpful message." },
+  { id:"CRA-005", severity:"HIGH", sevOrder:1, category:"Crash", component:"mapper.rs",
+    title:"Mappers don't validate bank numbers against ROM size",
+    desc:"Some mappers don't validate bank numbers against actual ROM size. Oversized bank switch from malformed ROM causes slice index panic.",
+    impact:"Crash on specific malformed ROMs. Mapper-specific — affects less common games but results in a hard crash." },
+  { id:"CRA-006", severity:"HIGH", sevOrder:1, category:"Crash", component:"netplay.rs",
+    title:"Packet parsing insufficient length validation",
+    desc:"Checks data.len() >= 2 but later indexes data[10], data[11..15]. A 3-14 byte packet passes validation but panics on access.",
+    impact:"Remote crash — a malicious or buggy netplay peer can crash your emulator by sending a short packet. Also a security issue." },
+  { id:"CRA-007", severity:"MEDIUM", sevOrder:2, category:"Crash", component:"apu.rs",
+    title:"blip_buf unwrap() on buffer creation",
+    desc:"unwrap() on audio buffer creation. Would only fail on memory exhaustion (OOM).",
+    impact:"Extremely unlikely in practice. On low-memory systems the emulator crashes instead of gracefully degrading audio." },
+  { id:"CRA-008", severity:"MEDIUM", sevOrder:2, category:"Crash", component:"recording.rs",
+    title:"FM2 export unwrap() on file creation",
+    desc:"unwrap() on file creation for movie recording export. Fails if target path is read-only or disk is full.",
+    impact:"Crash when user tries to save a recording to a read-only location. Should show an error dialog instead." },
+  { id:"CRA-009", severity:"MEDIUM", sevOrder:2, category:"Crash", component:"main.rs",
+    title:"Netplay send errors silently dropped",
+    desc:"Multiple let _ = socket.send_to(...) calls silently drop send errors with no logging or user notification.",
+    impact:"Netplay appears to work but the remote player sees stale/missing input. No indication anything is wrong until desync." },
+  { id:"CRA-010", severity:"MEDIUM", sevOrder:2, category:"Crash", component:"scripting.rs",
+    title:"Lua eval crashes on malformed scripts",
+    desc:"lua.load() result is unwrapped. A syntax error in a Lua script panics the emulator.",
+    impact:"Users experimenting with Lua scripting can crash the emulator with a simple typo. Hostile script in a ROM folder crashes on load." },
+  { id:"CRA-011", severity:"MEDIUM", sevOrder:2, category:"Crash", component:"bus.rs",
+    title:"Open bus returns 0 for unmapped reads",
+    desc:"Open bus behavior returns 0 for unmapped memory reads, but some games rely on specific open-bus values.",
+    impact:"Subtle emulation inaccuracy. Some games may exhibit glitches or incorrect behavior. Not a crash but affects accuracy." },
+  { id:"CRA-012", severity:"LOW", sevOrder:3, category:"Crash", component:"romdb.rs",
+    title:"CRC32 computation O(n) on every ROM load",
+    desc:"CRC32 is computed over entire ROM on each load. Safe but redundant for repeated loads of the same ROM.",
+    impact:"Negligible. ~1ms for a typical 256KB ROM. Only noticeable if loading very large ROMs repeatedly." },
+  { id:"CRA-013", severity:"LOW", sevOrder:3, category:"Crash", component:"achievements.rs",
+    title:"Achievement JSON uses unwrap_or_default()",
+    desc:"JSON parse of achievement definitions uses unwrap_or_default() — safe degradation to empty set.",
+    impact:"None — this is actually correct defensive programming. Achievements silently disabled if file is corrupt." },
+
+  // ── UX ISSUES ──
+  { id:"UX-001", severity:"HIGH", sevOrder:1, category:"UX", component:"netplay.rs",
+    title:"NetplayState::Desynced enum variant is dead code",
+    desc:"Enum variant exists but is never entered. Implies a desync detection feature that doesn't actually function.",
+    impact:"Misleads contributors and creates false confidence. Users may expect desync detection to work based on code/docs." },
+  { id:"UX-002", severity:"HIGH", sevOrder:1, category:"UX", component:"netplay.rs",
+    title:"No disconnect detection for netplay peers",
+    desc:"Netplay peer can vanish and local player gets stuck with stale input forever. No timeout, no disconnect message.",
+    impact:"After peer disconnects, user is stuck with frozen/repeating input and must manually quit. Terrible multiplayer experience." },
+  { id:"UX-003", severity:"HIGH", sevOrder:1, category:"UX", component:"main.rs",
+    title:"Save state overwrites without confirmation",
+    desc:"Pressing save on an occupied slot silently overwrites. No confirmation dialog for this destructive action.",
+    impact:"Users accidentally lose hours of save state progress with a single keypress. No undo mechanism exists." },
+  { id:"UX-004", severity:"HIGH", sevOrder:1, category:"UX", component:"apu.rs / main.rs",
+    title:"Audio clicks/pops on pause and unpause",
+    desc:"No fade-in/fade-out when entering/exiting pause menu. Abrupt audio stop causes audible pop artifact.",
+    impact:"Jarring audio glitch every time user pauses. Makes the emulator feel unpolished. Especially noticeable on headphones." },
+  { id:"UX-005", severity:"MEDIUM", sevOrder:2, category:"UX", component:"main.rs",
+    title:"Drag-and-drop non-.nes file shows no error",
+    desc:"Dropping a non-.nes file gives no error overlay — just stays on the menu screen with no feedback.",
+    impact:"User thinks the app is broken or unresponsive. No indication that the file format was wrong." },
+  { id:"UX-006", severity:"MEDIUM", sevOrder:2, category:"UX", component:"config / main.rs",
+    title:"CRT filter selection not persisted to config",
+    desc:"Filter mode resets to default on restart. User has to re-select their preferred filter every launch.",
+    impact:"Annoyance for users who prefer a specific filter. Repetitive manual action on every session." },
+  { id:"UX-007", severity:"MEDIUM", sevOrder:2, category:"UX", component:"main.rs",
+    title:"Controller hot-plug not handled",
+    desc:"gilrs polls controllers at startup only. Controllers plugged in after launch are not detected.",
+    impact:"User must restart the emulator to use a newly connected controller. Common scenario for Bluetooth controllers." },
+  { id:"UX-008", severity:"MEDIUM", sevOrder:2, category:"UX", component:"config / main.rs",
+    title:"Fullscreen state not persisted",
+    desc:"F11 fullscreen toggle isn't saved to config. Always starts windowed regardless of user preference.",
+    impact:"Users who prefer fullscreen must press F11 every launch. Minor but persistent annoyance." },
+  { id:"UX-009", severity:"MEDIUM", sevOrder:2, category:"UX", component:"main.rs (UI)",
+    title:"Long ROM names truncated in lists",
+    desc:"Favorites/recent list doesn't handle long names gracefully — text is visually cut off mid-word.",
+    impact:"Users can't distinguish between similarly-named ROMs. Visible in screenshots — looks unfinished." },
+  { id:"UX-010", severity:"MEDIUM", sevOrder:2, category:"UX", component:"main.rs (OSD)",
+    title:"No persistent visual indicator for current save slot",
+    desc:"When cycling save slots with number keys, the OSD shows briefly then vanishes. Easy to lose track of active slot.",
+    impact:"Users save to wrong slot, compounding the overwrite-without-confirmation issue (UX-003)." },
+  { id:"UX-011", severity:"MEDIUM", sevOrder:2, category:"UX", component:"main.rs",
+    title:"Rewind buffer size not configurable",
+    desc:"Hardcoded rewind buffer (~19MB at 60fps × 5 seconds). Not adjustable by user.",
+    impact:"On low-memory systems this is wasteful. Power users may want longer rewind. No control either way." },
+  { id:"UX-012", severity:"LOW", sevOrder:3, category:"UX", component:"main.rs (UI)",
+    title:"Menu cursor wraps without animation",
+    desc:"Cursor jumps from last to first menu item with no transition or visual feedback.",
+    impact:"Minor disorientation. User momentarily loses position in menu. Cosmetic polish issue." },
+  { id:"UX-013", severity:"LOW", sevOrder:3, category:"UX", component:"main.rs (OSD)",
+    title:"OSD messages overlap when simultaneous",
+    desc:"Multiple OSD messages triggered at the same time overlap visually (e.g., save state + netplay status).",
+    impact:"Messages become unreadable. Information is lost. Minor but happens in real usage." },
+  { id:"UX-014", severity:"LOW", sevOrder:3, category:"UX", component:"main.rs",
+    title:'No "About" screen with version/credits',
+    desc:"No way to see version info, credits, or license from within the app. Version label only shows when an update is available.",
+    impact:"Users cannot verify which version they're running. Makes bug reporting harder. Missing standard UX element." },
+
+  // ── SECURITY ──
+  { id:"SEC-001", severity:"CRITICAL", sevOrder:0, category:"Security", component:"updater.rs",
+    title:"No binary integrity verification in auto-updater",
+    desc:"Downloads binaries from GitHub Releases over HTTPS but performs no post-download checksum or signature verification.",
+    impact:"A compromised GitHub account or CDN man-in-the-middle could deliver arbitrary malware to every user via auto-update. Highest-impact attack vector in the codebase." },
+  { id:"SEC-002", severity:"HIGH", sevOrder:1, category:"Security", component:"scripting.rs",
+    title:"Lua scripting has no sandbox restrictions",
+    desc:"mlua initialized with Lua::new() giving full stdlib access. Scripts can: read/write files, execute OS commands, access network.",
+    impact:"A malicious Lua script in a ROM folder achieves arbitrary code execution on the user's machine. No os/io/debug library removal." },
+  { id:"SEC-003", severity:"HIGH", sevOrder:1, category:"Security", component:"netplay.rs",
+    title:"Crafted packets crash emulator (remote DoS)",
+    desc:"Insufficient packet length validation allows a malicious peer to crash the emulator with a 3-14 byte packet.",
+    impact:"Remote denial of service. Any netplay peer can instantly crash the other player's emulator. No authentication required." },
+  { id:"SEC-004", severity:"MEDIUM", sevOrder:2, category:"Security", component:"cartridge.rs",
+    title:"No ROM size sanity check — OOM/hang risk",
+    desc:"iNES header can claim up to 4GB PRG/CHR. Loader attempts to read claimed size, potentially causing OOM or hang on small malicious files.",
+    impact:"Specially crafted ROM file can hang or crash the emulator. Could be used for DoS via shared ROM files." },
+  { id:"SEC-005", severity:"MEDIUM", sevOrder:2, category:"Security", component:"config",
+    title:"Config deserialization accepts extreme values",
+    desc:"serde_json::from_str() uses unwrap_or_default() (safe), but extreme values like volume: 999999 could cause unexpected behavior.",
+    impact:"Low — requires local file access to exploit. Could cause audio distortion or UI issues with crafted config." },
+  { id:"SEC-006", severity:"MEDIUM", sevOrder:2, category:"Security", component:"cartridge.rs",
+    title:"No SRAM path sanitization — directory traversal",
+    desc:'SRAM saves named from ROM filename. A ROM named "../../etc/passwd.nes" writes SRAM to a traversed path.',
+    impact:"File write to unexpected paths. Mitigated by being in user home directory, but could overwrite user files on some platforms." },
+  { id:"SEC-007", severity:"LOW", sevOrder:3, category:"Security", component:"updater.rs",
+    title:"ureq uses system certificate store",
+    desc:"HTTP client uses system cert store. On outdated Windows systems, root certs may be stale. Standard practice.",
+    impact:"Negligible. TLS connections could fail on very outdated systems. Not a vulnerability — standard approach." },
+
+  // ── PERFORMANCE & RENDERING ──
+  { id:"PERF-001", severity:"HIGH", sevOrder:1, category:"Performance", component:"main.rs",
+    title:"Frame pacer spin-wait burns full CPU core",
+    desc:"Frame limiter uses thread::sleep() for bulk wait then spin-waits for precision. Burns CPU during final ~1ms of each frame.",
+    impact:"100% utilization on one core even on the menu screen. Laptop battery drain, thermal throttling, fan noise. Users notice and complain." },
+  { id:"PERF-002", severity:"HIGH", sevOrder:1, category:"Performance", component:"main.rs (CRT)",
+    title:"CRT filter + OSD allocates strings per-frame",
+    desc:"format!() calls inside CRT overlay and OSD rendering allocate heap strings every frame (60 per second).",
+    impact:"Causes GC-like micro-stutter. On lower-end machines, these allocations contribute to frame drops during heavy rendering." },
+  { id:"PERF-003", severity:"HIGH", sevOrder:1, category:"Performance", component:"main.rs (CRT)",
+    title:"Glass glare effect is computationally expensive",
+    desc:"Chromatic aberration + glass reflection: O(SCREEN_W×SCREEN_H) with ~10 FP ops per pixel = ~7M FP ops/frame at 960×720.",
+    impact:"Consumes significant frame budget. On integrated GPUs this can push total frame time over 16.6ms, causing dropped frames." },
+  { id:"PERF-004", severity:"MEDIUM", sevOrder:2, category:"Performance", component:"apu.rs / main.rs",
+    title:"Audio buffer underruns when CRT filter is slow",
+    desc:"When CRT filter exceeds frame budget, audio drains faster than refilled. cpal callback returns silence, causing audible gaps.",
+    impact:"Audio stuttering correlated with visual complexity. No frame-skip mechanism to catch up. Perceptible on slower hardware." },
+  { id:"PERF-005", severity:"MEDIUM", sevOrder:2, category:"Performance", component:"main.rs:~2050",
+    title:"Update checker blocks main thread on startup",
+    desc:"ureq update check runs on main thread. If network is slow/unreachable, UI freezes for up to 30 seconds (default timeout).",
+    impact:"Users with spotty internet stare at a frozen window on every launch. Appears hung/broken. May force-quit and retry repeatedly." },
+  { id:"PERF-006", severity:"MEDIUM", sevOrder:2, category:"Performance", component:"main.rs",
+    title:"Save states are uncompressed",
+    desc:"Full NES state serialized as raw bytes. ~50-100KB per save. With 4 slots + thumbnails this adds up.",
+    impact:"Minor disk usage. Not a performance issue per se, but save/load could be faster with compression, and disk writes are unbuffered." },
+  { id:"PERF-007", severity:"MEDIUM", sevOrder:2, category:"Performance", component:"main.rs",
+    title:"Rewind buffer uses ~19MB with no cap",
+    desc:"Stores full frame state per rewind frame. At ~64KB × 300 states (5s at 60fps) = ~19MB. Not configurable or bounded.",
+    impact:"Fixed 19MB memory overhead. On constrained systems this matters. No way for users to reduce or increase it." },
+  { id:"PERF-008", severity:"LOW", sevOrder:3, category:"Performance", component:"main.rs",
+    title:"No vsync integration — potential tearing",
+    desc:"Emulator manages its own frame timing rather than syncing to display refresh rate.",
+    impact:"Screen tearing visible on some monitor/driver combinations. Users accustomed to vsync will notice the artifacts." },
+  { id:"PERF-009", severity:"LOW", sevOrder:3, category:"Performance", component:"romdb.rs",
+    title:"ROM database O(n) linear scan lookup",
+    desc:"Linear scan for CRC match in ROM database. With ~50 entries this is negligible.",
+    impact:"Unmeasurable with current database size. Would need to be addressed if DB grows to thousands of entries." },
+  { id:"PERF-010", severity:"LOW", sevOrder:3, category:"Performance", component:"cartridge.rs",
+    title:"Large ROMs fully loaded into memory",
+    desc:"Entire ROM loaded into memory. Fine for typical NES ROMs (≤1MB) but NES 2.0 theoretically allows multi-GB.",
+    impact:"Only a theoretical concern. No real NES ROM exceeds a few MB. Defensive check already recommended in SEC-004." },
+];
+
+// ── Render table ──
+const tbody = document.getElementById('findingsBody');
+function renderTable(data) {
+  tbody.innerHTML = data.map(r => `
+    <tr data-severity="${r.severity}" data-category="${r.category}">
+      <td class="col-id">${r.id}</td>
+      <td class="col-sev"><span class="sev-pill sev-${r.severity}">${r.severity}</span></td>
+      <td class="col-cat"><span class="cat-pill cat-${r.category}">${r.category}</span></td>
+      <td class="col-comp"><span class="comp-tag">${r.component}</span></td>
+      <td class="col-title">${r.title}</td>
+      <td>${r.desc}</td>
+      <td class="col-impact">${r.impact}</td>
+    </tr>`).join('');
+}
+renderTable(DATA);
+
+// ── Sorting ──
+const sevMap = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3 };
+let sortCol = 'id', sortAsc = true;
+
+document.querySelectorAll('thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+    document.querySelectorAll('thead th').forEach(h => h.classList.remove('sorted'));
+    th.classList.add('sorted');
+    th.querySelector('.sort-arrow').textContent = sortAsc ? '▲' : '▼';
+
+    DATA.sort((a,b) => {
+      let va, vb;
+      switch(col) {
+        case 'severity': va = a.sevOrder; vb = b.sevOrder; break;
+        case 'category': va = a.category; vb = b.category; break;
+        case 'component': va = a.component; vb = b.component; break;
+        case 'title': va = a.title; vb = b.title; break;
+        default: va = a.id; vb = b.id;
+      }
+      if (typeof va === 'string') { return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va); }
+      return sortAsc ? va - vb : vb - va;
+    });
+    renderTable(DATA);
+    applyFilters();
+  });
+});
+
+// ── Filtering ──
+let activeSev = 'ALL', activeCat = 'ALL';
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const grp = btn.dataset.filter;
+    const val = btn.dataset.value;
+    document.querySelectorAll(`.filter-btn[data-filter="${grp}"]`).forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (grp === 'severity') activeSev = val;
+    if (grp === 'category') activeCat = val;
+    applyFilters();
+  });
+});
+
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  document.querySelectorAll('#findingsBody tr').forEach(tr => {
+    const sev = tr.dataset.severity;
+    const cat = tr.dataset.category;
+    const text = tr.textContent.toLowerCase();
+    const matchSev = activeSev === 'ALL' || sev === activeSev;
+    const matchCat = activeCat === 'ALL' || cat === activeCat;
+    const matchSearch = !q || text.includes(q);
+    tr.classList.toggle('row-hidden', !(matchSev && matchCat && matchSearch));
+  });
+}
+</script>
+</body>
+</html>
