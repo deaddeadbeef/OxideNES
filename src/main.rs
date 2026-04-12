@@ -4569,50 +4569,52 @@ fn main() {
                         }
                     }
 
-                    // ALWAYS render (even when paused - shows frozen frame)
                     // Detailed perf overlay: sample render-stage timings once per ~60 frames (≈1 s).
                     // The Option<Instant> pattern has zero cost when do_detail_sample is false.
                     let do_detail_sample = overlay_level == PerfOverlayLevel::Detailed && {
                         detail_tick = detail_tick.wrapping_add(1);
                         detail_tick % 60 == 0
                     };
-                    let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                    // Render game frame (skip when paused or overlay active — they have own rendering)
+                    if !paused && !quick_overlay {
+                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
 
-                    // Stage 1: CRT filter (or passthrough scale)
-                    let t_crt = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                    if crt_enabled {
-                        crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
-                    } else {
-                        scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
-                    }
-                    if let Some(t) = t_crt { perf_snapshot.crt_us = t.elapsed().as_micros() as u32; }
-
-                    // Stage 2: Post-process (bloom + glow + chromatic aberration)
-                    let t_bloom = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                    if crt_enabled {
-                        // Phosphor bloom — bright pixels glow into neighbors
-                        apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                        apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                        // Apply chromatic aberration to crt_buffer (screen area only)
-                        if glass_intensity > 30 {
-                            apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
-                            std::mem::swap(&mut crt_buffer, &mut ca_temp);
+                        // Stage 1: CRT filter (or passthrough scale)
+                        let t_crt = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        if crt_enabled {
+                            crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                        } else {
+                            scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
                         }
-                    }
-                    if let Some(t) = t_bloom { perf_snapshot.bloom_us = t.elapsed().as_micros() as u32; }
+                        if let Some(t) = t_crt { perf_snapshot.crt_us = t.elapsed().as_micros() as u32; }
 
-                    // Stage 3: Composite game output into TV frame
-                    let t_composite = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                    composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
-                    if let Some(t) = t_composite { perf_snapshot.composite_us = t.elapsed().as_micros() as u32; }
+                        // Stage 2: Post-process (bloom + glow + chromatic aberration)
+                        let t_bloom = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        if crt_enabled {
+                            // Phosphor bloom — bright pixels glow into neighbors
+                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            // Apply chromatic aberration to crt_buffer (screen area only)
+                            if glass_intensity > 30 {
+                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                std::mem::swap(&mut crt_buffer, &mut ca_temp);
+                            }
+                        }
+                        if let Some(t) = t_bloom { perf_snapshot.bloom_us = t.elapsed().as_micros() as u32; }
 
-                    // Stage 4: Glass / bezel effects
-                    let t_glass = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                    if crt_enabled && glass_intensity > 0 {
-                        let do_ghost = glass_intensity > 20;
-                        apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
-                    }
-                    if let Some(t) = t_glass { perf_snapshot.glass_us = t.elapsed().as_micros() as u32; }
+                        // Stage 3: Composite game output into TV frame
+                        let t_composite = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                        if let Some(t) = t_composite { perf_snapshot.composite_us = t.elapsed().as_micros() as u32; }
+
+                        // Stage 4: Glass / bezel effects
+                        let t_glass = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        if crt_enabled && glass_intensity > 0 {
+                            let do_ghost = glass_intensity > 20;
+                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
+                        }
+                        if let Some(t) = t_glass { perf_snapshot.glass_us = t.elapsed().as_micros() as u32; }
+                    } // end if !paused && !quick_overlay
 
                     // Latch detailed display string once per sample
                     if do_detail_sample { fmt_detail_line(&mut detail_display, &perf_snapshot); }
@@ -5951,9 +5953,9 @@ fn main() {
                             menu_framebuffer[i] = (r << 16) | (g << 8) | b;
                         }
 
-                        // Draw centered overlay box (compact: 20 tiles wide × 12 tiles tall)
-                        let box_left: usize = 6;
-                        let box_right: usize = 26;
+                        // Draw centered overlay box (compact: 24 tiles wide × 14 tiles tall)
+                        let box_left: usize = 4;
+                        let box_right: usize = 28;
                         let box_top: usize = 8;
                         let box_bottom: usize = 22;
 

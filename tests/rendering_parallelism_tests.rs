@@ -13,12 +13,12 @@ fn function_block<'a>(source: &'a str, fn_name: &str) -> &'a str {
 }
 
 #[test]
-fn crt_filters_use_multi_row_parallel_chunks() {
+fn crt_filters_use_multi_row_processing_chunks() {
     let source = include_str!("../src/rendering.rs");
 
     assert!(
         source.contains("const PAR_ROWS: usize = 16;"),
-        "rendering.rs should define PAR_ROWS for coarser rayon work chunks"
+        "rendering.rs should define PAR_ROWS for coarser processing chunks"
     );
 
     for fn_name in [
@@ -29,12 +29,12 @@ fn crt_filters_use_multi_row_parallel_chunks() {
     ] {
         let block = function_block(source, fn_name);
         assert!(
-            block.contains("par_chunks_mut(SCREEN_W * PAR_ROWS)"),
-            "{fn_name} should chunk rayon work by multiple rows"
+            block.contains("chunks_mut(SCREEN_W * PAR_ROWS)"),
+            "{fn_name} should chunk processing by multiple rows"
         );
         assert!(
-            !block.contains("par_chunks_mut(SCREEN_W).enumerate()"),
-            "{fn_name} should not dispatch one rayon job per screen row"
+            !block.contains("chunks_mut(SCREEN_W).enumerate()"),
+            "{fn_name} should not dispatch one chunk per screen row"
         );
     }
 }
@@ -45,8 +45,8 @@ fn glass_inner_loop_avoids_row_chunk_vec_allocation() {
     let block = function_block(source, "glass_inner_loop");
 
     assert!(
-        block.contains("buffer[buf_start..buf_end].par_chunks_mut(window_width * PAR_ROWS)"),
-        "glass_inner_loop should parallelize directly over the window slice"
+        block.contains("buffer[buf_start..buf_end].chunks_mut(window_width * PAR_ROWS)"),
+        "glass_inner_loop should chunk directly over the window slice"
     );
     assert!(
         !block.contains("collect();"),
