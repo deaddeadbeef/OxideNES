@@ -2069,13 +2069,6 @@ fn get_screen_resolution() -> (usize, usize) {
 }
 
 fn main() {
-    // Limit rayon to 4 worker threads to avoid saturating CPU and causing
-    // frame timing jitter from OS thread scheduling.
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build_global()
-        .ok();
-
     // Boost Windows timer resolution for smooth frame pacing
     #[cfg(target_os = "windows")]
     {

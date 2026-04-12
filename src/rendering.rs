@@ -1,7 +1,6 @@
 // Rendering pipeline: CRT filter, glass effects, and supporting helpers.
 // Extracted from main.rs for modularity and benchmarking.
 
-use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
 
 // ── Screen geometry constants ────────────────────────────────────────────────
@@ -9,7 +8,7 @@ pub const SCREEN_W: usize = 960;
 pub const SCREEN_H: usize = 720;
 pub const SCREEN_X: usize = 70;
 pub const SCREEN_Y: usize = 50;
-/// Number of rows per rayon work chunk. Balances parallelism vs overhead.
+/// Number of rows per processing chunk.
 const PAR_ROWS: usize = 16;
 
 // ── CRT mask mode ────────────────────────────────────────────────────────────
@@ -365,7 +364,7 @@ pub fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
                    distortion_table: &[(u32, u32)],
                    phosphor_lut: &[(u32, u32, u32); 256],
                    blur_center: u32, blur_side: u32, mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+    output.chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
         let base_y = chunk_idx * PAR_ROWS;
         let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
@@ -432,7 +431,7 @@ pub fn crt_filter_full(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
 pub fn crt_filter_masked(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
                       distortion_table: &[(u32, u32)],
                       phosphor_lut: &[(u32, u32, u32); 256], mask_table: &[(u16, u16, u16)], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+    output.chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
         let base_y = chunk_idx * PAR_ROWS;
         let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
@@ -494,7 +493,7 @@ pub fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
                        distortion_table: &[(u32, u32)],
                        phosphor_lut: &[(u32, u32, u32); 256],
                        blur_center: u32, blur_side: u32, gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+    output.chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
         let base_y = chunk_idx * PAR_ROWS;
         let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
@@ -558,7 +557,7 @@ pub fn crt_filter_blurred(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
 pub fn crt_filter_basic(input: &[u32], output: &mut Vec<u32>, sv_table: &[u8],
                      distortion_table: &[(u32, u32)],
                      phosphor_lut: &[(u32, u32, u32); 256], gamma_lut: &[u8; 256]) {
-    output.par_chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
+    output.chunks_mut(SCREEN_W * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_output)| {
         let base_y = chunk_idx * PAR_ROWS;
         let rows_in_chunk = chunk_output.len() / SCREEN_W;
 
@@ -677,7 +676,7 @@ pub fn glass_inner_loop(
 
     let buf_start = SCREEN_Y * window_width;
     let buf_end = (SCREEN_Y + SCREEN_H) * window_width;
-    buffer[buf_start..buf_end].par_chunks_mut(window_width * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_buf)| {
+    buffer[buf_start..buf_end].chunks_mut(window_width * PAR_ROWS).enumerate().for_each(|(chunk_idx, chunk_buf)| {
         let base_y = chunk_idx * PAR_ROWS;
         let rows_in_chunk = chunk_buf.len() / window_width;
 
