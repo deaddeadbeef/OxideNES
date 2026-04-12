@@ -42,10 +42,10 @@ cargo build --release
 ### Run
 ```bash
 # With a ROM file
-./target/release/nes-emulator path/to/game.nes
+./target/release/oxidenes path/to/game.nes
 
 # Or use the built-in file browser
-./target/release/nes-emulator
+./target/release/oxidenes
 ```
 
 ## Controls
@@ -127,9 +127,11 @@ cargo run --release -- game.nes  # Run
 ```
 
 ### Windows Installer
-Requires [Inno Setup](https://jrsoftware.org/isinfo.php):
+Requires [WiX Toolset](https://wixtoolset.org/):
 ```bash
-iscc installer/nes-emulator.iss
+# Build MSI installer
+cargo build --release
+# Then use WiX to compile wix/main.wxs
 ```
 
 ## Credits & Acknowledgments
