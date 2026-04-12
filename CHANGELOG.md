@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2] - 2026-04-12
+
+### Added
+- Extracted rendering module (`src/rendering.rs`) with CRT filter, glass effects, bloom, and glow
+- Criterion benchmarks for CRT filter and glass effects (`benches/crt_bench.rs`, `benches/glass_bench.rs`)
+- 3-level performance overlay toggled with F10 (Off / Basic / Detailed)
+- Parallelism regression tests
+
+### Fixed
+- Quick overlay menu (LB+RB) hidden under game frame due to unconditional CRT rendering overwriting composite buffer
+- Quick overlay menu border clipping text on right side (widened from 20 to 24 tiles)
+- Binary name references in README (`nes-emulator` → `oxidenes`)
+
 ## [0.2.1] - 2026-04-05
 
 ### Performance
