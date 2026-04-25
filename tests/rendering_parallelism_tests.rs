@@ -43,9 +43,10 @@ fn crt_filters_use_multi_row_processing_chunks() {
 fn glass_inner_loop_avoids_row_chunk_vec_allocation() {
     let source = include_str!("../src/rendering.rs");
     let block = function_block(source, "glass_inner_loop");
+    let compact_block: String = block.chars().filter(|ch| !ch.is_whitespace()).collect();
 
     assert!(
-        block.contains("buffer[buf_start..buf_end].chunks_mut(window_width * PAR_ROWS)"),
+        compact_block.contains("buffer[buf_start..buf_end].chunks_mut(window_width*PAR_ROWS)"),
         "glass_inner_loop should chunk directly over the window slice"
     );
     assert!(

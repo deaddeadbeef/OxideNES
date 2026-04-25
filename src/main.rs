@@ -1,4 +1,9 @@
 #![windows_subsystem = "windows"]
+#![allow(
+    clippy::collapsible_match,
+    clippy::unnecessary_min_or_max,
+    clippy::unnecessary_sort_by
+)]
 
 use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
 use std::collections::VecDeque;
@@ -4573,7 +4578,7 @@ fn main() {
                     // The Option<Instant> pattern has zero cost when do_detail_sample is false.
                     let do_detail_sample = overlay_level == PerfOverlayLevel::Detailed && {
                         detail_tick = detail_tick.wrapping_add(1);
-                        detail_tick % 60 == 0
+                        detail_tick.is_multiple_of(60)
                     };
                     // Render game frame (skip when paused or overlay active — they have own rendering)
                     if !paused && !quick_overlay {
