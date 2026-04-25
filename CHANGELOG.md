@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.3] - 2026-04-26
+
+### Performance
+- Added a flat CRT scaler fast path for the default non-barrel rendering mode
+- Cached horizontally scaled NES rows and reused them during vertical blending
+- Reduced `crt_filter` benchmark median from about 8.10ms to about 6.35ms on the local Windows benchmark run
+
+### Tests
+- Added byte-for-byte equivalence coverage for the new flat CRT masked/basic paths
+
 ## [0.2.2] - 2026-04-12
 
 ### Added
