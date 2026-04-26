@@ -53,11 +53,17 @@ jobs:
         env:
           OXIDENES_RELEASE: "1"
 
+      - name: Stage platform binary
+        shell: bash
+        run: |
+          mkdir -p target/release-assets
+          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "target/release-assets/${{ matrix.asset_name }}"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          path: target/release-assets/${{ matrix.asset_name }}
 
       - name: Upload installer artifact
         if: matrix.os == 'windows-latest'

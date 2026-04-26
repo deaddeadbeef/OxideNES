@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.1] - 2026-04-26
+
+### Added
+- Added automatic marquee scrolling for selected long game names in the home screen favorites list, recent games list, ROM browser, and first-run folder setup browser
+- Kept row markers, favorite stars, directory prefixes, and file size labels fixed while only the selected title text scrolls
+
+### Changed
+- Long unselected game names now truncate with an ellipsis instead of silently cutting off mid-title
+- Added a short pause before marquee scrolling starts so readable names do not move immediately
+
+### Fixed
+- Fixed long ROM names like "TEENAGE MUTANT NINJA..." being impossible to read completely from the browser list
+- Updated the release workflow so platform binaries are staged with their final download names before upload, avoiding ambiguous assets such as a generic `oxidenes` file
+
+### Tests
+- Added unit coverage for marquee pause/scroll behavior and character-count-based ellipsis truncation
+
 ## [0.3.0] - 2026-04-26
 
 ### Changed

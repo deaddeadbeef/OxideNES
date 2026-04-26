@@ -785,6 +785,8 @@ struct MenuState {
     submenu: Option<SubMenu>,
     cursor_visible: bool,
     cursor_timer: u32,
+    marquee_frame: u32,
+    marquee_key: String,
     // Screen transition fade effect
     transition_timer: u8,      // counts down from 6 to 0
     transition_out: bool,      // true = fading out, false = fading in
@@ -798,6 +800,8 @@ impl MenuState {
             submenu: None,
             cursor_visible: true,
             cursor_timer: 0,
+            marquee_frame: 0,
+            marquee_key: String::new(),
             transition_timer: 0,
             transition_out: false,
             favorites_page: 0,
@@ -1042,6 +1046,135 @@ fn draw_text_centered_8x8(fb: &mut [u32], text: &str, tile_y: usize, color: u32)
     draw_text_8x8(fb, text, tile_x, tile_y, color);
 }
 
+const MARQUEE_INITIAL_PAUSE_FRAMES: u32 = 45;
+const MARQUEE_STEP_FRAMES: u32 = 8;
+const MARQUEE_GAP: &str = "   ";
+
+fn truncate_with_ellipsis_chars(text: &str, max_chars: usize) -> String {
+    let len = text.chars().count();
+    if len <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+
+    let prefix: String = text.chars().take(max_chars - 3).collect();
+    format!("{}...", prefix)
+}
+
+fn marquee_text(text: &str, max_chars: usize, frame: u32) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if max_chars == 0 {
+        return String::new();
+    }
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+
+    let gap: Vec<char> = MARQUEE_GAP.chars().collect();
+    let cycle_len = chars.len() + gap.len();
+    let offset = if frame < MARQUEE_INITIAL_PAUSE_FRAMES {
+        0
+    } else {
+        ((frame - MARQUEE_INITIAL_PAUSE_FRAMES) / MARQUEE_STEP_FRAMES) as usize % cycle_len
+    };
+
+    chars.iter()
+        .chain(gap.iter())
+        .chain(chars.iter())
+        .skip(offset)
+        .take(max_chars)
+        .copied()
+        .collect()
+}
+
+fn draw_prefixed_name_8x8(fb: &mut [u32], prefix: &str, name: &str, tile: (usize, usize), name_max_chars: usize, color: u32, marquee_frame: Option<u32>) {
+    let (tile_x, tile_y) = tile;
+    draw_text_8x8(fb, prefix, tile_x, tile_y, color);
+    let display_name = if let Some(frame) = marquee_frame {
+        marquee_text(name, name_max_chars, frame)
+    } else {
+        truncate_with_ellipsis_chars(name, name_max_chars)
+    };
+    draw_text_8x8(fb, &display_name, tile_x + prefix.chars().count(), tile_y, color);
+}
+
+fn selected_marquee_key(menu: &MenuState, cfg: &EmulatorConfig, favorites_valid: &[bool]) -> String {
+    match &menu.submenu {
+        None => {
+            let valid_favorites: Vec<&String> = cfg.favorite_games.iter().enumerate()
+                .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
+                .map(|(_, p)| p)
+                .collect();
+            let total_favs = valid_favorites.len();
+            let per_page = 5usize;
+            let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
+            let page = menu.favorites_page.min(total_pages.saturating_sub(1));
+            let page_start = page * per_page;
+            let page_end = (page_start + per_page).min(total_favs);
+            let fav_count = page_end - page_start;
+
+            let mut current_row = 4usize;
+            if total_favs > 0 {
+                current_row += 1 + fav_count + 1;
+            }
+            let recent_non_fav: Vec<&String> = cfg.recent_games.iter()
+                .filter(|p| !cfg.favorite_games.contains(p))
+                .collect();
+            let recent_count = recent_non_fav
+                .len()
+                .min((23_usize.saturating_sub(current_row)).min(8));
+
+            if menu.selected < fav_count {
+                format!("home:fav:{}", valid_favorites[page_start + menu.selected])
+            } else if menu.selected < fav_count + recent_count {
+                format!("home:recent:{}", recent_non_fav[menu.selected - fav_count])
+            } else {
+                format!("home:item:{}", menu.selected)
+            }
+        }
+        Some(SubMenu::FileBrowser(browser)) => browser.entries
+            .get(browser.selected)
+            .map(|entry| format!("browser:{}", entry.full_path.display()))
+            .unwrap_or_else(|| "browser:empty".to_string()),
+        Some(SubMenu::FolderSetup { browser, .. }) => browser.entries
+            .get(browser.selected)
+            .map(|entry| format!("folder:{}", entry.full_path.display()))
+            .unwrap_or_else(|| "folder:empty".to_string()),
+        Some(SubMenu::Settings { selected, .. }) => format!("settings:{}", selected),
+        Some(SubMenu::InputSettings(state)) => format!("input:{}:{}", state.tab, state.selected),
+        Some(SubMenu::CrtSettings { selected, .. }) => format!("crt:{}", selected),
+    }
+}
+
+#[cfg(test)]
+mod menu_text_tests {
+    use super::*;
+
+    #[test]
+    fn marquee_keeps_short_text_static() {
+        assert_eq!(marquee_text("CONTRA", 12, 0), "CONTRA");
+        assert_eq!(marquee_text("CONTRA", 12, 240), "CONTRA");
+    }
+
+    #[test]
+    fn marquee_pauses_then_scrolls_selected_long_text() {
+        let title = "TEENAGE MUTANT NINJA TURTLES";
+        assert_eq!(marquee_text(title, 14, 0), "TEENAGE MUTANT");
+        assert_eq!(
+            marquee_text(title, 14, MARQUEE_INITIAL_PAUSE_FRAMES + MARQUEE_STEP_FRAMES),
+            "EENAGE MUTANT "
+        );
+    }
+
+    #[test]
+    fn truncation_is_char_count_based() {
+        assert_eq!(truncate_with_ellipsis_chars("ABCDEFGHIJ", 7), "ABCD...");
+        assert_eq!(truncate_with_ellipsis_chars("ABCDE", 7), "ABCDE");
+    }
+}
+
 fn draw_horizontal_line_px(fb: &mut [u32], y: usize, x_start: usize, x_end: usize, color: u32) {
     if y < 240 {
         for x in x_start..x_end.min(256) {
@@ -1192,8 +1325,15 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
 
             let display_name = filename.to_uppercase();
             let display_name = display_name.strip_suffix(".NES").unwrap_or(&display_name);
-            let display = format!("\x11 {}", &display_name.chars().take(24).collect::<String>());
-            draw_text_8x8(fb, &display, 3, row, color);
+            draw_prefixed_name_8x8(
+                fb,
+                "\x11 ",
+                display_name,
+                (3, row),
+                24,
+                color,
+                is_selected.then_some(menu.marquee_frame),
+            );
 
             item_index += 1;
             current_row += 1;
@@ -1251,7 +1391,11 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
 
                 let display_name = filename.to_uppercase();
                 let display_name = display_name.strip_suffix(".NES").unwrap_or(&display_name);
-                let display: String = display_name.chars().take(26).collect();
+                let display = if is_selected {
+                    marquee_text(display_name, 26, menu.marquee_frame)
+                } else {
+                    truncate_with_ellipsis_chars(display_name, 26)
+                };
                 draw_text_8x8(fb, &display, 3, row, color);
 
                 item_index += 1;
@@ -1522,7 +1666,7 @@ fn truncate_path_display(path: &Path, max_chars: usize) -> String {
     }
 }
 
-fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, cfg: &EmulatorConfig) {
+fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, cfg: &EmulatorConfig, marquee_frame: u32) {
     const VISIBLE_ROWS: usize = 20;
     const FIRST_ROW: usize = 5;
     const DIR_COLOR: u32 = 0x5C94FC;
@@ -1555,21 +1699,16 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             let entry = &browser.entries[i];
             let is_selected = i == browser.selected;
 
-            let name_upper = entry.name.to_uppercase();
-            let display_name = if name_upper.len() > 24 {
-                format!("{}...", &name_upper[..21])
-            } else {
-                name_upper
-            };
+            let display_name = entry.name.to_uppercase();
 
             let is_fav = !entry.is_dir && is_favorite(cfg, &entry.full_path.to_string_lossy());
 
-            let display = if entry.is_dir {
-                format!("> {}", display_name)
+            let prefix = if entry.is_dir {
+                "> "
             } else if is_fav {
-                format!("\x11 {}", display_name)
+                "\x11 "
             } else {
-                format!("  {}", display_name)
+                "  "
             };
 
             if is_selected {
@@ -1583,21 +1722,42 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 if !entry.is_dir && entry.size_kb > 0 {
                     let size_str = format!("{}K", entry.size_kb);
                     let size_x = 28 - size_str.len().min(6);
-                    // Truncate display name so it doesn't overlap with size
+                    // Keep the size fixed while the selected long title scrolls.
                     let max_name_chars = size_x.saturating_sub(3);
-                    let truncated = if display.len() > max_name_chars && max_name_chars > 3 {
-                        format!("{}...", &display[..max_name_chars - 3])
-                    } else {
-                        display.clone()
-                    };
-                    draw_text_8x8(fb, &truncated, 3, row, color);
+                    let prefix_chars = prefix.chars().count();
+                    let title_chars = max_name_chars.saturating_sub(prefix_chars);
+                    draw_prefixed_name_8x8(
+                        fb,
+                        prefix,
+                        &display_name,
+                        (3, row),
+                        title_chars,
+                        color,
+                        Some(marquee_frame),
+                    );
                     draw_text_8x8(fb, &size_str, size_x, row, MENU_DARK_GRAY);
                 } else {
-                    draw_text_8x8(fb, &display, 3, row, color);
+                    draw_prefixed_name_8x8(
+                        fb,
+                        prefix,
+                        &display_name,
+                        (3, row),
+                        24,
+                        color,
+                        Some(marquee_frame),
+                    );
                 }
             } else {
                 let color = if entry.is_dir { DIR_COLOR } else { MENU_GRAY };
-                draw_text_8x8(fb, &display, 3, row, color);
+                draw_prefixed_name_8x8(
+                    fb,
+                    prefix,
+                    &display_name,
+                    (3, row),
+                    24,
+                    color,
+                    None,
+                );
             }
         }
 
@@ -1628,7 +1788,7 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
     }
 }
 
-fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool) {
+fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, marquee_frame: u32) {
     const VISIBLE_ROWS: usize = 14;
     const FIRST_ROW: usize = 9;
     const DIR_COLOR: u32 = 0x5C94FC;
@@ -1663,17 +1823,11 @@ fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             let entry = &browser.entries[i];
             let is_selected = i == browser.selected;
 
-            let name_upper = entry.name.to_uppercase();
-            let display_name = if name_upper.len() > 24 {
-                format!("{}...", &name_upper[..21])
+            let display_name = entry.name.to_uppercase();
+            let prefix = if entry.is_dir {
+                "> "
             } else {
-                name_upper
-            };
-
-            let display = if entry.is_dir {
-                format!("> {}", display_name)
-            } else {
-                format!("  {}", display_name)
+                "  "
             };
 
             if is_selected {
@@ -1682,10 +1836,26 @@ fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
                 let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_DARK_GRAY };
-                draw_text_8x8(fb, &display, 3, row, color);
+                draw_prefixed_name_8x8(
+                    fb,
+                    prefix,
+                    &display_name,
+                    (3, row),
+                    24,
+                    color,
+                    Some(marquee_frame),
+                );
             } else {
                 let color = if entry.is_dir { DIR_COLOR } else { MENU_DARK_GRAY };
-                draw_text_8x8(fb, &display, 3, row, color);
+                draw_prefixed_name_8x8(
+                    fb,
+                    prefix,
+                    &display_name,
+                    (3, row),
+                    24,
+                    color,
+                    None,
+                );
             }
         }
 
@@ -3464,6 +3634,14 @@ fn main() {
                     continue;
                 }
 
+                let marquee_key = selected_marquee_key(menu, &config, &favorites_valid);
+                if marquee_key == menu.marquee_key {
+                    menu.marquee_frame = menu.marquee_frame.wrapping_add(1);
+                } else {
+                    menu.marquee_key = marquee_key;
+                    menu.marquee_frame = 0;
+                }
+
                 // Render menu to 256x240 framebuffer
                 match menu.submenu {
                     None => {
@@ -3482,7 +3660,7 @@ fn main() {
                         if *value_flash > 0 { *value_flash -= 1; }
                     }
                     Some(SubMenu::FileBrowser(ref browser)) => {
-                        render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible, &config);
+                        render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible, &config, menu.marquee_frame);
                     }
                     Some(SubMenu::InputSettings(ref state)) => {
                         render_input_settings(&mut menu_framebuffer, state, menu.cursor_visible);
@@ -3492,7 +3670,7 @@ fn main() {
                         if *value_flash > 0 { *value_flash -= 1; }
                     }
                     Some(SubMenu::FolderSetup { ref browser, .. }) => {
-                        render_folder_setup(&mut menu_framebuffer, browser, menu.cursor_visible);
+                        render_folder_setup(&mut menu_framebuffer, browser, menu.cursor_visible, menu.marquee_frame);
                     }
                 }
 
