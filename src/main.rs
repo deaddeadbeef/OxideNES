@@ -31,11 +31,14 @@ use oxidenes::romdb::RomDatabase;
 use oxidenes::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
-const TV_WIDTH: usize = 1100;
-const TV_HEIGHT: usize = 844;
+const TV_WIDTH: usize = 1240;
+const TV_HEIGHT: usize = 884;
 const CONSOLE_HEIGHT: usize = 110;
 const WINDOW_WIDTH: usize = TV_WIDTH;
 const WINDOW_HEIGHT: usize = TV_HEIGHT + CONSOLE_HEIGHT;
+const SCREEN_CURVE_SRC_BITS: u32 = 20;
+const SCREEN_CURVE_SRC_MASK: u32 = (1 << SCREEN_CURVE_SRC_BITS) - 1;
+const SCREEN_CURVE_CORNER_R: usize = 18;
 
 // NES menu colors
 const MENU_BG: u32 = 0x0C0C3C;
@@ -1816,6 +1819,39 @@ fn build_distortion_table_with_curvature(curvature: u8) -> Vec<(u32, u32)> {
     table
 }
 
+fn build_screen_curve_table() -> Vec<u32> {
+    let mut table = Vec::with_capacity(SCREEN_W * SCREEN_H);
+    let max_src_idx = (1usize << SCREEN_CURVE_SRC_BITS) - 1;
+    debug_assert!(SCREEN_W * SCREEN_H <= max_src_idx);
+
+    for dst_y in 0..SCREEN_H {
+        let ny = ((dst_y as f32 + 0.5) / SCREEN_H as f32) * 2.0 - 1.0;
+        for dst_x in 0..SCREEN_W {
+            let nx = ((dst_x as f32 + 0.5) / SCREEN_W as f32) * 2.0 - 1.0;
+            let src_idx = dst_y * SCREEN_W + dst_x;
+
+            let edge = nx.abs().max(ny.abs());
+            let edge_t = ((edge - 0.82) / 0.18).clamp(0.0, 1.0);
+            let corner_t = (nx.abs() * ny.abs()).powf(1.65);
+            let shade = if rounded_rect_contains(
+                dst_x,
+                dst_y,
+                SCREEN_W,
+                SCREEN_H,
+                SCREEN_CURVE_CORNER_R,
+            ) {
+                (256.0 - edge_t * edge_t * 18.0 - corner_t * 10.0).clamp(210.0, 256.0) as u32
+            } else {
+                0
+            };
+
+            table.push((src_idx as u32) | (shade << SCREEN_CURVE_SRC_BITS));
+        }
+    }
+
+    table
+}
+
 fn build_mask_table(mode: &CrtMaskMode, mask_intensity: u8) -> Vec<(u16, u16, u16)> {
     let intensity = mask_intensity as u32;
     let inv = 100 - intensity;
@@ -2230,6 +2266,7 @@ fn main() {
     // Pre-compute barrel distortion lookup table (configurable curvature)
     let mut distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
     let flat_distortion_table = build_flat_distortion_table();
+    let screen_curve_table = build_screen_curve_table();
     let glare_table = build_glare_table();
     let glass_thickness_table = build_glass_thickness_table();
     let mut mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
@@ -3352,7 +3389,7 @@ fn main() {
                                 } else {
                                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                                 }
-                                composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                                composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
                                 let _ = window.update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
                                 match Cartridge::new_with_romdb(&rom_data, Some(&romdb)) {
@@ -3480,10 +3517,9 @@ fn main() {
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
-                composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
                 if crt_enabled && glass_intensity > 0 {
-                    let do_ghost = glass_intensity > 20;
-                    apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
+                    apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
                 }
 
                 window
@@ -4609,14 +4645,13 @@ fn main() {
 
                         // Stage 3: Composite game output into TV frame
                         let t_composite = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
                         if let Some(t) = t_composite { perf_snapshot.composite_us = t.elapsed().as_micros() as u32; }
 
                         // Stage 4: Glass / bezel effects
                         let t_glass = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
                         if crt_enabled && glass_intensity > 0 {
-                            let do_ghost = glass_intensity > 20;
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
+                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
                         }
                         if let Some(t) = t_glass { perf_snapshot.glass_us = t.elapsed().as_micros() as u32; }
                     } // end if !paused && !quick_overlay
@@ -5826,10 +5861,9 @@ fn main() {
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
                         if crt_enabled && glass_intensity > 0 {
-                            let do_ghost = glass_intensity > 20;
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
+                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
                         }
 
                         // Render save state thumbnail in pause menu(composite buffer)
@@ -6070,10 +6104,9 @@ fn main() {
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, WINDOW_WIDTH);
+                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
                         if crt_enabled && glass_intensity > 0 {
-                            let do_ghost = glass_intensity > 20;
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, do_ghost, SCREEN_W);
+                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
                         }
                     }
 
@@ -6405,357 +6438,765 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     (p1_start, p1_select, l_trigger, r_trigger)
 }
 
-fn build_tv_frame(frame: &mut Vec<u32>) {
-    frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
+#[derive(Clone, Copy)]
+struct PixelRect {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+}
 
-    // ===== WALL BACKGROUND =====
-    for y in 0..TV_HEIGHT {
-        for x in 0..WINDOW_WIDTH {
-            let idx = y * WINDOW_WIDTH + x;
-            let noise = ((x.wrapping_mul(7) ^ y.wrapping_mul(13)) % 4) as u32;
-            frame[idx] = (0x1A + noise) << 16 | (0x18 + noise) << 8 | (0x16 + noise);
-        }
+impl PixelRect {
+    #[inline]
+    fn x2(self) -> usize {
+        self.x + self.w
     }
 
-    // ===== TV OUTER SHELL (silver plastic) =====
-    let tv_x1: usize = 25;
-    let tv_y1: usize = 12;
-    let tv_x2: usize = WINDOW_WIDTH - 25;
-    let tv_y2: usize = TV_HEIGHT - 12;
-    let tv_w = tv_x2 - tv_x1;
-    let tv_h = tv_y2 - tv_y1;
-    let corner_r: usize = 14;
+    #[inline]
+    fn y2(self) -> usize {
+        self.y + self.h
+    }
+}
 
-    // The bottom panel starts below the screen area
-    let panel_y = SCREEN_Y + SCREEN_H + 6; // panel divider Y
+#[inline]
+fn rgb(r: u32, g: u32, b: u32) -> u32 {
+    (r.min(255) << 16) | (g.min(255) << 8) | b.min(255)
+}
 
-    for y in tv_y1..tv_y2 {
-        for x in tv_x1..tv_x2 {
-            let lx = x - tv_x1;
-            let ly = y - tv_y1;
+#[inline]
+fn color_channel(color: u32, shift: u32) -> u32 {
+    (color >> shift) & 0xFF
+}
 
-            // Rounded corner check
-            let in_corner = (ly >= tv_h - corner_r || ly < corner_r) && (lx >= tv_w - corner_r || lx < corner_r);
-            if in_corner {
-                let cx = if lx < corner_r { corner_r } else { tv_w - corner_r };
-                let cy = if ly < corner_r { corner_r } else { tv_h - corner_r };
-                let dx = lx as f32 - cx as f32;
-                let dy = ly as f32 - cy as f32;
-                if (dx * dx + dy * dy).sqrt() > corner_r as f32 {
-                    continue;
-                }
-            }
+#[inline]
+fn adjust_color(color: u32, delta: i32) -> u32 {
+    let adjust = |channel: u32| -> u32 { (channel as i32 + delta).clamp(0, 255) as u32 };
+    rgb(
+        adjust(color_channel(color, 16)),
+        adjust(color_channel(color, 8)),
+        adjust(color_channel(color, 0)),
+    )
+}
 
-            // Silver plastic color with vertical gradient for 3D depth
-            let vert_t = ly as f32 / tv_h as f32;
-            // Lighter at top (light from above), darker at bottom
-            let silver_base: f32 = if y < panel_y { 0xA8 as f32 } else { 0x98 as f32 };
-            let gradient = silver_base * (1.0 - vert_t * 0.25);
+#[inline]
+fn blend_color(color: u32, target: u32, alpha: f32) -> u32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    let blend = |src: u32, dst: u32| -> u32 {
+        (src as f32 * (1.0 - alpha) + dst as f32 * alpha).round() as u32
+    };
+    rgb(
+        blend(color_channel(color, 16), color_channel(target, 16)),
+        blend(color_channel(color, 8), color_channel(target, 8)),
+        blend(color_channel(color, 0), color_channel(target, 0)),
+    )
+}
 
-            // Horizontal gradient for edge lighting (lighter center, darker edges)
-            let horiz_t = (lx as f32 / tv_w as f32 - 0.5).abs() * 2.0; // 0 at center, 1 at edges
-            let horiz_dim = 1.0 - horiz_t * 0.08;
-
-            let base = (gradient * horiz_dim) as u32;
-            // Slight warm tint for silver plastic
-            let r = base.min(255);
-            let g = base.min(255);
-            let b = (base + 4).min(255); // very slight cool tint
-
-            // Plastic texture noise
-            let noise = ((x.wrapping_mul(31) ^ y.wrapping_mul(17)) % 3) as u32;
-            let r = r.saturating_add(noise).min(255);
-            let g = g.saturating_add(noise).min(255);
-            let b = b.saturating_add(noise).min(255);
-
-            frame[y * WINDOW_WIDTH + x] = (r << 16) | (g << 8) | b;
+#[inline]
+fn write_pixel(frame: &mut [u32], x: usize, y: usize, color: u32) {
+    if x < WINDOW_WIDTH {
+        let idx = y * WINDOW_WIDTH + x;
+        if idx < frame.len() {
+            frame[idx] = color;
         }
     }
+}
 
-    // ===== EDGE HIGHLIGHTS (3D silver bevel) =====
-    // Top edge: bright highlight (light catch)
-    for x in (tv_x1 + corner_r)..(tv_x2 - corner_r) {
-        for dy in 0..3 {
-            let y = tv_y1 + dy;
-            let brightness = (40 - dy * 12) as u32;
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                let p = frame[idx];
-                let r = (((p >> 16) & 0xFF) + brightness).min(255);
-                let g = (((p >> 8) & 0xFF) + brightness).min(255);
-                let b = ((p & 0xFF) + brightness).min(255);
-                frame[idx] = (r << 16) | (g << 8) | b;
-            }
-        }
-    }
-    // Left edge: subtle highlight
-    for y in (tv_y1 + corner_r)..(tv_y2 - corner_r) {
-        for dx in 0..2 {
-            let x = tv_x1 + dx;
-            let brightness = (25 - dx * 12) as u32;
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                let p = frame[idx];
-                let r = (((p >> 16) & 0xFF) + brightness).min(255);
-                let g = (((p >> 8) & 0xFF) + brightness).min(255);
-                let b = ((p & 0xFF) + brightness).min(255);
-                frame[idx] = (r << 16) | (g << 8) | b;
-            }
-        }
-    }
-    // Bottom/right: shadow
-    for x in (tv_x1 + corner_r)..(tv_x2 - corner_r) {
-        for dy in 0..3 {
-            let y = tv_y2 - 1 - dy;
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                let p = frame[idx];
-                let dim = 25 - dy * 8;
-                let r = ((p >> 16) & 0xFF).saturating_sub(dim as u32);
-                let g = ((p >> 8) & 0xFF).saturating_sub(dim as u32);
-                let b = (p & 0xFF).saturating_sub(dim as u32);
-                frame[idx] = (r << 16) | (g << 8) | b;
-            }
-        }
-    }
-    for y in (tv_y1 + corner_r)..(tv_y2 - corner_r) {
-        for dx in 0..2 {
-            let x = tv_x2 - 1 - dx;
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                let p = frame[idx];
-                let r = ((p >> 16) & 0xFF).saturating_sub(20);
-                let g = ((p >> 8) & 0xFF).saturating_sub(20);
-                let b = (p & 0xFF).saturating_sub(20);
-                frame[idx] = (r << 16) | (g << 8) | b;
-            }
-        }
+#[inline]
+fn rounded_rect_contains(lx: usize, ly: usize, w: usize, h: usize, radius: usize) -> bool {
+    let radius = radius.min(w / 2).min(h / 2);
+    if radius == 0 {
+        return true;
     }
 
-    // ===== SCREEN BEZEL (dark recessed border around screen) =====
-    let bezel_pad: usize = 8;
-    let bx1 = SCREEN_X - bezel_pad;
-    let by1 = SCREEN_Y - bezel_pad;
-    let bx2 = SCREEN_X + SCREEN_W + bezel_pad;
-    let by2 = SCREEN_Y + SCREEN_H + bezel_pad;
+    let left = lx < radius;
+    let right = lx >= w - radius;
+    let top = ly < radius;
+    let bottom = ly >= h - radius;
 
-    for y in by1..by2 {
-        for x in bx1..bx2 {
-            if (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y) && (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x) {
-                continue;
-            }
-            if y < TV_HEIGHT && x < WINDOW_WIDTH {
-                let dist_top = (y - by1) as f32;
-                let dist_left = (x - bx1) as f32;
-                let dist_bottom = (by2 - 1 - y) as f32;
-                let dist_right = (bx2 - 1 - x) as f32;
-                let min_dist = dist_top.min(dist_left).min(dist_bottom).min(dist_right);
-                let depth = (min_dist / bezel_pad as f32).min(1.0);
-                let shade = 0x10 as f32 + depth * 0x14 as f32;
-                let v = shade as u32;
-                frame[y * WINDOW_WIDTH + x] = (v << 16) | (v << 8) | v;
-            }
-        }
+    if (left || right) && (top || bottom) {
+        let cx = if left { radius } else { w - 1 - radius };
+        let cy = if top { radius } else { h - 1 - radius };
+        let dx = lx.abs_diff(cx);
+        let dy = ly.abs_diff(cy);
+        dx * dx + dy * dy <= radius * radius
+    } else {
+        true
     }
+}
 
-    // ===== GLASS EDGE (crisp 2px border) =====
-    let glass_color: u32 = 0x060606;
-    for x in (SCREEN_X - 2)..(SCREEN_X + SCREEN_W + 2) {
-        for dy in 0..2 {
-            let y = SCREEN_Y - 2 + dy;
-            if y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-            let y = SCREEN_Y + SCREEN_H + dy;
-            if y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-        }
-    }
-    for y in (SCREEN_Y - 2)..(SCREEN_Y + SCREEN_H + 2) {
-        for dx in 0..2 {
-            let x = SCREEN_X - 2 + dx;
-            if x < WINDOW_WIDTH && y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-            let x = SCREEN_X + SCREEN_W + dx;
-            if x < WINDOW_WIDTH && y < TV_HEIGHT { frame[y * WINDOW_WIDTH + x] = glass_color; }
-        }
-    }
-
-    // ===== PANEL DIVIDER LINE (separates upper bezel from bottom panel) =====
-    if panel_y < tv_y2 {
-        for x in (tv_x1 + 5)..(tv_x2 - 5) {
-            let idx = panel_y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                frame[idx] = 0x7A7A7E; // Light gray line
-            }
-            // Shadow below line
-            if panel_y + 1 < TV_HEIGHT {
-                let idx2 = (panel_y + 1) * WINDOW_WIDTH + x;
-                if idx2 < frame.len() {
-                    frame[idx2] = 0x686868;
-                }
-            }
-        }
-    }
-
-    // ===== SPEAKER GRILLE (left side of bottom panel) =====
-    let grille_x1 = tv_x1 + 20;
-    let grille_x2 = tv_x1 + 160;
-    let grille_y1 = panel_y + 10;
-    let grille_y2 = tv_y2 - 14;
-    
-    for y in grille_y1..grille_y2.min(TV_HEIGHT) {
-        for x in grille_x1..grille_x2.min(WINDOW_WIDTH) {
-            let row = (y - grille_y1) % 4;
-            if row == 0 || row == 1 {
-                // Grille slot: dark horizontal lines
-                let idx = y * WINDOW_WIDTH + x;
-                if idx < frame.len() {
-                    frame[idx] = 0x505054;
-                }
-            }
-        }
-    }
-
-    // ===== RCA INPUT JACKS (4 colored circles) =====
-    let jack_colors: [(u32, usize); 4] = [
-        (0xD0D040, 5),  // Yellow (video) 
-        (0xE0E0E0, 5),  // White (audio L)
-        (0xD04040, 5),  // Red (audio R)
-        (0x40A0D0, 5),  // Blue (S-video)
-    ];
-    let jack_start_x = grille_x2 + 30;
-    let jack_y = (grille_y1 + grille_y2) / 2;
-
-    for (i, &(color, radius)) in jack_colors.iter().enumerate() {
-        let cx = jack_start_x + i * 26;
-        let cy = jack_y;
-        // Outer ring (dark)
-        for dy in 0..(radius * 2 + 4) {
-            for dx in 0..(radius * 2 + 4) {
-                let px = cx + dx - radius - 2;
-                let py = cy + dy - radius - 2;
-                if px < WINDOW_WIDTH && py < TV_HEIGHT {
-                    let ddx = px as f32 - cx as f32;
-                    let ddy = py as f32 - cy as f32;
-                    let dist = (ddx * ddx + ddy * ddy).sqrt();
-                    if dist <= (radius + 2) as f32 && dist > radius as f32 {
-                        frame[py * WINDOW_WIDTH + px] = 0x303030;
-                    } else if dist <= radius as f32 {
-                        // Inner colored circle
-                        let bright = 1.0 - dist / (radius as f32 * 1.5);
-                        let cr = ((color >> 16) & 0xFF) as f32 * bright;
-                        let cg = ((color >> 8) & 0xFF) as f32 * bright;
-                        let cb = (color & 0xFF) as f32 * bright;
-                        frame[py * WINDOW_WIDTH + px] = ((cr as u32) << 16) | ((cg as u32) << 8) | (cb as u32);
-                    }
-                }
-            }
-        }
-        // Center hole (black)
-        for dy in 0..3usize {
-            for dx in 0..3usize {
-                let px = cx + dx - 1;
-                let py = cy + dy - 1;
-                if px < WINDOW_WIDTH && py < TV_HEIGHT {
-                    frame[py * WINDOW_WIDTH + px] = 0x0A0A0A;
-                }
-            }
-        }
-    }
-
-    // ===== CONTROL BUTTONS (7 rectangular buttons) =====
-    let btn_start_x = jack_start_x + 130;
-    let btn_y1 = jack_y - 6;
-    let btn_y2 = jack_y + 6;
-    let btn_w: usize = 12;
-    let btn_gap: usize = 5;
-
-    for i in 0..7usize {
-        let bx = btn_start_x + i * (btn_w + btn_gap);
-        // Button body (slightly darker silver)
-        for y in btn_y1..btn_y2.min(TV_HEIGHT) {
-            for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
-                let idx = y * WINDOW_WIDTH + x;
-                if idx < frame.len() {
-                    frame[idx] = 0x787880;
-                }
-            }
-        }
-        // Button highlight (top edge)
-        for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
-            let idx = btn_y1 * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                frame[idx] = 0x909098;
-            }
-        }
-        // Button shadow (bottom edge)
-        if btn_y2 - 1 < TV_HEIGHT {
-            for x in bx..((bx + btn_w).min(WINDOW_WIDTH)) {
-                let idx = (btn_y2 - 1) * WINDOW_WIDTH + x;
-                if idx < frame.len() {
-                    frame[idx] = 0x606068;
-                }
-            }
-        }
-    }
-
-    // ===== BRAND BADGE (small rectangle, right side of panel) =====
-    let badge_x = tv_x2 - 90;
-    let badge_y = jack_y - 5;
-    let badge_w: usize = 45;
-    let badge_h: usize = 10;
-    for y in badge_y..(badge_y + badge_h).min(TV_HEIGHT) {
-        for x in badge_x..(badge_x + badge_w).min(WINDOW_WIDTH) {
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                frame[idx] = 0x8A8A90;
-            }
-        }
-    }
-
-    // ===== POWER LED (green dot, near buttons) =====
-    let led_x = btn_start_x - 16;
-    let led_y = jack_y;
-    for dy in 0..4usize {
-        for dx in 0..4usize {
-            let px = led_x + dx;
-            let py = led_y + dy - 2;
-            if px < WINDOW_WIDTH && py < TV_HEIGHT {
-                let ddx = dx as f32 - 1.5;
-                let ddy = dy as f32 - 1.5;
-                let dist = (ddx * ddx + ddy * ddy).sqrt();
-                if dist < 2.0 {
-                    let g = (0xA0 as f32 * (1.0 - dist / 3.0)) as u32;
-                    frame[py * WINDOW_WIDTH + px] = g.min(255) << 8;
-                }
-            }
-        }
-    }
-
-    // ===== DROP SHADOW (below TV onto wall) =====
-    for dy in 0..8usize {
-        let y = tv_y2 + dy;
-        if y >= TV_HEIGHT { break; }
-        let alpha = (8 - dy) as f32 / 12.0;
-        for x in (tv_x1 + 6)..(tv_x2 - 6) {
-            let idx = y * WINDOW_WIDTH + x;
-            if idx < frame.len() {
-                let p = frame[idx];
-                let r = ((((p >> 16) & 0xFF) as f32) * (1.0 - alpha)) as u32;
-                let g = ((((p >> 8) & 0xFF) as f32) * (1.0 - alpha)) as u32;
-                let b = (((p & 0xFF) as f32) * (1.0 - alpha)) as u32;
-                frame[idx] = (r << 16) | (g << 8) | b;
+fn draw_rounded_rect<F>(frame: &mut [u32], rect: PixelRect, radius: usize, mut color_at: F)
+where
+    F: FnMut(usize, usize) -> u32,
+{
+    let height = frame.len() / WINDOW_WIDTH;
+    let y_end = rect.y2().min(height);
+    let x_end = rect.x2().min(WINDOW_WIDTH);
+    for y in rect.y..y_end {
+        for x in rect.x..x_end {
+            if rounded_rect_contains(x - rect.x, y - rect.y, rect.w, rect.h, radius) {
+                frame[y * WINDOW_WIDTH + x] = color_at(x, y);
             }
         }
     }
 }
 
-fn composite_screen_fast(result: &mut [u32], game_output: &[u32], window_width: usize) {
-    // Only blit the CRT screen area onto the persistent composite buffer.
-    // The TV frame was already baked in at init time — no full-frame copy needed.
+fn darken_rounded_rect(frame: &mut [u32], rect: PixelRect, radius: usize, alpha: f32) {
+    let height = frame.len() / WINDOW_WIDTH;
+    let y_end = rect.y2().min(height);
+    let x_end = rect.x2().min(WINDOW_WIDTH);
+    for y in rect.y..y_end {
+        for x in rect.x..x_end {
+            if rounded_rect_contains(x - rect.x, y - rect.y, rect.w, rect.h, radius) {
+                let idx = y * WINDOW_WIDTH + x;
+                frame[idx] = blend_color(frame[idx], 0x000000, alpha);
+            }
+        }
+    }
+}
+
+fn draw_hline(frame: &mut [u32], x1: usize, x2: usize, y: usize, color: u32) {
+    if y >= frame.len() / WINDOW_WIDTH {
+        return;
+    }
+    for x in x1..x2.min(WINDOW_WIDTH) {
+        frame[y * WINDOW_WIDTH + x] = color;
+    }
+}
+
+fn draw_vline(frame: &mut [u32], x: usize, y1: usize, y2: usize, color: u32) {
+    if x >= WINDOW_WIDTH {
+        return;
+    }
+    let height = frame.len() / WINDOW_WIDTH;
+    for y in y1..y2.min(height) {
+        frame[y * WINDOW_WIDTH + x] = color;
+    }
+}
+
+fn draw_speaker_grille(frame: &mut [u32], rect: PixelRect) {
+    let well = PixelRect {
+        x: rect.x.saturating_sub(8),
+        y: rect.y.saturating_sub(6),
+        w: rect.w + 16,
+        h: rect.h + 12,
+    };
+    draw_rounded_rect(frame, well, 5, |x, y| {
+        let lx = x - well.x;
+        let ly = y - well.y;
+        let edge_x = (lx.min(well.w.saturating_sub(1) - lx)) as f32;
+        let edge_y = (ly.min(well.h.saturating_sub(1) - ly)) as f32;
+        let edge = edge_x.min(edge_y);
+        let lip = ((5.0 - edge).max(0.0) * 3.0) as i32;
+        let top_light = if ly < 3 { 18 } else { 0 };
+        let bottom_shadow = if ly + 4 >= well.h { -18 } else { 0 };
+        adjust_color(0x181A1B, top_light + lip + bottom_shadow)
+    });
+    draw_hline(frame, well.x + 8, well.x2() - 8, well.y + 1, 0x3B3E40);
+    draw_hline(frame, well.x + 8, well.x2() - 8, well.y2() - 2, 0x050606);
+
+    let mirror = rect.x > WINDOW_WIDTH / 2;
+    for y in rect.y..rect.y2().min(frame.len() / WINDOW_WIDTH) {
+        let ly = y - rect.y;
+        let taper = ly * 28 / rect.h.max(1);
+        let x1 = if mirror { rect.x + taper } else { rect.x };
+        let x2 = if mirror { rect.x2() } else { rect.x2().saturating_sub(taper) };
+        for x in x1..x2.min(WINDOW_WIDTH) {
+            let shade = if ly < 2 {
+                0x2F3234
+            } else if ly + 2 >= rect.h {
+                0x070809
+            } else {
+                0x1F2224
+            };
+            frame[y * WINDOW_WIDTH + x] = shade;
+        }
+    }
+
+    for row in 0..8usize {
+        let y = rect.y + 5 + row * 4;
+        let taper = (y - rect.y) * 28 / rect.h.max(1);
+        let x1 = if mirror { rect.x + taper + 4 } else { rect.x + 5 };
+        let x2 = if mirror { rect.x2() - 5 } else { rect.x2().saturating_sub(taper + 4) };
+        draw_hline(frame, x1, x2, y, 0x0B0C0D);
+        draw_hline(frame, x1, x2, y + 1, 0x17191A);
+        if y > rect.y {
+            draw_hline(frame, x1, x2, y - 1, 0x3A3C3E);
+        }
+    }
+}
+
+fn draw_front_button(frame: &mut [u32], rect: PixelRect, base: u32) {
+    let cx = rect.x as f32 + rect.w as f32 * 0.5;
+    let cy = rect.y as f32 + rect.h as f32 * 0.5;
+    let outer_radius = rect.w.min(rect.h) as f32 * 0.5;
+    let inner_radius = outer_radius - 1.15;
+    let height = frame.len() / WINDOW_WIDTH;
+
+    for y in rect.y.saturating_sub(1)..(rect.y2() + 1).min(height) {
+        for x in rect.x.saturating_sub(1)..(rect.x2() + 1).min(WINDOW_WIDTH) {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let dx = px - cx;
+            let dy = py - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let outer_alpha = (outer_radius + 0.5 - dist).clamp(0.0, 1.0);
+            if outer_alpha <= 0.0 {
+                continue;
+            }
+
+            let idx = y * WINDOW_WIDTH + x;
+            frame[idx] = blend_color(frame[idx], 0x0D0F10, outer_alpha);
+
+            let inner_alpha = (inner_radius + 0.5 - dist).clamp(0.0, 1.0);
+            if inner_alpha > 0.0 {
+                let top_lift = ((cy - py).max(0.0) * 4.0) as i32;
+                let rim = (dist / inner_radius.max(0.1) * 10.0) as i32;
+                let button = adjust_color(base, top_lift - rim);
+                frame[idx] = blend_color(frame[idx], button, inner_alpha);
+            }
+        }
+    }
+}
+
+fn draw_led(frame: &mut [u32], cx: usize, cy: usize) {
+    let cx = cx as f32 + 0.5;
+    let cy = cy as f32 + 0.5;
+    let height = frame.len() / WINDOW_WIDTH;
+    let glow_radius = 10.0f32;
+    let outer_radius = 5.5f32;
+    let lens_radius = 4.25f32;
+    let min_x = (cx - glow_radius - 1.0).max(0.0) as usize;
+    let max_x = (cx + glow_radius + 2.0).min(WINDOW_WIDTH as f32) as usize;
+    let min_y = (cy - glow_radius - 1.0).max(0.0) as usize;
+    let max_y = (cy + glow_radius + 2.0).min(height as f32) as usize;
+
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let dx = px - cx;
+            let dy = py - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist < glow_radius {
+                let glow = (1.0 - dist / glow_radius).powf(1.7) * 0.28;
+                let idx = y * WINDOW_WIDTH + x;
+                frame[idx] = blend_color(frame[idx], 0x19E35A, glow);
+            }
+        }
+    }
+
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let dx = px - cx;
+            let dy = py - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let outer_alpha = (outer_radius + 0.5 - dist).clamp(0.0, 1.0);
+            if outer_alpha <= 0.0 {
+                continue;
+            }
+
+            let idx = y * WINDOW_WIDTH + x;
+            frame[idx] = blend_color(frame[idx], 0x0B120D, outer_alpha);
+
+            let lens_alpha = (lens_radius + 0.5 - dist).clamp(0.0, 1.0);
+            if lens_alpha > 0.0 {
+                let intensity = (1.0 - dist / lens_radius).clamp(0.0, 1.0);
+                let highlight = if px < cx && py < cy { 18 } else { 0 };
+                let lens = rgb(
+                    (32.0 + 82.0 * intensity) as u32 + highlight,
+                    (172.0 + 68.0 * intensity) as u32 + highlight,
+                    (76.0 + 48.0 * intensity) as u32 + highlight / 2,
+                );
+                frame[idx] = blend_color(frame[idx], lens, lens_alpha);
+            }
+        }
+    }
+}
+
+fn draw_scaled_text(
+    frame: &mut [u32],
+    text: &str,
+    start_x: usize,
+    start_y: usize,
+    color: u32,
+    stride: usize,
+    scale: usize,
+) {
+    let mut cursor_x = start_x;
+    for ch in text.chars() {
+        let glyph = get_small_glyph(ch);
+        for (row, &bits) in glyph.iter().enumerate() {
+            for col in 0..3usize {
+                if bits & (0b100 >> col) != 0 {
+                    let px = cursor_x + col * scale;
+                    let py = start_y + row * scale;
+                    for sy in 0..scale {
+                        for sx in 0..scale {
+                            let x = px + sx;
+                            let y = py + sy;
+                            if x < stride && y * stride + x < frame.len() {
+                                frame[y * stride + x] = color;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cursor_x += 4 * scale;
+    }
+}
+
+fn build_tv_frame(frame: &mut Vec<u32>) {
+    frame.resize(WINDOW_WIDTH * WINDOW_HEIGHT, 0);
+
+    for y in 0..TV_HEIGHT {
+        for x in 0..WINDOW_WIDTH {
+            let nx = x as f32 / WINDOW_WIDTH as f32 - 0.5;
+            let ny = y as f32 / TV_HEIGHT as f32 - 0.38;
+            let vignette = ((nx * nx + ny * ny) * 28.0).min(18.0) as i32;
+            let vertical = (y as f32 / TV_HEIGHT as f32 * 10.0) as i32;
+            let noise =
+                ((x.wrapping_mul(7) ^ y.wrapping_mul(13) ^ (x + y).wrapping_mul(3)) % 5) as i32 - 2;
+            let shade = vignette + vertical;
+            let r = (196 - shade + noise).clamp(0, 255) as u32;
+            let g = (198 - shade + noise).clamp(0, 255) as u32;
+            let b = (193 - shade + noise).clamp(0, 255) as u32;
+            frame[y * WINDOW_WIDTH + x] = rgb(r, g, b);
+        }
+    }
+
+    let cabinet_w = 1054usize;
+    let cabinet_x = (WINDOW_WIDTH - cabinet_w) / 2;
+    let body = PixelRect {
+        x: cabinet_x,
+        y: 14,
+        w: cabinet_w,
+        h: TV_HEIGHT - 26,
+    };
+
+    for layer in (0..88usize).rev() {
+        let spread = layer / 2;
+        let shadow = PixelRect {
+            x: body.x + 26 + spread / 2,
+            y: body.y + 34 + spread / 3,
+            w: body.w + 64 + layer,
+            h: body.h + 36 + spread,
+        };
+        let alpha = 0.0005 + (88 - layer) as f32 * 0.00009;
+        darken_rounded_rect(frame, shadow, 54 + spread, alpha);
+    }
+
+    for layer in (0..38usize).rev() {
+        let spread = layer / 2;
+        let shadow = PixelRect {
+            x: body.x.saturating_sub(12 + spread),
+            y: body.y + 9 + spread / 2,
+            w: body.w + 24 + layer,
+            h: body.h + 18 + spread,
+        };
+        let alpha = 0.007 + (38 - layer) as f32 * 0.0018;
+        darken_rounded_rect(frame, shadow, 34 + spread, alpha);
+    }
+
+    for layer in (0..20usize).rev() {
+        let shadow = PixelRect {
+            x: body.x + 18 + layer,
+            y: body.y2().saturating_sub(14) + layer / 4,
+            w: body.w.saturating_sub(36 + layer * 2),
+            h: 14 + layer / 2,
+        };
+        let alpha = 0.015 + (20 - layer) as f32 * 0.003;
+        darken_rounded_rect(frame, shadow, 14 + layer / 2, alpha);
+    }
+
+    for layer in (0..18usize).rev() {
+        let shadow = PixelRect {
+            x: body.x + 2 + layer / 2,
+            y: body.y + 10 + layer,
+            w: body.w.saturating_sub(layer * 2),
+            h: body.h.saturating_sub(layer / 2),
+        };
+        let alpha = 0.015 + (18 - layer) as f32 * 0.006;
+        darken_rounded_rect(frame, shadow, 26 + layer, alpha);
+    }
+
+    draw_rounded_rect(frame, body, 27, |x, y| {
+        let lx = x - body.x;
+        let ly = y - body.y;
+        let fx = lx as f32 / body.w as f32;
+        let fy = ly as f32 / body.h as f32;
+        let edge = (fx - 0.5).abs() * 2.0;
+        let top_light = (1.0 - fy).max(0.0) * 18.0;
+        let center_lift = (1.0 - edge).max(0.0) * 7.0;
+        let lower_shadow = fy * 20.0;
+        let side_shadow = edge * 18.0;
+        let texture =
+            ((x.wrapping_mul(31) ^ y.wrapping_mul(17) ^ (x / 9).wrapping_mul(23)) % 4) as f32;
+        let base = (34.0 + top_light + center_lift - lower_shadow - side_shadow + texture)
+            .clamp(8.0, 68.0);
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+    });
+
+    draw_hline(frame, body.x + 34, body.x2() - 34, body.y + 2, 0x65696A);
+    draw_hline(frame, body.x + 38, body.x2() - 38, body.y + 3, 0x4B4E50);
+    draw_hline(frame, body.x + 42, body.x2() - 42, body.y + 9, 0x252728);
+    draw_hline(frame, body.x + 36, body.x2() - 36, body.y2() - 4, 0x090A0A);
+    draw_hline(frame, body.x + 42, body.x2() - 42, body.y2() - 3, 0x202123);
+    draw_vline(frame, body.x + 2, body.y + 38, body.y2() - 40, 0x4C4F50);
+    draw_vline(frame, body.x + 3, body.y + 40, body.y2() - 42, 0x2A2C2D);
+    draw_vline(frame, body.x2() - 3, body.y + 38, body.y2() - 40, 0x070707);
+    draw_vline(frame, body.x2() - 4, body.y + 40, body.y2() - 42, 0x151617);
+    for inset in 0..5usize {
+        let shade = adjust_color(0x1A1D1E, -(inset as i32 * 3));
+        draw_vline(
+            frame,
+            body.x2().saturating_sub(11 + inset),
+            body.y + 52 + inset,
+            body.y2().saturating_sub(52 + inset),
+            shade,
+        );
+    }
+    draw_hline(frame, body.x + 54, body.x2() - 74, body.y + 18, 0x35393A);
+    draw_hline(frame, body.x + 78, body.x2() - 94, body.y + 19, 0x111314);
+    draw_hline(frame, body.x + 44, body.x2() - 58, body.y2() - 18, 0x040505);
+    draw_hline(frame, body.x + 82, body.x2() - 96, body.y2() - 17, 0x141617);
+
+    let top_hood = PixelRect {
+        x: SCREEN_X - 50,
+        y: body.y + 22,
+        w: SCREEN_W + 100,
+        h: SCREEN_Y.saturating_sub(body.y + 30).max(22),
+    };
+    draw_rounded_rect(frame, top_hood, 13, |x, y| {
+        let ly = y - top_hood.y;
+        let fx = (x - top_hood.x) as f32 / top_hood.w as f32;
+        let side_falloff = (fx - 0.5).abs() * 2.0;
+        let highlight = if ly < 3 { 22.0 - ly as f32 * 4.0 } else { 0.0 };
+        let base = (26.0 + highlight - side_falloff * 10.0 - ly as f32 * 0.45).clamp(6.0, 54.0);
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+    });
+    draw_hline(frame, top_hood.x + 18, top_hood.x2() - 18, top_hood.y + 2, 0x53585A);
+    draw_hline(frame, top_hood.x + 34, top_hood.x2() - 34, top_hood.y2() - 2, 0x060707);
+
+    let left_cheek = PixelRect {
+        x: body.x + 12,
+        y: SCREEN_Y - 10,
+        w: SCREEN_X.saturating_sub(body.x + 28),
+        h: SCREEN_H + 58,
+    };
+    let right_cheek = PixelRect {
+        x: SCREEN_X + SCREEN_W + 16,
+        y: SCREEN_Y - 10,
+        w: body.x2().saturating_sub(SCREEN_X + SCREEN_W + 28),
+        h: SCREEN_H + 58,
+    };
+    for (cheek, mirror) in [(left_cheek, false), (right_cheek, true)] {
+        draw_rounded_rect(frame, cheek, 18, |x, y| {
+            let lx = x - cheek.x;
+            let ly = y - cheek.y;
+            let edge = if mirror {
+                lx as f32 / cheek.w.max(1) as f32
+            } else {
+                1.0 - lx as f32 / cheek.w.max(1) as f32
+            };
+            let vertical = ly as f32 / cheek.h.max(1) as f32;
+            let texture = ((x.wrapping_mul(11) ^ y.wrapping_mul(19)) % 3) as f32;
+            let base = (18.0 + edge * 15.0 - vertical * 8.0 + texture).clamp(4.0, 39.0);
+            rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+        });
+        let edge_x = if mirror { cheek.x } else { cheek.x2().saturating_sub(2) };
+        draw_vline(frame, edge_x, cheek.y + 18, cheek.y2().saturating_sub(18), 0x080909);
+        draw_vline(
+            frame,
+            if mirror { cheek.x + 2 } else { cheek.x2().saturating_sub(4) },
+            cheek.y + 22,
+            cheek.y2().saturating_sub(22),
+            0x2E3234,
+        );
+    }
+
+    let bezel = PixelRect {
+        x: body.x + 25,
+        y: 31,
+        w: body.w - 50,
+        h: SCREEN_Y + SCREEN_H + 17 - 31,
+    };
+    draw_rounded_rect(frame, bezel, 13, |x, y| {
+        let lx = x - bezel.x;
+        let ly = y - bezel.y;
+        let fx = lx as f32 / bezel.w as f32;
+        let fy = ly as f32 / bezel.h as f32;
+        let edge = (fx - 0.5).abs() * 2.0;
+        let upper = (1.0 - fy).max(0.0) * 9.0;
+        let recess =
+            if (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x)
+                && (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y)
+            {
+                -20.0
+            } else {
+                0.0
+            };
+        let base = (18.0 + upper - edge * 6.0 + recess).clamp(2.0, 34.0);
+        rgb(
+            base as u32,
+            (base + 1.0) as u32,
+            (base + 2.0) as u32,
+        )
+    });
+
+    let tube_recess = PixelRect {
+        x: SCREEN_X - 24,
+        y: SCREEN_Y - 18,
+        w: SCREEN_W + 48,
+        h: SCREEN_H + 39,
+    };
+    draw_rounded_rect(frame, tube_recess, 12, |x, y| {
+        let lx = x - tube_recess.x;
+        let ly = y - tube_recess.y;
+        let fx = lx as f32 / tube_recess.w as f32;
+        let fy = ly as f32 / tube_recess.h as f32;
+        let top_lift = (1.0 - fy).max(0.0) * 8.0;
+        let side_lift = (1.0 - fx).max(0.0) * 4.0;
+        let sink = fy * 8.0 + fx * 3.0;
+        let base = (13.0 + top_lift + side_lift - sink).clamp(1.0, 27.0);
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+    });
+    draw_hline(
+        frame,
+        tube_recess.x + 22,
+        tube_recess.x2() - 22,
+        tube_recess.y + 2,
+        0x303436,
+    );
+    draw_hline(
+        frame,
+        tube_recess.x + 22,
+        tube_recess.x2() - 22,
+        tube_recess.y2() - 3,
+        0x030303,
+    );
+
+    let glass_lip = PixelRect {
+        x: SCREEN_X - 8,
+        y: SCREEN_Y - 8,
+        w: SCREEN_W + 16,
+        h: SCREEN_H + 16,
+    };
+    draw_rounded_rect(frame, glass_lip, 8, |x, y| {
+        let lx = x - glass_lip.x;
+        let ly = y - glass_lip.y;
+        let fx = lx as f32 / glass_lip.w as f32;
+        let fy = ly as f32 / glass_lip.h as f32;
+        let top = if ly < 6 { (6 - ly) as f32 * 1.5 } else { 0.0 };
+        let left = if lx < 6 { (6 - lx) as f32 * 0.7 } else { 0.0 };
+        let base = (5.0 + top + left - fy * 6.0 - fx * 2.0).clamp(0.0, 18.0);
+        rgb(base as u32, base as u32, (base + 1.0) as u32)
+    });
+    draw_hline(
+        frame,
+        SCREEN_X + 8,
+        SCREEN_X + SCREEN_W - 8,
+        SCREEN_Y - 2,
+        0x181A1B,
+    );
+    draw_hline(
+        frame,
+        SCREEN_X + 10,
+        SCREEN_X + SCREEN_W - 10,
+        SCREEN_Y + SCREEN_H + 1,
+        0x010101,
+    );
+
+    for y in (SCREEN_Y + SCREEN_H + 13)..(SCREEN_Y + SCREEN_H + 18) {
+        let shade = 0x2A2D2E - ((y - (SCREEN_Y + SCREEN_H + 13)) as u32 * 0x020202);
+        draw_hline(frame, body.x + 16, body.x2() - 16, y, shade);
+    }
+
+    let panel = PixelRect {
+        x: body.x + 17,
+        y: SCREEN_Y + SCREEN_H + 19,
+        w: body.w - 34,
+        h: 75,
+    };
+    draw_rounded_rect(frame, panel, 8, |x, y| {
+        let ly = y - panel.y;
+        let fx = (x - panel.x) as f32 / panel.w as f32;
+        let center = (1.0 - (fx - 0.5).abs() * 2.0) * 5.0;
+        let top = if ly < 5 { 13.0 } else { 0.0 };
+        let bottom = if ly + 5 >= panel.h { -14.0 } else { 0.0 };
+        let base = (24.0 + center + top + bottom).clamp(9.0, 44.0);
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+    });
+    draw_hline(frame, panel.x + 10, panel.x2() - 10, panel.y + 1, 0x4A4E50);
+    draw_hline(
+        frame,
+        panel.x + 10,
+        panel.x2() - 10,
+        panel.y2() - 2,
+        0x070707,
+    );
+    draw_hline(frame, panel.x + 16, panel.x2() - 16, panel.y + 7, 0x35383A);
+    draw_hline(frame, panel.x + 16, panel.x2() - 16, panel.y + 9, 0x090A0A);
+
+    let center_controls = PixelRect {
+        x: WINDOW_WIDTH / 2 - 96,
+        y: panel.y + 30,
+        w: 244,
+        h: 35,
+    };
+    draw_rounded_rect(frame, center_controls, 6, |x, y| {
+        let lx = x - center_controls.x;
+        let ly = y - center_controls.y;
+        let fx = lx as f32 / center_controls.w as f32;
+        let top = if ly < 3 { 10.0 } else { 0.0 };
+        let bottom = if ly + 3 >= center_controls.h { -11.0 } else { 0.0 };
+        let side = (fx - 0.5).abs() * -4.0;
+        let base = (17.0 + top + bottom + side).clamp(5.0, 31.0);
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
+    });
+    draw_hline(
+        frame,
+        center_controls.x + 8,
+        center_controls.x2() - 8,
+        center_controls.y + 1,
+        0x323638,
+    );
+    draw_hline(
+        frame,
+        center_controls.x + 8,
+        center_controls.x2() - 8,
+        center_controls.y2() - 2,
+        0x060606,
+    );
+
+    draw_speaker_grille(
+        frame,
+        PixelRect {
+            x: panel.x + 2,
+            y: panel.y + 12,
+            w: 308,
+            h: 47,
+        },
+    );
+    draw_speaker_grille(
+        frame,
+        PixelRect {
+            x: panel.x2() - 310,
+            y: panel.y + 12,
+            w: 308,
+            h: 47,
+        },
+    );
+
+    let logo_scale = 2;
+    let logo_w = "OXIDENES".len() * 4 * logo_scale - logo_scale;
+    let logo_x = WINDOW_WIDTH / 2 - logo_w / 2;
+    draw_scaled_text(
+        frame,
+        "OXIDENES",
+        logo_x,
+        panel.y + 12,
+        0xBAC1C8,
+        WINDOW_WIDTH,
+        logo_scale,
+    );
+    write_pixel(frame, logo_x + 28, panel.y + 16, 0x4E88D8);
+    write_pixel(frame, logo_x + 29, panel.y + 15, 0x9EC7FF);
+
+    for i in 0..6usize {
+        draw_front_button(
+            frame,
+            PixelRect {
+                x: WINDOW_WIDTH / 2 - 54 + i * 16,
+                y: panel.y + 42,
+                w: 9,
+                h: 9,
+            },
+            0x3B3F42,
+        );
+    }
+
+    draw_rounded_rect(
+        frame,
+        PixelRect {
+            x: WINDOW_WIDTH / 2 + 88,
+            y: panel.y + 38,
+            w: 48,
+            h: 17,
+        },
+        2,
+        |x, y| {
+            let lx = x - (WINDOW_WIDTH / 2 + 88);
+            let ly = y - (panel.y + 38);
+            let shine = if ly < 3 && lx > 4 && lx < 24 { 10 } else { 0 };
+            adjust_color(0x050607, shine)
+        },
+    );
+    draw_led(frame, WINDOW_WIDTH / 2 + 178, panel.y + 46);
+
+    let left_foot = PixelRect {
+        x: body.x + 35,
+        y: TV_HEIGHT - 21,
+        w: 210,
+        h: 13,
+    };
+    let right_foot = PixelRect {
+        x: body.x2() - 245,
+        y: TV_HEIGHT - 21,
+        w: 210,
+        h: 13,
+    };
+    for foot in [left_foot, right_foot] {
+        draw_rounded_rect(frame, foot, 6, |_, y| {
+            let ly = y - foot.y;
+            if ly < 2 {
+                0x222324
+            } else {
+                0x050505
+            }
+        });
+        draw_hline(frame, foot.x + 12, foot.x2() - 12, foot.y + 1, 0x323334);
+    }
+}
+
+#[inline]
+fn scale_pixel(pixel: u32, shade: u32) -> u32 {
+    rgb(
+        (((pixel >> 16) & 0xFF) * shade) >> 8,
+        (((pixel >> 8) & 0xFF) * shade) >> 8,
+        ((pixel & 0xFF) * shade) >> 8,
+    )
+}
+
+fn composite_screen_fast(
+    result: &mut [u32],
+    game_output: &[u32],
+    screen_curve_table: &[u32],
+    window_width: usize,
+) {
+    debug_assert!(screen_curve_table.len() >= SCREEN_W * SCREEN_H);
+
+    // Only touch the CRT screen area on the persistent composite buffer.
+    // The table gives the tube a slight convex-glass bow without moving the cabinet.
     for src_y in 0..SCREEN_H {
         let dst_row_start = (src_y + SCREEN_Y) * window_width + SCREEN_X;
-        let src_row_start = src_y * SCREEN_W;
-        let dst_slice = &mut result[dst_row_start..dst_row_start + SCREEN_W];
-        let src_slice = &game_output[src_row_start..src_row_start + SCREEN_W];
-        dst_slice.copy_from_slice(src_slice);
+        let table_row_start = src_y * SCREEN_W;
+        for src_x in 0..SCREEN_W {
+            let sample = unsafe { *screen_curve_table.get_unchecked(table_row_start + src_x) };
+            let src_idx = (sample & SCREEN_CURVE_SRC_MASK) as usize;
+            let shade = sample >> SCREEN_CURVE_SRC_BITS;
+            let pixel = unsafe { *game_output.get_unchecked(src_idx) };
+            let out = if shade == 256 {
+                pixel
+            } else {
+                scale_pixel(pixel, shade)
+            };
+            unsafe {
+                *result.get_unchecked_mut(dst_row_start + src_x) = out;
+            }
+        }
     }
 }
 
@@ -6772,45 +7213,47 @@ fn build_glare_table() -> Vec<u8> {
             // Edge distance for Fresnel and fading
             let edge_dist = nx.abs().max(ny.abs()).min(1.0);
 
-            // Layer 1: Enhanced Fresnel edge reflection (Schlick approximation)
-            // Starts earlier (0.5) for more gradual glass-edge glow
-            let fresnel_t = ((edge_dist - 0.5).max(0.0) / 0.5).min(1.0);
-            let fresnel = fresnel_t.powi(3) * 22.0;
+            let fresnel_t = ((edge_dist - 0.58).max(0.0) / 0.42).min(1.0);
+            let fresnel = fresnel_t.powi(3) * (24.0 + (1.0 - ny.abs()) * 10.0);
 
-            // Layer 2: Primary specular — overhead light reflecting off curved glass
-            // Elongated horizontally (like a fluorescent tube reflection)
-            let spec1_x = (fx - 0.35) / 0.18;
-            let spec1_y = (fy - 0.18) / 0.08;  // Narrow vertically = elongated highlight
-            let spec1 = (-(spec1_x * spec1_x + spec1_y * spec1_y) / 2.0).exp() * 45.0;
+            // Soft, asymmetric room reflections over convex CRT glass.
+            // The curve keeps the screen readable while avoiding a flat LCD-like band.
+            let top_curve = 0.115 + (fx - 0.44) * (fx - 0.44) * 0.105;
+            let top_width = 0.043 + (fx - 0.36).abs() * 0.018;
+            let top_band = (-(((fy - top_curve) / top_width).powi(2)) / 2.0).exp();
+            let top_fade = (1.0 - ((fx - 0.40).abs() / 0.52).powi(4)).max(0.0);
+            let top_sheen = top_band * top_fade * 52.0;
 
-            // Layer 3: Secondary specular — smaller, dimmer (second light or bounce)
-            let spec2_x = (fx - 0.68) / 0.12;
-            let spec2_y = (fy - 0.15) / 0.06;
-            let spec2 = (-(spec2_x * spec2_x + spec2_y * spec2_y) / 2.0).exp() * 25.0;
+            let broad_curve = 0.255 - 0.072 * nx * nx;
+            let broad_band = (-(((fy - broad_curve) / 0.105).powi(2)) / 2.0).exp();
+            let broad_fade = (1.0 - (nx.abs() - 0.78).max(0.0) * 4.5).max(0.0);
+            let broad_sheen = broad_band * broad_fade * 18.0;
 
-            // Layer 4: Broad curved reflection arc (the characteristic CRT glass sweep)
-            // This is the wide, gentle arc you see on real CRT screens
-            let arc_center = 0.3 - 0.15 * nx * nx;  // Curved arc following glass curvature
-            let arc_dist = (fy - arc_center).abs();
-            let arc = (-(arc_dist * arc_dist) * 35.0).exp() * 15.0;
-            let arc_fade = (1.0 - (nx.abs() - 0.8).max(0.0) * 5.0).max(0.0);  // Fade at sides
-            let arc = arc * arc_fade;
+            let side_left = (-(((fx - 0.065) / 0.045).powi(2)) / 2.0).exp()
+                * (-(((fy - 0.42) / 0.50).powi(2)) / 2.0).exp()
+                * 18.0;
+            let side_right = (-(((fx - 0.935) / 0.05).powi(2)) / 2.0).exp()
+                * (-(((fy - 0.40) / 0.48).powi(2)) / 2.0).exp()
+                * 12.0;
 
-            // Layer 5: Subtle bottom-edge reflection (desk/surface bounce light)
+            let small_glint_x = (fx - 0.63) / 0.18;
+            let small_glint_y = (fy - 0.18) / 0.055;
+            let small_glint =
+                (-(small_glint_x * small_glint_x + small_glint_y * small_glint_y) / 2.0).exp()
+                    * 15.0;
+
             let bottom_glow_t = ((fy - 0.85).max(0.0) / 0.15).min(1.0);
             let bottom_center = (-(nx * nx) * 3.0).exp();
-            let bottom = bottom_glow_t * bottom_center * 10.0;
+            let bottom = bottom_glow_t * bottom_center * 12.0;
 
-            // Layer 6: Very faint window reflection (rectangular ghost, upper area)
-            let win_x = ((fx - 0.45).abs() < 0.15) as u8 as f64;
-            let win_y = ((fy > 0.08) && (fy < 0.35)) as u8 as f64;
-            let win_edge_x = (1.0 - ((fx - 0.45).abs() / 0.15).powi(4)).max(0.0);
-            let win_edge_y_top = ((fy - 0.08).min(0.05) / 0.05).max(0.0);
-            let win_edge_y_bot = ((0.35 - fy).min(0.05) / 0.05).max(0.0);
-            let window = win_x * win_y * win_edge_x * win_edge_y_top * win_edge_y_bot * 8.0;
-
-            // Combine all layers
-            let total = (fresnel + spec1 + spec2 + arc + bottom + window).clamp(0.0, 70.0) as u8;
+            let total = (fresnel
+                + top_sheen
+                + broad_sheen
+                + side_left
+                + side_right
+                + small_glint
+                + bottom)
+                .clamp(0.0, 96.0) as u8;
 
             // Zero out near border (glass-bezel junction has no glare)
             let in_border = !(4..SCREEN_W - 4).contains(&x) || !(4..SCREEN_H - 4).contains(&y);
@@ -6870,7 +7313,7 @@ fn apply_glass_effects(
 ) {
     if glass_intensity == 0 { return; }
 
-    const CORNER_R: usize = 10;
+    const CORNER_R: usize = SCREEN_CURVE_CORNER_R;
     let intensity_factor = glass_intensity as u32;
     let tint_strength = intensity_factor * 10 / 100;
     let corner_x_max = SCREEN_W - CORNER_R;
@@ -7011,41 +7454,79 @@ fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, c
 
 #[allow(clippy::ptr_arg)]
 fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h: usize) {
-    // Simple dark shelf/stand below TV
+    let table_h = (win_h - tv_h).max(1);
     for y in tv_h..win_h {
         for x in 0..win_w {
             let idx = y * win_w + x;
             if idx < frame.len() {
                 let dy = y - tv_h;
-                // Gradient: darker at top (shadow from TV), lighter below
-                let shadow = if dy < 15 {
-                    (15 - dy) as f32 / 22.0
+                let fy = dy as f32 / table_h as f32;
+                let top_shadow = if dy < 30 { (30 - dy) as f32 / 30.0 } else { 0.0 };
+                let front_rolloff = ((fy - 0.76).max(0.0) / 0.24).min(1.0);
+                let center_lift = (1.0 - (fy - 0.48).abs() * 1.8).max(0.0) * 15.0;
+
+                let plank = x / 168;
+                let plank_tint = ((plank.wrapping_mul(29) % 19) as i32) - 9;
+                let seam = x % 168;
+                let seam_shadow = if !(2..=165).contains(&seam) { -16 } else { 0 };
+                let long_grain = if ((x / 21 + y / 5 + plank * 3) % 7) == 0 { -7 } else { 0 };
+                let fine_grain =
+                    ((x.wrapping_mul(17) ^ y.wrapping_mul(31) ^ (x / 13).wrapping_mul(11)) % 21)
+                        as i32
+                        - 10;
+                let knot = if ((x + plank * 53) % 271) < 22 && ((dy + x / 37) % 19) < 5 {
+                    -10
                 } else {
-                    0.0
+                    0
                 };
-                
-                let base_r = 0x22 as f32 * (1.0 - shadow);
-                let base_g = 0x22 as f32 * (1.0 - shadow);
-                let base_b = 0x28 as f32 * (1.0 - shadow);
-                
-                // Subtle texture
-                let noise = ((x.wrapping_mul(11) ^ y.wrapping_mul(23)) % 3) as f32;
-                let r = (base_r + noise) as u32;
-                let g = (base_g + noise) as u32;
-                let b = (base_b + noise) as u32;
-                
-                frame[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+
+                let shade = center_lift - top_shadow * 48.0 - front_rolloff * 24.0;
+                let r = (92.0 + shade) as i32 + plank_tint + seam_shadow + fine_grain + long_grain + knot;
+                let g = (50.0 + shade * 0.48) as i32 + plank_tint / 2 + seam_shadow / 2 + fine_grain / 2;
+                let b = (25.0 + shade * 0.22) as i32 + plank_tint / 4 + fine_grain / 4;
+                frame[idx] = rgb(
+                    r.clamp(0, 255) as u32,
+                    g.clamp(0, 255) as u32,
+                    b.clamp(0, 255) as u32,
+                );
             }
         }
     }
-    
-    // Front edge highlight (thin light line at very bottom)
-    let edge_y = win_h - 2;
-    if edge_y * win_w < frame.len() {
-        for x in 80..(win_w - 80) {
-            let idx = edge_y * win_w + x;
+
+    for y in tv_h..(tv_h + 16).min(win_h) {
+        let dy = y - tv_h;
+        let alpha = (0.52 - dy as f32 * 0.026).max(0.0);
+        for x in 28..win_w.saturating_sub(28) {
+            let idx = y * win_w + x;
             if idx < frame.len() {
-                frame[idx] = 0x3A3A40;
+                frame[idx] = blend_color(frame[idx], 0x080503, alpha);
+            }
+        }
+    }
+
+    let back_edge_y = tv_h + 1;
+    if back_edge_y < win_h {
+        for x in 46..win_w.saturating_sub(46) {
+            let idx = back_edge_y * win_w + x;
+            if idx < frame.len() {
+                frame[idx] = 0x1B0E06;
+            }
+        }
+    }
+
+    let front_lip_y = win_h.saturating_sub(18);
+    for y in front_lip_y..win_h {
+        let ly = y - front_lip_y;
+        let highlight = ly == 0;
+        for x in 0..win_w {
+            let idx = y * win_w + x;
+            if idx < frame.len() {
+                if highlight && (60..win_w.saturating_sub(60)).contains(&x) {
+                    frame[idx] = blend_color(frame[idx], 0xA76632, 0.46);
+                } else {
+                    let alpha = 0.10 + ly as f32 * 0.018;
+                    frame[idx] = blend_color(frame[idx], 0x2E1609, alpha);
+                }
             }
         }
     }
@@ -7169,12 +7650,15 @@ mod tests {
         let scan_muls = make_scan_muls(scanline_intensity);
 
         // Sample pixels across all 4 scanline phases and various x positions
+        let right = SCREEN_W - 1;
+        let mid_x = SCREEN_W / 2;
+        let bottom = SCREEN_H - 1;
         let samples: &[(usize, usize)] = &[
-            (0, 0), (0, 479), (0, 959),
-            (1, 0), (1, 200), (1, 959),
-            (2, 0), (2, 480), (2, 959),
-            (3, 0), (3, 719), (3, 959),
-            (100, 300), (240, 500), (400, 0), (719, 959),
+            (0, 0), (0, mid_x.saturating_sub(1)), (0, right),
+            (1, 0), (1, 200.min(right)), (1, right),
+            (2, 0), (2, mid_x), (2, right),
+            (3, 0), (3, bottom), (3, right),
+            (100.min(bottom), 300.min(right)), (240.min(bottom), 500.min(right)), (400.min(bottom), 0), (bottom, right),
         ];
         for &(dst_y, dst_x) in samples {
             let idx = dst_y * SCREEN_W + dst_x;
@@ -7213,8 +7697,8 @@ mod tests {
         let sv = build_sv_table(&vignette, 100);
         let scan_muls = make_scan_muls(100);
 
-        for dst_y in [0usize, 1, 2, 3, 720 - 4, 720 - 3, 720 - 2, 720 - 1] {
-            for dst_x in [0usize, 1, 480, 958, 959] {
+        for dst_y in [0usize, 1, 2, 3, SCREEN_H - 4, SCREEN_H - 3, SCREEN_H - 2, SCREEN_H - 1] {
+            for dst_x in [0usize, 1, SCREEN_W / 2, SCREEN_W - 2, SCREEN_W - 1] {
                 let idx = dst_y * SCREEN_W + dst_x;
                 let vig = vignette[idx] as u32;
                 let scan_mul = scan_muls[dst_y % 4];

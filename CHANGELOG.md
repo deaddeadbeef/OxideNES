@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0] - 2026-04-26
+
+### Changed
+- Rebuilt the CRT television frame around a heavier black consumer-TV cabinet instead of the previous flatter silver bezel
+- Increased the window and TV canvas to give the cabinet more breathing room against the wall and table
+- Redesigned the bottom control panel with a thicker face, centered OxideNES badge, speaker grilles, round front buttons, a round green LED, and a recessed input slot
+- Added a more realistic wood tabletop/stand with plank seams, grain variation, contact shadow, and front lip shading
+- Simplified the bezel stack after visual review so the screen surround reads as a single heavy CRT shell instead of layered LCD-like trim
+- Added subtle CRT tube edge shading so the visible screen has rounded glass corners and more depth without warping gameplay geometry
+- Reworked the glass reflection model with softer asymmetric highlights, side reflections, bottom bounce light, and cooler specular tint
+
+### Fixed
+- Removed the dynamic shifted-screen glass ghost that could look like lower-screen interference when sprites moved
+- Kept the existing custom frame pacer after testing showed a presentation-timing change did not improve the artifact and hurt performance
+- Restored the TV/background composition so the cabinet stands farther off the wall with a longer, cleaner shadow instead of clipping at the right edge
+- Adjusted the TV proportions so the body feels thicker and heavier, closer to an old CRT television
+
+### Performance
+- Avoided the per-frame dynamic glass ghost blend while preserving glass tint and reflection effects
+- Kept CRT screen curvature as a precomputed shading table, avoiding extra per-frame geometry work
+
 ## [0.2.3] - 2026-04-26
 
 ### Performance
