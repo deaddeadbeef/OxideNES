@@ -4,10 +4,10 @@
 use serde::{Deserialize, Serialize};
 
 // ── Screen geometry constants ────────────────────────────────────────────────
-pub const SCREEN_W: usize = 960;
-pub const SCREEN_H: usize = 720;
-pub const SCREEN_X: usize = 70;
-pub const SCREEN_Y: usize = 50;
+pub const SCREEN_W: usize = 900;
+pub const SCREEN_H: usize = 675;
+pub const SCREEN_X: usize = 170;
+pub const SCREEN_Y: usize = 70;
 /// Number of rows per processing chunk.
 const PAR_ROWS: usize = 16;
 
@@ -1115,7 +1115,7 @@ pub fn glass_inner_loop(
     ghost_w: usize,
     ghost_stride: usize,
 ) {
-    const CORNER_R: usize = 10;
+    const CORNER_R: usize = 18;
     const CORNER_R_SQ: usize = CORNER_R * CORNER_R;
 
     let buf_start = SCREEN_Y * window_width;
@@ -1186,9 +1186,9 @@ pub fn glass_inner_loop(
                             (glare_base * intensity_factor * (200_u32.saturating_sub(grey)) * 29)
                                 >> 19;
 
-                        r = (r + glare + ((glare * 171) >> 11)).min(255);
-                        g = (g + glare).min(255);
-                        b = (b + glare.saturating_sub((glare * 17) >> 8)).min(255);
+                        r = (r + glare).min(255);
+                        g = (g + glare + ((glare * 9) >> 7)).min(255);
+                        b = (b + glare + ((glare * 29) >> 7)).min(255);
                     }
 
                     if let Some(src_row) = ghost_src_row {
