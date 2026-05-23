@@ -7,17 +7,18 @@ Thanks for your interest in contributing!
 1. Fork and clone the repo
 2. `cargo build` to verify the build
 3. `cargo test` to run the test suite
-4. Create a feature branch from `master`
+4. Create a feature branch from `main`
 
 ## Development
 
-- Run `cargo clippy` before submitting
+- Run `cargo clippy -- -D warnings` before submitting
 - Add tests for new functionality
 - Keep commits focused and well-described
+- Follow [docs/IP_COMPLIANCE.md](docs/IP_COMPLIANCE.md): do not commit commercial ROMs, copyrighted screenshots, box art, manuals, music, logos, icons, or trademarked character artwork
 
 ## Pull Requests
 
-- Open a PR against `master`
+- Open a PR against `main`
 - Describe what changed and why
 - Ensure CI passes (build + test on all 3 platforms)
 
