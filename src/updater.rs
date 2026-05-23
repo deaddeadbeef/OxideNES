@@ -1,5 +1,5 @@
-use std::thread;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 #[derive(Clone)]
 pub struct UpdateInfo {

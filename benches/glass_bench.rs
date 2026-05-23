@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use oxidenes::rendering::*;
 
 fn bench_glass_inner_loop(c: &mut Criterion) {
@@ -18,10 +18,15 @@ fn bench_glass_inner_loop(c: &mut Criterion) {
                 black_box(&thickness_table),
                 black_box(&ghost_alpha_table),
                 window_width,
-                50, 30, true,
-                SCREEN_W - 10, SCREEN_H - 10,
-                5, 5,
-                SCREEN_H - 10, SCREEN_W - 10,
+                50,
+                30,
+                true,
+                SCREEN_W - 10,
+                SCREEN_H - 10,
+                5,
+                5,
+                SCREEN_H - 10,
+                SCREEN_W - 10,
                 SCREEN_W,
             );
         })

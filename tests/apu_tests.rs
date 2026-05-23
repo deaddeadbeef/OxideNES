@@ -5,9 +5,15 @@ const SAMPLE_RATE: u32 = 44100;
 #[test]
 fn new_apu_initial_state() {
     let apu = Apu::new(SAMPLE_RATE);
-    assert!(apu.sample_buffer.is_empty(), "sample_buffer should be empty on init");
+    assert!(
+        apu.sample_buffer.is_empty(),
+        "sample_buffer should be empty on init"
+    );
     assert!(!apu.irq_pending, "frame IRQ should not be pending on init");
-    assert!(!apu.dmc.irq_pending, "DMC IRQ should not be pending on init");
+    assert!(
+        !apu.dmc.irq_pending,
+        "DMC IRQ should not be pending on init"
+    );
 }
 
 #[test]
@@ -16,14 +22,21 @@ fn channel_enable_disable() {
 
     // All channels disabled initially — status should be 0 (no length counters active)
     let status = apu.read(0x4015);
-    assert_eq!(status & 0x1F, 0, "No channels should report active initially");
+    assert_eq!(
+        status & 0x1F,
+        0,
+        "No channels should report active initially"
+    );
 
     // Enable pulse 1 and write to its length counter register ($4003)
     // to load a non-zero length counter
     apu.write(0x4015, 0x01); // enable pulse 1
     apu.write(0x4003, 0x08); // load length counter (table lookup)
     let status = apu.read(0x4015);
-    assert!(status & 0x01 != 0, "Pulse 1 should report active after length load");
+    assert!(
+        status & 0x01 != 0,
+        "Pulse 1 should report active after length load"
+    );
 
     // Disable pulse 1
     apu.write(0x4015, 0x00);
@@ -42,7 +55,10 @@ fn read_status_clears_frame_irq() {
     for _ in 0..29831 {
         apu.tick();
     }
-    assert!(apu.irq_pending, "Frame IRQ should be pending after enough ticks");
+    assert!(
+        apu.irq_pending,
+        "Frame IRQ should be pending after enough ticks"
+    );
 
     // Reading $4015 should report IRQ and clear it
     let status = apu.read(0x4015);
@@ -51,7 +67,11 @@ fn read_status_clears_frame_irq() {
 
     // Second read should not show IRQ
     let status2 = apu.read(0x4015);
-    assert_eq!(status2 & 0x40, 0, "Frame IRQ bit should be clear on second read");
+    assert_eq!(
+        status2 & 0x40,
+        0,
+        "Frame IRQ bit should be clear on second read"
+    );
 }
 
 #[test]
@@ -72,7 +92,10 @@ fn pulse_channel_write() {
 
     // Pulse 1 should be active (length counter loaded)
     let status = apu.read(0x4015);
-    assert!(status & 0x01 != 0, "Pulse 1 should be active after register writes");
+    assert!(
+        status & 0x01 != 0,
+        "Pulse 1 should be active after register writes"
+    );
 }
 
 #[test]
@@ -89,7 +112,10 @@ fn triangle_channel_write() {
     }
 
     let status = apu.read(0x4015);
-    assert!(status & 0x04 != 0, "Triangle should be active after register writes");
+    assert!(
+        status & 0x04 != 0,
+        "Triangle should be active after register writes"
+    );
 }
 
 #[test]
@@ -106,7 +132,10 @@ fn noise_channel_write() {
     }
 
     let status = apu.read(0x4015);
-    assert!(status & 0x08 != 0, "Noise should be active after register writes");
+    assert!(
+        status & 0x08 != 0,
+        "Noise should be active after register writes"
+    );
 }
 
 #[test]
@@ -116,11 +145,17 @@ fn dmc_channel_enable_disable() {
     // Enable DMC via $4015 bit 4
     apu.write(0x4015, 0x10);
     // DMC enabled → sample_length reloaded from start_length (default 1)
-    assert!(apu.dmc.sample_length > 0, "DMC sample_length should be non-zero when enabled");
+    assert!(
+        apu.dmc.sample_length > 0,
+        "DMC sample_length should be non-zero when enabled"
+    );
 
     // Disable DMC
     apu.write(0x4015, 0x00);
-    assert_eq!(apu.dmc.sample_length, 0, "DMC sample_length should be 0 when disabled");
+    assert_eq!(
+        apu.dmc.sample_length, 0,
+        "DMC sample_length should be 0 when disabled"
+    );
 }
 
 #[test]
@@ -141,7 +176,10 @@ fn frame_counter_mode_set() {
     for _ in 0..40000 {
         apu5.tick();
     }
-    assert!(!apu5.irq_pending, "5-step mode should never generate frame IRQ");
+    assert!(
+        !apu5.irq_pending,
+        "5-step mode should never generate frame IRQ"
+    );
 }
 
 #[test]
@@ -154,7 +192,10 @@ fn tick_produces_samples() {
     }
     apu.end_frame();
 
-    assert!(!apu.sample_buffer.is_empty(), "sample_buffer should have data after a frame");
+    assert!(
+        !apu.sample_buffer.is_empty(),
+        "sample_buffer should have data after a frame"
+    );
 }
 
 #[test]
@@ -165,11 +206,17 @@ fn drain_samples_clears_buffer() {
         apu.tick();
     }
     apu.end_frame();
-    assert!(!apu.sample_buffer.is_empty(), "Should have samples before drain");
+    assert!(
+        !apu.sample_buffer.is_empty(),
+        "Should have samples before drain"
+    );
 
     let samples = apu.drain_samples();
     assert!(!samples.is_empty(), "Drained samples should be non-empty");
-    assert!(apu.sample_buffer.is_empty(), "Buffer should be empty after drain");
+    assert!(
+        apu.sample_buffer.is_empty(),
+        "Buffer should be empty after drain"
+    );
 }
 
 #[test]
@@ -202,8 +249,14 @@ fn save_load_state_roundtrip() {
     // Restore state
     let loaded = apu.load_state(&saved);
     assert!(loaded, "load_state should return true for valid data");
-    assert_eq!(apu.irq_pending, irq_before, "IRQ pending should be restored");
-    assert_eq!(apu.dmc.irq_pending, dmc_irq_before, "DMC IRQ should be restored");
+    assert_eq!(
+        apu.irq_pending, irq_before,
+        "IRQ pending should be restored"
+    );
+    assert_eq!(
+        apu.dmc.irq_pending, dmc_irq_before,
+        "DMC IRQ should be restored"
+    );
 }
 
 #[test]
@@ -219,5 +272,8 @@ fn sample_rate_change() {
     }
     apu.end_frame();
 
-    assert!(!apu.sample_buffer.is_empty(), "Should produce samples after sample rate change");
+    assert!(
+        !apu.sample_buffer.is_empty(),
+        "Should produce samples after sample rate change"
+    );
 }

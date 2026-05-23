@@ -3,8 +3,14 @@ use oxidenes::cartridge::Cartridge;
 
 fn make_minimal_rom() -> Vec<u8> {
     let mut rom = vec![0u8; 16 + 16384 + 8192];
-    rom[0] = 0x4E; rom[1] = 0x45; rom[2] = 0x53; rom[3] = 0x1A;
-    rom[4] = 1; rom[5] = 1; rom[6] = 0; rom[7] = 0;
+    rom[0] = 0x4E;
+    rom[1] = 0x45;
+    rom[2] = 0x53;
+    rom[3] = 0x1A;
+    rom[4] = 1;
+    rom[5] = 1;
+    rom[6] = 0;
+    rom[7] = 0;
     rom
 }
 

@@ -29,7 +29,11 @@ fn make_cart() -> Cartridge {
 #[test]
 fn ppu_initial_state() {
     let ppu = Ppu::new();
-    assert_eq!(ppu.frame_data.len(), 256 * 240, "Frame buffer should be 256x240 pixels");
+    assert_eq!(
+        ppu.frame_data.len(),
+        256 * 240,
+        "Frame buffer should be 256x240 pixels"
+    );
     assert_eq!(ppu.oam_data.len(), 256, "OAM should be 256 bytes");
 }
 
@@ -41,7 +45,10 @@ fn ppu_oam_write_read() {
     ppu.cpu_write(0x2003, 0x10, &mut cart);
     ppu.cpu_write(0x2004, 0xAB, &mut cart);
     // Verify via pub field
-    assert_eq!(ppu.oam_data[0x10], 0xAB, "OAM byte should be written via register");
+    assert_eq!(
+        ppu.oam_data[0x10], 0xAB,
+        "OAM byte should be written via register"
+    );
     // Read back through register: reset address then read
     ppu.cpu_write(0x2003, 0x10, &mut cart);
     let readback = ppu.cpu_read(0x2004, &cart);
@@ -66,10 +73,18 @@ fn ppu_status_read_clears_vblank() {
     assert!(entered_vblank, "PPU should reach vblank within 100K ticks");
     // STATUS bit 7 (vblank) should be set
     let status = ppu.cpu_read(0x2002, &cart);
-    assert_ne!(status & 0x80, 0, "Vblank flag (bit 7) should be set at vblank");
+    assert_ne!(
+        status & 0x80,
+        0,
+        "Vblank flag (bit 7) should be set at vblank"
+    );
     // Reading STATUS clears the vblank flag
     let status_after = ppu.cpu_read(0x2002, &cart);
-    assert_eq!(status_after & 0x80, 0, "Vblank flag should be cleared after STATUS read");
+    assert_eq!(
+        status_after & 0x80,
+        0,
+        "Vblank flag should be cleared after STATUS read"
+    );
 }
 
 #[test]
@@ -77,7 +92,7 @@ fn ppu_scroll_double_write() {
     let mut ppu = Ppu::new();
     let mut cart = make_cart();
     ppu.cpu_write(0x2005, 100, &mut cart); // X scroll
-    ppu.cpu_write(0x2005, 50, &mut cart);  // Y scroll
+    ppu.cpu_write(0x2005, 50, &mut cart); // Y scroll
 }
 
 #[test]
@@ -115,7 +130,10 @@ fn ppu_frame_complete_after_full_frame() {
             break;
         }
     }
-    assert!(completed, "PPU should signal frame completion within ~89342 ticks");
+    assert!(
+        completed,
+        "PPU should signal frame completion within ~89342 ticks"
+    );
 }
 
 #[test]
@@ -132,7 +150,10 @@ fn ppu_nmi_at_vblank() {
             break;
         }
     }
-    assert!(nmi_fired, "NMI should fire at vblank when enabled via CTRL bit 7");
+    assert!(
+        nmi_fired,
+        "NMI should fire at vblank when enabled via CTRL bit 7"
+    );
 }
 
 #[test]
@@ -145,14 +166,20 @@ fn ppu_save_load_state() {
     assert_eq!(ppu.oam_data[0x00], 0xAA);
     // Save state
     let state = ppu.save_state();
-    assert!(!state.is_empty(), "save_state should produce non-empty data");
+    assert!(
+        !state.is_empty(),
+        "save_state should produce non-empty data"
+    );
     // Modify OAM directly
     ppu.oam_data[0x00] = 0x55;
     assert_eq!(ppu.oam_data[0x00], 0x55);
     // Load state
     let success = ppu.load_state(&state);
     assert!(success, "load_state should succeed");
-    assert_eq!(ppu.oam_data[0x00], 0xAA, "OAM should be restored after load_state");
+    assert_eq!(
+        ppu.oam_data[0x00], 0xAA,
+        "OAM should be restored after load_state"
+    );
 }
 
 #[test]
@@ -171,5 +198,9 @@ fn ppu_data_read_write_roundtrip() {
     ppu.cpu_write(0x2006, 0x00, &mut cart);
     // Read back (palette reads are immediate, not buffered)
     let readback = ppu.cpu_read(0x2007, &cart);
-    assert_eq!(readback & 0x3F, 0x15, "Palette data should round-trip through PPU registers");
+    assert_eq!(
+        readback & 0x3F,
+        0x15,
+        "Palette data should round-trip through PPU registers"
+    );
 }

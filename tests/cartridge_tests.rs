@@ -25,7 +25,10 @@ fn make_rom(prg_banks: u8, chr_banks: u8, mapper: u8, flags: u8) -> Vec<u8> {
 #[test]
 fn valid_ines_header() {
     let rom = make_rom(1, 1, 0, 0);
-    assert!(Cartridge::new(&rom).is_ok(), "Valid iNES ROM should parse successfully");
+    assert!(
+        Cartridge::new(&rom).is_ok(),
+        "Valid iNES ROM should parse successfully"
+    );
 }
 
 #[test]
@@ -34,7 +37,10 @@ fn invalid_magic_bytes() {
     rom[0] = 0x00;
     let result = Cartridge::new(&rom);
     assert!(result.is_err(), "Invalid magic should fail");
-    assert!(result.unwrap_err().contains("iNES"), "Error should mention iNES");
+    assert!(
+        result.unwrap_err().contains("iNES"),
+        "Error should mention iNES"
+    );
 }
 
 #[test]
@@ -61,52 +67,77 @@ fn vertical_mirroring() {
 fn battery_flag() {
     let rom = make_rom(1, 1, 0, 0x02); // bit 1 = battery
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(cart.has_battery, "has_battery should be true when flag is set");
+    assert!(
+        cart.has_battery,
+        "has_battery should be true when flag is set"
+    );
 }
 
 #[test]
 fn no_battery_flag() {
     let rom = make_rom(1, 1, 0, 0x00);
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(!cart.has_battery, "has_battery should be false when flag is clear");
+    assert!(
+        !cart.has_battery,
+        "has_battery should be false when flag is clear"
+    );
 }
 
 #[test]
 fn chr_ram_auto_creation() {
     let rom = make_rom(1, 0, 0, 0); // chr_banks = 0
     let cart = Cartridge::new(&rom);
-    assert!(cart.is_ok(), "chr_banks=0 should succeed (CHR RAM auto-created)");
+    assert!(
+        cart.is_ok(),
+        "chr_banks=0 should succeed (CHR RAM auto-created)"
+    );
     let mut cart = cart.unwrap();
     cart.mapper.write_chr(0x0000, 0xAB);
-    assert_eq!(cart.mapper.read_chr(0x0000), 0xAB, "CHR RAM should be writable");
+    assert_eq!(
+        cart.mapper.read_chr(0x0000),
+        0xAB,
+        "CHR RAM should be writable"
+    );
 }
 
 #[test]
 fn mapper_0_creation() {
     let rom = make_rom(1, 1, 0, 0);
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(matches!(cart.mapper, MapperEnum::Mapper000(_)), "Expected Mapper000 variant");
+    assert!(
+        matches!(cart.mapper, MapperEnum::Mapper000(_)),
+        "Expected Mapper000 variant"
+    );
 }
 
 #[test]
 fn mapper_1_creation() {
     let rom = make_rom(2, 1, 1, 0);
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(matches!(cart.mapper, MapperEnum::Mapper001(_)), "Expected Mapper001 variant");
+    assert!(
+        matches!(cart.mapper, MapperEnum::Mapper001(_)),
+        "Expected Mapper001 variant"
+    );
 }
 
 #[test]
 fn mapper_2_creation() {
     let rom = make_rom(2, 1, 2, 0);
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(matches!(cart.mapper, MapperEnum::Mapper002(_)), "Expected Mapper002 variant");
+    assert!(
+        matches!(cart.mapper, MapperEnum::Mapper002(_)),
+        "Expected Mapper002 variant"
+    );
 }
 
 #[test]
 fn mapper_4_creation() {
     let rom = make_rom(2, 2, 4, 0);
     let cart = Cartridge::new(&rom).unwrap();
-    assert!(matches!(cart.mapper, MapperEnum::Mapper004(_)), "Expected Mapper004 variant");
+    assert!(
+        matches!(cart.mapper, MapperEnum::Mapper004(_)),
+        "Expected Mapper004 variant"
+    );
 }
 
 #[test]

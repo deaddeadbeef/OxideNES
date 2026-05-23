@@ -57,7 +57,7 @@ fn mapper0_prg_read() {
 fn mapper0_prg_read_32k() {
     // 2 PRG banks (32KB): no mirroring
     let mut rom = make_rom(2, 1, 0, 0);
-    rom[16] = 0xAA;         // Bank 0 marker
+    rom[16] = 0xAA; // Bank 0 marker
     rom[16 + 16384] = 0xBB; // Bank 1 marker
     let cart = Cartridge::new(&rom).unwrap();
     assert_eq!(cart.mapper.read_prg(0x8000), 0xAA, "Bank 0 at $8000");
@@ -74,10 +74,10 @@ fn mapper0_chr_read() {
     let rom = make_rom(1, 1, 0, 0);
     let cart = Cartridge::new(&rom).unwrap();
     // CHR data pattern: ((offset >> 2) & 0xFF)
-    assert_eq!(cart.mapper.read_chr(0x0000), 0);   // (0>>2) = 0
-    assert_eq!(cart.mapper.read_chr(0x0004), 1);   // (4>>2) = 1
-    assert_eq!(cart.mapper.read_chr(0x0008), 2);   // (8>>2) = 2
-    assert_eq!(cart.mapper.read_chr(0x0100), 64);  // (256>>2) = 64
+    assert_eq!(cart.mapper.read_chr(0x0000), 0); // (0>>2) = 0
+    assert_eq!(cart.mapper.read_chr(0x0004), 1); // (4>>2) = 1
+    assert_eq!(cart.mapper.read_chr(0x0008), 2); // (8>>2) = 2
+    assert_eq!(cart.mapper.read_chr(0x0100), 64); // (256>>2) = 64
 }
 
 // -- Mapper 2 (UxROM) ------------------------------------------------------
@@ -91,12 +91,28 @@ fn mapper2_bank_switch() {
     }
     let mut cart = Cartridge::new(&rom).unwrap();
     // Default: bank 0 at $8000, last bank (7) at $C000
-    assert_eq!(cart.mapper.read_prg(0x8000), 0xA0, "Default bank 0 at $8000");
-    assert_eq!(cart.mapper.read_prg(0xC000), 0xA7, "Last bank fixed at $C000");
+    assert_eq!(
+        cart.mapper.read_prg(0x8000),
+        0xA0,
+        "Default bank 0 at $8000"
+    );
+    assert_eq!(
+        cart.mapper.read_prg(0xC000),
+        0xA7,
+        "Last bank fixed at $C000"
+    );
     // Switch to bank 3
     cart.mapper.write_prg(0x8000, 3);
-    assert_eq!(cart.mapper.read_prg(0x8000), 0xA3, "Bank 3 at $8000 after switch");
-    assert_eq!(cart.mapper.read_prg(0xC000), 0xA7, "Last bank still at $C000");
+    assert_eq!(
+        cart.mapper.read_prg(0x8000),
+        0xA3,
+        "Bank 3 at $8000 after switch"
+    );
+    assert_eq!(
+        cart.mapper.read_prg(0xC000),
+        0xA7,
+        "Last bank still at $C000"
+    );
     // Switch to bank 5
     cart.mapper.write_prg(0x8000, 5);
     assert_eq!(cart.mapper.read_prg(0x8000), 0xA5, "Bank 5 at $8000");
@@ -116,10 +132,18 @@ fn mapper3_chr_switch() {
     assert_eq!(cart.mapper.read_chr(0x0000), 0xB0, "Default CHR bank 0");
     // Switch to CHR bank 2
     cart.mapper.write_prg(0x8000, 2);
-    assert_eq!(cart.mapper.read_chr(0x0000), 0xB2, "CHR bank 2 after switch");
+    assert_eq!(
+        cart.mapper.read_chr(0x0000),
+        0xB2,
+        "CHR bank 2 after switch"
+    );
     // Switch to CHR bank 3
     cart.mapper.write_prg(0x8000, 3);
-    assert_eq!(cart.mapper.read_chr(0x0000), 0xB3, "CHR bank 3 after switch");
+    assert_eq!(
+        cart.mapper.read_chr(0x0000),
+        0xB3,
+        "CHR bank 3 after switch"
+    );
 }
 
 // -- Mapper 1 (MMC1) -------------------------------------------------------
@@ -139,19 +163,25 @@ fn mapper1_shift_register() {
     // Set PRG bank to 0
     mmc1_write(&mut cart.mapper, 0xE000, 0);
     assert_eq!(cart.mapper.read_prg(0x8000), 0xC0, "PRG bank 0 at $8000");
-    assert_eq!(cart.mapper.read_prg(0xC000), 0xC3, "Last bank (3) fixed at $C000");
+    assert_eq!(
+        cart.mapper.read_prg(0xC000),
+        0xC3,
+        "Last bank (3) fixed at $C000"
+    );
     // Write first 4 of 5 bits for bank 2 (0b00010)
     for bit in 0..4u8 {
         cart.mapper.write_prg(0xE000, (2 >> bit) & 1);
     }
     assert_eq!(
-        cart.mapper.read_prg(0x8000), 0xC0,
+        cart.mapper.read_prg(0x8000),
+        0xC0,
         "Bank should still be 0 after only 4 serial writes"
     );
     // 5th write completes the shift -> bank switches to 2
     cart.mapper.write_prg(0xE000, (2 >> 4) & 1);
     assert_eq!(
-        cart.mapper.read_prg(0x8000), 0xC2,
+        cart.mapper.read_prg(0x8000),
+        0xC2,
         "Bank should switch to 2 after 5th serial write"
     );
 }
@@ -192,7 +222,11 @@ fn mapper_sram_get_set() {
     let retrieved = cart.mapper.get_sram();
     assert_eq!(retrieved[0], 0x12, "SRAM byte 0 should persist");
     assert_eq!(retrieved[1], 0x34, "SRAM byte 1 should persist");
-    assert_eq!(retrieved[retrieved.len() - 1], 0xFF, "SRAM last byte should persist");
+    assert_eq!(
+        retrieved[retrieved.len() - 1],
+        0xFF,
+        "SRAM last byte should persist"
+    );
 }
 
 // -- Save / Load State ------------------------------------------------------
@@ -215,7 +249,8 @@ fn mapper_save_load_state() {
 
     if !state.is_empty() {
         assert_eq!(
-            cart.mapper.read_chr(0x0000), 0xAB,
+            cart.mapper.read_chr(0x0000),
+            0xAB,
             "CHR RAM should be restored after load_state"
         );
     }
@@ -232,7 +267,10 @@ fn mapper4_irq_countdown() {
     cart.mapper.write_prg(0xC001, 0); // request counter reload
     cart.mapper.write_prg(0xE001, 0); // enable IRQ
 
-    assert!(!cart.mapper.irq_pending(), "IRQ should not be pending before clocking");
+    assert!(
+        !cart.mapper.irq_pending(),
+        "IRQ should not be pending before clocking"
+    );
 
     let mut irq_at = None;
     for i in 1..=10 {
@@ -242,8 +280,14 @@ fn mapper4_irq_countdown() {
             break;
         }
     }
-    assert!(irq_at.is_some(), "IRQ should fire after clocking scanlines with latch=3");
+    assert!(
+        irq_at.is_some(),
+        "IRQ should fire after clocking scanlines with latch=3"
+    );
 
     cart.mapper.irq_clear();
-    assert!(!cart.mapper.irq_pending(), "IRQ should clear after irq_clear()");
+    assert!(
+        !cart.mapper.irq_pending(),
+        "IRQ should clear after irq_clear()"
+    );
 }

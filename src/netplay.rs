@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 
 // Packet magic bytes
 const MAGIC_INPUT: [u8; 2] = [0x4E, 0x50]; // "NP" - input packet
-const MAGIC_HOST: [u8; 2] = [0x4E, 0x48];  // "NH" - host welcome
-const MAGIC_JOIN: [u8; 2] = [0x4E, 0x43];  // "NC" - client join request
+const MAGIC_HOST: [u8; 2] = [0x4E, 0x48]; // "NH" - host welcome
+const MAGIC_JOIN: [u8; 2] = [0x4E, 0x43]; // "NC" - client join request
 const MAGIC_ACCEPT: [u8; 2] = [0x4E, 0x41]; // "NA" - host accept
 const MAGIC_KEEPALIVE: [u8; 2] = [0x4E, 0x4B]; // "NK" - keepalive heartbeat
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2);
 
-const INPUT_PACKET_SIZE: usize = 15;// 2 magic + 8 frame + 1 input + 4 checksum
+const INPUT_PACKET_SIZE: usize = 15; // 2 magic + 8 frame + 1 input + 4 checksum
 
 #[derive(Debug, PartialEq)]
 pub enum NetplayState {
@@ -84,9 +84,10 @@ impl NetplaySession {
     }
 
     pub fn join(&mut self, addr: &str) -> Result<(), String> {
-        let peer: SocketAddr = addr.parse().map_err(|e| format!("Invalid address: {}", e))?;
-        let socket =
-            UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Bind failed: {}", e))?;
+        let peer: SocketAddr = addr
+            .parse()
+            .map_err(|e| format!("Invalid address: {}", e))?;
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Bind failed: {}", e))?;
         socket
             .set_nonblocking(true)
             .map_err(|e| format!("Non-blocking failed: {}", e))?;
@@ -292,16 +293,41 @@ impl NetplaySession {
     /// Encode local input bits from individual button booleans.
     /// Bit layout matches NES joypad: A B Sel St U D L R
     #[allow(clippy::too_many_arguments)]
-    pub fn encode_input(a: bool, b: bool, select: bool, start: bool, up: bool, down: bool, left: bool, right: bool) -> u8 {
+    pub fn encode_input(
+        a: bool,
+        b: bool,
+        select: bool,
+        start: bool,
+        up: bool,
+        down: bool,
+        left: bool,
+        right: bool,
+    ) -> u8 {
         let mut bits = 0u8;
-        if a { bits |= 1 << 0; }
-        if b { bits |= 1 << 1; }
-        if select { bits |= 1 << 2; }
-        if start { bits |= 1 << 3; }
-        if up { bits |= 1 << 4; }
-        if down { bits |= 1 << 5; }
-        if left { bits |= 1 << 6; }
-        if right { bits |= 1 << 7; }
+        if a {
+            bits |= 1 << 0;
+        }
+        if b {
+            bits |= 1 << 1;
+        }
+        if select {
+            bits |= 1 << 2;
+        }
+        if start {
+            bits |= 1 << 3;
+        }
+        if up {
+            bits |= 1 << 4;
+        }
+        if down {
+            bits |= 1 << 5;
+        }
+        if left {
+            bits |= 1 << 6;
+        }
+        if right {
+            bits |= 1 << 7;
+        }
         bits
     }
 
@@ -358,7 +384,8 @@ mod tests {
 
     #[test]
     fn test_encode_no_buttons() {
-        let bits = NetplaySession::encode_input(false, false, false, false, false, false, false, false);
+        let bits =
+            NetplaySession::encode_input(false, false, false, false, false, false, false, false);
         assert_eq!(bits, 0x00);
     }
 
@@ -393,14 +420,21 @@ mod tests {
         let mut host = NetplaySession::new();
         host.port = 0;
         host.host().expect("host should bind");
-        let host_port = match host.socket.as_ref().expect("host socket should exist").local_addr() {
+        let host_port = match host
+            .socket
+            .as_ref()
+            .expect("host socket should exist")
+            .local_addr()
+        {
             Ok(addr) => addr.port(),
             Err(_) => return, // Skip if we can't get port
         };
 
         // Client joins
         let mut client = NetplaySession::new();
-        client.join(&format!("127.0.0.1:{}", host_port)).expect("client should connect");
+        client
+            .join(&format!("127.0.0.1:{}", host_port))
+            .expect("client should connect");
         assert_eq!(client.state, NetplayState::Connecting);
 
         // Give the OS a moment, then have host receive the join
@@ -414,9 +448,18 @@ mod tests {
         assert_eq!(client.state, NetplayState::Connected);
 
         // Exchange an input packet
-        let client_port = client.socket.as_ref().expect("client socket should exist")
-            .local_addr().expect("client should have local addr").port();
-        host.peer_addr = Some(format!("127.0.0.1:{}", client_port).parse().expect("valid socket addr"));
+        let client_port = client
+            .socket
+            .as_ref()
+            .expect("client socket should exist")
+            .local_addr()
+            .expect("client should have local addr")
+            .port();
+        host.peer_addr = Some(
+            format!("127.0.0.1:{}", client_port)
+                .parse()
+                .expect("valid socket addr"),
+        );
         host.send_input(1, 0b00000001, 0x12345678);
 
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -486,5 +529,4 @@ mod tests {
         assert!(session.remote_inputs.is_empty());
         session.disconnect();
     }
-
 }

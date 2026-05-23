@@ -39,25 +39,31 @@ impl ScriptEngine {
 
             // nes.pixel(x, y, color)
             let ps = pixel_sink.clone();
-            let pixel_fn = lua.create_function(move |_, (x, y, color): (usize, usize, u32)| {
-                ps.borrow_mut().push((x, y, color));
-                Ok(())
-            }).expect("create pixel fn");
+            let pixel_fn = lua
+                .create_function(move |_, (x, y, color): (usize, usize, u32)| {
+                    ps.borrow_mut().push((x, y, color));
+                    Ok(())
+                })
+                .expect("create pixel fn");
             nes.set("pixel", pixel_fn).expect("set pixel");
 
             // nes.message(text)
             let ms = message_sink.clone();
-            let message_fn = lua.create_function(move |_, text: String| {
-                ms.borrow_mut().push((text, 60));
-                Ok(())
-            }).expect("create message fn");
+            let message_fn = lua
+                .create_function(move |_, text: String| {
+                    ms.borrow_mut().push((text, 60));
+                    Ok(())
+                })
+                .expect("create message fn");
             nes.set("message", message_fn).expect("set message");
 
             // nes.log(text)
-            let log_fn = lua.create_function(|_, text: String| {
-                eprintln!("[lua] {}", text);
-                Ok(())
-            }).expect("create log fn");
+            let log_fn = lua
+                .create_function(|_, text: String| {
+                    eprintln!("[lua] {}", text);
+                    Ok(())
+                })
+                .expect("create log fn");
             nes.set("log", log_fn).expect("set log");
 
             lua.globals().set("nes", nes).expect("set nes global");
@@ -88,7 +94,10 @@ impl ScriptEngine {
         let source = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read '{}': {}", path, e))?;
 
-        self.lua.load(&source).exec().map_err(|e| format!("Lua error: {}", e))?;
+        self.lua
+            .load(&source)
+            .exec()
+            .map_err(|e| format!("Lua error: {}", e))?;
 
         self.active = true;
         self.script_path = Some(path.to_string());
@@ -108,32 +117,37 @@ impl ScriptEngine {
         self.message_sink.borrow_mut().clear();
 
         // Use scope so the read function borrows ram for this call only
-        self.lua.scope(|scope| {
-            // nes.read(addr) — scoped, captures ram slice
-            let read_fn = scope.create_function(|_, addr: u16| {
-                Ok(if (addr as usize) < ram.len() { ram[addr as usize] } else { 0 })
-            })?;
+        self.lua
+            .scope(|scope| {
+                // nes.read(addr) — scoped, captures ram slice
+                let read_fn = scope.create_function(|_, addr: u16| {
+                    Ok(if (addr as usize) < ram.len() {
+                        ram[addr as usize]
+                    } else {
+                        0
+                    })
+                })?;
 
-            let nes: LuaTable = self.lua.globals().get("nes")?;
-            nes.set("read", read_fn)?;
+                let nes: LuaTable = self.lua.globals().get("nes")?;
+                nes.set("read", read_fn)?;
 
-            // nes.framecount()
-            let fc_fn = scope.create_function(|_, ()| {
-                Ok(frame_count)
-            })?;
-            nes.set("framecount", fc_fn)?;
+                // nes.framecount()
+                let fc_fn = scope.create_function(|_, ()| Ok(frame_count))?;
+                nes.set("framecount", fc_fn)?;
 
-            // Call the registered on_frame callback (if any)
-            let callback: Option<LuaFunction> = self.lua.globals().get("_nes_on_frame").ok();
-            if let Some(cb) = callback {
-                cb.call::<()>(())?;
-            }
+                // Call the registered on_frame callback (if any)
+                let callback: Option<LuaFunction> = self.lua.globals().get("_nes_on_frame").ok();
+                if let Some(cb) = callback {
+                    cb.call::<()>(())?;
+                }
 
-            Ok(())
-        }).map_err(|e| format!("on_frame: {}", e))?;
+                Ok(())
+            })
+            .map_err(|e| format!("on_frame: {}", e))?;
 
         // Drain sinks into public vecs for renderer
-        self.overlay_pixels.append(&mut self.pixel_sink.borrow_mut());
+        self.overlay_pixels
+            .append(&mut self.pixel_sink.borrow_mut());
         self.messages.append(&mut self.message_sink.borrow_mut());
 
         Ok(())
