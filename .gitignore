@@ -4,10 +4,8 @@
 *.pdb
 *.dSYM
 
-# ROM files (do not distribute copyrighted ROMs)
+# ROM files (do not distribute ROMs)
 *.nes
-# Exception: test ROM (public domain)
-!nestest.nes
 
 # User data
 *.sav
