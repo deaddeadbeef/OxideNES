@@ -27,4 +27,4 @@ Before opening a pull request:
 ## Current Repository Notes
 
 - `nestest.nes` is kept as a CPU test fixture because the README credits it as public domain.
-- `src/romdb.rs` contains compatibility metadata and should stay factual, minimal, and user-overridable. Any expansion of built-in metadata requires a separate review under this policy.
+- `src/romdb.rs` contains compatibility metadata and should stay factual, minimal, and user-overridable. Follow `docs/ROM_METADATA_POLICY.md` for user overrides and any proposed built-in metadata changes.
