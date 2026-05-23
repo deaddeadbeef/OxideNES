@@ -9,7 +9,22 @@ permissions:
   contents: write
 
 jobs:
+  ip-compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/ip_compliance_audit.py
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked --version 0.22.1
+      - run: cargo audit
+
   build:
+    needs: [ip-compliance, security-audit]
     strategy:
       matrix:
         include:

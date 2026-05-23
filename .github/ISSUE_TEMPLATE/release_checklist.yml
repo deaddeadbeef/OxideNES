@@ -38,17 +38,21 @@ body:
     attributes:
       label: Required validation
       options:
-        - label: `cargo fmt -- --check`
+        - label: "`cargo fmt -- --check`"
           required: true
-        - label: `cargo check`
+        - label: "`cargo check`"
           required: true
-        - label: `cargo test`
+        - label: "`cargo test`"
           required: true
-        - label: `cargo clippy -- -D warnings`
+        - label: "`cargo clippy -- -D warnings`"
           required: true
-        - label: `git diff --check`
+        - label: "`git diff --check`"
           required: true
-        - label: GitHub Actions are green on Windows, macOS, Linux, clippy, and fmt jobs.
+        - label: "`cargo audit`"
+          required: true
+        - label: "`python scripts/ip_compliance_audit.py`"
+          required: true
+        - label: GitHub Actions are green on Windows, macOS, Linux, clippy, fmt, security audit, and IP compliance jobs.
           required: true
   - type: checkboxes
     id: packaging

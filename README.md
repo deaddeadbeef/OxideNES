@@ -8,7 +8,7 @@ A feature-rich NES-compatible emulator written in Rust.
 
 > **Note:** This emulator does not include any game ROMs. You must provide your own legally obtained .nes ROM files.
 
-> *Screenshot: Launch the emulator and drop a .nes ROM file to start playing!*
+> *Screenshot placeholder: launch the emulator with a homebrew or other legally usable `.nes` file to capture product screenshots.*
 
 ## Features
 
@@ -170,7 +170,7 @@ Public issues must not include ROMs, BIOS files, save files from commercial game
 
 ## Credits & Acknowledgments
 
-- **nestest.nes** — CPU test ROM by [Kevin Horton](http://wiki.nesdev.com/w/index.php/Emulator_tests), public domain
+- **Synthetic test fixtures** — Generated in `tests/common/synthetic_rom.rs` from deterministic byte patterns, with no bundled ROM content
 - **NESdev Wiki** — Invaluable hardware documentation at [nesdev.org](https://www.nesdev.org/wiki/)
 - **Rust Crates** — [minifb](https://crates.io/crates/minifb) (windowing), [cpal](https://crates.io/crates/cpal) (audio), [gilrs](https://crates.io/crates/gilrs) (gamepad), [serde](https://crates.io/crates/serde) (config)
 

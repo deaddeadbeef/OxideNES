@@ -1,5 +1,5 @@
 -- show_ram.lua: Display first 16 bytes of CPU RAM as overlay
--- Usage: nes-emulator game.nes --script examples/show_ram.lua
+-- Usage: oxidenes game.nes --script examples/show_ram.lua
 
 function on_frame()
     local fc = nes.framecount()

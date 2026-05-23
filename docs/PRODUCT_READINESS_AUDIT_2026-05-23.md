@@ -27,7 +27,7 @@ This audit records the first full-project pass toward making OxideNES feel like 
 ## IP Compliance Findings
 
 - The repo does not bundle commercial ROMs or proprietary artwork.
-- `nestest.nes` is bundled as a test fixture and is credited in the README as public domain.
+- The initial baseline included `nestest.nes` as a test fixture credited as public domain. M4 removes that binary fixture and relies on generated in-memory test ROM content instead.
 - `src/romdb.rs` includes factual compatibility metadata for commercial titles. That is not ROM content, but any future expansion should be reviewed carefully and kept user-overridable.
 - Documentation examples should avoid naming specific commercial titles unless there is a concrete compatibility reason.
 

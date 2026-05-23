@@ -33,7 +33,7 @@ body:
     attributes:
       label: ROM name only
       description: Provide only the homebrew, test ROM, or game title name. Do not upload or link ROM files.
-      placeholder: "Example: nestest, a homebrew title, or a compatibility title name"
+      placeholder: "Example: a homebrew test ROM or compatibility title name"
     validations:
       required: false
   - type: textarea
