@@ -1,7 +1,7 @@
-use std::fs;
 use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
 use oxidenes::cpu::Cpu;
+use std::fs;
 
 #[test]
 fn nestest_official_opcodes() {

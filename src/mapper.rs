@@ -6,19 +6,27 @@ pub trait Mapper {
     fn read_chr(&self, addr: u16) -> u8;
     fn write_chr(&mut self, addr: u16, data: u8);
     fn mirroring(&self) -> crate::cartridge::Mirroring;
-    fn clock_scanline(&mut self) {}  // NEW - default no-op
-    fn irq_pending(&self) -> bool { false }  // NEW - default false
-    fn irq_clear(&mut self) {}  // NEW - default no-op
-    
+    fn clock_scanline(&mut self) {} // NEW - default no-op
+    fn irq_pending(&self) -> bool {
+        false
+    } // NEW - default false
+    fn irq_clear(&mut self) {} // NEW - default no-op
+
     // Audio expansion (VRC6, etc.) - returns mixed audio sample
-    fn audio_output(&self) -> f32 { 0.0 }
-    
+    fn audio_output(&self) -> f32 {
+        0.0
+    }
+
     // Save state support - SRAM/PRG RAM access
-    fn get_sram(&self) -> Vec<u8> { Vec::new() }
+    fn get_sram(&self) -> Vec<u8> {
+        Vec::new()
+    }
     fn set_sram(&mut self, _data: &[u8]) {}
-    
+
     // Save state support - mapper state
-    fn save_state(&self) -> Vec<u8> { Vec::new() }
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
     fn load_state(&mut self, _data: &[u8]) {}
 }
 
@@ -400,7 +408,11 @@ impl Mapper000 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper000 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             mirroring,
             prg_banks,
@@ -448,12 +460,12 @@ impl Mapper for Mapper000 {
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
-    
+
     #[inline]
     fn get_sram(&self) -> Vec<u8> {
         self.prg_ram.clone()
     }
-    
+
     #[inline]
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
@@ -466,28 +478,28 @@ pub struct Mapper004 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    
+
     // Bank select
     bank_select: u8,
     prg_bank_mode: bool,
     chr_inversion: bool,
-    
+
     // Bank registers R0-R7
     registers: [u8; 8],
-    
+
     // PRG banking
     prg_banks: usize,
-    
+
     // CHR banking (cached)
     chr_bank_count: usize,
-    
+
     // IRQ
     irq_counter: u8,
     irq_reload: u8,
     irq_enabled: bool,
     irq_pending: bool,
     irq_reload_flag: bool,
-    
+
     // Mirroring control
     mirror_mode: u8,
 }
@@ -496,7 +508,11 @@ impl Mapper004 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
         let prg_banks = prg_rom.len() / 0x2000; // 8KB banks
         let has_chr_ram = chr_rom.is_empty();
-        let chr_data = if has_chr_ram { vec![0; 0x2000] } else { chr_rom };
+        let chr_data = if has_chr_ram {
+            vec![0; 0x2000]
+        } else {
+            chr_rom
+        };
         let chr_bank_count = chr_data.len() >> 10; // / 0x0400 = 1KB banks
         Mapper004 {
             prg_rom,
@@ -513,22 +529,28 @@ impl Mapper004 {
             irq_enabled: false,
             irq_pending: false,
             irq_reload_flag: false,
-            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical { 0 } else { 1 },
+            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical {
+                0
+            } else {
+                1
+            },
         }
     }
-    
+
     #[inline]
     fn prg_bank_offset(&self, bank: usize) -> usize {
         let bank = bank % self.prg_banks;
-        bank << 13  // 0x2000 = 8KB
+        bank << 13 // 0x2000 = 8KB
     }
-    
+
     #[inline]
     fn chr_bank_offset(&self, bank: usize) -> usize {
         let chr_banks = self.chr_bank_count;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
-        bank << 10  // 0x0400 = 1KB
+        bank << 10 // 0x0400 = 1KB
     }
 }
 
@@ -568,7 +590,7 @@ impl Mapper for Mapper004 {
             _ => 0,
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
@@ -615,7 +637,7 @@ impl Mapper for Mapper004 {
             _ => {}
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = if self.chr_inversion {
@@ -651,7 +673,7 @@ impl Mapper for Mapper004 {
             0
         }
     }
-    
+
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         // Only write if CHR RAM
@@ -659,7 +681,7 @@ impl Mapper for Mapper004 {
             self.chr_rom[addr as usize] = data;
         }
     }
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirror_mode == 0 {
@@ -676,7 +698,7 @@ impl Mapper for Mapper004 {
         } else {
             self.irq_counter -= 1;
         }
-        
+
         if self.irq_counter == 0 && self.irq_enabled {
             self.irq_pending = true;
         }
@@ -689,16 +711,16 @@ impl Mapper for Mapper004 {
     fn irq_clear(&mut self) {
         self.irq_pending = false;
     }
-    
+
     fn get_sram(&self) -> Vec<u8> {
         self.prg_ram.clone()
     }
-    
+
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
         data.push(self.bank_select);
@@ -713,7 +735,7 @@ impl Mapper for Mapper004 {
         data.push(self.mirror_mode);
         data
     }
-    
+
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 16 {
             self.bank_select = data[0];
@@ -747,7 +769,11 @@ impl Mapper002 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper002 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             mirroring,
             prg_banks,
@@ -801,20 +827,20 @@ impl Mapper for Mapper002 {
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
-    
+
     fn get_sram(&self) -> Vec<u8> {
         self.prg_ram.clone()
     }
-    
+
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         vec![self.bank_select]
     }
-    
+
     fn load_state(&mut self, data: &[u8]) {
         if !data.is_empty() {
             if self.prg_banks > 0 {
@@ -831,28 +857,36 @@ pub struct Mapper001 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    
+
     shift_register: u8,
     write_count: u8,
-    
+
     control: u8,
     chr_bank_0: u8,
     chr_bank_1: u8,
     prg_bank: u8,
-    
+
     prg_banks: usize,
     chr_banks: usize,
 }
 
 impl Mapper001 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        _mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
         let chr_size = chr_rom.len();
         let has_chr_ram = chr_rom.is_empty();
         let chr_banks = if has_chr_ram { 0 } else { chr_size / 0x1000 };
         Mapper001 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             shift_register: 0x10,
             write_count: 0,
@@ -864,7 +898,7 @@ impl Mapper001 {
             chr_banks,
         }
     }
-    
+
     fn load_register(&mut self, addr: u16, data: u8) {
         if data & 0x80 != 0 {
             self.shift_register = 0x10;
@@ -872,11 +906,11 @@ impl Mapper001 {
             self.control |= 0x0C;
             return;
         }
-        
+
         self.shift_register >>= 1;
         self.shift_register |= (data & 1) << 4;
         self.write_count += 1;
-        
+
         if self.write_count == 5 {
             let value = self.shift_register;
             match addr {
@@ -901,8 +935,8 @@ impl Mapper for Mapper001 {
                 let prg_mode = (self.control >> 2) & 3;
                 let bank = match prg_mode {
                     0 | 1 => (self.prg_bank & 0xFE) as usize, // 32KB mode
-                    2 => 0, // fixed first bank
-                    3 => self.prg_bank as usize, // switchable
+                    2 => 0,                                   // fixed first bank
+                    3 => self.prg_bank as usize,              // switchable
                     _ => 0,
                 };
                 let bank = bank % self.prg_banks;
@@ -922,8 +956,8 @@ impl Mapper for Mapper001 {
                 let prg_mode = (self.control >> 2) & 3;
                 let bank = match prg_mode {
                     0 | 1 => ((self.prg_bank & 0xFE) as usize) + 1, // 32KB mode, second half
-                    2 => self.prg_bank as usize, // switchable
-                    3 => self.prg_banks - 1, // fixed last bank
+                    2 => self.prg_bank as usize,                    // switchable
+                    3 => self.prg_banks - 1,                        // fixed last bank
                     _ => self.prg_banks - 1,
                 };
                 let bank = bank % self.prg_banks;
@@ -937,7 +971,7 @@ impl Mapper for Mapper001 {
             _ => 0,
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
@@ -946,7 +980,7 @@ impl Mapper for Mapper001 {
             _ => {}
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let chr_mode = self.control & 0x10 != 0;
@@ -954,7 +988,7 @@ impl Mapper for Mapper001 {
             // CHR RAM
             return self.chr_rom[addr as usize];
         }
-        
+
         let bank = if chr_mode {
             // 4KB mode
             match addr {
@@ -970,7 +1004,7 @@ impl Mapper for Mapper001 {
                 _ => 0,
             }
         };
-        
+
         let offset = (bank % self.chr_banks) * 0x1000 + (addr & 0x0FFF) as usize;
         if offset < self.chr_rom.len() {
             self.chr_rom[offset]
@@ -978,14 +1012,14 @@ impl Mapper for Mapper001 {
             0
         }
     }
-    
+
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_banks == 0 {
             self.chr_rom[addr as usize] = data;
         }
     }
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.control & 3 {
@@ -996,16 +1030,16 @@ impl Mapper for Mapper001 {
             _ => unreachable!(),
         }
     }
-    
+
     fn get_sram(&self) -> Vec<u8> {
         self.prg_ram.clone()
     }
-    
+
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         vec![
             self.shift_register,
@@ -1016,7 +1050,7 @@ impl Mapper for Mapper001 {
             self.prg_bank,
         ]
     }
-    
+
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 6 {
             self.shift_register = data[0];
@@ -1057,9 +1091,7 @@ impl Mapper for Mapper003 {
     #[inline]
     fn read_prg(&self, addr: u16) -> u8 {
         match addr {
-            0x8000..=0xBFFF => {
-                self.prg_rom[(addr - 0x8000) as usize % self.prg_rom.len()]
-            }
+            0x8000..=0xBFFF => self.prg_rom[(addr - 0x8000) as usize % self.prg_rom.len()],
             0xC000..=0xFFFF => {
                 if self.prg_banks > 1 {
                     self.prg_rom[(addr - 0x8000) as usize]
@@ -1071,14 +1103,14 @@ impl Mapper for Mapper003 {
             _ => 0,
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
             self.chr_bank = data & 0x03; // Usually 2 bits, supporting up to 4 banks
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         if self.chr_rom.is_empty() {
@@ -1093,21 +1125,21 @@ impl Mapper for Mapper003 {
             0
         }
     }
-    
+
     #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {
         // CHR ROM is read-only for CNROM
     }
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         self.mirroring
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         vec![self.chr_bank]
     }
-    
+
     fn load_state(&mut self, data: &[u8]) {
         if !data.is_empty() {
             self.chr_bank = data[0];
@@ -1123,7 +1155,11 @@ pub struct Mapper007 {
 }
 
 impl Mapper007 {
-    pub fn new(prg_rom: Vec<u8>, _chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        _chr_rom: Vec<u8>,
+        _mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         Mapper007 {
             prg_rom,
             chr_ram: vec![0; 0x2000],
@@ -1150,7 +1186,7 @@ impl Mapper for Mapper007 {
             0
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         if addr >= 0x8000 {
@@ -1158,17 +1194,17 @@ impl Mapper for Mapper007 {
             self.mirroring_bit = data & 0x10 != 0; // bit 4: mirroring
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         self.chr_ram[addr as usize & 0x1FFF]
     }
-    
+
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         self.chr_ram[addr as usize & 0x1FFF] = data;
     }
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirroring_bit {
@@ -1177,11 +1213,11 @@ impl Mapper for Mapper007 {
             crate::cartridge::Mirroring::SingleScreenLower
         }
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         vec![self.prg_bank, if self.mirroring_bit { 1 } else { 0 }]
     }
-    
+
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 2 {
             self.prg_bank = data[0];
@@ -1199,9 +1235,9 @@ pub struct Mapper009 {
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
     prg_banks: usize,
-    
+
     prg_bank: u8,
-    
+
     // CHR latches: two pairs of banks, switched by reading $FD/$FE tiles
     chr_bank_0_fd: u8,
     chr_bank_0_fe: u8,
@@ -1209,21 +1245,29 @@ pub struct Mapper009 {
     chr_bank_1_fe: u8,
     latch_0: std::cell::Cell<bool>, // false = $FD, true = $FE
     latch_1: std::cell::Cell<bool>,
-    
+
     mirror_mode: u8,
 }
 
 impl Mapper009 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        _mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         let prg_banks = prg_rom.len() / 0x2000;
         Mapper009 {
-            prg_rom, chr_rom,
+            prg_rom,
+            chr_rom,
             prg_ram: vec![0; 0x2000],
             prg_banks,
             prg_bank: 0,
-            chr_bank_0_fd: 0, chr_bank_0_fe: 0,
-            chr_bank_1_fd: 0, chr_bank_1_fe: 0,
-            latch_0: std::cell::Cell::new(true), latch_1: std::cell::Cell::new(true),
+            chr_bank_0_fd: 0,
+            chr_bank_0_fe: 0,
+            chr_bank_1_fd: 0,
+            chr_bank_1_fe: 0,
+            latch_0: std::cell::Cell::new(true),
+            latch_1: std::cell::Cell::new(true),
             mirror_mode: 0,
         }
     }
@@ -1253,7 +1297,7 @@ impl Mapper for Mapper009 {
             _ => 0,
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
@@ -1267,25 +1311,39 @@ impl Mapper for Mapper009 {
             _ => {}
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = match addr {
             0x0000..=0x0FFF => {
-                if self.latch_0.get() { self.chr_bank_0_fe } else { self.chr_bank_0_fd }
+                if self.latch_0.get() {
+                    self.chr_bank_0_fe
+                } else {
+                    self.chr_bank_0_fd
+                }
             }
             0x1000..=0x1FFF => {
-                if self.latch_1.get() { self.chr_bank_1_fe } else { self.chr_bank_1_fd }
+                if self.latch_1.get() {
+                    self.chr_bank_1_fe
+                } else {
+                    self.chr_bank_1_fd
+                }
             }
             _ => 0,
         } as usize;
-        
+
         let chr_banks = self.chr_rom.len() / 0x1000;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x1000 + (addr & 0x0FFF) as usize;
-        let result = if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 };
-        
+        let result = if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        };
+
         // Update latches based on tile address fetched
         match addr {
             0x0FD8..=0x0FDF => self.latch_0.set(false),
@@ -1294,13 +1352,13 @@ impl Mapper for Mapper009 {
             0x1FE8..=0x1FEF => self.latch_1.set(true),
             _ => {}
         }
-        
+
         result
     }
-    
+
     #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         if self.mirror_mode == 0 {
@@ -1309,27 +1367,36 @@ impl Mapper for Mapper009 {
             crate::cartridge::Mirroring::Horizontal
         }
     }
-    
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         vec![
-            self.prg_bank, self.chr_bank_0_fd, self.chr_bank_0_fe,
-            self.chr_bank_1_fd, self.chr_bank_1_fe,
-            if self.latch_0.get() { 1 } else { 0 }, if self.latch_1.get() { 1 } else { 0 },
+            self.prg_bank,
+            self.chr_bank_0_fd,
+            self.chr_bank_0_fe,
+            self.chr_bank_1_fd,
+            self.chr_bank_1_fe,
+            if self.latch_0.get() { 1 } else { 0 },
+            if self.latch_1.get() { 1 } else { 0 },
             self.mirror_mode,
         ]
     }
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 8 {
             self.prg_bank = data[0];
-            self.chr_bank_0_fd = data[1]; self.chr_bank_0_fe = data[2];
-            self.chr_bank_1_fd = data[3]; self.chr_bank_1_fe = data[4];
-            self.latch_0.set(data[5] != 0); self.latch_1.set(data[6] != 0);
+            self.chr_bank_0_fd = data[1];
+            self.chr_bank_0_fe = data[2];
+            self.chr_bank_1_fd = data[3];
+            self.chr_bank_1_fe = data[4];
+            self.latch_0.set(data[5] != 0);
+            self.latch_1.set(data[6] != 0);
             self.mirror_mode = data[7];
         }
     }
@@ -1348,7 +1415,13 @@ pub struct Mapper011 {
 
 impl Mapper011 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
-        Mapper011 { prg_rom, chr_rom, prg_bank: 0, chr_bank: 0, mirroring }
+        Mapper011 {
+            prg_rom,
+            chr_rom,
+            prg_bank: 0,
+            chr_bank: 0,
+            mirroring,
+        }
     }
 }
 
@@ -1357,11 +1430,19 @@ impl Mapper for Mapper011 {
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
-            if prg_banks == 0 { return 0; }
+            if prg_banks == 0 {
+                return 0;
+            }
             let bank = (self.prg_bank as usize) % prg_banks;
             let offset = bank * 0x8000 + (addr - 0x8000) as usize;
-            if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
-        } else { 0 }
+            if offset < self.prg_rom.len() {
+                self.prg_rom[offset]
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
@@ -1372,20 +1453,35 @@ impl Mapper for Mapper011 {
     }
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
-        if self.chr_rom.is_empty() { return 0; }
+        if self.chr_rom.is_empty() {
+            return 0;
+        }
         let chr_banks = self.chr_rom.len() / 0x2000;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = (self.chr_bank as usize) % chr_banks;
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
     #[inline]
-    fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
-    fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.prg_bank, self.chr_bank]
+    }
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() >= 2 { self.prg_bank = data[0]; self.chr_bank = data[1]; }
+        if data.len() >= 2 {
+            self.prg_bank = data[0];
+            self.chr_bank = data[1];
+        }
     }
 }
 
@@ -1402,7 +1498,13 @@ pub struct Mapper066 {
 
 impl Mapper066 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
-        Mapper066 { prg_rom, chr_rom, prg_bank: 0, chr_bank: 0, mirroring }
+        Mapper066 {
+            prg_rom,
+            chr_rom,
+            prg_bank: 0,
+            chr_bank: 0,
+            mirroring,
+        }
     }
 }
 
@@ -1411,11 +1513,19 @@ impl Mapper for Mapper066 {
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
-            if prg_banks == 0 { return 0; }
+            if prg_banks == 0 {
+                return 0;
+            }
             let bank = (self.prg_bank as usize) % prg_banks;
             let offset = bank * 0x8000 + (addr - 0x8000) as usize;
-            if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
-        } else { 0 }
+            if offset < self.prg_rom.len() {
+                self.prg_rom[offset]
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
@@ -1426,20 +1536,35 @@ impl Mapper for Mapper066 {
     }
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
-        if self.chr_rom.is_empty() { return 0; }
+        if self.chr_rom.is_empty() {
+            return 0;
+        }
         let chr_banks = self.chr_rom.len() / 0x2000;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = (self.chr_bank as usize) % chr_banks;
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
     #[inline]
-    fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
-    fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.prg_bank, self.chr_bank]
+    }
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() >= 2 { self.prg_bank = data[0]; self.chr_bank = data[1]; }
+        if data.len() >= 2 {
+            self.prg_bank = data[0];
+            self.chr_bank = data[1];
+        }
     }
 }
 
@@ -1456,11 +1581,18 @@ pub struct Mapper071 {
 }
 
 impl Mapper071 {
-    pub fn new(prg_rom: Vec<u8>, _chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        _chr_rom: Vec<u8>,
+        mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
         Mapper071 {
-            prg_rom, chr_ram: vec![0; 0x2000],
-            prg_bank: 0, prg_banks, mirroring,
+            prg_rom,
+            chr_ram: vec![0; 0x2000],
+            prg_bank: 0,
+            prg_banks,
+            mirroring,
             mirror_override: None,
         }
     }
@@ -1495,9 +1627,13 @@ impl Mapper for Mapper071 {
         }
     }
     #[inline]
-    fn read_chr(&self, addr: u16) -> u8 { self.chr_ram[addr as usize & 0x1FFF] }
+    fn read_chr(&self, addr: u16) -> u8 {
+        self.chr_ram[addr as usize & 0x1FFF]
+    }
     #[inline]
-    fn write_chr(&mut self, addr: u16, data: u8) { self.chr_ram[addr as usize & 0x1FFF] = data; }
+    fn write_chr(&mut self, addr: u16, data: u8) {
+        self.chr_ram[addr as usize & 0x1FFF] = data;
+    }
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_override {
@@ -1507,12 +1643,23 @@ impl Mapper for Mapper071 {
         }
     }
     fn save_state(&self) -> Vec<u8> {
-        vec![self.prg_bank, match self.mirror_override { Some(true) => 2, Some(false) => 1, None => 0 }]
+        vec![
+            self.prg_bank,
+            match self.mirror_override {
+                Some(true) => 2,
+                Some(false) => 1,
+                None => 0,
+            },
+        ]
     }
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 2 {
             self.prg_bank = data[0];
-            self.mirror_override = match data[1] { 2 => Some(true), 1 => Some(false), _ => None };
+            self.mirror_override = match data[1] {
+                2 => Some(true),
+                1 => Some(false),
+                _ => None,
+            };
         }
     }
 }
@@ -1527,7 +1674,7 @@ pub struct Mapper069 {
     prg_ram: Vec<u8>,
     mirroring: crate::cartridge::Mirroring,
     prg_banks: usize,
-    
+
     command: u8,
     chr_banks: [u8; 8],
     prg_bank_6: u8,
@@ -1537,7 +1684,7 @@ pub struct Mapper069 {
     prg_ram_enabled: bool,
     prg_ram_select: bool,
     mirror_mode: u8,
-    
+
     irq_enabled: bool,
     irq_counter_enabled: bool,
     irq_counter: u16,
@@ -1550,16 +1697,27 @@ impl Mapper069 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper069 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
-            mirroring, prg_banks,
+            mirroring,
+            prg_banks,
             command: 0,
             chr_banks: [0; 8],
-            prg_bank_6: 0, prg_bank_8: 0, prg_bank_a: 0, prg_bank_c: 0,
-            prg_ram_enabled: false, prg_ram_select: false,
+            prg_bank_6: 0,
+            prg_bank_8: 0,
+            prg_bank_a: 0,
+            prg_bank_c: 0,
+            prg_ram_enabled: false,
+            prg_ram_select: false,
             mirror_mode: 0,
-            irq_enabled: false, irq_counter_enabled: false,
-            irq_counter: 0, irq_pending_flag: false,
+            irq_enabled: false,
+            irq_counter_enabled: false,
+            irq_counter: 0,
+            irq_pending_flag: false,
         }
     }
 }
@@ -1574,7 +1732,11 @@ impl Mapper for Mapper069 {
                 } else {
                     let bank = (self.prg_bank_6 as usize) % self.prg_banks;
                     let offset = bank * 0x2000 + (addr - 0x6000) as usize;
-                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                    if offset < self.prg_rom.len() {
+                        self.prg_rom[offset]
+                    } else {
+                        0
+                    }
                 }
             }
             0x8000..=0x9FFF => {
@@ -1596,7 +1758,7 @@ impl Mapper for Mapper069 {
             _ => 0,
         }
     }
-    
+
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
         match addr {
@@ -1606,55 +1768,61 @@ impl Mapper for Mapper069 {
                 }
             }
             0x8000..=0x9FFF => self.command = data & 0x0F,
-            0xA000..=0xBFFF => {
-                match self.command {
-                    0x00..=0x07 => self.chr_banks[self.command as usize] = data,
-                    0x08 => {
-                        self.prg_ram_select = data & 0x40 != 0;
-                        self.prg_ram_enabled = data & 0x80 != 0;
-                        self.prg_bank_6 = data & 0x3F;
-                    }
-                    0x09 => self.prg_bank_8 = data & 0x3F,
-                    0x0A => self.prg_bank_a = data & 0x3F,
-                    0x0B => self.prg_bank_c = data & 0x3F,
-                    0x0C => self.mirror_mode = data & 0x03,
-                    0x0D => {
-                        self.irq_enabled = data & 0x01 != 0;
-                        self.irq_counter_enabled = data & 0x80 != 0;
-                        self.irq_pending_flag = false;
-                    }
-                    0x0E => {
-                        self.irq_counter = (self.irq_counter & 0xFF00) | data as u16;
-                    }
-                    0x0F => {
-                        self.irq_counter = (self.irq_counter & 0x00FF) | ((data as u16) << 8);
-                    }
-                    _ => {}
+            0xA000..=0xBFFF => match self.command {
+                0x00..=0x07 => self.chr_banks[self.command as usize] = data,
+                0x08 => {
+                    self.prg_ram_select = data & 0x40 != 0;
+                    self.prg_ram_enabled = data & 0x80 != 0;
+                    self.prg_bank_6 = data & 0x3F;
                 }
-            }
+                0x09 => self.prg_bank_8 = data & 0x3F,
+                0x0A => self.prg_bank_a = data & 0x3F,
+                0x0B => self.prg_bank_c = data & 0x3F,
+                0x0C => self.mirror_mode = data & 0x03,
+                0x0D => {
+                    self.irq_enabled = data & 0x01 != 0;
+                    self.irq_counter_enabled = data & 0x80 != 0;
+                    self.irq_pending_flag = false;
+                }
+                0x0E => {
+                    self.irq_counter = (self.irq_counter & 0xFF00) | data as u16;
+                }
+                0x0F => {
+                    self.irq_counter = (self.irq_counter & 0x00FF) | ((data as u16) << 8);
+                }
+                _ => {}
+            },
             _ => {}
         }
     }
-    
+
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
-        if bank_idx >= 8 { return 0; }
+        if bank_idx >= 8 {
+            return 0;
+        }
         let bank = self.chr_banks[bank_idx] as usize;
         let chr_banks = self.chr_rom.len() / 0x0400;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
-    
+
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         if self.chr_rom.len() <= 0x2000 {
             self.chr_rom[addr as usize & 0x1FFF] = data;
         }
     }
-    
+
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
         match self.mirror_mode {
@@ -1665,7 +1833,7 @@ impl Mapper for Mapper069 {
             _ => self.mirroring,
         }
     }
-    
+
     fn clock_scanline(&mut self) {
         if self.irq_counter_enabled {
             if self.irq_counter == 0 {
@@ -1677,22 +1845,30 @@ impl Mapper for Mapper069 {
             }
         }
     }
-    
-    fn irq_pending(&self) -> bool { self.irq_pending_flag }
-    fn irq_clear(&mut self) { self.irq_pending_flag = false; }
-    
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+
+    fn irq_pending(&self) -> bool {
+        self.irq_pending_flag
+    }
+    fn irq_clear(&mut self) {
+        self.irq_pending_flag = false;
+    }
+
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    
+
     fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
         data.push(self.command);
         data.extend_from_slice(&self.chr_banks);
-        data.push(self.prg_bank_6); data.push(self.prg_bank_8);
-        data.push(self.prg_bank_a); data.push(self.prg_bank_c);
+        data.push(self.prg_bank_6);
+        data.push(self.prg_bank_8);
+        data.push(self.prg_bank_a);
+        data.push(self.prg_bank_c);
         data.push(if self.prg_ram_enabled { 1 } else { 0 });
         data.push(if self.prg_ram_select { 1 } else { 0 });
         data.push(self.mirror_mode);
@@ -1705,18 +1881,30 @@ impl Mapper for Mapper069 {
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 20 {
             let mut pos = 0;
-            self.command = data[pos]; pos += 1;
-            self.chr_banks.copy_from_slice(&data[pos..pos+8]); pos += 8;
-            self.prg_bank_6 = data[pos]; pos += 1;
-            self.prg_bank_8 = data[pos]; pos += 1;
-            self.prg_bank_a = data[pos]; pos += 1;
-            self.prg_bank_c = data[pos]; pos += 1;
-            self.prg_ram_enabled = data[pos] != 0; pos += 1;
-            self.prg_ram_select = data[pos] != 0; pos += 1;
-            self.mirror_mode = data[pos]; pos += 1;
-            self.irq_enabled = data[pos] != 0; pos += 1;
-            self.irq_counter_enabled = data[pos] != 0; pos += 1;
-            self.irq_counter = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
+            self.command = data[pos];
+            pos += 1;
+            self.chr_banks.copy_from_slice(&data[pos..pos + 8]);
+            pos += 8;
+            self.prg_bank_6 = data[pos];
+            pos += 1;
+            self.prg_bank_8 = data[pos];
+            pos += 1;
+            self.prg_bank_a = data[pos];
+            pos += 1;
+            self.prg_bank_c = data[pos];
+            pos += 1;
+            self.prg_ram_enabled = data[pos] != 0;
+            pos += 1;
+            self.prg_ram_select = data[pos] != 0;
+            pos += 1;
+            self.mirror_mode = data[pos];
+            pos += 1;
+            self.irq_enabled = data[pos] != 0;
+            pos += 1;
+            self.irq_counter_enabled = data[pos] != 0;
+            pos += 1;
+            self.irq_counter = u16::from_le_bytes([data[pos], data[pos + 1]]);
+            pos += 2;
             self.irq_pending_flag = data[pos] != 0;
         }
     }
@@ -1739,14 +1927,24 @@ pub struct Mapper010 {
 }
 
 impl Mapper010 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        _mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         let prg_banks = prg_rom.len() / 0x4000;
         Mapper010 {
-            prg_rom, chr_rom, prg_ram: vec![0; 0x2000],
-            prg_banks, prg_bank: 0,
-            chr_bank_0_fd: 0, chr_bank_0_fe: 0,
-            chr_bank_1_fd: 0, chr_bank_1_fe: 0,
-            latch_0: std::cell::Cell::new(true), latch_1: std::cell::Cell::new(true),
+            prg_rom,
+            chr_rom,
+            prg_ram: vec![0; 0x2000],
+            prg_banks,
+            prg_bank: 0,
+            chr_bank_0_fd: 0,
+            chr_bank_0_fe: 0,
+            chr_bank_1_fd: 0,
+            chr_bank_1_fe: 0,
+            latch_0: std::cell::Cell::new(true),
+            latch_1: std::cell::Cell::new(true),
             mirror_mode: 0,
         }
     }
@@ -1784,15 +1982,33 @@ impl Mapper for Mapper010 {
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank = match addr {
-            0x0000..=0x0FFF => if self.latch_0.get() { self.chr_bank_0_fe } else { self.chr_bank_0_fd },
-            0x1000..=0x1FFF => if self.latch_1.get() { self.chr_bank_1_fe } else { self.chr_bank_1_fd },
+            0x0000..=0x0FFF => {
+                if self.latch_0.get() {
+                    self.chr_bank_0_fe
+                } else {
+                    self.chr_bank_0_fd
+                }
+            }
+            0x1000..=0x1FFF => {
+                if self.latch_1.get() {
+                    self.chr_bank_1_fe
+                } else {
+                    self.chr_bank_1_fd
+                }
+            }
             _ => 0,
         } as usize;
         let chr_banks = self.chr_rom.len() / 0x1000;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x1000 + (addr & 0x0FFF) as usize;
-        let result = if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 };
+        let result = if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        };
         match addr {
             0x0FD8..=0x0FDF => self.latch_0.set(false),
             0x0FE8..=0x0FEF => self.latch_0.set(true),
@@ -1806,22 +2022,41 @@ impl Mapper for Mapper010 {
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
     #[inline]
     fn mirroring(&self) -> crate::cartridge::Mirroring {
-        if self.mirror_mode == 0 { crate::cartridge::Mirroring::Vertical } else { crate::cartridge::Mirroring::Horizontal }
+        if self.mirror_mode == 0 {
+            crate::cartridge::Mirroring::Vertical
+        } else {
+            crate::cartridge::Mirroring::Horizontal
+        }
     }
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
     fn save_state(&self) -> Vec<u8> {
-        vec![self.prg_bank, self.chr_bank_0_fd, self.chr_bank_0_fe, self.chr_bank_1_fd, self.chr_bank_1_fe,
-             if self.latch_0.get() { 1 } else { 0 }, if self.latch_1.get() { 1 } else { 0 }, self.mirror_mode]
+        vec![
+            self.prg_bank,
+            self.chr_bank_0_fd,
+            self.chr_bank_0_fe,
+            self.chr_bank_1_fd,
+            self.chr_bank_1_fe,
+            if self.latch_0.get() { 1 } else { 0 },
+            if self.latch_1.get() { 1 } else { 0 },
+            self.mirror_mode,
+        ]
     }
     fn load_state(&mut self, data: &[u8]) {
         if data.len() >= 8 {
-            self.prg_bank = data[0]; self.chr_bank_0_fd = data[1]; self.chr_bank_0_fe = data[2];
-            self.chr_bank_1_fd = data[3]; self.chr_bank_1_fe = data[4];
-            self.latch_0.set(data[5] != 0); self.latch_1.set(data[6] != 0); self.mirror_mode = data[7];
+            self.prg_bank = data[0];
+            self.chr_bank_0_fd = data[1];
+            self.chr_bank_0_fe = data[2];
+            self.chr_bank_1_fd = data[3];
+            self.chr_bank_1_fe = data[4];
+            self.latch_0.set(data[5] != 0);
+            self.latch_1.set(data[6] != 0);
+            self.mirror_mode = data[7];
         }
     }
 }
@@ -1836,7 +2071,13 @@ pub struct Mapper079 {
 
 impl Mapper079 {
     pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring) -> Self {
-        Mapper079 { prg_rom, chr_rom, prg_bank: 0, chr_bank: 0, mirroring }
+        Mapper079 {
+            prg_rom,
+            chr_rom,
+            prg_bank: 0,
+            chr_bank: 0,
+            mirroring,
+        }
     }
 }
 
@@ -1845,11 +2086,19 @@ impl Mapper for Mapper079 {
     fn read_prg(&self, addr: u16) -> u8 {
         if addr >= 0x8000 {
             let prg_banks = self.prg_rom.len() / 0x8000;
-            if prg_banks == 0 { return 0; }
+            if prg_banks == 0 {
+                return 0;
+            }
             let bank = (self.prg_bank as usize) % prg_banks;
             let offset = bank * 0x8000 + (addr - 0x8000) as usize;
-            if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
-        } else { 0 }
+            if offset < self.prg_rom.len() {
+                self.prg_rom[offset]
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_prg(&mut self, addr: u16, data: u8) {
@@ -1860,20 +2109,35 @@ impl Mapper for Mapper079 {
     }
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
-        if self.chr_rom.is_empty() { return 0; }
+        if self.chr_rom.is_empty() {
+            return 0;
+        }
         let chr_banks = self.chr_rom.len() / 0x2000;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = (self.chr_bank as usize) % chr_banks;
         let offset = bank * 0x2000 + (addr as usize & 0x1FFF);
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_chr(&mut self, _addr: u16, _data: u8) {}
     #[inline]
-    fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
-    fn save_state(&self) -> Vec<u8> { vec![self.prg_bank, self.chr_bank] }
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.prg_bank, self.chr_bank]
+    }
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() >= 2 { self.prg_bank = data[0]; self.chr_bank = data[1]; }
+        if data.len() >= 2 {
+            self.prg_bank = data[0];
+            self.chr_bank = data[1];
+        }
     }
 }
 
@@ -1892,8 +2156,15 @@ impl Mapper206 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper206 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
-            mirroring, bank_select: 0, registers: [0; 8], prg_banks,
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
+            mirroring,
+            bank_select: 0,
+            registers: [0; 8],
+            prg_banks,
         }
     }
 }
@@ -1945,17 +2216,27 @@ impl Mapper for Mapper206 {
             _ => 0,
         };
         let chr_banks = self.chr_rom.len() / 0x0400;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
-        if self.chr_rom.len() <= 0x2000 { self.chr_rom[addr as usize & 0x1FFF] = data; }
+        if self.chr_rom.len() <= 0x2000 {
+            self.chr_rom[addr as usize & 0x1FFF] = data;
+        }
     }
     #[inline]
-    fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
     fn save_state(&self) -> Vec<u8> {
         let mut data = vec![self.bank_select];
         data.extend_from_slice(&self.registers);
@@ -1986,7 +2267,11 @@ impl Mapper034 {
         let prg_banks = prg_rom.len() / 0x8000;
         Mapper034 {
             prg_rom,
-            chr_ram: if chr_rom.is_empty() { vec![0; 0x2000] } else { chr_rom },
+            chr_ram: if chr_rom.is_empty() {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             mirroring,
             prg_banks: prg_banks.max(1),
@@ -2003,7 +2288,11 @@ impl Mapper for Mapper034 {
             0x8000..=0xFFFF => {
                 let bank = (self.bank_select as usize) % self.prg_banks;
                 let offset = bank * 0x8000 + (addr - 0x8000) as usize;
-                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                if offset < self.prg_rom.len() {
+                    self.prg_rom[offset]
+                } else {
+                    0
+                }
             }
             _ => 0,
         }
@@ -2027,13 +2316,19 @@ impl Mapper for Mapper034 {
         self.chr_ram[addr as usize & 0x1FFF] = data;
     }
     #[inline]
-    fn mirroring(&self) -> crate::cartridge::Mirroring { self.mirroring }
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn mirroring(&self) -> crate::cartridge::Mirroring {
+        self.mirroring
+    }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
     }
-    fn save_state(&self) -> Vec<u8> { vec![self.bank_select] }
+    fn save_state(&self) -> Vec<u8> {
+        vec![self.bank_select]
+    }
     fn load_state(&mut self, data: &[u8]) {
         if !data.is_empty() {
             self.bank_select = (data[0] as usize % self.prg_banks) as u8;
@@ -2055,8 +2350,8 @@ pub struct MapperVRC6 {
     prg_banks: usize,
 
     // PRG bank registers
-    prg_bank_16k: u8,  // $8000-$BFFF (16KB)
-    prg_bank_8k: u8,   // $C000-$DFFF (8KB)
+    prg_bank_16k: u8, // $8000-$BFFF (16KB)
+    prg_bank_8k: u8,  // $C000-$DFFF (8KB)
 
     // CHR bank registers (8 × 1KB)
     chr_banks: [u8; 8],
@@ -2075,7 +2370,7 @@ pub struct MapperVRC6 {
     // Audio - Pulse channel 1
     pulse1_volume: u8,
     pulse1_duty: u8,
-    pulse1_mode: bool,  // direct volume mode (duty ignored)
+    pulse1_mode: bool, // direct volume mode (duty ignored)
     pulse1_period: u16,
     pulse1_enabled: bool,
     pulse1_timer: u16,
@@ -2103,31 +2398,65 @@ pub struct MapperVRC6 {
 }
 
 impl MapperVRC6 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, mirroring: crate::cartridge::Mirroring, is_vrc6b: bool) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        mirroring: crate::cartridge::Mirroring,
+        is_vrc6b: bool,
+    ) -> Self {
         let prg_banks = prg_rom.len() / 0x2000; // 8KB banks
         let has_chr_ram = chr_rom.is_empty();
         MapperVRC6 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             prg_banks: prg_banks.max(1),
-            prg_bank_16k: 0, prg_bank_8k: 0,
+            prg_bank_16k: 0,
+            prg_bank_8k: 0,
             chr_banks: [0; 8],
-            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical { 0 } else { 1 },
-            irq_latch: 0, irq_counter: 0, irq_prescaler: 341,
-            irq_enabled: false, irq_cycle_mode: false, irq_pending_flag: false,
-            pulse1_volume: 0, pulse1_duty: 0, pulse1_mode: false,
-            pulse1_period: 0, pulse1_enabled: false, pulse1_timer: 0, pulse1_step: 0,
-            pulse2_volume: 0, pulse2_duty: 0, pulse2_mode: false,
-            pulse2_period: 0, pulse2_enabled: false, pulse2_timer: 0, pulse2_step: 0,
-            saw_accum_rate: 0, saw_period: 0, saw_enabled: false,
-            saw_timer: 0, saw_accum: 0, saw_step: 0,
+            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical {
+                0
+            } else {
+                1
+            },
+            irq_latch: 0,
+            irq_counter: 0,
+            irq_prescaler: 341,
+            irq_enabled: false,
+            irq_cycle_mode: false,
+            irq_pending_flag: false,
+            pulse1_volume: 0,
+            pulse1_duty: 0,
+            pulse1_mode: false,
+            pulse1_period: 0,
+            pulse1_enabled: false,
+            pulse1_timer: 0,
+            pulse1_step: 0,
+            pulse2_volume: 0,
+            pulse2_duty: 0,
+            pulse2_mode: false,
+            pulse2_period: 0,
+            pulse2_enabled: false,
+            pulse2_timer: 0,
+            pulse2_step: 0,
+            saw_accum_rate: 0,
+            saw_period: 0,
+            saw_enabled: false,
+            saw_timer: 0,
+            saw_accum: 0,
+            saw_step: 0,
             is_vrc6b,
         }
     }
 
     fn translate_addr(&self, addr: u16) -> u16 {
-        if addr < 0x8000 { return addr; }
+        if addr < 0x8000 {
+            return addr;
+        }
         if self.is_vrc6b {
             // Mapper 26: swap A0 and A1
             let base = addr & 0xFFFC;
@@ -2149,18 +2478,26 @@ impl MapperVRC6 {
     }
 
     fn pulse_output(&self, volume: u8, duty: u8, mode: bool, step: u8, enabled: bool) -> f32 {
-        if !enabled { return 0.0; }
+        if !enabled {
+            return 0.0;
+        }
         if mode {
             // Direct volume mode
             volume as f32 / 15.0
         } else {
             // Duty cycle: step < (duty + 1) means output high
-            if step <= duty { volume as f32 / 15.0 } else { 0.0 }
+            if step <= duty {
+                volume as f32 / 15.0
+            } else {
+                0.0
+            }
         }
     }
 
     fn saw_output(&self) -> f32 {
-        if !self.saw_enabled { return 0.0; }
+        if !self.saw_enabled {
+            return 0.0;
+        }
         // Output is top 5 bits of accumulator
         ((self.saw_accum >> 3) & 0x1F) as f32 / 31.0
     }
@@ -2175,17 +2512,29 @@ impl Mapper for MapperVRC6 {
                 // 16KB bank
                 let bank = (self.prg_bank_16k as usize * 2) % self.prg_banks;
                 let offset = bank * 0x2000 + (addr - 0x8000) as usize;
-                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                if offset < self.prg_rom.len() {
+                    self.prg_rom[offset]
+                } else {
+                    0
+                }
             }
             0xC000..=0xDFFF => {
                 let bank = (self.prg_bank_8k as usize) % self.prg_banks;
                 let offset = bank * 0x2000 + (addr - 0xC000) as usize;
-                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                if offset < self.prg_rom.len() {
+                    self.prg_rom[offset]
+                } else {
+                    0
+                }
             }
             0xE000..=0xFFFF => {
                 let bank = self.prg_banks - 1;
                 let offset = bank * 0x2000 + (addr - 0xE000) as usize;
-                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                if offset < self.prg_rom.len() {
+                    self.prg_rom[offset]
+                } else {
+                    0
+                }
             }
             _ => 0,
         }
@@ -2289,13 +2638,21 @@ impl Mapper for MapperVRC6 {
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
-        if bank_idx >= 8 { return 0; }
+        if bank_idx >= 8 {
+            return 0;
+        }
         let bank = self.chr_banks[bank_idx] as usize;
         let chr_banks = self.chr_rom.len() / 0x0400;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
 
     #[inline]
@@ -2318,7 +2675,9 @@ impl Mapper for MapperVRC6 {
 
     #[allow(clippy::manual_is_multiple_of)]
     fn clock_scanline(&mut self) {
-        if !self.irq_enabled { return; }
+        if !self.irq_enabled {
+            return;
+        }
 
         if self.irq_cycle_mode {
             self.clock_irq();
@@ -2369,18 +2728,36 @@ impl Mapper for MapperVRC6 {
         }
     }
 
-    fn irq_pending(&self) -> bool { self.irq_pending_flag }
-    fn irq_clear(&mut self) { self.irq_pending_flag = false; }
+    fn irq_pending(&self) -> bool {
+        self.irq_pending_flag
+    }
+    fn irq_clear(&mut self) {
+        self.irq_pending_flag = false;
+    }
 
     fn audio_output(&self) -> f32 {
-        let p1 = self.pulse_output(self.pulse1_volume, self.pulse1_duty, self.pulse1_mode, self.pulse1_step, self.pulse1_enabled);
-        let p2 = self.pulse_output(self.pulse2_volume, self.pulse2_duty, self.pulse2_mode, self.pulse2_step, self.pulse2_enabled);
+        let p1 = self.pulse_output(
+            self.pulse1_volume,
+            self.pulse1_duty,
+            self.pulse1_mode,
+            self.pulse1_step,
+            self.pulse1_enabled,
+        );
+        let p2 = self.pulse_output(
+            self.pulse2_volume,
+            self.pulse2_duty,
+            self.pulse2_mode,
+            self.pulse2_step,
+            self.pulse2_enabled,
+        );
         let saw = self.saw_output();
         // Mix: VRC6 audio is roughly equal amplitude to APU
         (p1 + p2 + saw) / 3.0
     }
 
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
@@ -2399,12 +2776,14 @@ impl Mapper for MapperVRC6 {
         s.push(if self.irq_cycle_mode { 1 } else { 0 });
         s.push(if self.irq_pending_flag { 1 } else { 0 });
         // Audio state
-        s.push(self.pulse1_volume); s.push(self.pulse1_duty);
+        s.push(self.pulse1_volume);
+        s.push(self.pulse1_duty);
         s.push(if self.pulse1_mode { 1 } else { 0 });
         s.extend_from_slice(&self.pulse1_period.to_le_bytes());
         s.push(if self.pulse1_enabled { 1 } else { 0 });
         s.push(self.pulse1_step);
-        s.push(self.pulse2_volume); s.push(self.pulse2_duty);
+        s.push(self.pulse2_volume);
+        s.push(self.pulse2_duty);
         s.push(if self.pulse2_mode { 1 } else { 0 });
         s.extend_from_slice(&self.pulse2_period.to_le_bytes());
         s.push(if self.pulse2_enabled { 1 } else { 0 });
@@ -2418,36 +2797,64 @@ impl Mapper for MapperVRC6 {
     }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 17 { return; }
+        if data.len() < 17 {
+            return;
+        }
         let mut p = 0;
-        self.prg_bank_16k = data[p]; p += 1;
-        self.prg_bank_8k = data[p]; p += 1;
-        self.chr_banks.copy_from_slice(&data[p..p+8]); p += 8;
-        self.mirror_mode = data[p]; p += 1;
-        self.irq_latch = data[p]; p += 1;
-        self.irq_counter = data[p]; p += 1;
-        self.irq_prescaler = i16::from_le_bytes([data[p], data[p+1]]); p += 2;
-        self.irq_enabled = data[p] != 0; p += 1;
-        self.irq_cycle_mode = data[p] != 0; p += 1;
-        self.irq_pending_flag = data[p] != 0; p += 1;
+        self.prg_bank_16k = data[p];
+        p += 1;
+        self.prg_bank_8k = data[p];
+        p += 1;
+        self.chr_banks.copy_from_slice(&data[p..p + 8]);
+        p += 8;
+        self.mirror_mode = data[p];
+        p += 1;
+        self.irq_latch = data[p];
+        p += 1;
+        self.irq_counter = data[p];
+        p += 1;
+        self.irq_prescaler = i16::from_le_bytes([data[p], data[p + 1]]);
+        p += 2;
+        self.irq_enabled = data[p] != 0;
+        p += 1;
+        self.irq_cycle_mode = data[p] != 0;
+        p += 1;
+        self.irq_pending_flag = data[p] != 0;
+        p += 1;
         // Audio state
         if data.len() >= p + 18 {
-            self.pulse1_volume = data[p]; p += 1;
-            self.pulse1_duty = data[p]; p += 1;
-            self.pulse1_mode = data[p] != 0; p += 1;
-            self.pulse1_period = u16::from_le_bytes([data[p], data[p+1]]); p += 2;
-            self.pulse1_enabled = data[p] != 0; p += 1;
-            self.pulse1_step = data[p]; p += 1;
-            self.pulse2_volume = data[p]; p += 1;
-            self.pulse2_duty = data[p]; p += 1;
-            self.pulse2_mode = data[p] != 0; p += 1;
-            self.pulse2_period = u16::from_le_bytes([data[p], data[p+1]]); p += 2;
-            self.pulse2_enabled = data[p] != 0; p += 1;
-            self.pulse2_step = data[p]; p += 1;
-            self.saw_accum_rate = data[p]; p += 1;
-            self.saw_period = u16::from_le_bytes([data[p], data[p+1]]); p += 2;
-            self.saw_enabled = data[p] != 0; p += 1;
-            self.saw_accum = data[p]; p += 1;
+            self.pulse1_volume = data[p];
+            p += 1;
+            self.pulse1_duty = data[p];
+            p += 1;
+            self.pulse1_mode = data[p] != 0;
+            p += 1;
+            self.pulse1_period = u16::from_le_bytes([data[p], data[p + 1]]);
+            p += 2;
+            self.pulse1_enabled = data[p] != 0;
+            p += 1;
+            self.pulse1_step = data[p];
+            p += 1;
+            self.pulse2_volume = data[p];
+            p += 1;
+            self.pulse2_duty = data[p];
+            p += 1;
+            self.pulse2_mode = data[p] != 0;
+            p += 1;
+            self.pulse2_period = u16::from_le_bytes([data[p], data[p + 1]]);
+            p += 2;
+            self.pulse2_enabled = data[p] != 0;
+            p += 1;
+            self.pulse2_step = data[p];
+            p += 1;
+            self.saw_accum_rate = data[p];
+            p += 1;
+            self.saw_period = u16::from_le_bytes([data[p], data[p + 1]]);
+            p += 2;
+            self.saw_enabled = data[p] != 0;
+            p += 1;
+            self.saw_accum = data[p];
+            p += 1;
             self.saw_step = data[p];
         }
     }
@@ -2461,8 +2868,8 @@ impl Mapper for MapperVRC6 {
 pub struct Mapper005 {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
-    prg_ram: Vec<u8>,        // 8KB at $6000-$7FFF (can be up to 64KB total)
-    ex_ram: Vec<u8>,         // 1KB ExRAM at $5C00-$5FFF
+    prg_ram: Vec<u8>, // 8KB at $6000-$7FFF (can be up to 64KB total)
+    ex_ram: Vec<u8>,  // 1KB ExRAM at $5C00-$5FFF
 
     prg_banks_8k: usize,
 
@@ -2472,13 +2879,13 @@ pub struct Mapper005 {
     chr_mode: u8,
 
     // PRG bank registers
-    prg_bank: [u8; 5],      // banks for different modes
+    prg_bank: [u8; 5], // banks for different modes
     prg_ram_protect1: u8,
     prg_ram_protect2: u8,
 
     // CHR bank registers
-    chr_bank: [u16; 12],    // up to 12 registers for various CHR modes
-    chr_upper: u8,           // upper CHR bits ($5130)
+    chr_bank: [u16; 12], // up to 12 registers for various CHR modes
+    chr_upper: u8,       // upper CHR bits ($5130)
 
     // Mirroring
     nametable_mapping: u8,
@@ -2503,19 +2910,27 @@ pub struct Mapper005 {
 }
 
 impl Mapper005 {
-    pub fn new(prg_rom: Vec<u8>, chr_rom: Vec<u8>, _mirroring: crate::cartridge::Mirroring) -> Self {
+    pub fn new(
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+        _mirroring: crate::cartridge::Mirroring,
+    ) -> Self {
         let prg_banks_8k = prg_rom.len() / 0x2000;
         let has_chr_ram = chr_rom.is_empty();
         Mapper005 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x10000], // 64KB PRG RAM
             ex_ram: vec![0; 0x0400],
 
             prg_banks_8k: prg_banks_8k.max(1),
 
-            prg_mode: 3,  // default to 4×8KB mode
-            chr_mode: 3,  // default to 8×1KB mode
+            prg_mode: 3, // default to 4×8KB mode
+            chr_mode: 3, // default to 8×1KB mode
 
             prg_bank: [0, 0, 0, 0, 0xFF], // last bank defaults to last page
             prg_ram_protect1: 0,
@@ -2588,7 +3003,9 @@ impl Mapper for Mapper005 {
                 let local = (addr - 0x6000) as usize;
                 if bank_offset + local < self.prg_ram.len() {
                     self.prg_ram[bank_offset + local]
-                } else { 0 }
+                } else {
+                    0
+                }
             }
 
             // $8000-$FFFF: PRG ROM/RAM based on mode
@@ -2598,7 +3015,11 @@ impl Mapper for Mapper005 {
                         // Mode 0: one 32KB bank at $8000
                         let bank = (self.prg_bank[4] & 0x7C) as usize; // 32KB aligned
                         let offset = (bank % self.prg_banks_8k) * 0x2000 + (addr - 0x8000) as usize;
-                        if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                        if offset < self.prg_rom.len() {
+                            self.prg_rom[offset]
+                        } else {
+                            0
+                        }
                     }
                     1 => {
                         // Mode 1: 16KB + 16KB
@@ -2607,18 +3028,31 @@ impl Mapper for Mapper005 {
                                 let bank_reg = self.prg_bank[1];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg & 0x06, true) + (addr - 0x8000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg & 0x06, true)
+                                        + (addr - 0x8000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7E) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0x8000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xC000..=0xFFFF => {
                                 let bank = ((self.prg_bank[4] & 0x7E) as usize) % self.prg_banks_8k;
                                 let offset = bank * 0x2000 + (addr - 0xC000) as usize;
-                                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                if offset < self.prg_rom.len() {
+                                    self.prg_rom[offset]
+                                } else {
+                                    0
+                                }
                             }
                             _ => 0,
                         }
@@ -2630,30 +3064,52 @@ impl Mapper for Mapper005 {
                                 let bank_reg = self.prg_bank[1];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg & 0x06, true) + (addr - 0x8000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg & 0x06, true)
+                                        + (addr - 0x8000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7E) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0x8000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xC000..=0xDFFF => {
                                 let bank_reg = self.prg_bank[3];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg, true) + (addr - 0xC000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg, true)
+                                        + (addr - 0xC000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7F) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0xC000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xE000..=0xFFFF => {
                                 let bank = ((self.prg_bank[4] & 0x7F) as usize) % self.prg_banks_8k;
                                 let offset = bank * 0x2000 + (addr - 0xE000) as usize;
-                                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                if offset < self.prg_rom.len() {
+                                    self.prg_rom[offset]
+                                } else {
+                                    0
+                                }
                             }
                             _ => 0,
                         }
@@ -2665,43 +3121,74 @@ impl Mapper for Mapper005 {
                                 let bank_reg = self.prg_bank[1];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg, true) + (addr - 0x8000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg, true)
+                                        + (addr - 0x8000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7F) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0x8000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xA000..=0xBFFF => {
                                 let bank_reg = self.prg_bank[2];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg, true) + (addr - 0xA000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg, true)
+                                        + (addr - 0xA000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7F) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0xA000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xC000..=0xDFFF => {
                                 let bank_reg = self.prg_bank[3];
                                 let is_ram = bank_reg & 0x80 == 0;
                                 if is_ram {
-                                    let offset = self.prg_bank_offset(bank_reg, true) + (addr - 0xC000) as usize;
-                                    if offset < self.prg_ram.len() { self.prg_ram[offset] } else { 0 }
+                                    let offset = self.prg_bank_offset(bank_reg, true)
+                                        + (addr - 0xC000) as usize;
+                                    if offset < self.prg_ram.len() {
+                                        self.prg_ram[offset]
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     let bank = ((bank_reg & 0x7F) as usize) % self.prg_banks_8k;
                                     let offset = bank * 0x2000 + (addr - 0xC000) as usize;
-                                    if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                    if offset < self.prg_rom.len() {
+                                        self.prg_rom[offset]
+                                    } else {
+                                        0
+                                    }
                                 }
                             }
                             0xE000..=0xFFFF => {
                                 // Always ROM in mode 3
                                 let bank = ((self.prg_bank[4] & 0x7F) as usize) % self.prg_banks_8k;
                                 let offset = bank * 0x2000 + (addr - 0xE000) as usize;
-                                if offset < self.prg_rom.len() { self.prg_rom[offset] } else { 0 }
+                                if offset < self.prg_rom.len() {
+                                    self.prg_rom[offset]
+                                } else {
+                                    0
+                                }
                             }
                             _ => 0,
                         }
@@ -2837,8 +3324,12 @@ impl Mapper for Mapper005 {
                 // 2KB mode
                 match addr {
                     0x0000..=0x07FF => (self.chr_bank[1] as usize * 2) + (addr as usize / 0x0400),
-                    0x0800..=0x0FFF => (self.chr_bank[3] as usize * 2) + ((addr as usize - 0x0800) / 0x0400),
-                    0x1000..=0x17FF => (self.chr_bank[5] as usize * 2) + ((addr as usize - 0x1000) / 0x0400),
+                    0x0800..=0x0FFF => {
+                        (self.chr_bank[3] as usize * 2) + ((addr as usize - 0x0800) / 0x0400)
+                    }
+                    0x1000..=0x17FF => {
+                        (self.chr_bank[5] as usize * 2) + ((addr as usize - 0x1000) / 0x0400)
+                    }
                     _ => (self.chr_bank[7] as usize * 2) + ((addr as usize - 0x1800) / 0x0400),
                 }
             }
@@ -2851,7 +3342,11 @@ impl Mapper for Mapper005 {
 
         let bank = bank % chr_banks_1k;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
 
     #[inline]
@@ -2885,10 +3380,16 @@ impl Mapper for Mapper005 {
         }
     }
 
-    fn irq_pending(&self) -> bool { self.irq_pending_flag }
-    fn irq_clear(&mut self) { self.irq_pending_flag = false; }
+    fn irq_pending(&self) -> bool {
+        self.irq_pending_flag
+    }
+    fn irq_clear(&mut self) {
+        self.irq_pending_flag = false;
+    }
 
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
@@ -2901,7 +3402,9 @@ impl Mapper for Mapper005 {
         s.extend_from_slice(&self.prg_bank);
         s.push(self.prg_ram_protect1);
         s.push(self.prg_ram_protect2);
-        for &b in &self.chr_bank { s.extend_from_slice(&b.to_le_bytes()); }
+        for &b in &self.chr_bank {
+            s.extend_from_slice(&b.to_le_bytes());
+        }
         s.push(self.chr_upper);
         s.push(self.nametable_mapping);
         s.push(self.multiplicand);
@@ -2919,30 +3422,50 @@ impl Mapper for Mapper005 {
     }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 45 { return; }
-        let mut p = 0;
-        self.prg_mode = data[p]; p += 1;
-        self.chr_mode = data[p]; p += 1;
-        self.prg_bank.copy_from_slice(&data[p..p+5]); p += 5;
-        self.prg_ram_protect1 = data[p]; p += 1;
-        self.prg_ram_protect2 = data[p]; p += 1;
-        for i in 0..12 {
-            self.chr_bank[i] = u16::from_le_bytes([data[p], data[p+1]]); p += 2;
+        if data.len() < 45 {
+            return;
         }
-        self.chr_upper = data[p]; p += 1;
-        self.nametable_mapping = data[p]; p += 1;
-        self.multiplicand = data[p]; p += 1;
-        self.multiplier = data[p]; p += 1;
-        self.fill_tile = data[p]; p += 1;
-        self.fill_attr = data[p]; p += 1;
-        self.irq_target = data[p]; p += 1;
-        self.irq_enabled = data[p] != 0; p += 1;
-        self.irq_pending_flag = data[p] != 0; p += 1;
-        self.scanline_counter = data[p]; p += 1;
-        self.in_frame = data[p] != 0; p += 1;
-        self.ex_ram_mode = data[p]; p += 1;
+        let mut p = 0;
+        self.prg_mode = data[p];
+        p += 1;
+        self.chr_mode = data[p];
+        p += 1;
+        self.prg_bank.copy_from_slice(&data[p..p + 5]);
+        p += 5;
+        self.prg_ram_protect1 = data[p];
+        p += 1;
+        self.prg_ram_protect2 = data[p];
+        p += 1;
+        for i in 0..12 {
+            self.chr_bank[i] = u16::from_le_bytes([data[p], data[p + 1]]);
+            p += 2;
+        }
+        self.chr_upper = data[p];
+        p += 1;
+        self.nametable_mapping = data[p];
+        p += 1;
+        self.multiplicand = data[p];
+        p += 1;
+        self.multiplier = data[p];
+        p += 1;
+        self.fill_tile = data[p];
+        p += 1;
+        self.fill_attr = data[p];
+        p += 1;
+        self.irq_target = data[p];
+        p += 1;
+        self.irq_enabled = data[p] != 0;
+        p += 1;
+        self.irq_pending_flag = data[p] != 0;
+        p += 1;
+        self.scanline_counter = data[p];
+        p += 1;
+        self.in_frame = data[p] != 0;
+        p += 1;
+        self.ex_ram_mode = data[p];
+        p += 1;
         if data.len() >= p + 0x0400 {
-            self.ex_ram.copy_from_slice(&data[p..p+0x0400]);
+            self.ex_ram.copy_from_slice(&data[p..p + 0x0400]);
         }
     }
 }
@@ -2989,12 +3512,20 @@ impl Mapper019 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper019 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             prg_banks_8k: prg_banks_8k.max(1),
             chr_banks: [0; 8],
             prg_bank: [0, 0, 0, (prg_banks_8k - 1) as u8],
-            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical { 0 } else { 1 },
+            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical {
+                0
+            } else {
+                1
+            },
             irq_counter: 0,
             irq_enabled: false,
             irq_pending_flag: false,
@@ -3021,9 +3552,7 @@ impl Mapper for Mapper019 {
             }
 
             // $5000-$5FFF: IRQ counter reads
-            0x5000..=0x57FF => {
-                (self.irq_counter & 0xFF) as u8
-            }
+            0x5000..=0x57FF => (self.irq_counter & 0xFF) as u8,
             0x5800..=0x5FFF => {
                 ((self.irq_counter >> 8) & 0x7F) as u8 | if self.irq_enabled { 0x80 } else { 0 }
             }
@@ -3057,7 +3586,8 @@ impl Mapper for Mapper019 {
             0x4800..=0x4FFF => {
                 self.sound_ram[(self.sound_addr.get() & 0x7F) as usize] = data;
                 if self.sound_auto_inc {
-                    self.sound_addr.set((self.sound_addr.get().wrapping_add(1)) & 0x7F);
+                    self.sound_addr
+                        .set((self.sound_addr.get().wrapping_add(1)) & 0x7F);
                 }
             }
 
@@ -3112,30 +3642,42 @@ impl Mapper for Mapper019 {
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
-        if bank_idx >= 8 { return 0; }
+        if bank_idx >= 8 {
+            return 0;
+        }
         let bank_val = self.chr_banks[bank_idx];
 
         // If bank value >= 0xE0, use internal CHR RAM (nametable area)
         if bank_val >= 0xE0 {
-            let ram_offset = ((bank_val as usize - 0xE0) * 0x0400 + (addr & 0x03FF) as usize) % self.chr_ram.len();
+            let ram_offset = ((bank_val as usize - 0xE0) * 0x0400 + (addr & 0x03FF) as usize)
+                % self.chr_ram.len();
             return self.chr_ram[ram_offset];
         }
 
         let chr_banks_1k = self.chr_rom.len() / 0x0400;
-        if chr_banks_1k == 0 { return 0; }
+        if chr_banks_1k == 0 {
+            return 0;
+        }
         let bank = (bank_val as usize) % chr_banks_1k;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
 
     #[inline]
     fn write_chr(&mut self, addr: u16, data: u8) {
         let bank_idx = (addr / 0x0400) as usize;
-        if bank_idx >= 8 { return; }
+        if bank_idx >= 8 {
+            return;
+        }
         let bank_val = self.chr_banks[bank_idx];
 
         if bank_val >= 0xE0 {
-            let ram_offset = ((bank_val as usize - 0xE0) * 0x0400 + (addr & 0x03FF) as usize) % self.chr_ram.len();
+            let ram_offset = ((bank_val as usize - 0xE0) * 0x0400 + (addr & 0x03FF) as usize)
+                % self.chr_ram.len();
             self.chr_ram[ram_offset] = data;
         } else if self.chr_rom.len() <= 0x2000 {
             self.chr_rom[addr as usize & 0x1FFF] = data;
@@ -3168,10 +3710,16 @@ impl Mapper for Mapper019 {
         }
     }
 
-    fn irq_pending(&self) -> bool { self.irq_pending_flag }
-    fn irq_clear(&mut self) { self.irq_pending_flag = false; }
+    fn irq_pending(&self) -> bool {
+        self.irq_pending_flag
+    }
+    fn irq_clear(&mut self) {
+        self.irq_pending_flag = false;
+    }
 
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
@@ -3192,18 +3740,28 @@ impl Mapper for Mapper019 {
     }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 18 { return; }
+        if data.len() < 18 {
+            return;
+        }
         let mut p = 0;
-        self.chr_banks.copy_from_slice(&data[p..p+8]); p += 8;
-        self.prg_bank.copy_from_slice(&data[p..p+4]); p += 4;
-        self.mirror_mode = data[p]; p += 1;
-        self.irq_counter = u16::from_le_bytes([data[p], data[p+1]]); p += 2;
-        self.irq_enabled = data[p] != 0; p += 1;
-        self.irq_pending_flag = data[p] != 0; p += 1;
-        self.sound_addr.set(data[p]); p += 1;
-        self.sound_auto_inc = data[p] != 0; p += 1;
+        self.chr_banks.copy_from_slice(&data[p..p + 8]);
+        p += 8;
+        self.prg_bank.copy_from_slice(&data[p..p + 4]);
+        p += 4;
+        self.mirror_mode = data[p];
+        p += 1;
+        self.irq_counter = u16::from_le_bytes([data[p], data[p + 1]]);
+        p += 2;
+        self.irq_enabled = data[p] != 0;
+        p += 1;
+        self.irq_pending_flag = data[p] != 0;
+        p += 1;
+        self.sound_addr.set(data[p]);
+        p += 1;
+        self.sound_auto_inc = data[p] != 0;
+        p += 1;
         if data.len() >= p + 128 {
-            self.sound_ram.copy_from_slice(&data[p..p+128]);
+            self.sound_ram.copy_from_slice(&data[p..p + 128]);
         }
     }
 }
@@ -3250,20 +3808,34 @@ impl Mapper085 {
         let has_chr_ram = chr_rom.is_empty();
         Mapper085 {
             prg_rom,
-            chr_rom: if has_chr_ram { vec![0; 0x2000] } else { chr_rom },
+            chr_rom: if has_chr_ram {
+                vec![0; 0x2000]
+            } else {
+                chr_rom
+            },
             prg_ram: vec![0; 0x2000],
             prg_banks_8k: prg_banks_8k.max(1),
             prg_bank: [0; 3],
             chr_banks: [0; 8],
-            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical { 0 } else { 1 },
-            irq_latch: 0, irq_counter: 0, irq_prescaler: 341,
-            irq_enabled: false, irq_cycle_mode: false, irq_pending_flag: false,
+            mirror_mode: if mirroring == crate::cartridge::Mirroring::Vertical {
+                0
+            } else {
+                1
+            },
+            irq_latch: 0,
+            irq_counter: 0,
+            irq_prescaler: 341,
+            irq_enabled: false,
+            irq_cycle_mode: false,
+            irq_pending_flag: false,
             addr_mask: 0x0018, // Common VRC7 wiring: A3 and A4
         }
     }
 
     fn translate_addr(&self, addr: u16) -> u16 {
-        if addr < 0x8000 { return addr; }
+        if addr < 0x8000 {
+            return addr;
+        }
         // Normalize to $x000/$x008/$x010/$x018 pattern
         let base = addr & 0xF000;
         let low = addr & self.addr_mask;
@@ -3361,13 +3933,21 @@ impl Mapper for Mapper085 {
     #[inline]
     fn read_chr(&self, addr: u16) -> u8 {
         let bank_idx = (addr / 0x0400) as usize;
-        if bank_idx >= 8 { return 0; }
+        if bank_idx >= 8 {
+            return 0;
+        }
         let bank = self.chr_banks[bank_idx] as usize;
         let chr_banks = self.chr_rom.len() / 0x0400;
-        if chr_banks == 0 { return 0; }
+        if chr_banks == 0 {
+            return 0;
+        }
         let bank = bank % chr_banks;
         let offset = bank * 0x0400 + (addr & 0x03FF) as usize;
-        if offset < self.chr_rom.len() { self.chr_rom[offset] } else { 0 }
+        if offset < self.chr_rom.len() {
+            self.chr_rom[offset]
+        } else {
+            0
+        }
     }
 
     #[inline]
@@ -3389,7 +3969,9 @@ impl Mapper for Mapper085 {
     }
 
     fn clock_scanline(&mut self) {
-        if !self.irq_enabled { return; }
+        if !self.irq_enabled {
+            return;
+        }
 
         if self.irq_cycle_mode {
             self.clock_irq();
@@ -3402,10 +3984,16 @@ impl Mapper for Mapper085 {
         }
     }
 
-    fn irq_pending(&self) -> bool { self.irq_pending_flag }
-    fn irq_clear(&mut self) { self.irq_pending_flag = false; }
+    fn irq_pending(&self) -> bool {
+        self.irq_pending_flag
+    }
+    fn irq_clear(&mut self) {
+        self.irq_pending_flag = false;
+    }
 
-    fn get_sram(&self) -> Vec<u8> { self.prg_ram.clone() }
+    fn get_sram(&self) -> Vec<u8> {
+        self.prg_ram.clone()
+    }
     fn set_sram(&mut self, data: &[u8]) {
         let len = data.len().min(self.prg_ram.len());
         self.prg_ram[..len].copy_from_slice(&data[..len]);
@@ -3426,16 +4014,26 @@ impl Mapper for Mapper085 {
     }
 
     fn load_state(&mut self, data: &[u8]) {
-        if data.len() < 18 { return; }
+        if data.len() < 18 {
+            return;
+        }
         let mut p = 0;
-        self.prg_bank.copy_from_slice(&data[p..p+3]); p += 3;
-        self.chr_banks.copy_from_slice(&data[p..p+8]); p += 8;
-        self.mirror_mode = data[p]; p += 1;
-        self.irq_latch = data[p]; p += 1;
-        self.irq_counter = data[p]; p += 1;
-        self.irq_prescaler = i16::from_le_bytes([data[p], data[p+1]]); p += 2;
-        self.irq_enabled = data[p] != 0; p += 1;
-        self.irq_cycle_mode = data[p] != 0; p += 1;
+        self.prg_bank.copy_from_slice(&data[p..p + 3]);
+        p += 3;
+        self.chr_banks.copy_from_slice(&data[p..p + 8]);
+        p += 8;
+        self.mirror_mode = data[p];
+        p += 1;
+        self.irq_latch = data[p];
+        p += 1;
+        self.irq_counter = data[p];
+        p += 1;
+        self.irq_prescaler = i16::from_le_bytes([data[p], data[p + 1]]);
+        p += 2;
+        self.irq_enabled = data[p] != 0;
+        p += 1;
+        self.irq_cycle_mode = data[p] != 0;
+        p += 1;
         self.irq_pending_flag = data[p] != 0;
     }
 }

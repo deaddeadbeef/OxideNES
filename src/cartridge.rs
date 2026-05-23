@@ -1,4 +1,8 @@
-use crate::mapper::{MapperEnum, Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper005, Mapper007, Mapper009, Mapper010, Mapper011, Mapper019, Mapper034, Mapper066, Mapper069, Mapper071, Mapper079, Mapper085, Mapper206, MapperVRC6};
+use crate::mapper::{
+    Mapper000, Mapper001, Mapper002, Mapper003, Mapper004, Mapper005, Mapper007, Mapper009,
+    Mapper010, Mapper011, Mapper019, Mapper034, Mapper066, Mapper069, Mapper071, Mapper079,
+    Mapper085, Mapper206, MapperEnum, MapperVRC6,
+};
 use crate::romdb::RomDatabase;
 
 const INES_MAGIC: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // "NES\x1a"
@@ -49,8 +53,8 @@ impl Cartridge {
 
         // Detect dirty headers (e.g., "DiskDude!" watermark in bytes 7-15)
         // In valid iNES 1.0, bytes 12-15 must be zero
-        let has_dirty_header = !is_nes2 && rom_data.len() > 15 &&
-            rom_data[12..16].iter().any(|&b| b != 0);
+        let has_dirty_header =
+            !is_nes2 && rom_data.len() > 15 && rom_data[12..16].iter().any(|&b| b != 0);
 
         let mut mapper_id = if is_nes2 && rom_data.len() > 8 {
             // NES 2.0: extended mapper from flags8
@@ -96,8 +100,10 @@ impl Cartridge {
                     _ => Mirroring::Horizontal,
                 };
                 if db_mapper != mapper_id || db_mirroring != mirroring {
-                    eprintln!("ROM DB: \"{}\" — correcting mapper {}→{}, mirroring {:?}→{:?}",
-                        entry.title, mapper_id, db_mapper, mirroring, db_mirroring);
+                    eprintln!(
+                        "ROM DB: \"{}\" — correcting mapper {}→{}, mirroring {:?}→{:?}",
+                        entry.title, mapper_id, db_mapper, mirroring, db_mirroring
+                    );
                     mapper_id = db_mapper;
                     mirroring = db_mirroring;
                 }
@@ -161,10 +167,17 @@ impl Cartridge {
                 } else {
                     format!("Unsupported mapper: {} (used by: {})", mapper_id, popular)
                 };
-                return Err(format!("{}. Supported: 0,1,2,3,4,5,7,9,10,11,19,24,26,34,66,69,71,79,85,206", hint));
+                return Err(format!(
+                    "{}. Supported: 0,1,2,3,4,5,7,9,10,11,19,24,26,34,66,69,71,79,85,206",
+                    hint
+                ));
             }
         };
 
-        Ok(Cartridge { mapper, has_battery, rom_title })
+        Ok(Cartridge {
+            mapper,
+            has_battery,
+            rom_title,
+        })
     }
 }

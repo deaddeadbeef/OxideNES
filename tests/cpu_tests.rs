@@ -1,11 +1,17 @@
-use oxidenes::cpu::Cpu;
 use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
+use oxidenes::cpu::Cpu;
 
 fn make_minimal_rom() -> Vec<u8> {
     let mut rom = vec![0u8; 16 + 16384 + 8192];
-    rom[0] = 0x4E; rom[1] = 0x45; rom[2] = 0x53; rom[3] = 0x1A;
-    rom[4] = 1; rom[5] = 1; rom[6] = 0; rom[7] = 0;
+    rom[0] = 0x4E;
+    rom[1] = 0x45;
+    rom[2] = 0x53;
+    rom[3] = 0x1A;
+    rom[4] = 1;
+    rom[5] = 1;
+    rom[6] = 0;
+    rom[7] = 0;
     rom
 }
 
@@ -31,9 +37,14 @@ fn cpu_initial_state() {
 fn cpu_flag_set_get() {
     let mut cpu = Cpu::new();
     let flags: [(u8, &str); 8] = [
-        (0x01, "carry"), (0x02, "zero"), (0x04, "interrupt"),
-        (0x08, "decimal"), (0x10, "break"), (0x20, "unused"),
-        (0x40, "overflow"), (0x80, "negative"),
+        (0x01, "carry"),
+        (0x02, "zero"),
+        (0x04, "interrupt"),
+        (0x08, "decimal"),
+        (0x10, "break"),
+        (0x20, "unused"),
+        (0x40, "overflow"),
+        (0x80, "negative"),
     ];
     for (flag, name) in &flags {
         cpu.set_flag(*flag, true);
@@ -320,7 +331,7 @@ fn cpu_php_plp() {
     cpu.execute(&mut bus, 0x08); // PHP
     cpu.status = 0x00;
     cpu.execute(&mut bus, 0x28); // PLP
-    // PHP pushes status with BREAK and UNUSED set, PLP clears BREAK
+                                 // PHP pushes status with BREAK and UNUSED set, PLP clears BREAK
     assert!(cpu.get_flag(0x01)); // carry restored
     assert!(cpu.get_flag(0x40)); // overflow restored
 }

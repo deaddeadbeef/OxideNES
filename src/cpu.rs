@@ -64,7 +64,6 @@ impl Default for Cpu {
 }
 
 impl Cpu {
-
     #[inline(always)]
     pub fn get_flag(&self, flag: u8) -> bool {
         (self.status & flag) != 0
@@ -303,7 +302,10 @@ impl Cpu {
         let sum = self.a as u16 + value as u16 + carry;
         self.set_flag(CARRY, sum > 0xFF);
         let result = sum as u8;
-        self.set_flag(OVERFLOW, (!(self.a ^ value) & (self.a ^ result)) & 0x80 != 0);
+        self.set_flag(
+            OVERFLOW,
+            (!(self.a ^ value) & (self.a ^ result)) & 0x80 != 0,
+        );
         self.a = result;
         self.update_zero_negative(self.a);
     }
@@ -1139,42 +1141,50 @@ impl Cpu {
             }
 
             // ── Branches ────────────────────────────────────────
-            0x90 => { // BCC
+            0x90 => {
+                // BCC
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(!self.get_flag(CARRY), addr, pc);
             }
-            0xB0 => { // BCS
+            0xB0 => {
+                // BCS
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(self.get_flag(CARRY), addr, pc);
             }
-            0xF0 => { // BEQ
+            0xF0 => {
+                // BEQ
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(self.get_flag(ZERO), addr, pc);
             }
-            0x30 => { // BMI
+            0x30 => {
+                // BMI
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(self.get_flag(NEGATIVE), addr, pc);
             }
-            0xD0 => { // BNE
+            0xD0 => {
+                // BNE
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(!self.get_flag(ZERO), addr, pc);
             }
-            0x10 => { // BPL
+            0x10 => {
+                // BPL
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(!self.get_flag(NEGATIVE), addr, pc);
             }
-            0x50 => { // BVC
+            0x50 => {
+                // BVC
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(!self.get_flag(OVERFLOW), addr, pc);
             }
-            0x70 => { // BVS
+            0x70 => {
+                // BVS
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::Relative);
                 self.cycles = 2;
                 self.branch(self.get_flag(OVERFLOW), addr, pc);
@@ -1260,21 +1270,65 @@ impl Cpu {
             }
 
             // ── Flag instructions ───────────────────────────────
-            0x38 => { self.set_flag(CARRY, true); self.cycles = 2; }             // SEC
-            0x18 => { self.set_flag(CARRY, false); self.cycles = 2; }            // CLC
-            0x78 => { self.set_flag(INTERRUPT_DISABLE, true); self.cycles = 2; } // SEI
-            0x58 => { self.set_flag(INTERRUPT_DISABLE, false); self.cycles = 2; }// CLI
-            0xF8 => { self.set_flag(DECIMAL, true); self.cycles = 2; }           // SED
-            0xD8 => { self.set_flag(DECIMAL, false); self.cycles = 2; }          // CLD
-            0xB8 => { self.set_flag(OVERFLOW, false); self.cycles = 2; }         // CLV
+            0x38 => {
+                self.set_flag(CARRY, true);
+                self.cycles = 2;
+            } // SEC
+            0x18 => {
+                self.set_flag(CARRY, false);
+                self.cycles = 2;
+            } // CLC
+            0x78 => {
+                self.set_flag(INTERRUPT_DISABLE, true);
+                self.cycles = 2;
+            } // SEI
+            0x58 => {
+                self.set_flag(INTERRUPT_DISABLE, false);
+                self.cycles = 2;
+            } // CLI
+            0xF8 => {
+                self.set_flag(DECIMAL, true);
+                self.cycles = 2;
+            } // SED
+            0xD8 => {
+                self.set_flag(DECIMAL, false);
+                self.cycles = 2;
+            } // CLD
+            0xB8 => {
+                self.set_flag(OVERFLOW, false);
+                self.cycles = 2;
+            } // CLV
 
             // ── Transfer instructions ───────────────────────────
-            0xAA => { self.x = self.a; self.update_zero_negative(self.x); self.cycles = 2; } // TAX
-            0xA8 => { self.y = self.a; self.update_zero_negative(self.y); self.cycles = 2; } // TAY
-            0x8A => { self.a = self.x; self.update_zero_negative(self.a); self.cycles = 2; } // TXA
-            0x98 => { self.a = self.y; self.update_zero_negative(self.a); self.cycles = 2; } // TYA
-            0xBA => { self.x = self.sp; self.update_zero_negative(self.x); self.cycles = 2; }// TSX
-            0x9A => { self.sp = self.x; self.cycles = 2; }                                   // TXS
+            0xAA => {
+                self.x = self.a;
+                self.update_zero_negative(self.x);
+                self.cycles = 2;
+            } // TAX
+            0xA8 => {
+                self.y = self.a;
+                self.update_zero_negative(self.y);
+                self.cycles = 2;
+            } // TAY
+            0x8A => {
+                self.a = self.x;
+                self.update_zero_negative(self.a);
+                self.cycles = 2;
+            } // TXA
+            0x98 => {
+                self.a = self.y;
+                self.update_zero_negative(self.a);
+                self.cycles = 2;
+            } // TYA
+            0xBA => {
+                self.x = self.sp;
+                self.update_zero_negative(self.x);
+                self.cycles = 2;
+            } // TSX
+            0x9A => {
+                self.sp = self.x;
+                self.cycles = 2;
+            } // TXS
 
             // ═════════════════════════════════════════════════════
             // ILLEGAL / UNOFFICIAL OPCODES
@@ -1284,42 +1338,48 @@ impl Cpu {
             0xA7 => {
                 let (addr, _) = self.get_operand_address(bus, AddressingMode::ZeroPage);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 3;
             }
             0xB7 => {
                 let (addr, _) = self.get_operand_address(bus, AddressingMode::ZeroPageY);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 4;
             }
             0xAF => {
                 let (addr, _) = self.get_operand_address(bus, AddressingMode::Absolute);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 4;
             }
             0xBF => {
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::AbsoluteY);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 4 + pc as u8;
             }
             0xA3 => {
                 let (addr, _) = self.get_operand_address(bus, AddressingMode::IndirectX);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 6;
             }
             0xB3 => {
                 let (addr, pc) = self.get_operand_address(bus, AddressingMode::IndirectY);
                 let val = bus.cpu_read(addr);
-                self.a = val; self.x = val;
+                self.a = val;
+                self.x = val;
                 self.update_zero_negative(val);
                 self.cycles = 5 + pc as u8;
             }
@@ -1712,8 +1772,8 @@ impl Cpu {
                 self.cycles = 2;
             }
             // 2-byte NOPs (skip one byte)
-            0x04 | 0x14 | 0x34 | 0x44 | 0x54 | 0x64 | 0x74 |
-            0x80 | 0x82 | 0x89 | 0xC2 | 0xD4 | 0xE2 | 0xF4 => {
+            0x04 | 0x14 | 0x34 | 0x44 | 0x54 | 0x64 | 0x74 | 0x80 | 0x82 | 0x89 | 0xC2 | 0xD4
+            | 0xE2 | 0xF4 => {
                 self.pc = self.pc.wrapping_add(1);
                 self.cycles = 2;
             }
@@ -1729,7 +1789,7 @@ impl Cpu {
             }
         }
     }
-    
+
     // ── Save state support ──────────────────────────────────────────
     pub fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
@@ -1747,20 +1807,37 @@ impl Cpu {
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        if data.len() < 18 { return false; } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
+        if data.len() < 18 {
+            return false;
+        } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
         let mut pos = 0;
-        self.pc = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.sp = data[pos]; pos += 1;
-        self.a = data[pos]; pos += 1;
-        self.x = data[pos]; pos += 1;
-        self.y = data[pos]; pos += 1;
-        self.status = data[pos]; pos += 1;
-        self.cycles = data[pos]; pos += 1;
+        self.pc = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.sp = data[pos];
+        pos += 1;
+        self.a = data[pos];
+        pos += 1;
+        self.x = data[pos];
+        pos += 1;
+        self.y = data[pos];
+        pos += 1;
+        self.status = data[pos];
+        pos += 1;
+        self.cycles = data[pos];
+        pos += 1;
         self.total_cycles = usize::from_le_bytes([
-            data[pos], data[pos+1], data[pos+2], data[pos+3],
-            data[pos+4], data[pos+5], data[pos+6], data[pos+7]
-        ]); pos += 8;
-        self.nmi_pending = data[pos] != 0; pos += 1;
+            data[pos],
+            data[pos + 1],
+            data[pos + 2],
+            data[pos + 3],
+            data[pos + 4],
+            data[pos + 5],
+            data[pos + 6],
+            data[pos + 7],
+        ]);
+        pos += 8;
+        self.nmi_pending = data[pos] != 0;
+        pos += 1;
         self.irq_pending = data[pos] != 0;
         true
     }

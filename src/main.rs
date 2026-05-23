@@ -5,29 +5,29 @@
     clippy::unnecessary_sort_by
 )]
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use gilrs::{Axis, Button, Gilrs};
 use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
+use ringbuf::{traits::*, HeapRb};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::{traits::*, HeapRb};
-use gilrs::{Gilrs, Button, Axis};
-use serde::{Serialize, Deserialize};
 
 pub mod rendering;
 use rendering::*;
 
+use oxidenes::achievements::{md5_hex, AchievementEngine};
 use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
 use oxidenes::cpu::Cpu;
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
 use oxidenes::ppu::Region;
-use oxidenes::scripting::ScriptEngine;
-use oxidenes::achievements::{AchievementEngine, md5_hex};
-use oxidenes::recording::{InputRecording, sha256};
+use oxidenes::recording::{sha256, InputRecording};
 use oxidenes::romdb::RomDatabase;
+use oxidenes::scripting::ScriptEngine;
 use oxidenes::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
@@ -192,46 +192,112 @@ impl Default for InputBindings {
 
 fn string_to_key(s: &str) -> Option<Key> {
     match s {
-        "A" => Some(Key::A), "B" => Some(Key::B), "C" => Some(Key::C), "D" => Some(Key::D),
-        "E" => Some(Key::E), "F" => Some(Key::F), "G" => Some(Key::G), "H" => Some(Key::H),
-        "I" => Some(Key::I), "J" => Some(Key::J), "K" => Some(Key::K), "L" => Some(Key::L),
-        "M" => Some(Key::M), "N" => Some(Key::N), "O" => Some(Key::O), "P" => Some(Key::P),
-        "Q" => Some(Key::Q), "R" => Some(Key::R), "S" => Some(Key::S), "T" => Some(Key::T),
-        "U" => Some(Key::U), "V" => Some(Key::V), "W" => Some(Key::W), "X" => Some(Key::X),
-        "Y" => Some(Key::Y), "Z" => Some(Key::Z),
-        "Up" => Some(Key::Up), "Down" => Some(Key::Down), "Left" => Some(Key::Left), "Right" => Some(Key::Right),
-        "Enter" => Some(Key::Enter), "Space" => Some(Key::Space),
-        "LeftShift" => Some(Key::LeftShift), "RightShift" => Some(Key::RightShift),
-        "LeftCtrl" => Some(Key::LeftCtrl), "RightCtrl" => Some(Key::RightCtrl),
-        "Comma" => Some(Key::Comma), "Period" => Some(Key::Period),
-        "Slash" => Some(Key::Slash), "Semicolon" => Some(Key::Semicolon),
+        "A" => Some(Key::A),
+        "B" => Some(Key::B),
+        "C" => Some(Key::C),
+        "D" => Some(Key::D),
+        "E" => Some(Key::E),
+        "F" => Some(Key::F),
+        "G" => Some(Key::G),
+        "H" => Some(Key::H),
+        "I" => Some(Key::I),
+        "J" => Some(Key::J),
+        "K" => Some(Key::K),
+        "L" => Some(Key::L),
+        "M" => Some(Key::M),
+        "N" => Some(Key::N),
+        "O" => Some(Key::O),
+        "P" => Some(Key::P),
+        "Q" => Some(Key::Q),
+        "R" => Some(Key::R),
+        "S" => Some(Key::S),
+        "T" => Some(Key::T),
+        "U" => Some(Key::U),
+        "V" => Some(Key::V),
+        "W" => Some(Key::W),
+        "X" => Some(Key::X),
+        "Y" => Some(Key::Y),
+        "Z" => Some(Key::Z),
+        "Up" => Some(Key::Up),
+        "Down" => Some(Key::Down),
+        "Left" => Some(Key::Left),
+        "Right" => Some(Key::Right),
+        "Enter" => Some(Key::Enter),
+        "Space" => Some(Key::Space),
+        "LeftShift" => Some(Key::LeftShift),
+        "RightShift" => Some(Key::RightShift),
+        "LeftCtrl" => Some(Key::LeftCtrl),
+        "RightCtrl" => Some(Key::RightCtrl),
+        "Comma" => Some(Key::Comma),
+        "Period" => Some(Key::Period),
+        "Slash" => Some(Key::Slash),
+        "Semicolon" => Some(Key::Semicolon),
         "Apostrophe" => Some(Key::Apostrophe),
-        "1" => Some(Key::Key1), "2" => Some(Key::Key2), "3" => Some(Key::Key3),
-        "4" => Some(Key::Key4), "5" => Some(Key::Key5), "6" => Some(Key::Key6),
-        "7" => Some(Key::Key7), "8" => Some(Key::Key8), "9" => Some(Key::Key9), "0" => Some(Key::Key0),
-        "Escape" => Some(Key::Escape), "Tab" => Some(Key::Tab), "Backspace" => Some(Key::Backspace),
-        "Delete" => Some(Key::Delete), "Insert" => Some(Key::Insert),
-        "Home" => Some(Key::Home), "End" => Some(Key::End),
-        "PageUp" => Some(Key::PageUp), "PageDown" => Some(Key::PageDown),
-        "Pause" => Some(Key::Pause), "Menu" => Some(Key::Menu),
-        "F1" => Some(Key::F1), "F2" => Some(Key::F2), "F3" => Some(Key::F3),
-        "F4" => Some(Key::F4), "F5" => Some(Key::F5), "F6" => Some(Key::F6),
-        "F7" => Some(Key::F7), "F8" => Some(Key::F8), "F9" => Some(Key::F9),
-        "F10" => Some(Key::F10), "F11" => Some(Key::F11), "F12" => Some(Key::F12),
-        "F13" => Some(Key::F13), "F14" => Some(Key::F14), "F15" => Some(Key::F15),
-        "CapsLock" => Some(Key::CapsLock), "NumLock" => Some(Key::NumLock), "ScrollLock" => Some(Key::ScrollLock),
-        "NumPad0" => Some(Key::NumPad0), "NumPad1" => Some(Key::NumPad1), "NumPad2" => Some(Key::NumPad2),
-        "NumPad3" => Some(Key::NumPad3), "NumPad4" => Some(Key::NumPad4), "NumPad5" => Some(Key::NumPad5),
-        "NumPad6" => Some(Key::NumPad6), "NumPad7" => Some(Key::NumPad7), "NumPad8" => Some(Key::NumPad8),
+        "1" => Some(Key::Key1),
+        "2" => Some(Key::Key2),
+        "3" => Some(Key::Key3),
+        "4" => Some(Key::Key4),
+        "5" => Some(Key::Key5),
+        "6" => Some(Key::Key6),
+        "7" => Some(Key::Key7),
+        "8" => Some(Key::Key8),
+        "9" => Some(Key::Key9),
+        "0" => Some(Key::Key0),
+        "Escape" => Some(Key::Escape),
+        "Tab" => Some(Key::Tab),
+        "Backspace" => Some(Key::Backspace),
+        "Delete" => Some(Key::Delete),
+        "Insert" => Some(Key::Insert),
+        "Home" => Some(Key::Home),
+        "End" => Some(Key::End),
+        "PageUp" => Some(Key::PageUp),
+        "PageDown" => Some(Key::PageDown),
+        "Pause" => Some(Key::Pause),
+        "Menu" => Some(Key::Menu),
+        "F1" => Some(Key::F1),
+        "F2" => Some(Key::F2),
+        "F3" => Some(Key::F3),
+        "F4" => Some(Key::F4),
+        "F5" => Some(Key::F5),
+        "F6" => Some(Key::F6),
+        "F7" => Some(Key::F7),
+        "F8" => Some(Key::F8),
+        "F9" => Some(Key::F9),
+        "F10" => Some(Key::F10),
+        "F11" => Some(Key::F11),
+        "F12" => Some(Key::F12),
+        "F13" => Some(Key::F13),
+        "F14" => Some(Key::F14),
+        "F15" => Some(Key::F15),
+        "CapsLock" => Some(Key::CapsLock),
+        "NumLock" => Some(Key::NumLock),
+        "ScrollLock" => Some(Key::ScrollLock),
+        "NumPad0" => Some(Key::NumPad0),
+        "NumPad1" => Some(Key::NumPad1),
+        "NumPad2" => Some(Key::NumPad2),
+        "NumPad3" => Some(Key::NumPad3),
+        "NumPad4" => Some(Key::NumPad4),
+        "NumPad5" => Some(Key::NumPad5),
+        "NumPad6" => Some(Key::NumPad6),
+        "NumPad7" => Some(Key::NumPad7),
+        "NumPad8" => Some(Key::NumPad8),
         "NumPad9" => Some(Key::NumPad9),
-        "NumPadDot" => Some(Key::NumPadDot), "NumPadSlash" => Some(Key::NumPadSlash),
-        "NumPadAsterisk" => Some(Key::NumPadAsterisk), "NumPadMinus" => Some(Key::NumPadMinus),
-        "NumPadPlus" => Some(Key::NumPadPlus), "NumPadEnter" => Some(Key::NumPadEnter),
-        "LeftAlt" => Some(Key::LeftAlt), "RightAlt" => Some(Key::RightAlt),
-        "LeftSuper" => Some(Key::LeftSuper), "RightSuper" => Some(Key::RightSuper),
-        "Backquote" => Some(Key::Backquote), "Backslash" => Some(Key::Backslash),
-        "Equal" => Some(Key::Equal), "Minus" => Some(Key::Minus),
-        "LeftBracket" => Some(Key::LeftBracket), "RightBracket" => Some(Key::RightBracket),
+        "NumPadDot" => Some(Key::NumPadDot),
+        "NumPadSlash" => Some(Key::NumPadSlash),
+        "NumPadAsterisk" => Some(Key::NumPadAsterisk),
+        "NumPadMinus" => Some(Key::NumPadMinus),
+        "NumPadPlus" => Some(Key::NumPadPlus),
+        "NumPadEnter" => Some(Key::NumPadEnter),
+        "LeftAlt" => Some(Key::LeftAlt),
+        "RightAlt" => Some(Key::RightAlt),
+        "LeftSuper" => Some(Key::LeftSuper),
+        "RightSuper" => Some(Key::RightSuper),
+        "Backquote" => Some(Key::Backquote),
+        "Backslash" => Some(Key::Backslash),
+        "Equal" => Some(Key::Equal),
+        "Minus" => Some(Key::Minus),
+        "LeftBracket" => Some(Key::LeftBracket),
+        "RightBracket" => Some(Key::RightBracket),
         _ => None,
     }
 }
@@ -261,46 +327,112 @@ fn string_to_gilrs_button(name: &str) -> Option<gilrs::Button> {
 
 fn key_to_string(key: Key) -> String {
     match key {
-        Key::A => "A".to_string(), Key::B => "B".to_string(), Key::C => "C".to_string(), Key::D => "D".to_string(),
-        Key::E => "E".to_string(), Key::F => "F".to_string(), Key::G => "G".to_string(), Key::H => "H".to_string(),
-        Key::I => "I".to_string(), Key::J => "J".to_string(), Key::K => "K".to_string(), Key::L => "L".to_string(),
-        Key::M => "M".to_string(), Key::N => "N".to_string(), Key::O => "O".to_string(), Key::P => "P".to_string(),
-        Key::Q => "Q".to_string(), Key::R => "R".to_string(), Key::S => "S".to_string(), Key::T => "T".to_string(),
-        Key::U => "U".to_string(), Key::V => "V".to_string(), Key::W => "W".to_string(), Key::X => "X".to_string(),
-        Key::Y => "Y".to_string(), Key::Z => "Z".to_string(),
-        Key::Up => "Up".to_string(), Key::Down => "Down".to_string(), Key::Left => "Left".to_string(), Key::Right => "Right".to_string(),
-        Key::Enter => "Enter".to_string(), Key::Space => "Space".to_string(),
-        Key::LeftShift => "LeftShift".to_string(), Key::RightShift => "RightShift".to_string(),
-        Key::LeftCtrl => "LeftCtrl".to_string(), Key::RightCtrl => "RightCtrl".to_string(),
-        Key::Comma => "Comma".to_string(), Key::Period => "Period".to_string(),
-        Key::Slash => "Slash".to_string(), Key::Semicolon => "Semicolon".to_string(),
+        Key::A => "A".to_string(),
+        Key::B => "B".to_string(),
+        Key::C => "C".to_string(),
+        Key::D => "D".to_string(),
+        Key::E => "E".to_string(),
+        Key::F => "F".to_string(),
+        Key::G => "G".to_string(),
+        Key::H => "H".to_string(),
+        Key::I => "I".to_string(),
+        Key::J => "J".to_string(),
+        Key::K => "K".to_string(),
+        Key::L => "L".to_string(),
+        Key::M => "M".to_string(),
+        Key::N => "N".to_string(),
+        Key::O => "O".to_string(),
+        Key::P => "P".to_string(),
+        Key::Q => "Q".to_string(),
+        Key::R => "R".to_string(),
+        Key::S => "S".to_string(),
+        Key::T => "T".to_string(),
+        Key::U => "U".to_string(),
+        Key::V => "V".to_string(),
+        Key::W => "W".to_string(),
+        Key::X => "X".to_string(),
+        Key::Y => "Y".to_string(),
+        Key::Z => "Z".to_string(),
+        Key::Up => "Up".to_string(),
+        Key::Down => "Down".to_string(),
+        Key::Left => "Left".to_string(),
+        Key::Right => "Right".to_string(),
+        Key::Enter => "Enter".to_string(),
+        Key::Space => "Space".to_string(),
+        Key::LeftShift => "LeftShift".to_string(),
+        Key::RightShift => "RightShift".to_string(),
+        Key::LeftCtrl => "LeftCtrl".to_string(),
+        Key::RightCtrl => "RightCtrl".to_string(),
+        Key::Comma => "Comma".to_string(),
+        Key::Period => "Period".to_string(),
+        Key::Slash => "Slash".to_string(),
+        Key::Semicolon => "Semicolon".to_string(),
         Key::Apostrophe => "Apostrophe".to_string(),
-        Key::Key1 => "1".to_string(), Key::Key2 => "2".to_string(), Key::Key3 => "3".to_string(),
-        Key::Key4 => "4".to_string(), Key::Key5 => "5".to_string(), Key::Key6 => "6".to_string(),
-        Key::Key7 => "7".to_string(), Key::Key8 => "8".to_string(), Key::Key9 => "9".to_string(), Key::Key0 => "0".to_string(),
-        Key::Escape => "Escape".to_string(), Key::Tab => "Tab".to_string(), Key::Backspace => "Backspace".to_string(),
-        Key::Delete => "Delete".to_string(), Key::Insert => "Insert".to_string(),
-        Key::Home => "Home".to_string(), Key::End => "End".to_string(),
-        Key::PageUp => "PageUp".to_string(), Key::PageDown => "PageDown".to_string(),
-        Key::Pause => "Pause".to_string(), Key::Menu => "Menu".to_string(),
-        Key::F1 => "F1".to_string(), Key::F2 => "F2".to_string(), Key::F3 => "F3".to_string(),
-        Key::F4 => "F4".to_string(), Key::F5 => "F5".to_string(), Key::F6 => "F6".to_string(),
-        Key::F7 => "F7".to_string(), Key::F8 => "F8".to_string(), Key::F9 => "F9".to_string(),
-        Key::F10 => "F10".to_string(), Key::F11 => "F11".to_string(), Key::F12 => "F12".to_string(),
-        Key::F13 => "F13".to_string(), Key::F14 => "F14".to_string(), Key::F15 => "F15".to_string(),
-        Key::CapsLock => "CapsLock".to_string(), Key::NumLock => "NumLock".to_string(), Key::ScrollLock => "ScrollLock".to_string(),
-        Key::NumPad0 => "NumPad0".to_string(), Key::NumPad1 => "NumPad1".to_string(), Key::NumPad2 => "NumPad2".to_string(),
-        Key::NumPad3 => "NumPad3".to_string(), Key::NumPad4 => "NumPad4".to_string(), Key::NumPad5 => "NumPad5".to_string(),
-        Key::NumPad6 => "NumPad6".to_string(), Key::NumPad7 => "NumPad7".to_string(), Key::NumPad8 => "NumPad8".to_string(),
+        Key::Key1 => "1".to_string(),
+        Key::Key2 => "2".to_string(),
+        Key::Key3 => "3".to_string(),
+        Key::Key4 => "4".to_string(),
+        Key::Key5 => "5".to_string(),
+        Key::Key6 => "6".to_string(),
+        Key::Key7 => "7".to_string(),
+        Key::Key8 => "8".to_string(),
+        Key::Key9 => "9".to_string(),
+        Key::Key0 => "0".to_string(),
+        Key::Escape => "Escape".to_string(),
+        Key::Tab => "Tab".to_string(),
+        Key::Backspace => "Backspace".to_string(),
+        Key::Delete => "Delete".to_string(),
+        Key::Insert => "Insert".to_string(),
+        Key::Home => "Home".to_string(),
+        Key::End => "End".to_string(),
+        Key::PageUp => "PageUp".to_string(),
+        Key::PageDown => "PageDown".to_string(),
+        Key::Pause => "Pause".to_string(),
+        Key::Menu => "Menu".to_string(),
+        Key::F1 => "F1".to_string(),
+        Key::F2 => "F2".to_string(),
+        Key::F3 => "F3".to_string(),
+        Key::F4 => "F4".to_string(),
+        Key::F5 => "F5".to_string(),
+        Key::F6 => "F6".to_string(),
+        Key::F7 => "F7".to_string(),
+        Key::F8 => "F8".to_string(),
+        Key::F9 => "F9".to_string(),
+        Key::F10 => "F10".to_string(),
+        Key::F11 => "F11".to_string(),
+        Key::F12 => "F12".to_string(),
+        Key::F13 => "F13".to_string(),
+        Key::F14 => "F14".to_string(),
+        Key::F15 => "F15".to_string(),
+        Key::CapsLock => "CapsLock".to_string(),
+        Key::NumLock => "NumLock".to_string(),
+        Key::ScrollLock => "ScrollLock".to_string(),
+        Key::NumPad0 => "NumPad0".to_string(),
+        Key::NumPad1 => "NumPad1".to_string(),
+        Key::NumPad2 => "NumPad2".to_string(),
+        Key::NumPad3 => "NumPad3".to_string(),
+        Key::NumPad4 => "NumPad4".to_string(),
+        Key::NumPad5 => "NumPad5".to_string(),
+        Key::NumPad6 => "NumPad6".to_string(),
+        Key::NumPad7 => "NumPad7".to_string(),
+        Key::NumPad8 => "NumPad8".to_string(),
         Key::NumPad9 => "NumPad9".to_string(),
-        Key::NumPadDot => "NumPadDot".to_string(), Key::NumPadSlash => "NumPadSlash".to_string(),
-        Key::NumPadAsterisk => "NumPadAsterisk".to_string(), Key::NumPadMinus => "NumPadMinus".to_string(),
-        Key::NumPadPlus => "NumPadPlus".to_string(), Key::NumPadEnter => "NumPadEnter".to_string(),
-        Key::LeftAlt => "LeftAlt".to_string(), Key::RightAlt => "RightAlt".to_string(),
-        Key::LeftSuper => "LeftSuper".to_string(), Key::RightSuper => "RightSuper".to_string(),
-        Key::Backquote => "Backquote".to_string(), Key::Backslash => "Backslash".to_string(),
-        Key::Equal => "Equal".to_string(), Key::Minus => "Minus".to_string(),
-        Key::LeftBracket => "LeftBracket".to_string(), Key::RightBracket => "RightBracket".to_string(),
+        Key::NumPadDot => "NumPadDot".to_string(),
+        Key::NumPadSlash => "NumPadSlash".to_string(),
+        Key::NumPadAsterisk => "NumPadAsterisk".to_string(),
+        Key::NumPadMinus => "NumPadMinus".to_string(),
+        Key::NumPadPlus => "NumPadPlus".to_string(),
+        Key::NumPadEnter => "NumPadEnter".to_string(),
+        Key::LeftAlt => "LeftAlt".to_string(),
+        Key::RightAlt => "RightAlt".to_string(),
+        Key::LeftSuper => "LeftSuper".to_string(),
+        Key::RightSuper => "RightSuper".to_string(),
+        Key::Backquote => "Backquote".to_string(),
+        Key::Backslash => "Backslash".to_string(),
+        Key::Equal => "Equal".to_string(),
+        Key::Minus => "Minus".to_string(),
+        Key::LeftBracket => "LeftBracket".to_string(),
+        Key::RightBracket => "RightBracket".to_string(),
         _ => format!("{:?}", key),
     }
 }
@@ -328,13 +460,22 @@ fn gilrs_button_to_string(button: gilrs::Button) -> String {
     }
 }
 
-fn default_region() -> String { "ntsc".to_string() }
-fn default_glass_intensity() -> u8 { 60 }
-fn default_true() -> bool { true }
-
+fn default_region() -> String {
+    "ntsc".to_string()
+}
+fn default_glass_intensity() -> u8 {
+    60
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Copy, PartialEq)]
-enum OsdType { None, Brightness, Contrast }
+enum OsdType {
+    None,
+    Brightness,
+    Contrast,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct EmulatorConfig {
@@ -399,7 +540,7 @@ fn load_config() -> EmulatorConfig {
         if let Ok(data) = fs::read_to_string(&path) {
             if let Ok(mut cfg) = serde_json::from_str::<EmulatorConfig>(&data) {
                 let mut migrated = false;
-                
+
                 // Handle migration from old key_bindings to new input_bindings
                 if cfg.config_version < 2 {
                     if let Some(old) = &cfg.key_bindings {
@@ -420,13 +561,13 @@ fn load_config() -> EmulatorConfig {
                     cfg.config_version = 2;
                     migrated = true;
                 }
-                
+
                 if cfg.config_version < 3 {
                     // rom_directory defaults to None via serde(default) — triggers first-run setup
                     cfg.config_version = 3;
                     migrated = true;
                 }
-                
+
                 if migrated {
                     save_config(&cfg);
                 }
@@ -484,29 +625,41 @@ fn cheats_dir() -> PathBuf {
 }
 
 fn save_cheats(rom_name: &str, cheats: &[oxidenes::bus::GameGenieCode]) {
-    if rom_name.is_empty() { return; }
+    if rom_name.is_empty() {
+        return;
+    }
     let dir = cheats_dir();
     let _ = fs::create_dir_all(&dir);
-    let entries: Vec<serde_json::Value> = cheats.iter().map(|c| {
-        serde_json::json!({ "code": c.code_str, "enabled": c.enabled })
-    }).collect();
+    let entries: Vec<serde_json::Value> = cheats
+        .iter()
+        .map(|c| serde_json::json!({ "code": c.code_str, "enabled": c.enabled }))
+        .collect();
     if let Ok(data) = serde_json::to_string_pretty(&entries) {
         let _ = fs::write(dir.join(format!("{}.json", rom_name)), data);
     }
 }
 
 fn load_cheats(rom_name: &str) -> Vec<oxidenes::bus::GameGenieCode> {
-    if rom_name.is_empty() { return Vec::new(); }
+    if rom_name.is_empty() {
+        return Vec::new();
+    }
     let path = cheats_dir().join(format!("{}.json", rom_name));
-    let Ok(data) = fs::read_to_string(&path) else { return Vec::new(); };
-    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&data) else { return Vec::new(); };
-    entries.iter().filter_map(|e| {
-        let code_str = e.get("code")?.as_str()?;
-        let enabled = e.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-        let mut code = oxidenes::bus::GameGenieCode::decode(code_str)?;
-        code.enabled = enabled;
-        Some(code)
-    }).collect()
+    let Ok(data) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&data) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|e| {
+            let code_str = e.get("code")?.as_str()?;
+            let enabled = e.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let mut code = oxidenes::bus::GameGenieCode::decode(code_str)?;
+            code.enabled = enabled;
+            Some(code)
+        })
+        .collect()
 }
 
 fn save_state_path(config: &EmulatorConfig, slot: u8) -> Option<PathBuf> {
@@ -544,68 +697,100 @@ fn load_thumbnail(config: &EmulatorConfig, slot: u8) -> Option<Vec<u8>> {
     let path = save_state_path(config, slot)?;
     let thumb_path = PathBuf::from(format!("{}.thumb", path.display()));
     let data = fs::read(&thumb_path).ok()?;
-    if data.len() == 64 * 60 * 3 { Some(data) } else { None }
+    if data.len() == 64 * 60 * 3 {
+        Some(data)
+    } else {
+        None
+    }
 }
 
 fn save_state(bus: &Bus, cpu: &Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     let path_opt = save_state_path(config, slot);
-    let Some(path) = path_opt else { return false; };
+    let Some(path) = path_opt else {
+        return false;
+    };
     let _ = fs::create_dir_all(save_state_dir());
-    
+
     let mut data = Vec::new();
     // Magic header + version
     data.extend_from_slice(b"NESSAV02");
-    
+
     // CPU state
     let cpu_state = cpu.save_state();
     data.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
     data.extend(cpu_state);
-    
+
     // Bus state (RAM + PPU + mapper)
     let bus_state = bus.save_state();
     data.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
     data.extend(bus_state);
-    
+
     // Save thumbnail alongside state
     save_thumbnail(config, slot, &bus.ppu.frame_data);
-    
+
     fs::write(&path, &data).is_ok()
 }
 
 fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -> bool {
     let path_opt = save_state_path(config, slot);
-    let Some(path) = path_opt else { return false; };
-    if !path.exists() { return false; }
-    let Ok(data) = fs::read(&path) else { return false; };
-    
+    let Some(path) = path_opt else {
+        return false;
+    };
+    if !path.exists() {
+        return false;
+    }
+    let Ok(data) = fs::read(&path) else {
+        return false;
+    };
+
     // Check magic header (accept V02 for backward compat, V03 with ROM fingerprint)
-    if data.len() < 8 { return false; }
+    if data.len() < 8 {
+        return false;
+    }
     let is_v03 = &data[0..8] == b"NESSAV03";
     let is_v02 = &data[0..8] == b"NESSAV02";
-    if !is_v02 && !is_v03 { return false; }
+    if !is_v02 && !is_v03 {
+        return false;
+    }
     let mut pos = 8;
-    
+
     // V03: skip ROM fingerprint (deprecated — validation was too aggressive)
     if is_v03 {
-        if pos + 4 > data.len() { return false; }
+        if pos + 4 > data.len() {
+            return false;
+        }
         pos += 4; // skip hash, don't validate
     }
-    
+
     // CPU state
-    if pos + 4 > data.len() { return false; }
-    let cpu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+    if pos + 4 > data.len() {
+        return false;
+    }
+    let cpu_len =
+        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
     pos += 4;
-    if pos + cpu_len > data.len() { return false; }
-    if !cpu.load_state(&data[pos..pos+cpu_len]) { return false; }
+    if pos + cpu_len > data.len() {
+        return false;
+    }
+    if !cpu.load_state(&data[pos..pos + cpu_len]) {
+        return false;
+    }
     pos += cpu_len;
-    
+
     // Bus state
-    if pos + 4 > data.len() { return false; }
-    let bus_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+    if pos + 4 > data.len() {
+        return false;
+    }
+    let bus_len =
+        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
     pos += 4;
-    if pos + bus_len > data.len() { return false; }
-    if !bus.load_state(&data[pos..pos+bus_len]) { return false; }
-    
+    if pos + bus_len > data.len() {
+        return false;
+    }
+    if !bus.load_state(&data[pos..pos + bus_len]) {
+        return false;
+    }
+
     true
 }
 
@@ -629,7 +814,7 @@ impl RewindBuffer {
             max_snapshots: 300,
             max_bytes: 64 * 1024 * 1024, // 64MB cap (includes PPU frame data for smooth rewind)
             total_bytes: 0,
-            frame_skip: 4,     // save every 4th frame (~15 snapshots/sec)
+            frame_skip: 4, // save every 4th frame (~15 snapshots/sec)
             frame_counter: 0,
         }
     }
@@ -639,7 +824,7 @@ impl RewindBuffer {
         if !self.frame_counter.is_multiple_of(self.frame_skip) {
             return;
         }
-        
+
         let estimated_size = 512 + bus.ppu.frame_data.len() * 4; // CPU state + bus state + frame data
         let mut snapshot = Vec::with_capacity(estimated_size);
         let cpu_state = cpu.save_state();
@@ -652,14 +837,13 @@ impl RewindBuffer {
         let frame = &bus.ppu.frame_data;
         snapshot.extend_from_slice(&(frame.len() as u32).to_le_bytes());
         // Bulk copy: reinterpret u32 slice as bytes (safe on same-endian round-trip)
-        let frame_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 4)
-        };
+        let frame_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(frame.as_ptr() as *const u8, frame.len() * 4) };
         snapshot.extend_from_slice(frame_bytes);
-        
+
         self.total_bytes += snapshot.len();
         self.snapshots.push_back(snapshot);
-        
+
         // Cap at max_snapshots AND max_bytes (64MB default)
         while self.snapshots.len() > self.max_snapshots || self.total_bytes > self.max_bytes {
             if let Some(old) = self.snapshots.pop_front() {
@@ -674,22 +858,49 @@ impl RewindBuffer {
         if let Some(snapshot) = self.snapshots.pop_back() {
             self.total_bytes = self.total_bytes.saturating_sub(snapshot.len());
             let mut pos = 0;
-            if pos + 4 > snapshot.len() { return false; }
-            let cpu_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+            if pos + 4 > snapshot.len() {
+                return false;
+            }
+            let cpu_len = u32::from_le_bytes([
+                snapshot[pos],
+                snapshot[pos + 1],
+                snapshot[pos + 2],
+                snapshot[pos + 3],
+            ]) as usize;
             pos += 4;
-            if pos + cpu_len > snapshot.len() { return false; }
-            if !cpu.load_state(&snapshot[pos..pos+cpu_len]) { return false; }
+            if pos + cpu_len > snapshot.len() {
+                return false;
+            }
+            if !cpu.load_state(&snapshot[pos..pos + cpu_len]) {
+                return false;
+            }
             pos += cpu_len;
-            
-            if pos + 4 > snapshot.len() { return false; }
-            let bus_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+
+            if pos + 4 > snapshot.len() {
+                return false;
+            }
+            let bus_len = u32::from_le_bytes([
+                snapshot[pos],
+                snapshot[pos + 1],
+                snapshot[pos + 2],
+                snapshot[pos + 3],
+            ]) as usize;
             pos += 4;
-            if pos + bus_len > snapshot.len() { return false; }
-            if !bus.load_state(&snapshot[pos..pos+bus_len]) { return false; }
+            if pos + bus_len > snapshot.len() {
+                return false;
+            }
+            if !bus.load_state(&snapshot[pos..pos + bus_len]) {
+                return false;
+            }
             pos += bus_len;
             // Restore PPU frame buffer for smooth rewind playback
             if pos + 4 <= snapshot.len() {
-                let frame_len = u32::from_le_bytes([snapshot[pos], snapshot[pos+1], snapshot[pos+2], snapshot[pos+3]]) as usize;
+                let frame_len = u32::from_le_bytes([
+                    snapshot[pos],
+                    snapshot[pos + 1],
+                    snapshot[pos + 2],
+                    snapshot[pos + 3],
+                ]) as usize;
                 pos += 4;
                 if pos + frame_len * 4 <= snapshot.len() {
                     bus.ppu.frame_data.resize(frame_len, 0);
@@ -704,7 +915,7 @@ impl RewindBuffer {
             false
         }
     }
-    
+
     fn clear(&mut self) {
         self.snapshots.clear();
         self.total_bytes = 0;
@@ -723,8 +934,12 @@ fn sram_path(config: &EmulatorConfig) -> Option<PathBuf> {
 }
 
 fn auto_save_sram(bus: &Bus, config: &EmulatorConfig) {
-    if !bus.cartridge.has_battery { return; }
-    let Some(path) = sram_path(config) else { return; };
+    if !bus.cartridge.has_battery {
+        return;
+    }
+    let Some(path) = sram_path(config) else {
+        return;
+    };
     let _ = fs::create_dir_all(save_state_dir());
     let sram = bus.get_sram();
     if !sram.is_empty() {
@@ -733,8 +948,12 @@ fn auto_save_sram(bus: &Bus, config: &EmulatorConfig) {
 }
 
 fn auto_load_sram(bus: &mut Bus, config: &EmulatorConfig) {
-    if !bus.cartridge.has_battery { return; }
-    let Some(path) = sram_path(config) else { return; };
+    if !bus.cartridge.has_battery {
+        return;
+    }
+    let Some(path) = sram_path(config) else {
+        return;
+    };
     if let Ok(data) = fs::read(&path) {
         bus.set_sram(&data);
     }
@@ -788,8 +1007,8 @@ struct MenuState {
     marquee_frame: u32,
     marquee_key: String,
     // Screen transition fade effect
-    transition_timer: u8,      // counts down from 6 to 0
-    transition_out: bool,      // true = fading out, false = fading in
+    transition_timer: u8, // counts down from 6 to 0
+    transition_out: bool, // true = fading out, false = fading in
     favorites_page: usize,
 }
 
@@ -811,18 +1030,28 @@ impl MenuState {
 
 #[allow(clippy::large_enum_variant)]
 enum SubMenu {
-    Settings { selected: usize, value_flash: u8 },
+    Settings {
+        selected: usize,
+        value_flash: u8,
+    },
     FileBrowser(FileBrowser),
     InputSettings(InputSettingsState),
-    CrtSettings { selected: usize, tables_dirty: bool, value_flash: u8 },
-    FolderSetup { browser: FileBrowser, from_settings: bool },
+    CrtSettings {
+        selected: usize,
+        tables_dirty: bool,
+        value_flash: u8,
+    },
+    FolderSetup {
+        browser: FileBrowser,
+        from_settings: bool,
+    },
 }
 
 struct InputSettingsState {
-    tab: u8,  // 0=KB P1, 1=KB P2, 2=Ctrl P1, 3=Ctrl P2
+    tab: u8, // 0=KB P1, 1=KB P2, 2=Ctrl P1, 3=Ctrl P2
     selected: usize,
     waiting_for_input: bool,
-    bindings: InputBindings,  // working copy
+    bindings: InputBindings, // working copy
     conflict_message: Option<String>,
     conflict_timer: u32,
 }
@@ -920,7 +1149,9 @@ fn scan_directory_result(dir: &Path) -> Result<Vec<FileBrowserEntry>, std::io::E
         } else if name.to_lowercase().ends_with(".nes") {
             let size_kb = if path.is_file() {
                 (fs::metadata(&path).map(|m| m.len()).unwrap_or(0) / 1024) as u32
-            } else { 0 };
+            } else {
+                0
+            };
             files.push(FileBrowserEntry {
                 name,
                 is_dir: false,
@@ -1022,7 +1253,9 @@ fn draw_char_8x8(fb: &mut [u32], ch: char, tile_x: usize, tile_y: usize, color: 
     for row in 0..8 {
         let bits = glyph[row];
         let y = py + row;
-        if y >= 240 { break; }
+        if y >= 240 {
+            break;
+        }
         for col in 0..8 {
             if bits & (0x80 >> col) != 0 {
                 let x = px + col;
@@ -1080,7 +1313,8 @@ fn marquee_text(text: &str, max_chars: usize, frame: u32) -> String {
         ((frame - MARQUEE_INITIAL_PAUSE_FRAMES) / MARQUEE_STEP_FRAMES) as usize % cycle_len
     };
 
-    chars.iter()
+    chars
+        .iter()
         .chain(gap.iter())
         .chain(chars.iter())
         .skip(offset)
@@ -1089,7 +1323,15 @@ fn marquee_text(text: &str, max_chars: usize, frame: u32) -> String {
         .collect()
 }
 
-fn draw_prefixed_name_8x8(fb: &mut [u32], prefix: &str, name: &str, tile: (usize, usize), name_max_chars: usize, color: u32, marquee_frame: Option<u32>) {
+fn draw_prefixed_name_8x8(
+    fb: &mut [u32],
+    prefix: &str,
+    name: &str,
+    tile: (usize, usize),
+    name_max_chars: usize,
+    color: u32,
+    marquee_frame: Option<u32>,
+) {
     let (tile_x, tile_y) = tile;
     draw_text_8x8(fb, prefix, tile_x, tile_y, color);
     let display_name = if let Some(frame) = marquee_frame {
@@ -1097,19 +1339,36 @@ fn draw_prefixed_name_8x8(fb: &mut [u32], prefix: &str, name: &str, tile: (usize
     } else {
         truncate_with_ellipsis_chars(name, name_max_chars)
     };
-    draw_text_8x8(fb, &display_name, tile_x + prefix.chars().count(), tile_y, color);
+    draw_text_8x8(
+        fb,
+        &display_name,
+        tile_x + prefix.chars().count(),
+        tile_y,
+        color,
+    );
 }
 
-fn selected_marquee_key(menu: &MenuState, cfg: &EmulatorConfig, favorites_valid: &[bool]) -> String {
+fn selected_marquee_key(
+    menu: &MenuState,
+    cfg: &EmulatorConfig,
+    favorites_valid: &[bool],
+) -> String {
     match &menu.submenu {
         None => {
-            let valid_favorites: Vec<&String> = cfg.favorite_games.iter().enumerate()
+            let valid_favorites: Vec<&String> = cfg
+                .favorite_games
+                .iter()
+                .enumerate()
                 .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
                 .map(|(_, p)| p)
                 .collect();
             let total_favs = valid_favorites.len();
             let per_page = 5usize;
-            let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
+            let total_pages = if total_favs == 0 {
+                0
+            } else {
+                total_favs.div_ceil(per_page)
+            };
             let page = menu.favorites_page.min(total_pages.saturating_sub(1));
             let page_start = page * per_page;
             let page_end = (page_start + per_page).min(total_favs);
@@ -1119,7 +1378,9 @@ fn selected_marquee_key(menu: &MenuState, cfg: &EmulatorConfig, favorites_valid:
             if total_favs > 0 {
                 current_row += 1 + fav_count + 1;
             }
-            let recent_non_fav: Vec<&String> = cfg.recent_games.iter()
+            let recent_non_fav: Vec<&String> = cfg
+                .recent_games
+                .iter()
                 .filter(|p| !cfg.favorite_games.contains(p))
                 .collect();
             let recent_count = recent_non_fav
@@ -1134,11 +1395,13 @@ fn selected_marquee_key(menu: &MenuState, cfg: &EmulatorConfig, favorites_valid:
                 format!("home:item:{}", menu.selected)
             }
         }
-        Some(SubMenu::FileBrowser(browser)) => browser.entries
+        Some(SubMenu::FileBrowser(browser)) => browser
+            .entries
             .get(browser.selected)
             .map(|entry| format!("browser:{}", entry.full_path.display()))
             .unwrap_or_else(|| "browser:empty".to_string()),
-        Some(SubMenu::FolderSetup { browser, .. }) => browser.entries
+        Some(SubMenu::FolderSetup { browser, .. }) => browser
+            .entries
             .get(browser.selected)
             .map(|entry| format!("folder:{}", entry.full_path.display()))
             .unwrap_or_else(|| "folder:empty".to_string()),
@@ -1163,7 +1426,11 @@ mod menu_text_tests {
         let title = "TEENAGE MUTANT NINJA TURTLES";
         assert_eq!(marquee_text(title, 14, 0), "TEENAGE MUTANT");
         assert_eq!(
-            marquee_text(title, 14, MARQUEE_INITIAL_PAUSE_FRAMES + MARQUEE_STEP_FRAMES),
+            marquee_text(
+                title,
+                14,
+                MARQUEE_INITIAL_PAUSE_FRAMES + MARQUEE_STEP_FRAMES
+            ),
             "EENAGE MUTANT "
         );
     }
@@ -1216,10 +1483,9 @@ fn draw_double_border_bottom(fb: &mut [u32], tile_row: usize) {
 fn draw_separator_line(fb: &mut [u32], tile_row: usize) {
     let y = tile_row * 8 + 4;
     for x in 24..232 {
-        if x % 4 < 2
-            && y < 240 {
-                fb[y * 256 + x] = MENU_DARK_GRAY;
-            }
+        if x % 4 < 2 && y < 240 {
+            fb[y * 256 + x] = MENU_DARK_GRAY;
+        }
     }
 }
 
@@ -1239,9 +1505,18 @@ fn draw_side_borders(fb: &mut [u32]) {
 
 /// Draw a selection highlight bar across a region of the framebuffer.
 #[inline]
-fn draw_highlight_bar(fb: &mut [u32], y_start: usize, height: usize, x_left: usize, x_right: usize, color: u32) {
+fn draw_highlight_bar(
+    fb: &mut [u32],
+    y_start: usize,
+    height: usize,
+    x_left: usize,
+    x_right: usize,
+    color: u32,
+) {
     for row in y_start..y_start + height {
-        if row >= 240 { break; }
+        if row >= 240 {
+            break;
+        }
         for col in x_left..x_right.min(256) {
             fb[row * 256 + col] = color;
         }
@@ -1252,7 +1527,9 @@ fn draw_highlight_bar(fb: &mut [u32], y_start: usize, height: usize, x_left: usi
 /// fade_level: 0=full brightness, 8=nearly black
 #[inline]
 fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) {
-    if fade_level == 0 { return; }
+    if fade_level == 0 {
+        return;
+    }
     // fade_level 0=full brightness, 8=nearly black
     let brightness = (255u32).saturating_sub(fade_level as u32 * 30); // 255, 225, 195... down to 15
     for pixel in fb[..width * height].iter_mut() {
@@ -1263,8 +1540,17 @@ fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) 
     }
 }
 
-fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cursor_visible: bool, favorites_valid: &[bool], recents_valid: &[bool]) {
-    for pixel in fb.iter_mut() { *pixel = MENU_BG; }
+fn render_home_screen(
+    fb: &mut [u32],
+    menu: &MenuState,
+    cfg: &EmulatorConfig,
+    cursor_visible: bool,
+    favorites_valid: &[bool],
+    recents_valid: &[bool],
+) {
+    for pixel in fb.iter_mut() {
+        *pixel = MENU_BG;
+    }
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
@@ -1277,13 +1563,20 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     let mut item_index: usize = 0;
 
     // === FAVORITES SECTION ===
-    let valid_favorites: Vec<&String> = cfg.favorite_games.iter().enumerate()
+    let valid_favorites: Vec<&String> = cfg
+        .favorite_games
+        .iter()
+        .enumerate()
         .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
         .map(|(_, p)| p)
         .collect();
     let total_favs = valid_favorites.len();
     let per_page = 5usize;
-    let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
+    let total_pages = if total_favs == 0 {
+        0
+    } else {
+        total_favs.div_ceil(per_page)
+    };
     let page = menu.favorites_page.min(total_pages.saturating_sub(1));
     let page_start = page * per_page;
     let page_end = (page_start + per_page).min(total_favs);
@@ -1303,7 +1596,9 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
 
         for i in 0..fav_count {
             let row = current_row;
-            if row >= 24 { break; }
+            if row >= 24 {
+                break;
+            }
 
             let path_str = valid_favorites[page_start + i];
             let filename = Path::new(path_str)
@@ -1343,7 +1638,10 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     }
 
     // === RECENT GAMES SECTION ===
-    let recent_non_fav: Vec<(usize, &String)> = cfg.recent_games.iter().enumerate()
+    let recent_non_fav: Vec<(usize, &String)> = cfg
+        .recent_games
+        .iter()
+        .enumerate()
         .filter(|(_, p)| !cfg.favorite_games.contains(p))
         .collect();
     let max_recent = (23_usize.saturating_sub(current_row)).min(8);
@@ -1362,7 +1660,9 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
             #[allow(clippy::needless_range_loop)]
             for i in 0..recent_count {
                 let row = current_row;
-                if row >= 24 { break; }
+                if row >= 24 {
+                    break;
+                }
 
                 let (orig_idx, path_str) = recent_non_fav[i];
                 let filename = Path::new(path_str)
@@ -1444,7 +1744,15 @@ fn render_home_screen(fb: &mut [u32], menu: &MenuState, cfg: &EmulatorConfig, cu
     draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, 0x585858);
 }
 
-fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, audio_volume: u32, glass_intensity: u8, value_flash: u8) {
+fn render_settings(
+    fb: &mut [u32],
+    cfg: &EmulatorConfig,
+    selected: usize,
+    cursor_visible: bool,
+    audio_volume: u32,
+    glass_intensity: u8,
+    value_flash: u8,
+) {
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
     }
@@ -1460,27 +1768,46 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
 
     let rom_folder_display = if let Some(ref dir) = cfg.rom_directory {
         let s = dir.replace('\\', "/").to_uppercase();
-        if s.len() > 17 { format!("...{}", &s[s.len()-14..]) } else { s }
+        if s.len() > 17 {
+            format!("...{}", &s[s.len() - 14..])
+        } else {
+            s
+        }
     } else {
         "NOT SET".to_string()
     };
 
     let settings_items = [
         format!("CRT FILTER: {}", if cfg.crt_enabled { "ON" } else { "OFF" }),
-        format!("BARREL DISTORTION: {}", if cfg.barrel_distortion { "ON" } else { "OFF" }),
+        format!(
+            "BARREL DISTORTION: {}",
+            if cfg.barrel_distortion { "ON" } else { "OFF" }
+        ),
         format!("GLASS INTENSITY: {}%", glass_intensity),
         format!("AUDIO VOLUME: {}%", audio_volume),
-        format!("REGION: {}", if cfg.region == "pal" { "PAL" } else { "NTSC" }),
+        format!(
+            "REGION: {}",
+            if cfg.region == "pal" { "PAL" } else { "NTSC" }
+        ),
         "CRT SETTINGS >".to_string(),
         "INPUT SETTINGS >".to_string(),
-        format!("CHECK FOR UPDATES: {}", if cfg.check_for_updates { "ON" } else { "OFF" }),
+        format!(
+            "CHECK FOR UPDATES: {}",
+            if cfg.check_for_updates { "ON" } else { "OFF" }
+        ),
         format!("ROM FOLDER: {}", rom_folder_display),
     ];
     let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
         let is_flashing = i == selected && value_flash > 0;
-        let color = if is_flashing { MENU_GOLD } else if i == selected { MENU_WHITE } else { MENU_GRAY };
+        let color = if is_flashing {
+            MENU_GOLD
+        } else if i == selected {
+            MENU_WHITE
+        } else {
+            MENU_GRAY
+        };
         if i == selected && cursor_visible {
             draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
         }
@@ -1493,7 +1820,13 @@ fn render_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor
     draw_text_centered_8x8(fb, "ESC TO GO BACK", 27, MENU_DARK_GRAY);
 }
 
-fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cursor_visible: bool, value_flash: u8) {
+fn render_crt_settings(
+    fb: &mut [u32],
+    cfg: &EmulatorConfig,
+    selected: usize,
+    cursor_visible: bool,
+    value_flash: u8,
+) {
     for pixel in fb.iter_mut() {
         *pixel = MENU_BG;
     }
@@ -1532,7 +1865,13 @@ fn render_crt_settings(fb: &mut [u32], cfg: &EmulatorConfig, selected: usize, cu
 
     for (i, ((label, value), &row)) in items.iter().zip(rows.iter()).enumerate() {
         let is_flashing = i == selected && value_flash > 0;
-        let color = if is_flashing { MENU_GOLD } else if i == selected { MENU_WHITE } else { MENU_GRAY };
+        let color = if is_flashing {
+            MENU_GOLD
+        } else if i == selected {
+            MENU_WHITE
+        } else {
+            MENU_GRAY
+        };
         let value_color = if is_flashing { MENU_GOLD } else { color };
         if i == selected && cursor_visible {
             draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
@@ -1573,7 +1912,11 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
     let tabs = ["KB P1", "KB P2", "PAD P1", "PAD P2"];
     let mut tab_x = 4;
     for (i, tab) in tabs.iter().enumerate() {
-        let color = if i == state.tab as usize { MENU_LIGHT_BLUE } else { MENU_DARK_GRAY };
+        let color = if i == state.tab as usize {
+            MENU_LIGHT_BLUE
+        } else {
+            MENU_DARK_GRAY
+        };
         draw_text_8x8(fb, &format!("[{}]", tab), tab_x, 4, color);
         tab_x += 8;
     }
@@ -1582,26 +1925,43 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
 
     // Binding lists based on active tab
     let current_row = 7;
-    
+
     match state.tab {
         0 | 1 => {
             // Keyboard bindings
-            let bindings = if state.tab == 0 { &state.bindings.keyboard_p1 } else { &state.bindings.keyboard_p2 };
-            let binding_names = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT", "TURBO A", "TURBO B"];
-            let binding_values = [
-                &bindings.up, &bindings.down, &bindings.left, &bindings.right,
-                &bindings.a, &bindings.b, &bindings.start, &bindings.select,
-                &bindings.turbo_a, &bindings.turbo_b
+            let bindings = if state.tab == 0 {
+                &state.bindings.keyboard_p1
+            } else {
+                &state.bindings.keyboard_p2
+            };
+            let binding_names = [
+                "UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT", "TURBO A", "TURBO B",
             ];
-            
+            let binding_values = [
+                &bindings.up,
+                &bindings.down,
+                &bindings.left,
+                &bindings.right,
+                &bindings.a,
+                &bindings.b,
+                &bindings.start,
+                &bindings.select,
+                &bindings.turbo_a,
+                &bindings.turbo_b,
+            ];
+
             for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
                 let row = current_row + i;
-                let color = if i == state.selected { MENU_WHITE } else { MENU_GRAY };
-                
+                let color = if i == state.selected {
+                    MENU_WHITE
+                } else {
+                    MENU_GRAY
+                };
+
                 if i == state.selected && cursor_visible {
                     draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
                 }
-                
+
                 if state.waiting_for_input && i == state.selected {
                     draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
                     draw_text_8x8(fb, "PRESS A KEY...", 18, row, MENU_GOLD);
@@ -1613,22 +1973,36 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
         }
         2 | 3 => {
             // Controller bindings
-            let bindings = if state.tab == 2 { &state.bindings.controller_p1 } else { &state.bindings.controller_p2 };
-            let binding_names = ["A", "B", "TURBO A", "TURBO B", "START", "SELECT", "DEADZONE"];
-            let binding_values = [
-                bindings.a.as_str(), bindings.b.as_str(), bindings.turbo_a.as_str(), 
-                bindings.turbo_b.as_str(), bindings.start.as_str(), bindings.select.as_str(),
-                ""  // Special case for deadzone
+            let bindings = if state.tab == 2 {
+                &state.bindings.controller_p1
+            } else {
+                &state.bindings.controller_p2
+            };
+            let binding_names = [
+                "A", "B", "TURBO A", "TURBO B", "START", "SELECT", "DEADZONE",
             ];
-            
+            let binding_values = [
+                bindings.a.as_str(),
+                bindings.b.as_str(),
+                bindings.turbo_a.as_str(),
+                bindings.turbo_b.as_str(),
+                bindings.start.as_str(),
+                bindings.select.as_str(),
+                "", // Special case for deadzone
+            ];
+
             for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
                 let row = current_row + i;
-                let color = if i == state.selected { MENU_WHITE } else { MENU_GRAY };
-                
+                let color = if i == state.selected {
+                    MENU_WHITE
+                } else {
+                    MENU_GRAY
+                };
+
                 if i == state.selected && cursor_visible {
                     draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
                 }
-                
+
                 if i == 6 {
                     // Deadzone special handling
                     draw_text_8x8(fb, &format!("{}:", name), 5, row, color);
@@ -1656,9 +2030,7 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
 }
 
 fn truncate_path_display(path: &Path, max_chars: usize) -> String {
-    let s = path.to_string_lossy()
-        .to_uppercase()
-        .replace('\\', "/");
+    let s = path.to_string_lossy().to_uppercase().replace('\\', "/");
     if s.len() <= max_chars {
         s
     } else {
@@ -1666,7 +2038,13 @@ fn truncate_path_display(path: &Path, max_chars: usize) -> String {
     }
 }
 
-fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, cfg: &EmulatorConfig, marquee_frame: u32) {
+fn render_file_browser(
+    fb: &mut [u32],
+    browser: &FileBrowser,
+    cursor_visible: bool,
+    cfg: &EmulatorConfig,
+    marquee_frame: u32,
+) {
     const VISIBLE_ROWS: usize = 20;
     const FIRST_ROW: usize = 5;
     const DIR_COLOR: u32 = 0x5C94FC;
@@ -1717,7 +2095,11 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 if cursor_visible {
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
-                let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_WHITE };
+                let color = if entry.is_dir {
+                    DIR_COLOR_SEL
+                } else {
+                    MENU_WHITE
+                };
 
                 if !entry.is_dir && entry.size_kb > 0 {
                     let size_str = format!("{}K", entry.size_kb);
@@ -1749,15 +2131,7 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                 }
             } else {
                 let color = if entry.is_dir { DIR_COLOR } else { MENU_GRAY };
-                draw_prefixed_name_8x8(
-                    fb,
-                    prefix,
-                    &display_name,
-                    (3, row),
-                    24,
-                    color,
-                    None,
-                );
+                draw_prefixed_name_8x8(fb, prefix, &display_name, (3, row), 24, color, None);
             }
         }
 
@@ -1788,14 +2162,21 @@ fn render_file_browser(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
     }
 }
 
-fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bool, marquee_frame: u32) {
+fn render_folder_setup(
+    fb: &mut [u32],
+    browser: &FileBrowser,
+    cursor_visible: bool,
+    marquee_frame: u32,
+) {
     const VISIBLE_ROWS: usize = 14;
     const FIRST_ROW: usize = 9;
     const DIR_COLOR: u32 = 0x5C94FC;
     const DIR_COLOR_SEL: u32 = 0x7CB4FC;
     const HIGHLIGHT_BG: u32 = 0x3C3C8C;
 
-    for pixel in fb.iter_mut() { *pixel = MENU_BG; }
+    for pixel in fb.iter_mut() {
+        *pixel = MENU_BG;
+    }
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
@@ -1824,18 +2205,18 @@ fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
             let is_selected = i == browser.selected;
 
             let display_name = entry.name.to_uppercase();
-            let prefix = if entry.is_dir {
-                "> "
-            } else {
-                "  "
-            };
+            let prefix = if entry.is_dir { "> " } else { "  " };
 
             if is_selected {
                 draw_highlight_bar(fb, row * 8, 8, 20, 236, HIGHLIGHT_BG);
                 if cursor_visible {
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
-                let color = if entry.is_dir { DIR_COLOR_SEL } else { MENU_DARK_GRAY };
+                let color = if entry.is_dir {
+                    DIR_COLOR_SEL
+                } else {
+                    MENU_DARK_GRAY
+                };
                 draw_prefixed_name_8x8(
                     fb,
                     prefix,
@@ -1846,16 +2227,12 @@ fn render_folder_setup(fb: &mut [u32], browser: &FileBrowser, cursor_visible: bo
                     Some(marquee_frame),
                 );
             } else {
-                let color = if entry.is_dir { DIR_COLOR } else { MENU_DARK_GRAY };
-                draw_prefixed_name_8x8(
-                    fb,
-                    prefix,
-                    &display_name,
-                    (3, row),
-                    24,
-                    color,
-                    None,
-                );
+                let color = if entry.is_dir {
+                    DIR_COLOR
+                } else {
+                    MENU_DARK_GRAY
+                };
+                draw_prefixed_name_8x8(fb, prefix, &display_name, (3, row), 24, color, None);
             }
         }
 
@@ -1950,7 +2327,11 @@ fn build_sv_table(vignette_table: &[u16], scanline_intensity: u8) -> Vec<u8> {
 
 /// Immediately rebuild sv_table after a scanline_intensity slider change.
 /// Called on every slider tick so the CRT live preview is never stale.
-fn apply_scanline_intensity_change(sv_table: &mut Vec<u8>, vignette_table: &[u16], new_intensity: u8) {
+fn apply_scanline_intensity_change(
+    sv_table: &mut Vec<u8>,
+    vignette_table: &[u16],
+    new_intensity: u8,
+) {
     *sv_table = build_sv_table(vignette_table, new_intensity);
 }
 
@@ -2003,17 +2384,12 @@ fn build_screen_curve_table() -> Vec<u32> {
             let edge = nx.abs().max(ny.abs());
             let edge_t = ((edge - 0.82) / 0.18).clamp(0.0, 1.0);
             let corner_t = (nx.abs() * ny.abs()).powf(1.65);
-            let shade = if rounded_rect_contains(
-                dst_x,
-                dst_y,
-                SCREEN_W,
-                SCREEN_H,
-                SCREEN_CURVE_CORNER_R,
-            ) {
-                (256.0 - edge_t * edge_t * 18.0 - corner_t * 10.0).clamp(210.0, 256.0) as u32
-            } else {
-                0
-            };
+            let shade =
+                if rounded_rect_contains(dst_x, dst_y, SCREEN_W, SCREEN_H, SCREEN_CURVE_CORNER_R) {
+                    (256.0 - edge_t * edge_t * 18.0 - corner_t * 10.0).clamp(210.0, 256.0) as u32
+                } else {
+                    0
+                };
 
             table.push((src_idx as u32) | (shade << SCREEN_CURVE_SRC_BITS));
         }
@@ -2045,12 +2421,12 @@ fn build_mask_table(mode: &CrtMaskMode, mask_intensity: u8) -> Vec<(u16, u16, u1
                 for x in 0..SCREEN_W {
                     let col_in_cell = (x + col_offset) % 3;
                     let (r, g, b) = match (row_in_cell, col_in_cell) {
-                        (0, 0) => (255, 180, 180),  // R bright — off channels at 70%
-                        (0, 1) => (180, 255, 180),  // G bright
-                        (0, 2) => (180, 180, 255),  // B bright
-                        (1, 0) => (220, 160, 160),  // R dim
-                        (1, 1) => (160, 220, 160),  // G dim
-                        (1, 2) => (160, 160, 220),  // B dim
+                        (0, 0) => (255, 180, 180), // R bright — off channels at 70%
+                        (0, 1) => (180, 255, 180), // G bright
+                        (0, 2) => (180, 180, 255), // B bright
+                        (1, 0) => (220, 160, 160), // R dim
+                        (1, 1) => (160, 220, 160), // G dim
+                        (1, 2) => (160, 160, 220), // B dim
                         _ => (200, 200, 200),
                     };
                     table[y * SCREEN_W + x] = (bake(r), bake(g), bake(b));
@@ -2063,9 +2439,9 @@ fn build_mask_table(mode: &CrtMaskMode, mask_intensity: u8) -> Vec<(u16, u16, u1
             for y in 0..SCREEN_H {
                 for x in 0..SCREEN_W {
                     let (r, g, b) = match x % 3 {
-                        0 => (255, 180, 180),  // R stripe
-                        1 => (180, 255, 180),  // G stripe
-                        2 => (180, 180, 255),  // B stripe
+                        0 => (255, 180, 180), // R stripe
+                        1 => (180, 255, 180), // G stripe
+                        2 => (180, 180, 255), // B stripe
                         _ => unreachable!(),
                     };
                     table[y * SCREEN_W + x] = (bake(r), bake(g), bake(b));
@@ -2085,9 +2461,9 @@ fn build_mask_table(mode: &CrtMaskMode, mask_intensity: u8) -> Vec<(u16, u16, u1
                         0 | 1 => {
                             // Active phosphor rows
                             match col_in_cell {
-                                0 | 1 => (255, 180, 180),  // R slot
-                                2 | 3 => (180, 255, 180),  // G slot
-                                4 | 5 => (180, 180, 255),  // B slot
+                                0 | 1 => (255, 180, 180), // R slot
+                                2 | 3 => (180, 255, 180), // G slot
+                                4 | 5 => (180, 180, 255), // B slot
                                 _ => unreachable!(),
                             }
                         }
@@ -2114,7 +2490,12 @@ struct RepeatTracker {
 
 impl RepeatTracker {
     fn new() -> Self {
-        Self { up_held: 0, down_held: 0, left_held: 0, right_held: 0 }
+        Self {
+            up_held: 0,
+            down_held: 0,
+            left_held: 0,
+            right_held: 0,
+        }
     }
 
     fn update_axis(raw_held: bool, counter: &mut u32) -> bool {
@@ -2140,7 +2521,13 @@ impl RepeatTracker {
         }
     }
 
-    fn process(&mut self, raw_up: bool, raw_down: bool, raw_left: bool, raw_right: bool) -> (bool, bool, bool, bool) {
+    fn process(
+        &mut self,
+        raw_up: bool,
+        raw_down: bool,
+        raw_left: bool,
+        raw_right: bool,
+    ) -> (bool, bool, bool, bool) {
         let up = Self::update_axis(raw_up, &mut self.up_held);
         let down = Self::update_axis(raw_down, &mut self.down_held);
         let left = Self::update_axis(raw_left, &mut self.left_held);
@@ -2163,7 +2550,13 @@ struct MenuInput {
     select: bool,
 }
 
-fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut RepeatTracker, menu_deadzone: f32, stick_state: &mut StickState) -> MenuInput {
+fn poll_menu_input(
+    window: &Window,
+    gilrs: &mut Option<Gilrs>,
+    repeat: &mut RepeatTracker,
+    menu_deadzone: f32,
+    stick_state: &mut StickState,
+) -> MenuInput {
     let confirm = window.is_key_pressed(Key::Enter, KeyRepeat::No);
     let back = window.is_key_pressed(Key::Escape, KeyRepeat::No);
     let backspace = window.is_key_pressed(Key::Backspace, KeyRepeat::No);
@@ -2177,8 +2570,15 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
     let mut raw_right = window.is_key_down(Key::Right);
 
     let mut mi = MenuInput {
-        up: false, down: false, left: false, right: false,
-        confirm, back, backspace, page_up, page_down,
+        up: false,
+        down: false,
+        left: false,
+        right: false,
+        confirm,
+        back,
+        backspace,
+        page_up,
+        page_down,
         favorite: window.is_key_pressed(Key::F, KeyRepeat::No),
         select: window.is_key_pressed(Key::Tab, KeyRepeat::No),
     };
@@ -2206,12 +2606,11 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
             raw_right |= gamepad.is_pressed(Button::DPadRight);
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
-                stick_x, stick_y, menu_deadzone, stick_state
-            );
-            raw_up    |= s_up;
-            raw_down  |= s_down;
-            raw_left  |= s_left;
+            let (s_up, s_down, s_left, s_right) =
+                stick_to_dpad(stick_x, stick_y, menu_deadzone, stick_state);
+            raw_up |= s_up;
+            raw_down |= s_down;
+            raw_left |= s_left;
             raw_right |= s_right;
         }
     }
@@ -2225,7 +2624,13 @@ fn poll_menu_input(window: &Window, gilrs: &mut Option<Gilrs>, repeat: &mut Repe
     mi
 }
 
-fn generate_menu_tone<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, frequency: f32, duration_ms: u32, volume: f32, sample_rate: u32) {
+fn generate_menu_tone<P: ringbuf::traits::Producer<Item = f32>>(
+    producer: &mut P,
+    frequency: f32,
+    duration_ms: u32,
+    volume: f32,
+    sample_rate: u32,
+) {
     let num_samples = (sample_rate as f32 * duration_ms as f32 / 1000.0) as usize;
     for i in 0..num_samples {
         let t = i as f32 / sample_rate as f32;
@@ -2234,7 +2639,11 @@ fn generate_menu_tone<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P
         } else {
             1.0 - (i as f32 - num_samples as f32 / 10.0) / (num_samples as f32 * 9.0 / 10.0)
         };
-        let sample = if (t * frequency * 2.0 * std::f32::consts::PI).sin() > 0.0 { volume } else { -volume };
+        let sample = if (t * frequency * 2.0 * std::f32::consts::PI).sin() > 0.0 {
+            volume
+        } else {
+            -volume
+        };
         let _ = producer.try_push(sample * envelope);
     }
 }
@@ -2247,7 +2656,12 @@ enum MenuSound {
     Adjust,
 }
 
-fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(producer: &mut P, sound: MenuSound, sample_rate: u32, volume: f32) {
+fn play_menu_sound<P: ringbuf::traits::Producer<Item = f32>>(
+    producer: &mut P,
+    sound: MenuSound,
+    sample_rate: u32,
+    volume: f32,
+) {
     let vol = volume.max(0.3) * 0.15; // minimum 30% so menu is always audible
     match sound {
         MenuSound::Cursor => generate_menu_tone(producer, 880.0, 30, vol, sample_rate),
@@ -2270,7 +2684,10 @@ fn get_screen_resolution() -> (usize, usize) {
     const SM_CXSCREEN: i32 = 0;
     const SM_CYSCREEN: i32 = 1;
     unsafe {
-        (GetSystemMetrics(SM_CXSCREEN) as usize, GetSystemMetrics(SM_CYSCREEN) as usize)
+        (
+            GetSystemMetrics(SM_CXSCREEN) as usize,
+            GetSystemMetrics(SM_CYSCREEN) as usize,
+        )
     }
 }
 
@@ -2286,7 +2703,9 @@ fn main() {
         extern "system" {
             fn timeBeginPeriod(uPeriod: u32) -> u32;
         }
-        unsafe { timeBeginPeriod(1); }
+        unsafe {
+            timeBeginPeriod(1);
+        }
     }
 
     // CLI flags (handle before any initialization)
@@ -2298,7 +2717,9 @@ fn main() {
         println!("    oxidenes [OPTIONS] [ROM_FILE]");
         println!();
         println!("ARGS:");
-        println!("    <ROM_FILE>    Path to a .nes ROM file (optional, opens file browser if omitted)");
+        println!(
+            "    <ROM_FILE>    Path to a .nes ROM file (optional, opens file browser if omitted)"
+        );
         println!();
         println!("OPTIONS:");
         println!("    -h, --help       Show this help message");
@@ -2340,13 +2761,17 @@ fn main() {
 
     let target_fps = if config.region == "pal" { 50 } else { 60 };
     let frame_duration_ns: u64 = 1_000_000_000 / target_fps as u64;
-    window.set_target_fps(0);  // Disabled: custom hybrid pacer handles timing
+    window.set_target_fps(0); // Disabled: custom hybrid pacer handles timing
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().ok();
     if let Some(ref g) = gilrs {
         for (_id, gamepad) in g.gamepads() {
-            println!("Controller: {} (connected: {})", gamepad.name(), gamepad.is_connected());
+            println!(
+                "Controller: {} (connected: {})",
+                gamepad.name(),
+                gamepad.is_connected()
+            );
         }
     }
 
@@ -2430,16 +2855,21 @@ fn main() {
     let mut composite_buffer = tv_frame_bg.clone();
 
     // Pre-compute vignette lookup table (configurable strength)
-    let mut vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
+    let mut vignette_table =
+        build_vignette_table_with_strength(config.crt_config.vignette_strength);
     // Pre-compute fused scanline×vignette table (avoids per-pixel multiply in hot loop)
     let mut sv_table = build_sv_table(&vignette_table, config.crt_config.scanline_intensity);
     // Pre-compute barrel distortion lookup table (configurable curvature)
-    let mut distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
+    let mut distortion_table =
+        build_distortion_table_with_curvature(config.crt_config.curvature_strength);
     let flat_distortion_table = build_flat_distortion_table();
     let screen_curve_table = build_screen_curve_table();
     let glare_table = build_glare_table();
     let glass_thickness_table = build_glass_thickness_table();
-    let mut mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
+    let mut mask_table = build_mask_table(
+        &config.crt_config.mask_mode,
+        config.crt_config.mask_intensity,
+    );
     let mut crt_enabled = config.crt_enabled;
     let mut barrel_distortion = config.barrel_distortion;
     let mut audio_volume = config.audio_volume;
@@ -2483,7 +2913,7 @@ fn main() {
     let mut stick_state_p1 = StickState::default();
     let mut stick_state_p2 = StickState::default();
     let mut stick_state_menu = StickState::default();
-    
+
     // Pause menu state
     let mut paused: bool = false;
     let mut pause_selected: usize = 0;
@@ -2578,7 +3008,8 @@ fn main() {
                         emulator_state = EmulatorState::Game;
                         println!("Loaded: {}", rom_path);
                         let game_name = rom_title.unwrap_or_else(|| {
-                            Path::new(rom_path).file_stem()
+                            Path::new(rom_path)
+                                .file_stem()
                                 .map(|s| s.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "Unknown".to_string())
                         });
@@ -2623,16 +3054,20 @@ fn main() {
     }
 
     // Cached validity for favorites/recents — avoids Path::exists() syscalls per frame
-    let mut favorites_valid: Vec<bool> = config.favorite_games.iter()
+    let mut favorites_valid: Vec<bool> = config
+        .favorite_games
+        .iter()
         .map(|p| std::path::Path::new(p.as_str()).exists())
         .collect();
-    let mut recents_valid: Vec<bool> = config.recent_games.iter()
+    let mut recents_valid: Vec<bool> = config
+        .recent_games
+        .iter()
         .map(|p| std::path::Path::new(p.as_str()).exists())
         .collect();
 
     while window.is_open() {
         let mut next_state: Option<EmulatorState> = None;
-        
+
         sound_cooldown = sound_cooldown.saturating_sub(1);
 
         match emulator_state {
@@ -2644,7 +3079,13 @@ fn main() {
                     menu.cursor_visible = !menu.cursor_visible;
                 }
 
-                let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                let input = poll_menu_input(
+                    &window,
+                    &mut gilrs,
+                    &mut repeat_tracker,
+                    config.input_bindings.controller_p1.deadzone,
+                    &mut stick_state_menu,
+                );
 
                 let mut action: Option<MenuAction> = None;
                 let mut input_back_crt = false;
@@ -2652,19 +3093,29 @@ fn main() {
                 match menu.submenu {
                     None => {
                         // Compute item layout: favorites, then recent (non-fav), then browse, settings
-                        let valid_favorites: Vec<String> = config.favorite_games.iter().enumerate()
+                        let valid_favorites: Vec<String> = config
+                            .favorite_games
+                            .iter()
+                            .enumerate()
                             .filter(|(i, _)| favorites_valid.get(*i).copied().unwrap_or(false))
                             .map(|(_, p)| p.clone())
                             .collect();
                         let total_favs = valid_favorites.len();
                         let per_page = 5usize;
-                        let total_pages = if total_favs == 0 { 0 } else { total_favs.div_ceil(per_page) };
+                        let total_pages = if total_favs == 0 {
+                            0
+                        } else {
+                            total_favs.div_ceil(per_page)
+                        };
                         let page = menu.favorites_page.min(total_pages.saturating_sub(1));
                         let page_start = page * per_page;
                         let page_end = (page_start + per_page).min(total_favs);
                         let fav_count = page_end - page_start;
-                        let recent_non_fav: Vec<String> = config.recent_games.iter()
-                            .filter(|p| !config.favorite_games.contains(p)).cloned()
+                        let recent_non_fav: Vec<String> = config
+                            .recent_games
+                            .iter()
+                            .filter(|p| !config.favorite_games.contains(p))
+                            .cloned()
                             .collect();
                         let max_recent = 8usize;
                         let recent_count = recent_non_fav.len().min(max_recent);
@@ -2680,7 +3131,12 @@ fn main() {
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
@@ -2690,7 +3146,12 @@ fn main() {
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
@@ -2699,7 +3160,12 @@ fn main() {
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
@@ -2715,23 +3181,45 @@ fn main() {
                             if let Some(path) = game_path {
                                 let added = toggle_favorite(&mut config, &path);
                                 save_config(&config);
-                                favorites_valid = config.favorite_games.iter()
-                                    .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
-                                recents_valid = config.recent_games.iter()
-                                    .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                favorites_valid = config
+                                    .favorite_games
+                                    .iter()
+                                    .map(|p| std::path::Path::new(p.as_str()).exists())
+                                    .collect();
+                                recents_valid = config
+                                    .recent_games
+                                    .iter()
+                                    .map(|p| std::path::Path::new(p.as_str()).exists())
+                                    .collect();
                                 if added {
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 } else {
-                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Back,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     // Adjust selection if item was removed from favorites section
                                     if menu.selected < fav_count && menu.selected > 0 {
                                         menu.selected -= 1;
                                     }
                                     // If page now empty, go back a page
-                                    let new_total = config.favorite_games.iter()
+                                    let new_total = config
+                                        .favorite_games
+                                        .iter()
                                         .filter(|p| std::path::Path::new(p.as_str()).exists())
                                         .count();
-                                    let new_pages = if new_total == 0 { 0 } else { new_total.div_ceil(per_page) };
+                                    let new_pages = if new_total == 0 {
+                                        0
+                                    } else {
+                                        new_total.div_ceil(per_page)
+                                    };
                                     if menu.favorites_page >= new_pages && menu.favorites_page > 0 {
                                         menu.favorites_page -= 1;
                                     }
@@ -2741,26 +3229,56 @@ fn main() {
                         if input.confirm {
                             if menu.selected < fav_count {
                                 let path = valid_favorites[page_start + menu.selected].clone();
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 action = Some(MenuAction::LoadRom(path));
                             } else if menu.selected < fav_count + recent_count {
                                 let path = recent_non_fav[menu.selected - fav_count].clone();
                                 if Path::new(&path).exists() {
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     action = Some(MenuAction::LoadRom(path));
                                 } else {
-                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Error,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
                             } else if menu.selected == browse_idx {
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new(config.rom_directory.as_deref())));
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
+                                menu.submenu = Some(SubMenu::FileBrowser(FileBrowser::new(
+                                    config.rom_directory.as_deref(),
+                                )));
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 menu.transition_timer = 6;
                                 menu.transition_out = false;
                             } else if menu.selected == settings_idx {
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::Settings { selected: 0, value_flash: 0 });
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
+                                menu.submenu = Some(SubMenu::Settings {
+                                    selected: 0,
+                                    value_flash: 0,
+                                });
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 menu.transition_timer = 6;
@@ -2777,7 +3295,9 @@ fn main() {
                                         info.download_url.clone()
                                     };
                                     // Validate URL before opening to prevent command injection
-                                    if url.starts_with("https://github.com/") || url.starts_with("https://api.github.com/") {
+                                    if url.starts_with("https://github.com/")
+                                        || url.starts_with("https://api.github.com/")
+                                    {
                                         #[cfg(target_os = "windows")]
                                         {
                                             let _ = std::process::Command::new("cmd")
@@ -2801,13 +3321,21 @@ fn main() {
                             break;
                         }
                     }
-                    Some(SubMenu::Settings { ref mut selected, ref mut value_flash }) => {
+                    Some(SubMenu::Settings {
+                        ref mut selected,
+                        ref mut value_flash,
+                    }) => {
                         if input.up && *selected > 0 {
                             *selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
@@ -2816,12 +3344,18 @@ fn main() {
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3; // skip 3 frames between beeps
                             }
                         }
                         if input.confirm || input.left || input.right {
-                            let is_slider_adjust = (input.left || input.right) && (*selected == 2 || *selected == 3);
+                            let is_slider_adjust =
+                                (input.left || input.right) && (*selected == 2 || *selected == 3);
                             match *selected {
                                 0 => {
                                     crt_enabled = !crt_enabled;
@@ -2834,10 +3368,9 @@ fn main() {
                                     save_config(&config);
                                 }
                                 2 => {
-                                    if (input.right || input.confirm)
-                                        && glass_intensity < 100 {
-                                            glass_intensity = (glass_intensity + 5).min(100);
-                                        }
+                                    if (input.right || input.confirm) && glass_intensity < 100 {
+                                        glass_intensity = (glass_intensity + 5).min(100);
+                                    }
                                     if input.left {
                                         glass_intensity = glass_intensity.saturating_sub(5);
                                     }
@@ -2848,10 +3381,9 @@ fn main() {
                                     *value_flash = 8;
                                 }
                                 3 => {
-                                    if (input.right || input.confirm)
-                                        && audio_volume < 100 {
-                                            audio_volume = (audio_volume + 5).min(100);
-                                        }
+                                    if (input.right || input.confirm) && audio_volume < 100 {
+                                        audio_volume = (audio_volume + 5).min(100);
+                                    }
                                     if input.left {
                                         audio_volume = audio_volume.saturating_sub(5);
                                     }
@@ -2870,8 +3402,17 @@ fn main() {
                                 }
                                 5 => {
                                     // Open CRT settings
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                    menu.submenu = Some(SubMenu::CrtSettings { selected: 0, tables_dirty: false, value_flash: 0 });
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                    menu.submenu = Some(SubMenu::CrtSettings {
+                                        selected: 0,
+                                        tables_dirty: false,
+                                        value_flash: 0,
+                                    });
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
                                     menu.transition_timer = 6;
@@ -2880,15 +3421,21 @@ fn main() {
                                 }
                                 6 => {
                                     // Open input settings
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
-                                    menu.submenu = Some(SubMenu::InputSettings(InputSettingsState {
-                                        tab: 0,
-                                        selected: 0,
-                                        waiting_for_input: false,
-                                        bindings: config.input_bindings.clone(),
-                                        conflict_message: None,
-                                        conflict_timer: 0,
-                                    }));
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                    menu.submenu =
+                                        Some(SubMenu::InputSettings(InputSettingsState {
+                                            tab: 0,
+                                            selected: 0,
+                                            waiting_for_input: false,
+                                            bindings: config.input_bindings.clone(),
+                                            conflict_message: None,
+                                            conflict_timer: 0,
+                                        }));
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
                                     menu.transition_timer = 6;
@@ -2902,7 +3449,12 @@ fn main() {
                                 }
                                 8 => {
                                     // Open folder setup to change ROM directory
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     menu.submenu = Some(SubMenu::FolderSetup {
                                         browser: FileBrowser::new(config.rom_directory.as_deref()),
                                         from_settings: true,
@@ -2915,10 +3467,24 @@ fn main() {
                                 }
                                 _ => {}
                             }
-                            play_menu_sound(&mut producer, if is_slider_adjust { MenuSound::Adjust } else { MenuSound::Confirm }, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                if is_slider_adjust {
+                                    MenuSound::Adjust
+                                } else {
+                                    MenuSound::Confirm
+                                },
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                         }
                         if input.back {
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                             menu.submenu = None;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
@@ -2926,13 +3492,22 @@ fn main() {
                             menu.transition_out = false;
                         }
                     }
-                    Some(SubMenu::CrtSettings { ref mut selected, ref mut tables_dirty, ref mut value_flash }) => {
+                    Some(SubMenu::CrtSettings {
+                        ref mut selected,
+                        ref mut tables_dirty,
+                        ref mut value_flash,
+                    }) => {
                         if input.up && *selected > 0 {
                             *selected -= 1;
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
@@ -2941,7 +3516,12 @@ fn main() {
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
@@ -2949,65 +3529,136 @@ fn main() {
                             let delta: i16 = if input.right { 5 } else { -5 };
                             match *selected {
                                 0 => {
-                                    config.crt_config.scanline_intensity = (config.crt_config.scanline_intensity as i16 + delta).clamp(0, 100) as u8;
-                                    apply_scanline_intensity_change(&mut sv_table, &vignette_table, config.crt_config.scanline_intensity);
+                                    config.crt_config.scanline_intensity =
+                                        (config.crt_config.scanline_intensity as i16 + delta)
+                                            .clamp(0, 100)
+                                            as u8;
+                                    apply_scanline_intensity_change(
+                                        &mut sv_table,
+                                        &vignette_table,
+                                        config.crt_config.scanline_intensity,
+                                    );
                                     *tables_dirty = true;
                                 }
                                 1 => {
-                                    config.crt_config.phosphor_warmth = (config.crt_config.phosphor_warmth as i16 + delta).clamp(0, 100) as u8;
+                                    config.crt_config.phosphor_warmth =
+                                        (config.crt_config.phosphor_warmth as i16 + delta)
+                                            .clamp(0, 100)
+                                            as u8;
                                     *tables_dirty = true;
                                 }
                                 2 => {
-                                    config.crt_config.vignette_strength = (config.crt_config.vignette_strength as i16 + delta).clamp(0, 100) as u8;
-                                    apply_vignette_strength_change(&mut sv_table, &mut vignette_table, config.crt_config.vignette_strength, config.crt_config.scanline_intensity);
+                                    config.crt_config.vignette_strength =
+                                        (config.crt_config.vignette_strength as i16 + delta)
+                                            .clamp(0, 100)
+                                            as u8;
+                                    apply_vignette_strength_change(
+                                        &mut sv_table,
+                                        &mut vignette_table,
+                                        config.crt_config.vignette_strength,
+                                        config.crt_config.scanline_intensity,
+                                    );
                                     *tables_dirty = true;
                                 }
                                 3 => {
-                                    config.crt_config.blur_amount = (config.crt_config.blur_amount as i16 + delta).clamp(0, 100) as u8;
+                                    config.crt_config.blur_amount = (config.crt_config.blur_amount
+                                        as i16
+                                        + delta)
+                                        .clamp(0, 100)
+                                        as u8;
                                     *tables_dirty = true;
                                 }
                                 4 => {
-                                    config.crt_config.curvature_strength = (config.crt_config.curvature_strength as i16 + delta).clamp(0, 100) as u8;
+                                    config.crt_config.curvature_strength =
+                                        (config.crt_config.curvature_strength as i16 + delta)
+                                            .clamp(0, 100)
+                                            as u8;
                                     *tables_dirty = true;
                                 }
                                 5 => {
                                     // Glass intensity (existing field)
-                                    glass_intensity = (glass_intensity as i16 + delta).clamp(0, 100) as u8;
+                                    glass_intensity =
+                                        (glass_intensity as i16 + delta).clamp(0, 100) as u8;
                                     config.glass_intensity = glass_intensity;
                                     ca_table = build_ca_table(SCREEN_W, SCREEN_H, glass_intensity);
                                     ghost_alpha_table = build_ghost_alpha_table(glass_intensity);
                                 }
                                 6 => {
                                     // Cycle mask mode
-                                    config.crt_config.mask_mode = match config.crt_config.mask_mode {
-                                        CrtMaskMode::Off => if input.right { CrtMaskMode::ShadowMask } else { CrtMaskMode::SlotMask },
-                                        CrtMaskMode::ShadowMask => if input.right { CrtMaskMode::ApertureGrille } else { CrtMaskMode::Off },
-                                        CrtMaskMode::ApertureGrille => if input.right { CrtMaskMode::SlotMask } else { CrtMaskMode::ShadowMask },
-                                        CrtMaskMode::SlotMask => if input.right { CrtMaskMode::Off } else { CrtMaskMode::ApertureGrille },
+                                    config.crt_config.mask_mode = match config.crt_config.mask_mode
+                                    {
+                                        CrtMaskMode::Off => {
+                                            if input.right {
+                                                CrtMaskMode::ShadowMask
+                                            } else {
+                                                CrtMaskMode::SlotMask
+                                            }
+                                        }
+                                        CrtMaskMode::ShadowMask => {
+                                            if input.right {
+                                                CrtMaskMode::ApertureGrille
+                                            } else {
+                                                CrtMaskMode::Off
+                                            }
+                                        }
+                                        CrtMaskMode::ApertureGrille => {
+                                            if input.right {
+                                                CrtMaskMode::SlotMask
+                                            } else {
+                                                CrtMaskMode::ShadowMask
+                                            }
+                                        }
+                                        CrtMaskMode::SlotMask => {
+                                            if input.right {
+                                                CrtMaskMode::Off
+                                            } else {
+                                                CrtMaskMode::ApertureGrille
+                                            }
+                                        }
                                     };
-                                    mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
+                                    mask_table = build_mask_table(
+                                        &config.crt_config.mask_mode,
+                                        config.crt_config.mask_intensity,
+                                    );
                                     *tables_dirty = true;
                                 }
                                 7 => {
-                                    config.crt_config.mask_intensity = (config.crt_config.mask_intensity as i16 + delta).clamp(0, 100) as u8;
-                                    mask_table = build_mask_table(&config.crt_config.mask_mode, config.crt_config.mask_intensity);
+                                    config.crt_config.mask_intensity =
+                                        (config.crt_config.mask_intensity as i16 + delta)
+                                            .clamp(0, 100)
+                                            as u8;
+                                    mask_table = build_mask_table(
+                                        &config.crt_config.mask_mode,
+                                        config.crt_config.mask_intensity,
+                                    );
                                     *tables_dirty = true;
                                 }
                                 8 => {
-                                    config.crt_config.brightness = (config.crt_config.brightness as i16 + delta).clamp(-50, 50) as i8;
+                                    config.crt_config.brightness = (config.crt_config.brightness
+                                        as i16
+                                        + delta)
+                                        .clamp(-50, 50)
+                                        as i8;
                                     osd_type = OsdType::Brightness;
                                     osd_value = config.crt_config.brightness as i32;
                                     osd_timer = 120;
                                 }
                                 9 => {
-                                    config.crt_config.contrast = (config.crt_config.contrast as i16 + delta).clamp(-50, 50) as i8;
+                                    config.crt_config.contrast =
+                                        (config.crt_config.contrast as i16 + delta).clamp(-50, 50)
+                                            as i8;
                                     osd_type = OsdType::Contrast;
                                     osd_value = config.crt_config.contrast as i32;
                                     osd_timer = 120;
                                 }
                                 _ => {}
                             }
-                            play_menu_sound(&mut producer, MenuSound::Adjust, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Adjust,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                             save_config(&config);
                             *value_flash = 8;
                         }
@@ -3017,12 +3668,27 @@ fn main() {
                         }
                         if input.back || input_back_crt {
                             if *tables_dirty {
-                                vignette_table = build_vignette_table_with_strength(config.crt_config.vignette_strength);
-                                distortion_table = build_distortion_table_with_curvature(config.crt_config.curvature_strength);
-                                sv_table = build_sv_table(&vignette_table, config.crt_config.scanline_intensity);
+                                vignette_table = build_vignette_table_with_strength(
+                                    config.crt_config.vignette_strength,
+                                );
+                                distortion_table = build_distortion_table_with_curvature(
+                                    config.crt_config.curvature_strength,
+                                );
+                                sv_table = build_sv_table(
+                                    &vignette_table,
+                                    config.crt_config.scanline_intensity,
+                                );
                             }
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
-                            menu.submenu = Some(SubMenu::Settings { selected: 5, value_flash: 0 });
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            menu.submenu = Some(SubMenu::Settings {
+                                selected: 5,
+                                value_flash: 0,
+                            });
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             menu.transition_timer = 6;
@@ -3044,7 +3710,12 @@ fn main() {
                                 browser.selected -= 1;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 if browser.selected < browser.scroll_offset {
                                     browser.scroll_offset = browser.selected;
                                 }
@@ -3054,7 +3725,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3; // skip 3 frames between beeps
                                 }
                                 if browser.selected >= browser.scroll_offset + 20 {
@@ -3066,7 +3742,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3; // skip 3 frames between beeps
                                 }
                                 if browser.selected < browser.scroll_offset {
@@ -3078,7 +3759,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3; // skip 3 frames between beeps
                                 }
                                 if browser.selected >= browser.scroll_offset + 20 {
@@ -3087,14 +3773,25 @@ fn main() {
                             }
                             if input.confirm {
                                 let entry_is_dir = browser.entries[browser.selected].is_dir;
-                                let entry_path = browser.entries[browser.selected].full_path.clone();
+                                let entry_path =
+                                    browser.entries[browser.selected].full_path.clone();
                                 if entry_is_dir {
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     browser.navigate_to(&entry_path);
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
                                 } else {
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     action = Some(MenuAction::LoadRom(
                                         entry_path.to_string_lossy().to_string(),
                                     ));
@@ -3103,24 +3800,46 @@ fn main() {
                             if input.favorite {
                                 if let Some(entry) = browser.entries.get(browser.selected) {
                                     if !entry.is_dir {
-                                        let path_str = entry.full_path.to_string_lossy().to_string();
+                                        let path_str =
+                                            entry.full_path.to_string_lossy().to_string();
                                         let added = toggle_favorite(&mut config, &path_str);
                                         save_config(&config);
-                                        favorites_valid = config.favorite_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
-                                        recents_valid = config.recent_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        favorites_valid = config
+                                            .favorite_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
+                                        recents_valid = config
+                                            .recent_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
                                         if added {
-                                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            play_menu_sound(
+                                                &mut producer,
+                                                MenuSound::Confirm,
+                                                actual_sample_rate,
+                                                audio_volume as f32 / 100.0,
+                                            );
                                         } else {
-                                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            play_menu_sound(
+                                                &mut producer,
+                                                MenuSound::Back,
+                                                actual_sample_rate,
+                                                audio_volume as f32 / 100.0,
+                                            );
                                         }
                                     }
                                 }
                             }
                         }
                         if input.back || input.backspace {
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                             let parent = browser.current_dir.parent().map(|p| p.to_path_buf());
                             if let Some(parent) = parent {
                                 if !parent.as_os_str().is_empty() {
@@ -3155,38 +3874,62 @@ fn main() {
                         if state.waiting_for_input {
                             // In key capture mode - handle raw input differently
                             let mut captured = false;
-                            
+
                             if state.tab < 2 {
                                 // Keyboard capture
                                 let keys = window.get_keys_pressed(KeyRepeat::No);
                                 if let Some(&key) = keys.first() {
                                     if key != Key::Escape {
                                         let key_string = key_to_string(key);
-                                        
+
                                         // Check for conflicts within the same player
                                         let binding_refs = if state.tab == 0 {
-                                            [&state.bindings.keyboard_p1.up, &state.bindings.keyboard_p1.down, &state.bindings.keyboard_p1.left, &state.bindings.keyboard_p1.right,
-                                             &state.bindings.keyboard_p1.a, &state.bindings.keyboard_p1.b, &state.bindings.keyboard_p1.start, &state.bindings.keyboard_p1.select,
-                                             &state.bindings.keyboard_p1.turbo_a, &state.bindings.keyboard_p1.turbo_b]
+                                            [
+                                                &state.bindings.keyboard_p1.up,
+                                                &state.bindings.keyboard_p1.down,
+                                                &state.bindings.keyboard_p1.left,
+                                                &state.bindings.keyboard_p1.right,
+                                                &state.bindings.keyboard_p1.a,
+                                                &state.bindings.keyboard_p1.b,
+                                                &state.bindings.keyboard_p1.start,
+                                                &state.bindings.keyboard_p1.select,
+                                                &state.bindings.keyboard_p1.turbo_a,
+                                                &state.bindings.keyboard_p1.turbo_b,
+                                            ]
                                         } else {
-                                            [&state.bindings.keyboard_p2.up, &state.bindings.keyboard_p2.down, &state.bindings.keyboard_p2.left, &state.bindings.keyboard_p2.right,
-                                             &state.bindings.keyboard_p2.a, &state.bindings.keyboard_p2.b, &state.bindings.keyboard_p2.start, &state.bindings.keyboard_p2.select,
-                                             &state.bindings.keyboard_p2.turbo_a, &state.bindings.keyboard_p2.turbo_b]
+                                            [
+                                                &state.bindings.keyboard_p2.up,
+                                                &state.bindings.keyboard_p2.down,
+                                                &state.bindings.keyboard_p2.left,
+                                                &state.bindings.keyboard_p2.right,
+                                                &state.bindings.keyboard_p2.a,
+                                                &state.bindings.keyboard_p2.b,
+                                                &state.bindings.keyboard_p2.start,
+                                                &state.bindings.keyboard_p2.select,
+                                                &state.bindings.keyboard_p2.turbo_a,
+                                                &state.bindings.keyboard_p2.turbo_b,
+                                            ]
                                         };
-                                        
-                                        let binding_names = ["UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START", "SELECT", "TURBO A", "TURBO B"];
+
+                                        let binding_names = [
+                                            "UP", "DOWN", "LEFT", "RIGHT", "A", "B", "START",
+                                            "SELECT", "TURBO A", "TURBO B",
+                                        ];
                                         let old_value = binding_refs[state.selected].clone();
                                         let mut conflict_idx: Option<usize> = None;
-                                        
+
                                         for (i, &existing_key) in binding_refs.iter().enumerate() {
                                             if i != state.selected && existing_key == &key_string {
-                                                state.conflict_message = Some(format!("Swapped with {}", binding_names[i]));
+                                                state.conflict_message = Some(format!(
+                                                    "Swapped with {}",
+                                                    binding_names[i]
+                                                ));
                                                 state.conflict_timer = 90;
                                                 conflict_idx = Some(i);
                                                 break;
                                             }
                                         }
-                                        
+
                                         // Apply the binding
                                         match state.tab {
                                             0 => match state.selected {
@@ -3198,8 +3941,12 @@ fn main() {
                                                 5 => state.bindings.keyboard_p1.b = key_string,
                                                 6 => state.bindings.keyboard_p1.start = key_string,
                                                 7 => state.bindings.keyboard_p1.select = key_string,
-                                                8 => state.bindings.keyboard_p1.turbo_a = key_string,
-                                                9 => state.bindings.keyboard_p1.turbo_b = key_string,
+                                                8 => {
+                                                    state.bindings.keyboard_p1.turbo_a = key_string
+                                                }
+                                                9 => {
+                                                    state.bindings.keyboard_p1.turbo_b = key_string
+                                                }
                                                 _ => {}
                                             },
                                             1 => match state.selected {
@@ -3211,46 +3958,84 @@ fn main() {
                                                 5 => state.bindings.keyboard_p2.b = key_string,
                                                 6 => state.bindings.keyboard_p2.start = key_string,
                                                 7 => state.bindings.keyboard_p2.select = key_string,
-                                                8 => state.bindings.keyboard_p2.turbo_a = key_string,
-                                                9 => state.bindings.keyboard_p2.turbo_b = key_string,
+                                                8 => {
+                                                    state.bindings.keyboard_p2.turbo_a = key_string
+                                                }
+                                                9 => {
+                                                    state.bindings.keyboard_p2.turbo_b = key_string
+                                                }
                                                 _ => {}
                                             },
                                             _ => {}
                                         }
-                                        
+
                                         // Swap: set conflicting binding to the old value
                                         if let Some(ci) = conflict_idx {
                                             match state.tab {
                                                 0 => match ci {
                                                     0 => state.bindings.keyboard_p1.up = old_value,
-                                                    1 => state.bindings.keyboard_p1.down = old_value,
-                                                    2 => state.bindings.keyboard_p1.left = old_value,
-                                                    3 => state.bindings.keyboard_p1.right = old_value,
+                                                    1 => {
+                                                        state.bindings.keyboard_p1.down = old_value
+                                                    }
+                                                    2 => {
+                                                        state.bindings.keyboard_p1.left = old_value
+                                                    }
+                                                    3 => {
+                                                        state.bindings.keyboard_p1.right = old_value
+                                                    }
                                                     4 => state.bindings.keyboard_p1.a = old_value,
                                                     5 => state.bindings.keyboard_p1.b = old_value,
-                                                    6 => state.bindings.keyboard_p1.start = old_value,
-                                                    7 => state.bindings.keyboard_p1.select = old_value,
-                                                    8 => state.bindings.keyboard_p1.turbo_a = old_value,
-                                                    9 => state.bindings.keyboard_p1.turbo_b = old_value,
+                                                    6 => {
+                                                        state.bindings.keyboard_p1.start = old_value
+                                                    }
+                                                    7 => {
+                                                        state.bindings.keyboard_p1.select =
+                                                            old_value
+                                                    }
+                                                    8 => {
+                                                        state.bindings.keyboard_p1.turbo_a =
+                                                            old_value
+                                                    }
+                                                    9 => {
+                                                        state.bindings.keyboard_p1.turbo_b =
+                                                            old_value
+                                                    }
                                                     _ => {}
                                                 },
                                                 1 => match ci {
                                                     0 => state.bindings.keyboard_p2.up = old_value,
-                                                    1 => state.bindings.keyboard_p2.down = old_value,
-                                                    2 => state.bindings.keyboard_p2.left = old_value,
-                                                    3 => state.bindings.keyboard_p2.right = old_value,
+                                                    1 => {
+                                                        state.bindings.keyboard_p2.down = old_value
+                                                    }
+                                                    2 => {
+                                                        state.bindings.keyboard_p2.left = old_value
+                                                    }
+                                                    3 => {
+                                                        state.bindings.keyboard_p2.right = old_value
+                                                    }
                                                     4 => state.bindings.keyboard_p2.a = old_value,
                                                     5 => state.bindings.keyboard_p2.b = old_value,
-                                                    6 => state.bindings.keyboard_p2.start = old_value,
-                                                    7 => state.bindings.keyboard_p2.select = old_value,
-                                                    8 => state.bindings.keyboard_p2.turbo_a = old_value,
-                                                    9 => state.bindings.keyboard_p2.turbo_b = old_value,
+                                                    6 => {
+                                                        state.bindings.keyboard_p2.start = old_value
+                                                    }
+                                                    7 => {
+                                                        state.bindings.keyboard_p2.select =
+                                                            old_value
+                                                    }
+                                                    8 => {
+                                                        state.bindings.keyboard_p2.turbo_a =
+                                                            old_value
+                                                    }
+                                                    9 => {
+                                                        state.bindings.keyboard_p2.turbo_b =
+                                                            old_value
+                                                    }
                                                     _ => {}
                                                 },
                                                 _ => {}
                                             }
                                         }
-                                        
+
                                         captured = true;
                                     }
                                 }
@@ -3258,108 +4043,211 @@ fn main() {
                                 // Controller capture
                                 if let Some(ref mut g) = gilrs {
                                     while let Some(event) = g.next_event() {
-                                        if let gilrs::EventType::ButtonPressed(btn, _) = event.event {
+                                        if let gilrs::EventType::ButtonPressed(btn, _) = event.event
+                                        {
                                             let button_string = gilrs_button_to_string(btn);
-                                            
+
                                             // Check for conflicts within the same controller
                                             let binding_refs = if state.tab == 2 {
-                                                [&state.bindings.controller_p1.a, &state.bindings.controller_p1.b,
-                                                 &state.bindings.controller_p1.turbo_a, &state.bindings.controller_p1.turbo_b,
-                                                 &state.bindings.controller_p1.start, &state.bindings.controller_p1.select]
+                                                [
+                                                    &state.bindings.controller_p1.a,
+                                                    &state.bindings.controller_p1.b,
+                                                    &state.bindings.controller_p1.turbo_a,
+                                                    &state.bindings.controller_p1.turbo_b,
+                                                    &state.bindings.controller_p1.start,
+                                                    &state.bindings.controller_p1.select,
+                                                ]
                                             } else {
-                                                [&state.bindings.controller_p2.a, &state.bindings.controller_p2.b,
-                                                 &state.bindings.controller_p2.turbo_a, &state.bindings.controller_p2.turbo_b,
-                                                 &state.bindings.controller_p2.start, &state.bindings.controller_p2.select]
+                                                [
+                                                    &state.bindings.controller_p2.a,
+                                                    &state.bindings.controller_p2.b,
+                                                    &state.bindings.controller_p2.turbo_a,
+                                                    &state.bindings.controller_p2.turbo_b,
+                                                    &state.bindings.controller_p2.start,
+                                                    &state.bindings.controller_p2.select,
+                                                ]
                                             };
-                                            
-                                            let binding_names = ["A", "B", "TURBO A", "TURBO B", "START", "SELECT"];
+
+                                            let binding_names =
+                                                ["A", "B", "TURBO A", "TURBO B", "START", "SELECT"];
                                             let old_value = binding_refs[state.selected].clone();
                                             let mut conflict_idx: Option<usize> = None;
-                                            
+
                                             for (i, &existing) in binding_refs.iter().enumerate() {
-                                                if i != state.selected && existing == &button_string {
-                                                    state.conflict_message = Some(format!("Swapped with {}", binding_names[i]));
+                                                if i != state.selected && existing == &button_string
+                                                {
+                                                    state.conflict_message = Some(format!(
+                                                        "Swapped with {}",
+                                                        binding_names[i]
+                                                    ));
                                                     state.conflict_timer = 90;
                                                     conflict_idx = Some(i);
                                                     break;
                                                 }
                                             }
-                                            
+
                                             // Apply the binding
                                             match state.tab {
                                                 2 => match state.selected {
-                                                    0 => state.bindings.controller_p1.a = button_string,
-                                                    1 => state.bindings.controller_p1.b = button_string,
-                                                    2 => state.bindings.controller_p1.turbo_a = button_string,
-                                                    3 => state.bindings.controller_p1.turbo_b = button_string,
-                                                    4 => state.bindings.controller_p1.start = button_string,
-                                                    5 => state.bindings.controller_p1.select = button_string,
+                                                    0 => {
+                                                        state.bindings.controller_p1.a =
+                                                            button_string
+                                                    }
+                                                    1 => {
+                                                        state.bindings.controller_p1.b =
+                                                            button_string
+                                                    }
+                                                    2 => {
+                                                        state.bindings.controller_p1.turbo_a =
+                                                            button_string
+                                                    }
+                                                    3 => {
+                                                        state.bindings.controller_p1.turbo_b =
+                                                            button_string
+                                                    }
+                                                    4 => {
+                                                        state.bindings.controller_p1.start =
+                                                            button_string
+                                                    }
+                                                    5 => {
+                                                        state.bindings.controller_p1.select =
+                                                            button_string
+                                                    }
                                                     _ => {}
                                                 },
                                                 3 => match state.selected {
-                                                    0 => state.bindings.controller_p2.a = button_string,
-                                                    1 => state.bindings.controller_p2.b = button_string,
-                                                    2 => state.bindings.controller_p2.turbo_a = button_string,
-                                                    3 => state.bindings.controller_p2.turbo_b = button_string,
-                                                    4 => state.bindings.controller_p2.start = button_string,
-                                                    5 => state.bindings.controller_p2.select = button_string,
+                                                    0 => {
+                                                        state.bindings.controller_p2.a =
+                                                            button_string
+                                                    }
+                                                    1 => {
+                                                        state.bindings.controller_p2.b =
+                                                            button_string
+                                                    }
+                                                    2 => {
+                                                        state.bindings.controller_p2.turbo_a =
+                                                            button_string
+                                                    }
+                                                    3 => {
+                                                        state.bindings.controller_p2.turbo_b =
+                                                            button_string
+                                                    }
+                                                    4 => {
+                                                        state.bindings.controller_p2.start =
+                                                            button_string
+                                                    }
+                                                    5 => {
+                                                        state.bindings.controller_p2.select =
+                                                            button_string
+                                                    }
                                                     _ => {}
                                                 },
                                                 _ => {}
                                             }
-                                            
+
                                             // Swap: set conflicting binding to the old value
                                             if let Some(ci) = conflict_idx {
                                                 match state.tab {
                                                     2 => match ci {
-                                                        0 => state.bindings.controller_p1.a = old_value,
-                                                        1 => state.bindings.controller_p1.b = old_value,
-                                                        2 => state.bindings.controller_p1.turbo_a = old_value,
-                                                        3 => state.bindings.controller_p1.turbo_b = old_value,
-                                                        4 => state.bindings.controller_p1.start = old_value,
-                                                        5 => state.bindings.controller_p1.select = old_value,
+                                                        0 => {
+                                                            state.bindings.controller_p1.a =
+                                                                old_value
+                                                        }
+                                                        1 => {
+                                                            state.bindings.controller_p1.b =
+                                                                old_value
+                                                        }
+                                                        2 => {
+                                                            state.bindings.controller_p1.turbo_a =
+                                                                old_value
+                                                        }
+                                                        3 => {
+                                                            state.bindings.controller_p1.turbo_b =
+                                                                old_value
+                                                        }
+                                                        4 => {
+                                                            state.bindings.controller_p1.start =
+                                                                old_value
+                                                        }
+                                                        5 => {
+                                                            state.bindings.controller_p1.select =
+                                                                old_value
+                                                        }
                                                         _ => {}
                                                     },
                                                     3 => match ci {
-                                                        0 => state.bindings.controller_p2.a = old_value,
-                                                        1 => state.bindings.controller_p2.b = old_value,
-                                                        2 => state.bindings.controller_p2.turbo_a = old_value,
-                                                        3 => state.bindings.controller_p2.turbo_b = old_value,
-                                                        4 => state.bindings.controller_p2.start = old_value,
-                                                        5 => state.bindings.controller_p2.select = old_value,
+                                                        0 => {
+                                                            state.bindings.controller_p2.a =
+                                                                old_value
+                                                        }
+                                                        1 => {
+                                                            state.bindings.controller_p2.b =
+                                                                old_value
+                                                        }
+                                                        2 => {
+                                                            state.bindings.controller_p2.turbo_a =
+                                                                old_value
+                                                        }
+                                                        3 => {
+                                                            state.bindings.controller_p2.turbo_b =
+                                                                old_value
+                                                        }
+                                                        4 => {
+                                                            state.bindings.controller_p2.start =
+                                                                old_value
+                                                        }
+                                                        5 => {
+                                                            state.bindings.controller_p2.select =
+                                                                old_value
+                                                        }
                                                         _ => {}
                                                     },
                                                     _ => {}
                                                 }
                                             }
-                                            
+
                                             captured = true;
                                             break;
                                         }
                                     }
                                 }
                             }
-                            
+
                             if captured {
                                 state.waiting_for_input = false;
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
-                            
+
                             if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
                                 // Cancel capture
                                 state.waiting_for_input = false;
-                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Back,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                         } else {
                             // Normal navigation mode
                             let max_items = if state.tab < 2 { 9 } else { 6 }; // 10 keyboard items (0-9), 7 controller items (0-6, including deadzone)
-                            
+
                             if input.up && state.selected > 0 {
                                 state.selected -= 1;
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
@@ -3368,11 +4256,16 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
-                            
+
                             // Tab switching (skip when deadzone row is active on controller tabs)
                             let deadzone_active = state.tab >= 2 && state.selected == 6;
                             if input.left && state.tab > 0 && !deadzone_active {
@@ -3381,7 +4274,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
@@ -3391,11 +4289,16 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
-                            
+
                             // Handle Tab key for switching tabs
                             if window.is_key_pressed(Key::Tab, KeyRepeat::No) {
                                 state.tab = (state.tab + 1) % 4;
@@ -3403,24 +4306,39 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
-                            
+
                             if input.confirm {
                                 // Start rebinding process
                                 if state.tab >= 2 && state.selected == 6 {
                                     // Special case for deadzone - adjust with left/right instead of rebinding
                                 } else {
                                     state.waiting_for_input = true;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
                             }
-                            
+
                             // Handle deadzone adjustment for controller tabs
-                            if state.tab >= 2 && state.selected == 6 && (input.left || input.right) {
-                                let deadzone = if state.tab == 2 { &mut state.bindings.controller_p1.deadzone } else { &mut state.bindings.controller_p2.deadzone };
+                            if state.tab >= 2 && state.selected == 6 && (input.left || input.right)
+                            {
+                                let deadzone = if state.tab == 2 {
+                                    &mut state.bindings.controller_p1.deadzone
+                                } else {
+                                    &mut state.bindings.controller_p2.deadzone
+                                };
                                 if input.left {
                                     *deadzone = (*deadzone - 0.05).max(0.10);
                                 }
@@ -3428,17 +4346,30 @@ fn main() {
                                     *deadzone = (*deadzone + 0.05).min(0.80);
                                 }
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
-                            
+
                             if input.back {
                                 // Save and go back
                                 config.input_bindings = state.bindings.clone();
                                 save_config(&config);
-                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
-                                menu.submenu = Some(SubMenu::Settings { selected: 4, value_flash: 0 }); // Return to settings, INPUT SETTINGS selected
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Back,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
+                                menu.submenu = Some(SubMenu::Settings {
+                                    selected: 4,
+                                    value_flash: 0,
+                                }); // Return to settings, INPUT SETTINGS selected
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 menu.transition_timer = 6;
@@ -3446,7 +4377,10 @@ fn main() {
                             }
                         }
                     }
-                    Some(SubMenu::FolderSetup { ref mut browser, from_settings }) => {
+                    Some(SubMenu::FolderSetup {
+                        ref mut browser,
+                        from_settings,
+                    }) => {
                         // Update error timer
                         if browser.error_timer > 0 {
                             browser.error_timer -= 1;
@@ -3462,7 +4396,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                                 if browser.selected < browser.scroll_offset {
@@ -3474,7 +4413,12 @@ fn main() {
                                 menu.cursor_timer = 0;
                                 menu.cursor_visible = true;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                                 if browser.selected >= browser.scroll_offset + 14 {
@@ -3483,9 +4427,15 @@ fn main() {
                             }
                             if input.confirm {
                                 let entry_is_dir = browser.entries[browser.selected].is_dir;
-                                let entry_path = browser.entries[browser.selected].full_path.clone();
+                                let entry_path =
+                                    browser.entries[browser.selected].full_path.clone();
                                 if entry_is_dir {
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     browser.navigate_to(&entry_path);
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
@@ -3505,7 +4455,12 @@ fn main() {
                             let parent = browser.current_dir.parent().map(|p| p.to_path_buf());
                             if let Some(parent) = parent {
                                 if !parent.as_os_str().is_empty() {
-                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Back,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     browser.navigate_to(&parent);
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
@@ -3522,9 +4477,17 @@ fn main() {
                         if folder_action == 1 {
                             config.rom_directory = Some(selected_dir);
                             save_config(&config);
-                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Confirm,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                             if fs_from_settings {
-                                menu.submenu = Some(SubMenu::Settings { selected: 8, value_flash: 0 });
+                                menu.submenu = Some(SubMenu::Settings {
+                                    selected: 8,
+                                    value_flash: 0,
+                                });
                             } else {
                                 menu.submenu = None;
                             }
@@ -3533,8 +4496,16 @@ fn main() {
                             menu.transition_timer = 6;
                             menu.transition_out = false;
                         } else if folder_action == 2 {
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
-                            menu.submenu = Some(SubMenu::Settings { selected: 8, value_flash: 0 });
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            menu.submenu = Some(SubMenu::Settings {
+                                selected: 8,
+                                value_flash: 0,
+                            });
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             menu.transition_timer = 6;
@@ -3549,18 +4520,55 @@ fn main() {
                         match fs::read(&path_str) {
                             Ok(rom_data) => {
                                 // Show loading indicator
-                                draw_text_centered_8x8(&mut menu_framebuffer, "LOADING...", 15, 0xF8D878);
-                                let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                                draw_text_centered_8x8(
+                                    &mut menu_framebuffer,
+                                    "LOADING...",
+                                    15,
+                                    0xF8D878,
+                                );
+                                let dt = if barrel_distortion {
+                                    &distortion_table
+                                } else {
+                                    &flat_distortion_table
+                                };
                                 if crt_enabled {
-                                    crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                                    crt_filter(
+                                        &menu_framebuffer,
+                                        &mut crt_buffer,
+                                        &sv_table,
+                                        dt,
+                                        &config.crt_config,
+                                        &mask_table,
+                                        config.crt_config.brightness as i32,
+                                        config.crt_config.contrast as i32,
+                                    );
                                     // Phosphor bloom — bright pixels glow into neighbors
-                                    apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                                    apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                                    apply_phosphor_bloom(
+                                        &mut crt_buffer,
+                                        SCREEN_W,
+                                        SCREEN_H,
+                                        config.crt_config.phosphor_warmth as u32,
+                                    );
+                                    apply_scanline_glow(
+                                        &mut crt_buffer,
+                                        SCREEN_W,
+                                        SCREEN_H,
+                                        config.crt_config.phosphor_warmth as u32,
+                                    );
                                 } else {
                                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                                 }
-                                composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
-                                let _ = window.update_with_buffer(&composite_buffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+                                composite_screen_fast(
+                                    &mut composite_buffer,
+                                    &crt_buffer,
+                                    &screen_curve_table,
+                                    WINDOW_WIDTH,
+                                );
+                                let _ = window.update_with_buffer(
+                                    &composite_buffer,
+                                    WINDOW_WIDTH,
+                                    WINDOW_HEIGHT,
+                                );
 
                                 match Cartridge::new_with_romdb(&rom_data, Some(&romdb)) {
                                     Ok(cart) => {
@@ -3574,10 +4582,16 @@ fn main() {
                                         cpu.reset(&mut bus);
                                         add_recent_game(&mut config, &path_str);
                                         save_config(&config);
-                                        favorites_valid = config.favorite_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
-                                        recents_valid = config.recent_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        favorites_valid = config
+                                            .favorite_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
+                                        recents_valid = config
+                                            .recent_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
                                         auto_load_sram(&mut bus, &config);
                                         rewind_buffer.clear();
                                         game_bus = Some(bus);
@@ -3585,7 +4599,8 @@ fn main() {
                                         next_state = Some(EmulatorState::Game);
                                         println!("Loaded: {}", path_str);
                                         let game_name = rom_title.unwrap_or_else(|| {
-                                            Path::new(&path_str).file_stem()
+                                            Path::new(&path_str)
+                                                .file_stem()
                                                 .map(|s| s.to_string_lossy().to_string())
                                                 .unwrap_or_else(|| "Unknown".to_string())
                                         });
@@ -3593,7 +4608,8 @@ fn main() {
                                         window.set_title(&window_title);
                                         // Initialize achievements & recording for this ROM
                                         let rom_md5 = md5_hex(&rom_data);
-                                        achievement_engine = AchievementEngine::load_for_rom(&rom_md5);
+                                        achievement_engine =
+                                            AchievementEngine::load_for_rom(&rom_md5);
                                         let rom_sha = sha256(&rom_data);
                                         recorder = InputRecording::new(rom_sha);
                                         current_rom_name = game_name;
@@ -3606,7 +4622,9 @@ fn main() {
                                     }
                                     Err(e) => {
                                         let msg = e.to_string();
-                                        if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
+                                        if let Some(SubMenu::FileBrowser(ref mut browser)) =
+                                            menu.submenu
+                                        {
                                             browser.error_message = Some(msg.clone());
                                             browser.error_timer = 180;
                                         }
@@ -3615,7 +4633,12 @@ fn main() {
                                 }
                             }
                             Err(e) => {
-                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Error,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 let msg = format!("READ ERROR: {}", e);
                                 if let Some(SubMenu::FileBrowser(ref mut browser)) = menu.submenu {
                                     browser.error_message = Some(msg.clone());
@@ -3645,32 +4668,81 @@ fn main() {
                 // Render menu to 256x240 framebuffer
                 match menu.submenu {
                     None => {
-                        render_home_screen(&mut menu_framebuffer, menu, &config, menu.cursor_visible, &favorites_valid, &recents_valid);
+                        render_home_screen(
+                            &mut menu_framebuffer,
+                            menu,
+                            &config,
+                            menu.cursor_visible,
+                            &favorites_valid,
+                            &recents_valid,
+                        );
                         // Show update banner if available and not dismissed
                         if !update_dismissed {
                             if let Some(info) = updater.get_update() {
                                 let banner = format!("v{}", info.version);
                                 let banner_x = 32 - banner.len() - 1;
-                                draw_text_8x8(&mut menu_framebuffer, &banner, banner_x, 29, MENU_DARK_GRAY);
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    &banner,
+                                    banner_x,
+                                    29,
+                                    MENU_DARK_GRAY,
+                                );
                             }
                         }
                     }
-                    Some(SubMenu::Settings { selected, ref mut value_flash }) => {
-                        render_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, audio_volume, glass_intensity, *value_flash);
-                        if *value_flash > 0 { *value_flash -= 1; }
+                    Some(SubMenu::Settings {
+                        selected,
+                        ref mut value_flash,
+                    }) => {
+                        render_settings(
+                            &mut menu_framebuffer,
+                            &config,
+                            selected,
+                            menu.cursor_visible,
+                            audio_volume,
+                            glass_intensity,
+                            *value_flash,
+                        );
+                        if *value_flash > 0 {
+                            *value_flash -= 1;
+                        }
                     }
                     Some(SubMenu::FileBrowser(ref browser)) => {
-                        render_file_browser(&mut menu_framebuffer, browser, menu.cursor_visible, &config, menu.marquee_frame);
+                        render_file_browser(
+                            &mut menu_framebuffer,
+                            browser,
+                            menu.cursor_visible,
+                            &config,
+                            menu.marquee_frame,
+                        );
                     }
                     Some(SubMenu::InputSettings(ref state)) => {
                         render_input_settings(&mut menu_framebuffer, state, menu.cursor_visible);
                     }
-                    Some(SubMenu::CrtSettings { selected, ref mut value_flash, .. }) => {
-                        render_crt_settings(&mut menu_framebuffer, &config, selected, menu.cursor_visible, *value_flash);
-                        if *value_flash > 0 { *value_flash -= 1; }
+                    Some(SubMenu::CrtSettings {
+                        selected,
+                        ref mut value_flash,
+                        ..
+                    }) => {
+                        render_crt_settings(
+                            &mut menu_framebuffer,
+                            &config,
+                            selected,
+                            menu.cursor_visible,
+                            *value_flash,
+                        );
+                        if *value_flash > 0 {
+                            *value_flash -= 1;
+                        }
                     }
                     Some(SubMenu::FolderSetup { ref browser, .. }) => {
-                        render_folder_setup(&mut menu_framebuffer, browser, menu.cursor_visible, menu.marquee_frame);
+                        render_folder_setup(
+                            &mut menu_framebuffer,
+                            browser,
+                            menu.cursor_visible,
+                            menu.marquee_frame,
+                        );
                     }
                 }
 
@@ -3681,23 +4753,67 @@ fn main() {
                 }
 
                 // Apply CRT filter pipeline (same as game!)
-                let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                let dt = if barrel_distortion {
+                    &distortion_table
+                } else {
+                    &flat_distortion_table
+                };
                 if crt_enabled {
-                    crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                    crt_filter(
+                        &menu_framebuffer,
+                        &mut crt_buffer,
+                        &sv_table,
+                        dt,
+                        &config.crt_config,
+                        &mask_table,
+                        config.crt_config.brightness as i32,
+                        config.crt_config.contrast as i32,
+                    );
                     // Phosphor bloom — bright pixels glow into neighbors
-                    apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                    apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                    apply_phosphor_bloom(
+                        &mut crt_buffer,
+                        SCREEN_W,
+                        SCREEN_H,
+                        config.crt_config.phosphor_warmth as u32,
+                    );
+                    apply_scanline_glow(
+                        &mut crt_buffer,
+                        SCREEN_W,
+                        SCREEN_H,
+                        config.crt_config.phosphor_warmth as u32,
+                    );
                     // Apply chromatic aberration to crt_buffer (screen area only)
                     if glass_intensity > 30 {
-                        apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                        apply_chromatic_aberration(
+                            &mut ca_temp,
+                            &crt_buffer,
+                            &ca_table,
+                            SCREEN_W,
+                            SCREEN_H,
+                        );
                         std::mem::swap(&mut crt_buffer, &mut ca_temp);
                     }
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
-                composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
+                composite_screen_fast(
+                    &mut composite_buffer,
+                    &crt_buffer,
+                    &screen_curve_table,
+                    WINDOW_WIDTH,
+                );
                 if crt_enabled && glass_intensity > 0 {
-                    apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
+                    apply_glass_effects(
+                        &mut composite_buffer,
+                        &crt_buffer,
+                        &glare_table,
+                        &glass_thickness_table,
+                        &ghost_alpha_table,
+                        WINDOW_WIDTH,
+                        glass_intensity,
+                        false,
+                        SCREEN_W,
+                    );
                 }
 
                 window
@@ -3730,14 +4846,21 @@ fn main() {
                                     Key::X => cheat_input_buffer.push('X'),
                                     Key::Y => cheat_input_buffer.push('Y'),
                                     Key::Z => cheat_input_buffer.push('Z'),
-                                    Key::Backspace => { cheat_input_buffer.pop(); }
+                                    Key::Backspace => {
+                                        cheat_input_buffer.pop();
+                                    }
                                     Key::Enter => {
-                                        if cheat_input_buffer.len() == 6 || cheat_input_buffer.len() == 8 {
-                                            if let Some(code) = oxidenes::bus::GameGenieCode::decode(&cheat_input_buffer) {
+                                        if cheat_input_buffer.len() == 6
+                                            || cheat_input_buffer.len() == 8
+                                        {
+                                            if let Some(code) = oxidenes::bus::GameGenieCode::decode(
+                                                &cheat_input_buffer,
+                                            ) {
                                                 bus.cheats.push(code);
                                                 bus.update_cheats_cache();
                                                 save_cheats(&current_rom_name, &bus.cheats);
-                                                cheat_message = Some(format!("ADDED: {}", cheat_input_buffer));
+                                                cheat_message =
+                                                    Some(format!("ADDED: {}", cheat_input_buffer));
                                                 cheat_message_timer = 120;
                                                 cheat_input_mode = false;
                                             } else {
@@ -3758,35 +4881,62 @@ fn main() {
                                 }
                             }
                         } else {
-                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                            let input = poll_menu_input(
+                                &window,
+                                &mut gilrs,
+                                &mut repeat_tracker,
+                                config.input_bindings.controller_p1.deadzone,
+                                &mut stick_state_menu,
+                            );
                             // Items: each cheat (toggle), then ADD CODE, CLEAR ALL
                             let item_count = bus.cheats.len() + 2;
                             if input.up && cheats_selected > 0 {
                                 cheats_selected -= 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.down && cheats_selected < item_count - 1 {
                                 cheats_selected += 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.confirm {
                                 if cheats_selected < bus.cheats.len() {
                                     // Toggle cheat on/off
-                                    bus.cheats[cheats_selected].enabled = !bus.cheats[cheats_selected].enabled;
+                                    bus.cheats[cheats_selected].enabled =
+                                        !bus.cheats[cheats_selected].enabled;
                                     bus.update_cheats_cache();
                                     save_cheats(&current_rom_name, &bus.cheats);
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 } else if cheats_selected == bus.cheats.len() {
                                     // ADD CODE
                                     cheat_input_mode = true;
                                     cheat_input_buffer.clear();
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 } else {
                                     // CLEAR ALL
                                     bus.cheats.clear();
@@ -3795,7 +4945,12 @@ fn main() {
                                     cheats_selected = 0;
                                     cheat_message = Some("ALL CHEATS CLEARED".to_string());
                                     cheat_message_timer = 90;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
                             }
                             if input.backspace && cheats_selected < bus.cheats.len() {
@@ -3806,27 +4961,59 @@ fn main() {
                                 if cheats_selected >= bus.cheats.len() + 2 {
                                     cheats_selected = (bus.cheats.len() + 1).max(0);
                                 }
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                             if input.back {
                                 cheats_submenu = false;
                                 cheat_input_mode = false;
-                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Back,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                         }
                     } else if paused && controls_submenu {
                         // Controls reference page input handling
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                        let input = poll_menu_input(
+                            &window,
+                            &mut gilrs,
+                            &mut repeat_tracker,
+                            config.input_bindings.controller_p1.deadzone,
+                            &mut stick_state_menu,
+                        );
                         if input.back {
                             controls_submenu = false;
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                         }
                     } else if paused && achievement_submenu {
                         // Achievement submenu input handling
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                        let input = poll_menu_input(
+                            &window,
+                            &mut gilrs,
+                            &mut repeat_tracker,
+                            config.input_bindings.controller_p1.deadzone,
+                            &mut stick_state_menu,
+                        );
                         if input.back {
                             achievement_submenu = false;
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                         }
                     } else if paused && netplay_submenu {
                         // Netplay submenu input handling
@@ -3834,25 +5021,72 @@ fn main() {
                             // Port text input mode
                             for key in &window.get_keys_pressed(KeyRepeat::Yes) {
                                 match key {
-                                    Key::Key0 | Key::NumPad0 => { if netplay_port_input.len() < 5 { netplay_port_input.push('0'); } }
-                                    Key::Key1 | Key::NumPad1 => { if netplay_port_input.len() < 5 { netplay_port_input.push('1'); } }
-                                    Key::Key2 | Key::NumPad2 => { if netplay_port_input.len() < 5 { netplay_port_input.push('2'); } }
-                                    Key::Key3 | Key::NumPad3 => { if netplay_port_input.len() < 5 { netplay_port_input.push('3'); } }
-                                    Key::Key4 | Key::NumPad4 => { if netplay_port_input.len() < 5 { netplay_port_input.push('4'); } }
-                                    Key::Key5 | Key::NumPad5 => { if netplay_port_input.len() < 5 { netplay_port_input.push('5'); } }
-                                    Key::Key6 | Key::NumPad6 => { if netplay_port_input.len() < 5 { netplay_port_input.push('6'); } }
-                                    Key::Key7 | Key::NumPad7 => { if netplay_port_input.len() < 5 { netplay_port_input.push('7'); } }
-                                    Key::Key8 | Key::NumPad8 => { if netplay_port_input.len() < 5 { netplay_port_input.push('8'); } }
-                                    Key::Key9 | Key::NumPad9 => { if netplay_port_input.len() < 5 { netplay_port_input.push('9'); } }
-                                    Key::Backspace => { netplay_port_input.pop(); }
+                                    Key::Key0 | Key::NumPad0 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('0');
+                                        }
+                                    }
+                                    Key::Key1 | Key::NumPad1 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('1');
+                                        }
+                                    }
+                                    Key::Key2 | Key::NumPad2 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('2');
+                                        }
+                                    }
+                                    Key::Key3 | Key::NumPad3 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('3');
+                                        }
+                                    }
+                                    Key::Key4 | Key::NumPad4 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('4');
+                                        }
+                                    }
+                                    Key::Key5 | Key::NumPad5 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('5');
+                                        }
+                                    }
+                                    Key::Key6 | Key::NumPad6 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('6');
+                                        }
+                                    }
+                                    Key::Key7 | Key::NumPad7 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('7');
+                                        }
+                                    }
+                                    Key::Key8 | Key::NumPad8 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('8');
+                                        }
+                                    }
+                                    Key::Key9 | Key::NumPad9 => {
+                                        if netplay_port_input.len() < 5 {
+                                            netplay_port_input.push('9');
+                                        }
+                                    }
+                                    Key::Backspace => {
+                                        netplay_port_input.pop();
+                                    }
                                     Key::Enter => {
                                         if let Ok(p) = netplay_port_input.parse::<u16>() {
                                             netplay.port = p;
                                             // Sync port in join address
                                             if let Some(colon_pos) = netplay_ip_input.rfind(':') {
-                                                netplay_ip_input = format!("{}:{}", &netplay_ip_input[..colon_pos], p);
+                                                netplay_ip_input = format!(
+                                                    "{}:{}",
+                                                    &netplay_ip_input[..colon_pos],
+                                                    p
+                                                );
                                             } else {
-                                                netplay_ip_input = format!("{}:{}", netplay_ip_input, p);
+                                                netplay_ip_input =
+                                                    format!("{}:{}", netplay_ip_input, p);
                                             }
                                         } else {
                                             // Invalid port, restore from current
@@ -3883,7 +5117,9 @@ fn main() {
                                     Key::Key9 | Key::NumPad9 => netplay_ip_input.push('9'),
                                     Key::Period | Key::NumPadDot => netplay_ip_input.push('.'),
                                     Key::Semicolon => netplay_ip_input.push(':'), // shift+; = : on most layouts
-                                    Key::Backspace => { netplay_ip_input.pop(); }
+                                    Key::Backspace => {
+                                        netplay_ip_input.pop();
+                                    }
                                     Key::Enter => {
                                         match netplay.join(&netplay_ip_input) {
                                             Ok(()) => {
@@ -3906,39 +5142,66 @@ fn main() {
                                 }
                             }
                         } else {
-                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                            let input = poll_menu_input(
+                                &window,
+                                &mut gilrs,
+                                &mut repeat_tracker,
+                                config.input_bindings.controller_p1.deadzone,
+                                &mut stick_state_menu,
+                            );
                             if input.up && netplay_selected > 0 {
                                 netplay_selected -= 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.down && netplay_selected < 4 {
                                 netplay_selected += 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.confirm {
                                 match netplay_selected {
-                                    0 => { // Port
+                                    0 => {
+                                        // Port
                                         netplay_editing_port = true;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    1 => { // Host
+                                    1 => {
+                                        // Host
                                         if let Ok(p) = netplay_port_input.parse::<u16>() {
                                             netplay.port = p;
                                             match netplay.host() {
                                                 Ok(()) => {
-                                                    overlay_message = Some(format!("HOSTING ON PORT {}", netplay.port));
+                                                    overlay_message = Some(format!(
+                                                        "HOSTING ON PORT {}",
+                                                        netplay.port
+                                                    ));
                                                     overlay_timer = 120;
                                                     netplay_submenu = false;
                                                     paused = false;
                                                 }
                                                 Err(e) => {
-                                                    overlay_message = Some(format!("HOST FAILED: {}", e));
+                                                    overlay_message =
+                                                        Some(format!("HOST FAILED: {}", e));
                                                     overlay_timer = 120;
                                                 }
                                             }
@@ -3946,112 +5209,226 @@ fn main() {
                                             overlay_message = Some("INVALID PORT".to_string());
                                             overlay_timer = 120;
                                         }
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    2 => { // Join
+                                    2 => {
+                                        // Join
                                         netplay_ip_editing = true;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    3 => { // Disconnect
+                                    3 => {
+                                        // Disconnect
                                         netplay.disconnect();
                                         overlay_message = Some("NETPLAY DISCONNECTED".to_string());
                                         overlay_timer = 90;
                                         netplay_submenu = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    4 => { // Input delay toggle (cycle 1-5)
-                                        netplay.input_delay = if netplay.input_delay >= 5 { 1 } else { netplay.input_delay + 1 };
-                                        play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    4 => {
+                                        // Input delay toggle (cycle 1-5)
+                                        netplay.input_delay = if netplay.input_delay >= 5 {
+                                            1
+                                        } else {
+                                            netplay.input_delay + 1
+                                        };
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Cursor,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                     _ => {}
                                 }
                             }
                             if input.back {
                                 netplay_submenu = false;
-                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Back,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                         }
                     } else if paused {
-                        let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                        let input = poll_menu_input(
+                            &window,
+                            &mut gilrs,
+                            &mut repeat_tracker,
+                            config.input_bindings.controller_p1.deadzone,
+                            &mut stick_state_menu,
+                        );
                         if input.up && pause_selected > 0 {
                             pause_selected -= 1;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
                         if input.down && pause_selected < 13 {
                             pause_selected += 1;
                             if sound_cooldown == 0 {
-                                play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Cursor,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                                 sound_cooldown = 3;
                             }
                         }
                         // L/R cycles save slot when on Save or Load items
                         if pause_selected == 1 || pause_selected == 2 {
                             if input.left {
-                                current_save_slot = if current_save_slot == 1 { 5 } else { current_save_slot - 1 };
-                                pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                                pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                current_save_slot = if current_save_slot == 1 {
+                                    5
+                                } else {
+                                    current_save_slot - 1
+                                };
+                                pause_save_label =
+                                    format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                pause_load_label =
+                                    format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.right {
-                                current_save_slot = if current_save_slot == 5 { 1 } else { current_save_slot + 1 };
-                                pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                                pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                current_save_slot = if current_save_slot == 5 {
+                                    1
+                                } else {
+                                    current_save_slot + 1
+                                };
+                                pause_save_label =
+                                    format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                pause_load_label =
+                                    format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                         }
                         if input.confirm {
                             match pause_selected {
-                                0 => { // Resume
+                                0 => {
+                                    // Resume
                                     paused = false;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
-                                1 => { // Save state
+                                1 => {
+                                    // Save state
                                     if save_state(bus, cpu, &config, current_save_slot) {
-                                        thumbnail_cache[(current_save_slot as usize).saturating_sub(1).min(3)] = load_thumbnail(&config, current_save_slot);
+                                        thumbnail_cache[(current_save_slot as usize)
+                                            .saturating_sub(1)
+                                            .min(3)] = load_thumbnail(&config, current_save_slot);
                                         overlay_message = Some("STATE SAVED".to_string());
                                         overlay_timer = 90;
                                         paused = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     } else {
                                         overlay_message = Some("NO SRAM FOUND".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Error,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                 }
-                                2 => { // Load state
+                                2 => {
+                                    // Load state
                                     if load_state(bus, cpu, &config, current_save_slot) {
                                         overlay_message = Some("STATE LOADED".to_string());
                                         overlay_timer = 90;
                                         paused = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     } else {
                                         overlay_message = Some("NO SAVE FOUND".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Error,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                 }
-                                3 => { // Cheats submenu
+                                3 => {
+                                    // Cheats submenu
                                     cheats_submenu = true;
                                     cheats_selected = 0;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
-                                4 => { // Netplay
+                                4 => {
+                                    // Netplay
                                     netplay_submenu = true;
                                     netplay_selected = 0;
                                     netplay_ip_editing = false;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
-                                5 => { // Reload / Load script
-                                    let path = script_engine.as_ref()
+                                5 => {
+                                    // Reload / Load script
+                                    let path = script_engine
+                                        .as_ref()
                                         .and_then(|s| s.script_path.clone())
                                         .or_else(|| script_path_arg.clone());
                                     if let Some(spath) = path {
@@ -4061,51 +5438,93 @@ fn main() {
                                                 script_engine = Some(engine);
                                                 overlay_message = Some("SCRIPT LOADED".to_string());
                                                 overlay_timer = 90;
-                                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                play_menu_sound(
+                                                    &mut producer,
+                                                    MenuSound::Confirm,
+                                                    actual_sample_rate,
+                                                    audio_volume as f32 / 100.0,
+                                                );
                                             }
                                             Err(e) => {
                                                 eprintln!("[scripting] {}", e);
                                                 overlay_message = Some("SCRIPT ERROR".to_string());
                                                 overlay_timer = 90;
-                                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                play_menu_sound(
+                                                    &mut producer,
+                                                    MenuSound::Error,
+                                                    actual_sample_rate,
+                                                    audio_volume as f32 / 100.0,
+                                                );
                                             }
                                         }
                                     } else {
-                                        overlay_message = Some("NO SCRIPT SET (--script)".to_string());
+                                        overlay_message =
+                                            Some("NO SCRIPT SET (--script)".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Error,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                     paused = false;
                                 }
-                                6 => { // Unload script
+                                6 => {
+                                    // Unload script
                                     if let Some(ref mut engine) = script_engine {
                                         engine.unload();
                                         overlay_message = Some("SCRIPT UNLOADED".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                     script_engine = None;
                                     paused = false;
                                 }
-                                7 => { // Toggle favorite
+                                7 => {
+                                    // Toggle favorite
                                     if !current_rom_path.is_empty() {
                                         let added = toggle_favorite(&mut config, &current_rom_path);
                                         save_config(&config);
-                                        favorites_valid = config.favorite_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
-                                        recents_valid = config.recent_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        favorites_valid = config
+                                            .favorite_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
+                                        recents_valid = config
+                                            .recent_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
                                         if added {
-                                            overlay_message = Some("ADDED TO FAVORITES".to_string());
-                                            play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            overlay_message =
+                                                Some("ADDED TO FAVORITES".to_string());
+                                            play_menu_sound(
+                                                &mut producer,
+                                                MenuSound::Confirm,
+                                                actual_sample_rate,
+                                                audio_volume as f32 / 100.0,
+                                            );
                                         } else {
-                                            overlay_message = Some("REMOVED FROM FAVORITES".to_string());
-                                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                            overlay_message =
+                                                Some("REMOVED FROM FAVORITES".to_string());
+                                            play_menu_sound(
+                                                &mut producer,
+                                                MenuSound::Back,
+                                                actual_sample_rate,
+                                                audio_volume as f32 / 100.0,
+                                            );
                                         }
                                         overlay_timer = 90;
                                     }
                                 }
-                                8 => { // Return to menu
+                                8 => {
+                                    // Return to menu
                                     netplay.disconnect();
                                     script_engine = None;
                                     if let Some(ref bus) = game_bus {
@@ -4118,182 +5537,270 @@ fn main() {
                                     achievement_engine = AchievementEngine::new();
                                     recorder = InputRecording::new([0u8; 32]);
                                     emulator_state = EmulatorState::Menu(MenuState::new());
-                                    window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
+                                    window_title =
+                                        format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                                     window.set_title(&window_title);
-                                    play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Back,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     continue;
                                 }
-                                9 => { // Achievements
+                                9 => {
+                                    // Achievements
                                     achievement_submenu = !achievement_submenu;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
-                                10 => { // Save recording
+                                10 => {
+                                    // Save recording
                                     if recorder.frame_count() > 0 {
                                         if let Some(base) = recordings_dir() {
                                             let _ = std::fs::create_dir_all(&base);
-                                            let path = base.join(format!("{}.nrec", current_rom_name));
-                                            match recorder.save_to_file(path.to_str().unwrap_or("recording.nrec")) {
+                                            let path =
+                                                base.join(format!("{}.nrec", current_rom_name));
+                                            match recorder.save_to_file(
+                                                path.to_str().unwrap_or("recording.nrec"),
+                                            ) {
                                                 Ok(()) => {
-                                                    overlay_message = Some("RECORDING SAVED".to_string());
+                                                    overlay_message =
+                                                        Some("RECORDING SAVED".to_string());
                                                     overlay_timer = 90;
-                                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                    play_menu_sound(
+                                                        &mut producer,
+                                                        MenuSound::Confirm,
+                                                        actual_sample_rate,
+                                                        audio_volume as f32 / 100.0,
+                                                    );
                                                 }
                                                 Err(e) => {
                                                     eprintln!("[recording] Save error: {}", e);
-                                                    overlay_message = Some("SAVE FAILED".to_string());
+                                                    overlay_message =
+                                                        Some("SAVE FAILED".to_string());
                                                     overlay_timer = 90;
-                                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                    play_menu_sound(
+                                                        &mut producer,
+                                                        MenuSound::Error,
+                                                        actual_sample_rate,
+                                                        audio_volume as f32 / 100.0,
+                                                    );
                                                 }
                                             }
                                         }
                                     } else {
                                         overlay_message = Some("NO RECORDING DATA".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Error,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                     paused = false;
                                 }
-                                11 => { // Load recording
+                                11 => {
+                                    // Load recording
                                     if let Some(base) = recordings_dir() {
                                         let path = base.join(format!("{}.nrec", current_rom_name));
-                                        match InputRecording::load_from_file(path.to_str().unwrap_or("")) {
+                                        match InputRecording::load_from_file(
+                                            path.to_str().unwrap_or(""),
+                                        ) {
                                             Ok(loaded) => {
                                                 let count = loaded.frame_count();
                                                 recorder = loaded;
-                                                overlay_message = Some(format!("LOADED {} FRAMES", count));
+                                                overlay_message =
+                                                    Some(format!("LOADED {} FRAMES", count));
                                                 overlay_timer = 90;
-                                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                play_menu_sound(
+                                                    &mut producer,
+                                                    MenuSound::Confirm,
+                                                    actual_sample_rate,
+                                                    audio_volume as f32 / 100.0,
+                                                );
                                             }
                                             Err(e) => {
                                                 eprintln!("[recording] Load error: {}", e);
                                                 overlay_message = Some("LOAD FAILED".to_string());
                                                 overlay_timer = 90;
-                                                play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                play_menu_sound(
+                                                    &mut producer,
+                                                    MenuSound::Error,
+                                                    actual_sample_rate,
+                                                    audio_volume as f32 / 100.0,
+                                                );
                                             }
                                         }
                                     }
                                     paused = false;
                                 }
-                                12 => { // Export FM2
+                                12 => {
+                                    // Export FM2
                                     if recorder.frame_count() > 0 {
                                         if let Some(base) = recordings_dir() {
                                             let _ = std::fs::create_dir_all(&base);
-                                            let path = base.join(format!("{}.fm2", current_rom_name));
-                                            match recorder.export_fm2(path.to_str().unwrap_or("recording.fm2"), &current_rom_name) {
+                                            let path =
+                                                base.join(format!("{}.fm2", current_rom_name));
+                                            match recorder.export_fm2(
+                                                path.to_str().unwrap_or("recording.fm2"),
+                                                &current_rom_name,
+                                            ) {
                                                 Ok(()) => {
-                                                    overlay_message = Some("FM2 EXPORTED".to_string());
+                                                    overlay_message =
+                                                        Some("FM2 EXPORTED".to_string());
                                                     overlay_timer = 90;
-                                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                    play_menu_sound(
+                                                        &mut producer,
+                                                        MenuSound::Confirm,
+                                                        actual_sample_rate,
+                                                        audio_volume as f32 / 100.0,
+                                                    );
                                                 }
                                                 Err(e) => {
-                                                    eprintln!("[recording] FM2 export error: {}", e);
-                                                    overlay_message = Some("EXPORT FAILED".to_string());
+                                                    eprintln!(
+                                                        "[recording] FM2 export error: {}",
+                                                        e
+                                                    );
+                                                    overlay_message =
+                                                        Some("EXPORT FAILED".to_string());
                                                     overlay_timer = 90;
-                                                    play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                                    play_menu_sound(
+                                                        &mut producer,
+                                                        MenuSound::Error,
+                                                        actual_sample_rate,
+                                                        audio_volume as f32 / 100.0,
+                                                    );
                                                 }
                                             }
                                         }
                                     } else {
                                         overlay_message = Some("NO RECORDING DATA".to_string());
                                         overlay_timer = 90;
-                                        play_menu_sound(&mut producer, MenuSound::Error, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Error,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
                                     paused = false;
                                 }
-                                13 => { // Controls reference page
+                                13 => {
+                                    // Controls reference page
                                     controls_submenu = true;
-                                    play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                 }
                                 _ => {}
                             }
                         }
                         if input.back {
                             paused = false; // ESC again resumes
-                            play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
                         }
                     } else {
                         // Normal game emulation when not paused
                         if !quick_overlay {
-                        let rewinding = window.is_key_down(Key::Backspace);
-                        is_rewinding = rewinding;
-                        
-                        if rewinding {
-                            // Rewind: pop snapshots and render them
-                            // Pop 2 frames for visible speed (since we only save every 2nd frame)
-                            let _rewound = rewind_buffer.pop_frame(bus, cpu);
-                        } else {
-                            let fast_forward = window.is_key_down(Key::Tab);
-                            let frame_count = if fast_forward { 4 } else { 1 };
+                            let rewinding = window.is_key_down(Key::Backspace);
+                            is_rewinding = rewinding;
 
-                            for ff in 0..frame_count {
-                                // Run one frame of emulation
-                                loop {
-                                    cpu.clock(bus);
-                                    bus.tick(1);
-                                    bus.tick_apu();
-                                    bus.service_dmc_dma();
+                            if rewinding {
+                                // Rewind: pop snapshots and render them
+                                // Pop 2 frames for visible speed (since we only save every 2nd frame)
+                                let _rewound = rewind_buffer.pop_frame(bus, cpu);
+                            } else {
+                                let fast_forward = window.is_key_down(Key::Tab);
+                                let frame_count = if fast_forward { 4 } else { 1 };
 
-                                    if bus.ppu.frame_complete() {
-                                        break;
+                                for ff in 0..frame_count {
+                                    // Run one frame of emulation
+                                    loop {
+                                        cpu.clock(bus);
+                                        bus.tick(1);
+                                        bus.tick_apu();
+                                        bus.service_dmc_dma();
+
+                                        if bus.ppu.frame_complete() {
+                                            break;
+                                        }
+                                    }
+
+                                    // End APU frame
+                                    bus.apu.end_frame();
+
+                                    if ff == frame_count - 1 {
+                                        std::mem::swap(
+                                            &mut audio_swap_buf,
+                                            &mut bus.apu.sample_buffer,
+                                        );
+                                        let vol = audio_volume as f32 / 100.0;
+                                        for &sample in &audio_swap_buf {
+                                            let _ = producer.try_push(sample * vol);
+                                        }
+                                        audio_swap_buf.clear();
+                                    } else {
+                                        bus.apu.sample_buffer.clear();
                                     }
                                 }
 
-                                // End APU frame
-                                bus.apu.end_frame();
+                                // Save snapshot for rewind (only during normal play, not fast-forward)
+                                if !fast_forward {
+                                    rewind_buffer.push_frame(bus, cpu);
+                                }
 
-                                if ff == frame_count - 1 {
-                                    std::mem::swap(&mut audio_swap_buf, &mut bus.apu.sample_buffer);
-                                    let vol = audio_volume as f32 / 100.0;
-                                    for &sample in &audio_swap_buf {
-                                        let _ = producer.try_push(sample * vol);
+                                // Fast forward overlay
+                                if fast_forward {
+                                    if overlay_message.is_none() {
+                                        overlay_message = Some(">> FAST FORWARD".to_string());
                                     }
-                                    audio_swap_buf.clear();
-                                } else {
-                                    bus.apu.sample_buffer.clear();
-                                }
-                            }
-
-                            // Save snapshot for rewind (only during normal play, not fast-forward)
-                            if !fast_forward {
-                                rewind_buffer.push_frame(bus, cpu);
-                            }
-
-                            // Fast forward overlay
-                            if fast_forward {
-                                if overlay_message.is_none() {
-                                    overlay_message = Some(">> FAST FORWARD".to_string());
-                                }
-                                overlay_timer = 2;
-                            }
-
-                            // Lua scripting: run per-frame callback
-                            if let Some(ref mut script) = script_engine {
-                                let ram_snapshot = bus.ram_snapshot();
-                                if let Err(e) = script.on_frame(&ram_snapshot, frame_counter as u64) {
-                                    eprintln!("[scripting] {}", e);
-                                }
-                                // Apply overlay pixels onto PPU frame
-                                for (x, y, color) in script.overlay_pixels.drain(..) {
-                                    if x < 256 && y < 240 {
-                                        bus.ppu.frame_data[y * 256 + x] = color;
-                                    }
-                                }
-                                // Show script messages as overlay
-                                for (msg, _frames) in script.messages.drain(..) {
-                                    overlay_message = Some(msg);
                                     overlay_timer = 2;
                                 }
-                            }
 
-                            // Achievement system: check RAM conditions each frame
-                            {
-                                let ram_snapshot = bus.ram_snapshot();
-                                achievement_engine.check_frame(&ram_snapshot);
-                                achievement_engine.tick_notifications();
+                                // Lua scripting: run per-frame callback
+                                if let Some(ref mut script) = script_engine {
+                                    let ram_snapshot = bus.ram_snapshot();
+                                    if let Err(e) =
+                                        script.on_frame(&ram_snapshot, frame_counter as u64)
+                                    {
+                                        eprintln!("[scripting] {}", e);
+                                    }
+                                    // Apply overlay pixels onto PPU frame
+                                    for (x, y, color) in script.overlay_pixels.drain(..) {
+                                        if x < 256 && y < 240 {
+                                            bus.ppu.frame_data[y * 256 + x] = color;
+                                        }
+                                    }
+                                    // Show script messages as overlay
+                                    for (msg, _frames) in script.messages.drain(..) {
+                                        overlay_message = Some(msg);
+                                        overlay_timer = 2;
+                                    }
+                                }
+
+                                // Achievement system: check RAM conditions each frame
+                                {
+                                    let ram_snapshot = bus.ram_snapshot();
+                                    achievement_engine.check_frame(&ram_snapshot);
+                                    achievement_engine.tick_notifications();
+                                }
                             }
-                        }
                         } // end if !quick_overlay
-                        
+
                         // Handle input when not paused
                         frame_counter = frame_counter.wrapping_add(1);
                         let (start_held, select_held, l_held, r_held) = if quick_overlay {
@@ -4302,23 +5809,34 @@ fn main() {
                             let mut l = false;
                             let mut r = false;
                             if let Some(ref mut g) = gilrs {
-                                if let Some((_, gamepad)) = g.gamepads().find(|(_, gp)| gp.is_connected()) {
-                                    l = gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
-                                    r = gamepad.is_pressed(Button::RightTrigger) || gamepad.is_pressed(Button::RightTrigger2);
+                                if let Some((_, gamepad)) =
+                                    g.gamepads().find(|(_, gp)| gp.is_connected())
+                                {
+                                    l = gamepad.is_pressed(Button::LeftTrigger)
+                                        || gamepad.is_pressed(Button::LeftTrigger2);
+                                    r = gamepad.is_pressed(Button::RightTrigger)
+                                        || gamepad.is_pressed(Button::RightTrigger2);
                                 }
                             }
                             (false, false, l, r)
                         } else {
-                            handle_input(&window, bus, &mut gilrs, frame_counter, &config.input_bindings, &mut stick_state_p1, &mut stick_state_p2)
+                            handle_input(
+                                &window,
+                                bus,
+                                &mut gilrs,
+                                frame_counter,
+                                &config.input_bindings,
+                                &mut stick_state_p1,
+                                &mut stick_state_p2,
+                            )
                         };
 
                         // Recording: capture current joypad state after input handling
-                        if !quick_overlay
-                            && recorder.is_recording() {
-                                let p1 = joypad_to_byte(bus, 1);
-                                let p2 = joypad_to_byte(bus, 2);
-                                recorder.record_frame(p1, p2);
-                            }
+                        if !quick_overlay && recorder.is_recording() {
+                            let p1 = joypad_to_byte(bus, 1);
+                            let p2 = joypad_to_byte(bus, 2);
+                            recorder.record_frame(p1, p2);
+                        }
 
                         // Playback: override joypad input from recording
                         if recorder.is_playing() {
@@ -4370,8 +5888,11 @@ fn main() {
                             netplay.send_input(netplay.frame_num, local_bits, checksum);
 
                             // Receive remote input
-                            let remote_bits = netplay.receive_input().unwrap_or(netplay.last_remote_input());
-                            let (ra, rb, rsel, rst, rup, rdn, rlt, rrt) = NetplaySession::decode_input(remote_bits);
+                            let remote_bits = netplay
+                                .receive_input()
+                                .unwrap_or(netplay.last_remote_input());
+                            let (ra, rb, rsel, rst, rup, rdn, rlt, rrt) =
+                                NetplaySession::decode_input(remote_bits);
 
                             // Apply remote input to the other player's joypad
                             if netplay.local_player == 0 {
@@ -4387,7 +5908,8 @@ fn main() {
                             } else {
                                 // We're P2: our local input goes to P2 joypad, remote goes to P1
                                 // First, move our local input from joypad1 to joypad2
-                                let (la, lb, lsel, lst, lup, ldn, llt, lrt) = NetplaySession::decode_input(local_bits);
+                                let (la, lb, lsel, lst, lup, ldn, llt, lrt) =
+                                    NetplaySession::decode_input(local_bits);
                                 bus.joypad2.set_button_pressed(JoypadButton::A, la);
                                 bus.joypad2.set_button_pressed(JoypadButton::B, lb);
                                 bus.joypad2.set_button_pressed(JoypadButton::Select, lsel);
@@ -4413,7 +5935,10 @@ fn main() {
                             }
                             let _ = netplay.receive_input();
                             if netplay.is_connected() {
-                                overlay_message = Some(format!("NETPLAY CONNECTED (P{})", netplay.local_player + 1));
+                                overlay_message = Some(format!(
+                                    "NETPLAY CONNECTED (P{})",
+                                    netplay.local_player + 1
+                                ));
                                 overlay_timer = 120;
                             }
                         }
@@ -4441,29 +5966,37 @@ fn main() {
                         // Slot selection: F2=slot 1, F3=slot 2, F4=slot 3, F6=slot 4
                         if window.is_key_pressed(Key::F2, KeyRepeat::No) {
                             current_save_slot = 1;
-                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                            pause_save_label =
+                                format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label =
+                                format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 1 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F3, KeyRepeat::No) {
                             current_save_slot = 2;
-                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                            pause_save_label =
+                                format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label =
+                                format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 2 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F4, KeyRepeat::No) {
                             current_save_slot = 3;
-                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                            pause_save_label =
+                                format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label =
+                                format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 3 SELECTED".to_string());
                             overlay_timer = 60;
                         }
                         if window.is_key_pressed(Key::F6, KeyRepeat::No) {
                             current_save_slot = 4;
-                            pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                            pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                            pause_save_label =
+                                format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                            pause_load_label =
+                                format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                             overlay_message = Some("SLOT 4 SELECTED".to_string());
                             overlay_timer = 60;
                         }
@@ -4471,7 +6004,8 @@ fn main() {
                         // F5 quick save, F9 quick load (using current slot)
                         if window.is_key_pressed(Key::F5, KeyRepeat::No) {
                             if save_state(bus, cpu, &config, current_save_slot) {
-                                overlay_message = Some(format!("STATE {} SAVED", current_save_slot));
+                                overlay_message =
+                                    Some(format!("STATE {} SAVED", current_save_slot));
                                 overlay_timer = 90;
                             } else {
                                 overlay_message = Some("SAVE FAILED".to_string());
@@ -4480,7 +6014,8 @@ fn main() {
                         }
                         if window.is_key_pressed(Key::F9, KeyRepeat::No) {
                             if load_state(bus, cpu, &config, current_save_slot) {
-                                overlay_message = Some(format!("STATE {} LOADED", current_save_slot));
+                                overlay_message =
+                                    Some(format!("STATE {} LOADED", current_save_slot));
                                 overlay_timer = 90;
                             } else {
                                 overlay_message = Some("NO SAVE FOUND".to_string());
@@ -4535,7 +6070,8 @@ fn main() {
                                         scale_mode: ScaleMode::AspectRatioStretch,
                                         ..WindowOptions::default()
                                     },
-                                ).expect("Failed to create fullscreen window");
+                                )
+                                .expect("Failed to create fullscreen window");
                                 window.set_position(0, 0);
                             } else {
                                 window = Window::new(
@@ -4546,10 +6082,15 @@ fn main() {
                                         scale: Scale::X1,
                                         ..WindowOptions::default()
                                     },
-                                ).expect("Failed to create window");
+                                )
+                                .expect("Failed to create window");
                             }
-                            window.set_target_fps(0);  // Disabled: custom hybrid pacer handles timing
-                            overlay_message = Some(if is_fullscreen { "FULLSCREEN".to_string() } else { "WINDOWED".to_string() });
+                            window.set_target_fps(0); // Disabled: custom hybrid pacer handles timing
+                            overlay_message = Some(if is_fullscreen {
+                                "FULLSCREEN".to_string()
+                            } else {
+                                "WINDOWED".to_string()
+                            });
                             overlay_timer = 60;
                         }
 
@@ -4574,10 +6115,13 @@ fn main() {
                                 overlay_message = Some("VOLUME: [..........] MUTED".to_string());
                             } else {
                                 audio_volume = config.audio_volume;
-                                if audio_volume == 0 { audio_volume = 100; }
+                                if audio_volume == 0 {
+                                    audio_volume = 100;
+                                }
                                 let bars = (audio_volume / 10) as usize;
                                 let bar: String = "#".repeat(bars) + &".".repeat(10 - bars);
-                                overlay_message = Some(format!("VOLUME: [{}] {}%", bar, audio_volume));
+                                overlay_message =
+                                    Some(format!("VOLUME: [{}] {}%", bar, audio_volume));
                             }
                             overlay_timer = 60;
                         }
@@ -4586,34 +6130,42 @@ fn main() {
                             crt_enabled = !crt_enabled;
                             config.crt_enabled = crt_enabled;
                             save_config(&config);
-                            overlay_message = Some(if crt_enabled { "CRT FILTER: ON".to_string() } else { "CRT FILTER: OFF".to_string() });
+                            overlay_message = Some(if crt_enabled {
+                                "CRT FILTER: ON".to_string()
+                            } else {
+                                "CRT FILTER: OFF".to_string()
+                            });
                             overlay_timer = 90; // 1.5 seconds
                         }
 
                         // Brightness/Contrast OSD hotkeys
                         if window.is_key_pressed(Key::Minus, KeyRepeat::Yes) {
-                            config.crt_config.brightness = (config.crt_config.brightness as i16 - 5).clamp(-50, 50) as i8;
+                            config.crt_config.brightness =
+                                (config.crt_config.brightness as i16 - 5).clamp(-50, 50) as i8;
                             save_config(&config);
                             osd_type = OsdType::Brightness;
                             osd_value = config.crt_config.brightness as i32;
                             osd_timer = 120;
                         }
                         if window.is_key_pressed(Key::Equal, KeyRepeat::Yes) {
-                            config.crt_config.brightness = (config.crt_config.brightness as i16 + 5).clamp(-50, 50) as i8;
+                            config.crt_config.brightness =
+                                (config.crt_config.brightness as i16 + 5).clamp(-50, 50) as i8;
                             save_config(&config);
                             osd_type = OsdType::Brightness;
                             osd_value = config.crt_config.brightness as i32;
                             osd_timer = 120;
                         }
                         if window.is_key_pressed(Key::LeftBracket, KeyRepeat::Yes) {
-                            config.crt_config.contrast = (config.crt_config.contrast as i16 - 5).clamp(-50, 50) as i8;
+                            config.crt_config.contrast =
+                                (config.crt_config.contrast as i16 - 5).clamp(-50, 50) as i8;
                             save_config(&config);
                             osd_type = OsdType::Contrast;
                             osd_value = config.crt_config.contrast as i32;
                             osd_timer = 120;
                         }
                         if window.is_key_pressed(Key::RightBracket, KeyRepeat::Yes) {
-                            config.crt_config.contrast = (config.crt_config.contrast as i16 + 5).clamp(-50, 50) as i8;
+                            config.crt_config.contrast =
+                                (config.crt_config.contrast as i16 + 5).clamp(-50, 50) as i8;
                             save_config(&config);
                             osd_type = OsdType::Contrast;
                             osd_value = config.crt_config.contrast as i32;
@@ -4621,11 +6173,15 @@ fn main() {
                         }
 
                         // Shift+R toggle recording
-                        if window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift) {
+                        if window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)
+                        {
                             if window.is_key_pressed(Key::R, KeyRepeat::No) {
                                 if recorder.is_recording() {
                                     recorder.stop_recording();
-                                    overlay_message = Some(format!("REC STOPPED ({} FRAMES)", recorder.frame_count()));
+                                    overlay_message = Some(format!(
+                                        "REC STOPPED ({} FRAMES)",
+                                        recorder.frame_count()
+                                    ));
                                     overlay_timer = 90;
                                 } else {
                                     recorder.start_recording();
@@ -4641,7 +6197,8 @@ fn main() {
                                     overlay_timer = 90;
                                 } else if recorder.frame_count() > 0 {
                                     recorder.start_playback();
-                                    overlay_message = Some(format!("PLAYING {} FRAMES", recorder.frame_count()));
+                                    overlay_message =
+                                        Some(format!("PLAYING {} FRAMES", recorder.frame_count()));
                                     overlay_timer = 90;
                                 } else {
                                     overlay_message = Some("NO RECORDING".to_string());
@@ -4657,7 +6214,12 @@ fn main() {
                                 // Open overlay after 20 frames debounce (~333ms)
                                 quick_overlay = true;
                                 quick_overlay_selected = 0;
-                                play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Confirm,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                         } else {
                             if quick_overlay_lr_frames > 0 && quick_overlay_lr_frames < 20 {
@@ -4668,91 +6230,161 @@ fn main() {
 
                         // Quick overlay input handling
                         if quick_overlay {
-                            let input = poll_menu_input(&window, &mut gilrs, &mut repeat_tracker, config.input_bindings.controller_p1.deadzone, &mut stick_state_menu);
+                            let input = poll_menu_input(
+                                &window,
+                                &mut gilrs,
+                                &mut repeat_tracker,
+                                config.input_bindings.controller_p1.deadzone,
+                                &mut stick_state_menu,
+                            );
                             let overlay_item_count: usize = 6;
 
                             if input.up && quick_overlay_selected > 0 {
                                 quick_overlay_selected -= 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             if input.down && quick_overlay_selected < overlay_item_count - 1 {
                                 quick_overlay_selected += 1;
                                 if sound_cooldown == 0 {
-                                    play_menu_sound(&mut producer, MenuSound::Cursor, actual_sample_rate, audio_volume as f32 / 100.0);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Cursor,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
                                     sound_cooldown = 3;
                                 }
                             }
                             // L/R cycles save slot on save/load items
                             if quick_overlay_selected == 1 || quick_overlay_selected == 2 {
                                 if input.left {
-                                    current_save_slot = if current_save_slot == 1 { 5 } else { current_save_slot - 1 };
-                                    pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                                    pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                    current_save_slot = if current_save_slot == 1 {
+                                        5
+                                    } else {
+                                        current_save_slot - 1
+                                    };
+                                    pause_save_label =
+                                        format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                    pause_load_label =
+                                        format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                                 }
                                 if input.right {
-                                    current_save_slot = if current_save_slot == 5 { 1 } else { current_save_slot + 1 };
-                                    pause_save_label = format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
-                                    pause_load_label = format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
+                                    current_save_slot = if current_save_slot == 5 {
+                                        1
+                                    } else {
+                                        current_save_slot + 1
+                                    };
+                                    pause_save_label =
+                                        format!("SAVE STATE  (F5)  [SLOT {}]", current_save_slot);
+                                    pause_load_label =
+                                        format!("LOAD STATE  (F9)  [SLOT {}]", current_save_slot);
                                 }
                             }
                             if input.confirm {
                                 match quick_overlay_selected {
-                                    0 => { // Resume
+                                    0 => {
+                                        // Resume
                                         quick_overlay = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    1 => { // Save State
+                                    1 => {
+                                        // Save State
                                         if save_state(bus, cpu, &config, current_save_slot) {
-                                            thumbnail_cache[(current_save_slot as usize).saturating_sub(1).min(3)] = load_thumbnail(&config, current_save_slot);
-                                            overlay_message = Some(format!("STATE {} SAVED", current_save_slot));
+                                            thumbnail_cache[(current_save_slot as usize)
+                                                .saturating_sub(1)
+                                                .min(3)] =
+                                                load_thumbnail(&config, current_save_slot);
+                                            overlay_message =
+                                                Some(format!("STATE {} SAVED", current_save_slot));
                                             overlay_timer = 90;
                                         } else {
                                             overlay_message = Some("SAVE FAILED".to_string());
                                             overlay_timer = 90;
                                         }
                                         quick_overlay = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    2 => { // Load State
+                                    2 => {
+                                        // Load State
                                         if load_state(bus, cpu, &config, current_save_slot) {
-                                            overlay_message = Some(format!("STATE {} LOADED", current_save_slot));
+                                            overlay_message =
+                                                Some(format!("STATE {} LOADED", current_save_slot));
                                             overlay_timer = 90;
                                         } else {
                                             overlay_message = Some("NO SAVE FOUND".to_string());
                                             overlay_timer = 90;
                                         }
                                         quick_overlay = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    3 => { // Toggle Favorite
+                                    3 => {
+                                        // Toggle Favorite
                                         let added = toggle_favorite(&mut config, &current_rom_path);
                                         save_config(&config);
-                                        favorites_valid = config.favorite_games.iter()
-                                            .map(|p| std::path::Path::new(p.as_str()).exists()).collect();
+                                        favorites_valid = config
+                                            .favorite_games
+                                            .iter()
+                                            .map(|p| std::path::Path::new(p.as_str()).exists())
+                                            .collect();
                                         if added {
-                                            overlay_message = Some("ADDED TO FAVORITES".to_string());
+                                            overlay_message =
+                                                Some("ADDED TO FAVORITES".to_string());
                                         } else {
-                                            overlay_message = Some("REMOVED FROM FAVORITES".to_string());
+                                            overlay_message =
+                                                Some("REMOVED FROM FAVORITES".to_string());
                                         }
                                         overlay_timer = 90;
                                         quick_overlay = false;
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    4 => { // Full Pause Menu
+                                    4 => {
+                                        // Full Pause Menu
                                         quick_overlay = false;
                                         paused = true;
                                         pause_selected = 0;
                                         pause_cursor_timer = 0;
                                         pause_cursor_visible = true;
                                         for slot in 0..4u8 {
-                                            thumbnail_cache[slot as usize] = load_thumbnail(&config, slot + 1);
+                                            thumbnail_cache[slot as usize] =
+                                                load_thumbnail(&config, slot + 1);
                                         }
-                                        play_menu_sound(&mut producer, MenuSound::Confirm, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Confirm,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                     }
-                                    5 => { // Return to Menu
+                                    5 => {
+                                        // Return to Menu
                                         if let Some(ref bus) = game_bus {
                                             auto_save_sram(bus, &config);
                                         }
@@ -4761,9 +6393,15 @@ fn main() {
                                         quick_overlay = false;
                                         repeat_tracker = RepeatTracker::new();
                                         emulator_state = EmulatorState::Menu(MenuState::new());
-                                        window_title = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
+                                        window_title =
+                                            format!("OxideNES v{}", env!("OXIDENES_VERSION"));
                                         window.set_title(&window_title);
-                                        play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                        play_menu_sound(
+                                            &mut producer,
+                                            MenuSound::Back,
+                                            actual_sample_rate,
+                                            audio_volume as f32 / 100.0,
+                                        );
                                         continue;
                                     }
                                     _ => {}
@@ -4771,7 +6409,12 @@ fn main() {
                             }
                             if input.back {
                                 quick_overlay = false;
-                                play_menu_sound(&mut producer, MenuSound::Back, actual_sample_rate, audio_volume as f32 / 100.0);
+                                play_menu_sound(
+                                    &mut producer,
+                                    MenuSound::Back,
+                                    actual_sample_rate,
+                                    audio_volume as f32 / 100.0,
+                                );
                             }
                         }
 
@@ -4796,46 +6439,116 @@ fn main() {
                     };
                     // Render game frame (skip when paused or overlay active — they have own rendering)
                     if !paused && !quick_overlay {
-                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                        let dt = if barrel_distortion {
+                            &distortion_table
+                        } else {
+                            &flat_distortion_table
+                        };
 
                         // Stage 1: CRT filter (or passthrough scale)
-                        let t_crt = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        let t_crt = if do_detail_sample {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
                         if crt_enabled {
-                            crt_filter(&bus.ppu.frame_data, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                            crt_filter(
+                                &bus.ppu.frame_data,
+                                &mut crt_buffer,
+                                &sv_table,
+                                dt,
+                                &config.crt_config,
+                                &mask_table,
+                                config.crt_config.brightness as i32,
+                                config.crt_config.contrast as i32,
+                            );
                         } else {
                             scale_simple(&bus.ppu.frame_data, &mut crt_buffer);
                         }
-                        if let Some(t) = t_crt { perf_snapshot.crt_us = t.elapsed().as_micros() as u32; }
+                        if let Some(t) = t_crt {
+                            perf_snapshot.crt_us = t.elapsed().as_micros() as u32;
+                        }
 
                         // Stage 2: Post-process (bloom + glow + chromatic aberration)
-                        let t_bloom = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        let t_bloom = if do_detail_sample {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
                         if crt_enabled {
                             // Phosphor bloom — bright pixels glow into neighbors
-                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            apply_phosphor_bloom(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
+                            apply_scanline_glow(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
                             // Apply chromatic aberration to crt_buffer (screen area only)
                             if glass_intensity > 30 {
-                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                apply_chromatic_aberration(
+                                    &mut ca_temp,
+                                    &crt_buffer,
+                                    &ca_table,
+                                    SCREEN_W,
+                                    SCREEN_H,
+                                );
                                 std::mem::swap(&mut crt_buffer, &mut ca_temp);
                             }
                         }
-                        if let Some(t) = t_bloom { perf_snapshot.bloom_us = t.elapsed().as_micros() as u32; }
+                        if let Some(t) = t_bloom {
+                            perf_snapshot.bloom_us = t.elapsed().as_micros() as u32;
+                        }
 
                         // Stage 3: Composite game output into TV frame
-                        let t_composite = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
-                        if let Some(t) = t_composite { perf_snapshot.composite_us = t.elapsed().as_micros() as u32; }
+                        let t_composite = if do_detail_sample {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
+                        composite_screen_fast(
+                            &mut composite_buffer,
+                            &crt_buffer,
+                            &screen_curve_table,
+                            WINDOW_WIDTH,
+                        );
+                        if let Some(t) = t_composite {
+                            perf_snapshot.composite_us = t.elapsed().as_micros() as u32;
+                        }
 
                         // Stage 4: Glass / bezel effects
-                        let t_glass = if do_detail_sample { Some(std::time::Instant::now()) } else { None };
+                        let t_glass = if do_detail_sample {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
                         if crt_enabled && glass_intensity > 0 {
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
+                            apply_glass_effects(
+                                &mut composite_buffer,
+                                &crt_buffer,
+                                &glare_table,
+                                &glass_thickness_table,
+                                &ghost_alpha_table,
+                                WINDOW_WIDTH,
+                                glass_intensity,
+                                false,
+                                SCREEN_W,
+                            );
                         }
-                        if let Some(t) = t_glass { perf_snapshot.glass_us = t.elapsed().as_micros() as u32; }
+                        if let Some(t) = t_glass {
+                            perf_snapshot.glass_us = t.elapsed().as_micros() as u32;
+                        }
                     } // end if !paused && !quick_overlay
 
                     // Latch detailed display string once per sample
-                    if do_detail_sample { fmt_detail_line(&mut detail_display, &perf_snapshot); }
+                    if do_detail_sample {
+                        fmt_detail_line(&mut detail_display, &perf_snapshot);
+                    }
                     if is_rewinding {
                         let sx = SCREEN_X;
                         let sy = SCREEN_Y;
@@ -4901,13 +6614,14 @@ fn main() {
                             let bleed_h = vhs_hash(0, row, fc / 2);
                             if bleed_h % 10 < 3 {
                                 let sp = 1 + (bleed_h as usize % 2); // 1–2 px
-                                // Shift red channel left (source = right neighbour)
+                                                                     // Shift red channel left (source = right neighbour)
                                 for x in 0..sw.saturating_sub(sp) {
                                     let di = buf_y * WINDOW_WIDTH + sx + x;
                                     let si = di + sp;
                                     if di < composite_buffer.len() && si < composite_buffer.len() {
                                         let src_r = (composite_buffer[si] >> 16) & 0xFF;
-                                        composite_buffer[di] = (src_r << 16) | (composite_buffer[di] & 0x00FFFF);
+                                        composite_buffer[di] =
+                                            (src_r << 16) | (composite_buffer[di] & 0x00FFFF);
                                     }
                                 }
                                 // Shift blue channel right (source = left neighbour)
@@ -4916,7 +6630,8 @@ fn main() {
                                     let si = di - sp;
                                     if di < composite_buffer.len() && si < composite_buffer.len() {
                                         let src_b = composite_buffer[si] & 0xFF;
-                                        composite_buffer[di] = (composite_buffer[di] & 0xFFFF00) | src_b;
+                                        composite_buffer[di] =
+                                            (composite_buffer[di] & 0xFFFF00) | src_b;
                                     }
                                 }
                             }
@@ -4924,7 +6639,9 @@ fn main() {
                             // ── Per-pixel: desaturate, pump, snow, roll bar, speed lines ──
                             for x in 0..sw {
                                 let idx = buf_y * WINDOW_WIDTH + sx + x;
-                                if idx >= composite_buffer.len() { break; }
+                                if idx >= composite_buffer.len() {
+                                    break;
+                                }
                                 let p = composite_buffer[idx];
                                 let mut r = (p >> 16) & 0xFF;
                                 let mut g = (p >> 8) & 0xFF;
@@ -4953,9 +6670,19 @@ fn main() {
 
                                 // ── 6. Rolling dark bar (~40 px, scrolls upward) ──
                                 let roll_y = ((fc.wrapping_mul(3)) % sh as u64) as usize;
-                                let dist = if row >= roll_y { row - roll_y } else { row + sh - roll_y };
+                                let dist = if row >= roll_y {
+                                    row - roll_y
+                                } else {
+                                    row + sh - roll_y
+                                };
                                 if dist < 40 {
-                                    let fade = if dist < 10 { 128u32 } else if dist < 30 { 160 } else { 192 };
+                                    let fade = if dist < 10 {
+                                        128u32
+                                    } else if dist < 30 {
+                                        160
+                                    } else {
+                                        192
+                                    };
                                     r = (r * fade) >> 8;
                                     g = (g * fade) >> 8;
                                     b = (b * fade) >> 8;
@@ -4971,13 +6698,15 @@ fn main() {
                                     }
                                 }
 
-                                composite_buffer[idx] = (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+                                composite_buffer[idx] =
+                                    (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
                             }
                         }
 
                         // ── 1. Tracking lines: 4 bright noise bands scrolling down ──
                         for band in 0..4u64 {
-                            let by = ((fc.wrapping_mul(7).wrapping_add(band * 193)) % sh as u64) as usize;
+                            let by = ((fc.wrapping_mul(7).wrapping_add(band * 193)) % sh as u64)
+                                as usize;
                             for dy in 0..3usize {
                                 let row = (by + dy) % sh;
                                 let buf_y = sy + row;
@@ -4993,11 +6722,13 @@ fn main() {
                         }
                     }
 
-                    let has_rewind_bar = !paused && is_rewinding && !rewind_buffer.snapshots.is_empty();
+                    let has_rewind_bar =
+                        !paused && is_rewinding && !rewind_buffer.snapshots.is_empty();
 
                     // Rewind buffer HUD bar (VCR style, top-right)
                     if has_rewind_bar {
-                        let rewind_pct = (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
+                        let rewind_pct =
+                            (rewind_buffer.snapshots.len() * 100) / rewind_buffer.max_snapshots;
                         let bar_w: usize = 60;
                         let bar_h: usize = 4;
                         let bar_x = SCREEN_X + SCREEN_W - 70;
@@ -5009,7 +6740,8 @@ fn main() {
                                 let py = bar_y + dy;
                                 let idx = py * WINDOW_WIDTH + px;
                                 if idx < composite_buffer.len() {
-                                    composite_buffer[idx] = if dx < filled { 0x00DDDD } else { 0x102030 };
+                                    composite_buffer[idx] =
+                                        if dx < filled { 0x00DDDD } else { 0x102030 };
                                 }
                             }
                         }
@@ -5034,7 +6766,14 @@ fn main() {
                                 }
                             }
                         }
-                        draw_text(&mut composite_buffer, "<< REW", osd_x, osd_y, 0x00FFFF, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "<< REW",
+                            osd_x,
+                            osd_y,
+                            0x00FFFF,
+                            WINDOW_WIDTH,
+                        );
                         // Fake backward-counting timecode  MM:SS:FF
                         let tc_total = 36000u64.saturating_sub(fc % 36000);
                         let display_s = tc_total / 60;
@@ -5042,13 +6781,25 @@ fn main() {
                         let ss = display_s % 60;
                         let ff = tc_total % 60;
                         let tc_buf: [u8; 8] = [
-                            b'0' + (mm / 10) as u8, b'0' + (mm % 10) as u8, b':',
-                            b'0' + (ss / 10) as u8, b'0' + (ss % 10) as u8, b':',
-                            b'0' + (ff / 10) as u8, b'0' + (ff % 10) as u8,
+                            b'0' + (mm / 10) as u8,
+                            b'0' + (mm % 10) as u8,
+                            b':',
+                            b'0' + (ss / 10) as u8,
+                            b'0' + (ss % 10) as u8,
+                            b':',
+                            b'0' + (ff / 10) as u8,
+                            b'0' + (ff % 10) as u8,
                         ];
                         // SAFETY: all bytes are ASCII digits or ':', guaranteed valid UTF-8
                         let tc = unsafe { std::str::from_utf8_unchecked(&tc_buf) };
-                        draw_text(&mut composite_buffer, tc, osd_x + 8, osd_y + 10, 0x00DDDD, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            tc,
+                            osd_x + 8,
+                            osd_y + 10,
+                            0x00DDDD,
+                            WINDOW_WIDTH,
+                        );
                     }
 
                     // Overlay message display
@@ -5081,20 +6832,25 @@ fn main() {
                         osd_timer -= 1;
 
                         // Fade: full brightness for first 90 frames, then fade over last 30
-                        let alpha = if osd_timer > 30 { 255u32 } else { osd_timer * 255 / 30 };
+                        let alpha = if osd_timer > 30 {
+                            255u32
+                        } else {
+                            osd_timer * 255 / 30
+                        };
 
                         if osd_type != OsdType::None {
                             // CRT TV OSD: thin green phosphor pipes ||||||----- spanning full screen width
                             let pad: usize = 40;
                             let icon_space: usize = 30; // space for icon on the left
-                            let val_space: usize = 40;  // space for value on the right
+                            let val_space: usize = 40; // space for value on the right
                             let osd_left = SCREEN_X + pad + icon_space;
                             let osd_right = SCREEN_X + SCREEN_W - pad - val_space;
                             let available_w = osd_right - osd_left;
 
                             let num_bars: usize = 50;
-                            let bar_w: usize = 2;      // thin pipes
-                            let bar_gap: usize = ((available_w - num_bars * bar_w) / (num_bars - 1)).max(2);
+                            let bar_w: usize = 2; // thin pipes
+                            let bar_gap: usize =
+                                ((available_w - num_bars * bar_w) / (num_bars - 1)).max(2);
                             let bar_stride = bar_w + bar_gap;
                             let total_w = num_bars * bar_stride - bar_gap;
                             let bar_h: usize = 28;
@@ -5134,56 +6890,122 @@ fn main() {
                                     // Center dot (3x3)
                                     for dy in 0..3usize {
                                         for dx in 0..3usize {
-                                            set_px(&mut composite_buffer, icon_x + 5 + dx, icon_y + 5 + dy, icon_color);
+                                            set_px(
+                                                &mut composite_buffer,
+                                                icon_x + 5 + dx,
+                                                icon_y + 5 + dy,
+                                                icon_color,
+                                            );
                                         }
                                     }
                                     // Circle (radius ~4)
                                     let circle_pts: [(usize, usize); 16] = [
-                                        (6,2),(7,2),(8,3),(9,4),(9,5),(9,6),(9,7),(8,8),
-                                        (7,9),(6,9),(5,8),(4,9),(3,8),(2,7),(2,6),(2,5),
+                                        (6, 2),
+                                        (7, 2),
+                                        (8, 3),
+                                        (9, 4),
+                                        (9, 5),
+                                        (9, 6),
+                                        (9, 7),
+                                        (8, 8),
+                                        (7, 9),
+                                        (6, 9),
+                                        (5, 8),
+                                        (4, 9),
+                                        (3, 8),
+                                        (2, 7),
+                                        (2, 6),
+                                        (2, 5),
                                     ];
-                                    let circle_pts2: [(usize, usize); 4] = [
-                                        (2,4),(3,3),(4,2),(5,2),
-                                    ];
-                                    for &(dx,dy) in circle_pts.iter().chain(circle_pts2.iter()) {
-                                        set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                    let circle_pts2: [(usize, usize); 4] =
+                                        [(2, 4), (3, 3), (4, 2), (5, 2)];
+                                    for &(dx, dy) in circle_pts.iter().chain(circle_pts2.iter()) {
+                                        set_px(
+                                            &mut composite_buffer,
+                                            icon_x + dx,
+                                            icon_y + dy,
+                                            icon_color,
+                                        );
                                     }
                                     // Rays (8 directions, 2px each)
                                     let rays: [(i32, i32); 8] = [
-                                        (0,-1),(0,1),(-1,0),(1,0),
-                                        (-1,-1),(1,-1),(-1,1),(1,1),
+                                        (0, -1),
+                                        (0, 1),
+                                        (-1, 0),
+                                        (1, 0),
+                                        (-1, -1),
+                                        (1, -1),
+                                        (-1, 1),
+                                        (1, 1),
                                     ];
                                     for &(rdx, rdy) in &rays {
                                         for dist in 5..7i32 {
                                             let rx = (6i32 + rdx * dist) as usize;
                                             let ry = (6i32 + rdy * dist) as usize;
-                                            set_px(&mut composite_buffer, icon_x + rx, icon_y + ry, icon_color);
+                                            set_px(
+                                                &mut composite_buffer,
+                                                icon_x + rx,
+                                                icon_y + ry,
+                                                icon_color,
+                                            );
                                         }
                                     }
                                 }
                                 OsdType::Contrast => {
                                     // Half-circle icon: 13x13 pixel art
                                     // Draw circle outline
-                                    let outline: [(usize,usize); 24] = [
-                                        (5,0),(6,0),(7,0),
-                                        (8,1),(9,2),(10,3),
-                                        (10,4),(10,5),(10,6),(10,7),(10,8),
-                                        (9,9),(8,10),(7,11),(6,11),(5,11),
-                                        (4,10),(3,9),(2,8),(2,7),(2,6),(2,5),(2,4),
-                                        (3,2),
+                                    let outline: [(usize, usize); 24] = [
+                                        (5, 0),
+                                        (6, 0),
+                                        (7, 0),
+                                        (8, 1),
+                                        (9, 2),
+                                        (10, 3),
+                                        (10, 4),
+                                        (10, 5),
+                                        (10, 6),
+                                        (10, 7),
+                                        (10, 8),
+                                        (9, 9),
+                                        (8, 10),
+                                        (7, 11),
+                                        (6, 11),
+                                        (5, 11),
+                                        (4, 10),
+                                        (3, 9),
+                                        (2, 8),
+                                        (2, 7),
+                                        (2, 6),
+                                        (2, 5),
+                                        (2, 4),
+                                        (3, 2),
                                     ];
-                                    let outline2: [(usize,usize); 2] = [(4,1),(3,3)];
-                                    for &(dx,dy) in outline.iter().chain(outline2.iter()) {
-                                        set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                    let outline2: [(usize, usize); 2] = [(4, 1), (3, 3)];
+                                    for &(dx, dy) in outline.iter().chain(outline2.iter()) {
+                                        set_px(
+                                            &mut composite_buffer,
+                                            icon_x + dx,
+                                            icon_y + dy,
+                                            icon_color,
+                                        );
                                     }
                                     // Fill left half (x <= 6)
                                     for dy in 1..11usize {
                                         let x_start = match dy {
-                                            1 => 4, 2 => 3, 3 => 3, 9 => 3, 10 => 4,
+                                            1 => 4,
+                                            2 => 3,
+                                            3 => 3,
+                                            9 => 3,
+                                            10 => 4,
                                             _ => 2,
                                         };
                                         for dx in x_start..7usize {
-                                            set_px(&mut composite_buffer, icon_x + dx, icon_y + dy, icon_color);
+                                            set_px(
+                                                &mut composite_buffer,
+                                                icon_x + dx,
+                                                icon_y + dy,
+                                                icon_color,
+                                            );
                                         }
                                     }
                                 }
@@ -5191,7 +7013,8 @@ fn main() {
                             }
 
                             // === Draw bars ===
-                            let filled_count = (((osd_value + 50) as usize) * num_bars / 100).min(num_bars);
+                            let filled_count =
+                                (((osd_value + 50) as usize) * num_bars / 100).min(num_bars);
 
                             for i in 0..num_bars {
                                 let sx = bar_x + i * bar_stride;
@@ -5247,7 +7070,9 @@ fn main() {
                                     }
                                     if center_x + 1 < WINDOW_WIDTH {
                                         let idx2 = ty * WINDOW_WIDTH + center_x + 1;
-                                        if idx2 < composite_buffer.len() { composite_buffer[idx2] = icon_color; }
+                                        if idx2 < composite_buffer.len() {
+                                            composite_buffer[idx2] = icon_color;
+                                        }
                                     }
                                 }
                             }
@@ -5255,7 +7080,14 @@ fn main() {
                             // Value text to the right
                             let val_text = format!("{:+}", osd_value);
                             let val_x = bar_x + total_w + 10;
-                            draw_text(&mut composite_buffer, &val_text, val_x, bar_y + 10, icon_color, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                &val_text,
+                                val_x,
+                                bar_y + 10,
+                                icon_color,
+                                WINDOW_WIDTH,
+                            );
 
                             // CRT scanline effect over OSD region
                             let osd_region_x0 = (SCREEN_X + pad).saturating_sub(4);
@@ -5283,7 +7115,9 @@ fn main() {
                     {
                         let mut notify_y = SCREEN_Y + 40;
                         for notif in achievement_engine.notifications.iter() {
-                            if notif.frames_remaining == 0 { continue; }
+                            if notif.frames_remaining == 0 {
+                                continue;
+                            }
                             let text = &notif.cached_text;
                             let text_w = text.len() * 4;
                             let nx = SCREEN_X + SCREEN_W - text_w - 16;
@@ -5298,7 +7132,14 @@ fn main() {
                                     }
                                 }
                             }
-                            draw_text(&mut composite_buffer, text, nx, notify_y, 0xF8D878, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                text,
+                                nx,
+                                notify_y,
+                                0xF8D878,
+                                WINDOW_WIDTH,
+                            );
                             notify_y += 14;
                         }
                     }
@@ -5325,7 +7166,14 @@ fn main() {
                                     }
                                 }
                             }
-                            draw_text(&mut composite_buffer, rec_text, rx, ry, 0xFF4444, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                rec_text,
+                                rx,
+                                ry,
+                                0xFF4444,
+                                WINDOW_WIDTH,
+                            );
                         }
                         if recorder.is_playing() {
                             let play_text = "> PLAY";
@@ -5346,13 +7194,21 @@ fn main() {
                                     }
                                 }
                             }
-                            draw_text(&mut composite_buffer, play_text, px, py, 0x44FF44, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                play_text,
+                                px,
+                                py,
+                                0x44FF44,
+                                WINDOW_WIDTH,
+                            );
                         }
                     }
 
                     // Performance overlay (F10 cycles Off -> Basic -> Detailed -> Off)
                     if overlay_level != PerfOverlayLevel::Off {
-                        let has_transport_hud = !paused && (recorder.is_recording() || recorder.is_playing());
+                        let has_transport_hud =
+                            !paused && (recorder.is_recording() || recorder.is_playing());
                         fps_frames += 1;
                         let elapsed = fps_timer.elapsed().as_secs_f64();
                         if elapsed >= 1.0 {
@@ -5364,13 +7220,28 @@ fn main() {
                         if !fps_display.is_empty() {
                             let fx = SCREEN_X + SCREEN_W - fps_display.len() * 4 - 8;
                             let fy = perf_basic_overlay_y(has_rewind_bar);
-                            draw_text(&mut composite_buffer, &fps_display, fx, fy, 0x00FF00, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                &fps_display,
+                                fx,
+                                fy,
+                                0x00FF00,
+                                WINDOW_WIDTH,
+                            );
                         }
                         // Detailed: show sampled stage breakdown below the FPS line
-                        if overlay_level == PerfOverlayLevel::Detailed && !detail_display.is_empty() {
+                        if overlay_level == PerfOverlayLevel::Detailed && !detail_display.is_empty()
+                        {
                             let dx = SCREEN_X + 8;
                             let dy = perf_detail_overlay_y(has_transport_hud);
-                            draw_text(&mut composite_buffer, &detail_display, dx, dy, 0xFFAA00, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                &detail_display,
+                                dx,
+                                dy,
+                                0xFFAA00,
+                                WINDOW_WIDTH,
+                            );
                         }
                     }
 
@@ -5398,7 +7269,14 @@ fn main() {
                                 }
                             }
                         }
-                        draw_text(&mut composite_buffer, &cached_net_text, nx, ny, 0x44CCFF, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            &cached_net_text,
+                            nx,
+                            ny,
+                            0x44CCFF,
+                            WINDOW_WIDTH,
+                        );
                     }
 
                     // Help overlay
@@ -5416,51 +7294,191 @@ fn main() {
                                 }
                             }
                         }
-                        
+
                         let help_x = SCREEN_X + 40;
                         let mut help_y = SCREEN_Y + 30;
                         let color = 0x44FF44;
                         let dim = 0x888888;
-                        
-                        draw_text(&mut composite_buffer, "=== CONTROLS ===", help_x, help_y, 0xFFFF00, WINDOW_WIDTH);
+
+                        draw_text(
+                            &mut composite_buffer,
+                            "=== CONTROLS ===",
+                            help_x,
+                            help_y,
+                            0xFFFF00,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 20;
-                        draw_text(&mut composite_buffer, "WASD/ARROWS  D-PAD", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "WASD/ARROWS  D-PAD",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "K  A BUTTON", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "K  A BUTTON",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "J  B BUTTON", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "J  B BUTTON",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "ENTER  START", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "ENTER  START",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "RSHIFT  SELECT", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "RSHIFT  SELECT",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "Z/X  TURBO A/B", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "Z/X  TURBO A/B",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 24;
-                        draw_text(&mut composite_buffer, "=== EMULATOR ===", help_x, help_y, 0xFFFF00, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "=== EMULATOR ===",
+                            help_x,
+                            help_y,
+                            0xFFFF00,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 20;
-                        draw_text(&mut composite_buffer, "ESC  PAUSE MENU", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "ESC  PAUSE MENU",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "TAB  FAST FORWARD", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "TAB  FAST FORWARD",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "BACKSPACE  REWIND", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "BACKSPACE  REWIND",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "M  MUTE/UNMUTE", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "M  MUTE/UNMUTE",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F1  CRT FILTER", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F1  CRT FILTER",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F2-F4,F6  SAVE SLOT", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F2-F4,F6  SAVE SLOT",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F5/F9  SAVE/LOAD", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F5/F9  SAVE/LOAD",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F7  RESET GAME", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F7  RESET GAME",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F8  SCREENSHOT", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F8  SCREENSHOT",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F10 PERF OVERLAY", help_x, help_y, color, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F10 PERF OVERLAY",
+                            help_x,
+                            help_y,
+                            color,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 12;
-                        draw_text(&mut composite_buffer, "F12  THIS HELP", help_x, help_y, dim, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "F12  THIS HELP",
+                            help_x,
+                            help_y,
+                            dim,
+                            WINDOW_WIDTH,
+                        );
                         help_y += 24;
-                        draw_text(&mut composite_buffer, "PRESS F12 TO CLOSE", help_x, help_y, dim, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "PRESS F12 TO CLOSE",
+                            help_x,
+                            help_y,
+                            dim,
+                            WINDOW_WIDTH,
+                        );
                     }
 
                     // Draw quit combo progress overlay (uses previous frame's counter)
@@ -5472,7 +7490,14 @@ fn main() {
                         let bar_y = SCREEN_Y + SCREEN_H - 40;
                         let text_x = bar_x + (bar_w - 17 * 4) / 2;
                         let text_y = bar_y - 10;
-                        draw_text(&mut composite_buffer, "RETURNING TO MENU", text_x, text_y, 0xFFFFFF, WINDOW_WIDTH);
+                        draw_text(
+                            &mut composite_buffer,
+                            "RETURNING TO MENU",
+                            text_x,
+                            text_y,
+                            0xFFFFFF,
+                            WINDOW_WIDTH,
+                        );
                         for y in bar_y..bar_y + bar_h {
                             for x in bar_x..bar_x + bar_w {
                                 if y * WINDOW_WIDTH + x < composite_buffer.len() {
@@ -5489,7 +7514,7 @@ fn main() {
                             }
                         }
                     }
-                    
+
                     // NES-style pause menu rendering
                     if paused {
                         // Update pause cursor blink (~500ms at 60fps)
@@ -5507,14 +7532,14 @@ fn main() {
                             let b = (p & 0xFF) / 3;
                             menu_framebuffer[i] = (r << 16) | (g << 8) | b;
                         }
-                        
+
                         // Box background (tile coordinates: 32 cols × 30 rows)
                         // Center a box roughly 20 tiles wide × 22 tiles tall
                         let box_left = 6;
                         let box_right = 26;
                         let box_top = 3;
                         let box_bottom = 28;
-                        
+
                         // Fill box background
                         for ty in box_top..box_bottom {
                             for tx in box_left..box_right {
@@ -5531,7 +7556,7 @@ fn main() {
                                 }
                             }
                         }
-                        
+
                         // Draw border using MENU_LIGHT_BLUE
                         for tx in box_left..box_right {
                             let px = tx * 8;
@@ -5569,15 +7594,26 @@ fn main() {
                                 }
                             }
                         }
-                        
+
                         // Title: game name or "PAUSED" centered
                         if !current_rom_name.is_empty() {
-                            let title: String = current_rom_name.to_uppercase().chars().take(24).collect();
-                            draw_text_centered_8x8(&mut menu_framebuffer, &format!("\x11 {} \x11", title), box_top + 1, MENU_GOLD);
+                            let title: String =
+                                current_rom_name.to_uppercase().chars().take(24).collect();
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                &format!("\x11 {} \x11", title),
+                                box_top + 1,
+                                MENU_GOLD,
+                            );
                         } else {
-                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 PAUSED \x11", box_top + 1, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "\x11 PAUSED \x11",
+                                box_top + 1,
+                                MENU_GOLD,
+                            );
                         }
-                        
+
                         // Separator
                         let sep_y = (box_top + 2) * 8 + 4;
                         for x in (box_left * 8 + 8)..(box_right * 8 - 8) {
@@ -5585,7 +7621,7 @@ fn main() {
                                 menu_framebuffer[sep_y * 256 + x] = MENU_DARK_GRAY;
                             }
                         }
-                        
+
                         // Menu items (use cached slot labels)
                         let net_status = match &netplay.state {
                             NetplayState::Connected => format!("NETPLAY  ({}MS)", netplay.ping_ms),
@@ -5601,7 +7637,11 @@ fn main() {
                         let ach_label = if achievement_engine.achievements.is_empty() {
                             "ACHIEVEMENTS".to_string()
                         } else {
-                            format!("ACHIEVEMENTS ({}/{})", achievement_engine.unlocked_count, achievement_engine.achievements.len())
+                            format!(
+                                "ACHIEVEMENTS ({}/{})",
+                                achievement_engine.unlocked_count,
+                                achievement_engine.achievements.len()
+                            )
                         };
                         let rec_label = if recorder.is_recording() {
                             format!("SAVE REC ({} FR)", recorder.frame_count())
@@ -5614,31 +7654,69 @@ fn main() {
                         } else {
                             "ADD TO FAVORITES".to_string()
                         };
-                        let items: Vec<&str> = vec!["RESUME GAME", &pause_save_label, &pause_load_label, &cheat_label, &net_status, script_status, "UNLOAD SCRIPT", &fav_label, "RETURN TO MENU", &ach_label, &rec_label, "LOAD RECORDING", "EXPORT FM2", "CONTROLS"];
+                        let items: Vec<&str> = vec![
+                            "RESUME GAME",
+                            &pause_save_label,
+                            &pause_load_label,
+                            &cheat_label,
+                            &net_status,
+                            script_status,
+                            "UNLOAD SCRIPT",
+                            &fav_label,
+                            "RETURN TO MENU",
+                            &ach_label,
+                            &rec_label,
+                            "LOAD RECORDING",
+                            "EXPORT FM2",
+                            "CONTROLS",
+                        ];
                         for (i, item) in items.iter().enumerate() {
                             let row = box_top + 3 + i;
                             let is_selected = i == pause_selected;
-                            
+
                             if is_selected {
                                 // Highlight bar (always visible)
-                                draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, box_left * 8 + 4, box_right * 8 - 4, 0x3C3C8C);
+                                draw_highlight_bar(
+                                    &mut menu_framebuffer,
+                                    row * 8,
+                                    8,
+                                    box_left * 8 + 4,
+                                    box_right * 8 - 4,
+                                    0x3C3C8C,
+                                );
                                 // Arrow blinks
                                 if pause_cursor_visible {
-                                    draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, MENU_WHITE);
+                                    draw_char_8x8(
+                                        &mut menu_framebuffer,
+                                        '\x10',
+                                        box_left + 1,
+                                        row,
+                                        MENU_WHITE,
+                                    );
                                 }
                             }
-                            
+
                             let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
                             draw_text_8x8(&mut menu_framebuffer, item, box_left + 2, row, color);
                         }
-                        
+
                         // Hint at bottom of box
                         if pause_selected == 1 || pause_selected == 2 {
-                            draw_text_centered_8x8(&mut menu_framebuffer, "A:SELECT  L/R:SLOT", box_bottom - 1, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "A:SELECT  L/R:SLOT",
+                                box_bottom - 1,
+                                MENU_DARK_GRAY,
+                            );
                         } else {
-                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:RESUME  A:SELECT", box_bottom - 1, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "ESC:RESUME  A:SELECT",
+                                box_bottom - 1,
+                                MENU_DARK_GRAY,
+                            );
                         }
-                        
+
                         if cheats_submenu {
                             // Cheats submenu overlay
                             let cb_left = 4;
@@ -5668,8 +7746,12 @@ fn main() {
                                     let x = px + dx;
                                     let yt = cb_top * 8;
                                     let yb = cb_bottom * 8 - 1;
-                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE; }
-                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE; }
+                                    if yt < 240 && x < 256 {
+                                        menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE;
+                                    }
+                                    if yb < 240 && x < 256 {
+                                        menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE;
+                                    }
                                 }
                             }
                             for ty in cb_top..cb_bottom {
@@ -5680,41 +7762,90 @@ fn main() {
                                         let xl = cb_left * 8;
                                         let xr = cb_right * 8 - 1;
                                         menu_framebuffer[y * 256 + xl] = MENU_LIGHT_BLUE;
-                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE; }
+                                        if xr < 256 {
+                                            menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE;
+                                        }
                                     }
                                 }
                             }
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 CHEATS \x11", cb_top + 1, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "\x11 CHEATS \x11",
+                                cb_top + 1,
+                                MENU_GOLD,
+                            );
 
                             // List cheats + ADD CODE + CLEAR ALL
                             let max_visible = 12usize; // max rows for cheat list
                             let total_items = bus.cheats.len() + 2;
                             let scroll_offset = if cheats_selected >= max_visible {
                                 cheats_selected - max_visible + 1
-                            } else { 0 };
+                            } else {
+                                0
+                            };
 
                             for i in 0..max_visible.min(total_items) {
                                 let item_idx = scroll_offset + i;
-                                if item_idx >= total_items { break; }
+                                if item_idx >= total_items {
+                                    break;
+                                }
                                 let row = cb_top + 3 + i;
-                                if row >= cb_bottom - 1 { break; }
+                                if row >= cb_bottom - 1 {
+                                    break;
+                                }
                                 let is_sel = item_idx == cheats_selected;
 
                                 if is_sel {
-                                    draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, cb_left * 8 + 4, cb_right * 8 - 4, 0x3C3C8C);
-                                    draw_char_8x8(&mut menu_framebuffer, '\x10', cb_left + 1, row, MENU_WHITE);
+                                    draw_highlight_bar(
+                                        &mut menu_framebuffer,
+                                        row * 8,
+                                        8,
+                                        cb_left * 8 + 4,
+                                        cb_right * 8 - 4,
+                                        0x3C3C8C,
+                                    );
+                                    draw_char_8x8(
+                                        &mut menu_framebuffer,
+                                        '\x10',
+                                        cb_left + 1,
+                                        row,
+                                        MENU_WHITE,
+                                    );
                                 }
 
                                 let color = if is_sel { MENU_WHITE } else { MENU_GRAY };
                                 if item_idx < bus.cheats.len() {
-                                    let status = if bus.cheats[item_idx].enabled { "ON " } else { "OFF" };
-                                    let label = format!("[{}] {}", status, bus.cheats[item_idx].code_str);
-                                    draw_text_8x8(&mut menu_framebuffer, &label, cb_left + 2, row, color);
+                                    let status = if bus.cheats[item_idx].enabled {
+                                        "ON "
+                                    } else {
+                                        "OFF"
+                                    };
+                                    let label =
+                                        format!("[{}] {}", status, bus.cheats[item_idx].code_str);
+                                    draw_text_8x8(
+                                        &mut menu_framebuffer,
+                                        &label,
+                                        cb_left + 2,
+                                        row,
+                                        color,
+                                    );
                                 } else if item_idx == bus.cheats.len() {
-                                    draw_text_8x8(&mut menu_framebuffer, "ADD CODE...", cb_left + 2, row, color);
+                                    draw_text_8x8(
+                                        &mut menu_framebuffer,
+                                        "ADD CODE...",
+                                        cb_left + 2,
+                                        row,
+                                        color,
+                                    );
                                 } else {
-                                    draw_text_8x8(&mut menu_framebuffer, "CLEAR ALL", cb_left + 2, row, color);
+                                    draw_text_8x8(
+                                        &mut menu_framebuffer,
+                                        "CLEAR ALL",
+                                        cb_left + 2,
+                                        row,
+                                        color,
+                                    );
                                 }
                             }
 
@@ -5730,21 +7861,49 @@ fn main() {
                                         }
                                     }
                                 }
-                                draw_text_8x8(&mut menu_framebuffer, "GAME GENIE CODE:", 7, input_y, 0xF8D878);
-                                let display = if cheat_input_buffer.is_empty() { "________" } else { &cheat_input_buffer };
-                                draw_text_8x8(&mut menu_framebuffer, display, 9, input_y + 1, 0xFCFCFC);
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    "GAME GENIE CODE:",
+                                    7,
+                                    input_y,
+                                    0xF8D878,
+                                );
+                                let display = if cheat_input_buffer.is_empty() {
+                                    "________"
+                                } else {
+                                    &cheat_input_buffer
+                                };
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    display,
+                                    9,
+                                    input_y + 1,
+                                    0xFCFCFC,
+                                );
                             }
 
                             // Status message
                             if cheat_message_timer > 0 {
                                 cheat_message_timer -= 1;
                                 if let Some(ref msg) = cheat_message {
-                                    draw_text_centered_8x8(&mut menu_framebuffer, msg, cb_bottom - 2, 0x44FF44);
+                                    draw_text_centered_8x8(
+                                        &mut menu_framebuffer,
+                                        msg,
+                                        cb_bottom - 2,
+                                        0x44FF44,
+                                    );
                                 }
-                                if cheat_message_timer == 0 { cheat_message = None; }
+                                if cheat_message_timer == 0 {
+                                    cheat_message = None;
+                                }
                             }
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:TOGGLE  BS:DEL", cb_bottom - 1, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "ESC:BACK  A:TOGGLE  BS:DEL",
+                                cb_bottom - 1,
+                                MENU_DARK_GRAY,
+                            );
                         }
 
                         // Netplay submenu overlay
@@ -5776,8 +7935,12 @@ fn main() {
                                     let x = px + dx;
                                     let yt = nb_top * 8;
                                     let yb = nb_bottom * 8 - 1;
-                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE; }
-                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE; }
+                                    if yt < 240 && x < 256 {
+                                        menu_framebuffer[yt * 256 + x] = MENU_LIGHT_BLUE;
+                                    }
+                                    if yb < 240 && x < 256 {
+                                        menu_framebuffer[yb * 256 + x] = MENU_LIGHT_BLUE;
+                                    }
                                 }
                             }
                             for ty in nb_top..nb_bottom {
@@ -5788,16 +7951,32 @@ fn main() {
                                         let xl = nb_left * 8;
                                         let xr = nb_right * 8 - 1;
                                         menu_framebuffer[y * 256 + xl] = MENU_LIGHT_BLUE;
-                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE; }
+                                        if xr < 256 {
+                                            menu_framebuffer[y * 256 + xr] = MENU_LIGHT_BLUE;
+                                        }
                                     }
                                 }
                             }
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 NETPLAY \x11", nb_top + 1, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "\x11 NETPLAY \x11",
+                                nb_top + 1,
+                                MENU_GOLD,
+                            );
 
                             // Status line
-                            let status_color = if netplay.is_connected() { 0x44FF44u32 } else { MENU_GRAY };
-                            draw_text_centered_8x8(&mut menu_framebuffer, netplay.status_text(), nb_top + 2, status_color);
+                            let status_color = if netplay.is_connected() {
+                                0x44FF44u32
+                            } else {
+                                MENU_GRAY
+                            };
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                netplay.status_text(),
+                                nb_top + 2,
+                                status_color,
+                            );
 
                             let host_label = format!("HOST (PORT {})", netplay.port);
                             let delay_str = format!("INPUT DELAY: {}", netplay.input_delay);
@@ -5806,13 +7985,27 @@ fn main() {
                             } else {
                                 format!("PORT: {}", netplay_port_input)
                             };
-                            let np_items: [&str; 5] = [&port_str, &host_label, "JOIN...", "DISCONNECT", &delay_str];
+                            let np_items: [&str; 5] =
+                                [&port_str, &host_label, "JOIN...", "DISCONNECT", &delay_str];
                             for (i, item) in np_items.iter().enumerate() {
                                 let row = nb_top + 4 + i * 2;
                                 let is_sel = i == netplay_selected;
                                 if is_sel {
-                                    draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, nb_left * 8 + 4, nb_right * 8 - 4, 0x3C3C8C);
-                                    draw_char_8x8(&mut menu_framebuffer, '\x10', nb_left + 1, row, MENU_WHITE);
+                                    draw_highlight_bar(
+                                        &mut menu_framebuffer,
+                                        row * 8,
+                                        8,
+                                        nb_left * 8 + 4,
+                                        nb_right * 8 - 4,
+                                        0x3C3C8C,
+                                    );
+                                    draw_char_8x8(
+                                        &mut menu_framebuffer,
+                                        '\x10',
+                                        nb_left + 1,
+                                        row,
+                                        MENU_WHITE,
+                                    );
                                 }
                                 let color = if is_sel { MENU_WHITE } else { MENU_GRAY };
                                 draw_text_8x8(&mut menu_framebuffer, item, nb_left + 2, row, color);
@@ -5830,9 +8023,25 @@ fn main() {
                                         }
                                     }
                                 }
-                                draw_text_8x8(&mut menu_framebuffer, "IP:PORT:", 9, nb_top + 9, 0xF8D878);
-                                let ip_display = if netplay_ip_input.is_empty() { "_" } else { &netplay_ip_input };
-                                draw_text_8x8(&mut menu_framebuffer, ip_display, 9, nb_top + 11, 0xFCFCFC);
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    "IP:PORT:",
+                                    9,
+                                    nb_top + 9,
+                                    0xF8D878,
+                                );
+                                let ip_display = if netplay_ip_input.is_empty() {
+                                    "_"
+                                } else {
+                                    &netplay_ip_input
+                                };
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    ip_display,
+                                    9,
+                                    nb_top + 11,
+                                    0xFCFCFC,
+                                );
                             }
 
                             // Port input overlay when editing
@@ -5847,12 +8056,33 @@ fn main() {
                                         }
                                     }
                                 }
-                                draw_text_8x8(&mut menu_framebuffer, "PORT:", 12, nb_top + 5, 0xF8D878);
-                                let port_display = if netplay_port_input.is_empty() { "_" } else { &netplay_port_input };
-                                draw_text_8x8(&mut menu_framebuffer, port_display, 18, nb_top + 5, 0xFCFCFC);
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    "PORT:",
+                                    12,
+                                    nb_top + 5,
+                                    0xF8D878,
+                                );
+                                let port_display = if netplay_port_input.is_empty() {
+                                    "_"
+                                } else {
+                                    &netplay_port_input
+                                };
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    port_display,
+                                    18,
+                                    nb_top + 5,
+                                    0xFCFCFC,
+                                );
                             }
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK  A:SELECT", nb_bottom - 1, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "ESC:BACK  A:SELECT",
+                                nb_bottom - 1,
+                                MENU_DARK_GRAY,
+                            );
                         }
 
                         // Achievement submenu overlay
@@ -5884,8 +8114,12 @@ fn main() {
                                     let x = px + dx;
                                     let yt = ab_top * 8;
                                     let yb = ab_bottom * 8 - 1;
-                                    if yt < 240 && x < 256 { menu_framebuffer[yt * 256 + x] = MENU_GOLD; }
-                                    if yb < 240 && x < 256 { menu_framebuffer[yb * 256 + x] = MENU_GOLD; }
+                                    if yt < 240 && x < 256 {
+                                        menu_framebuffer[yt * 256 + x] = MENU_GOLD;
+                                    }
+                                    if yb < 240 && x < 256 {
+                                        menu_framebuffer[yb * 256 + x] = MENU_GOLD;
+                                    }
                                 }
                             }
                             for ty in ab_top..ab_bottom {
@@ -5896,7 +8130,9 @@ fn main() {
                                         let xl = ab_left * 8;
                                         let xr = ab_right * 8 - 1;
                                         menu_framebuffer[y * 256 + xl] = MENU_GOLD;
-                                        if xr < 256 { menu_framebuffer[y * 256 + xr] = MENU_GOLD; }
+                                        if xr < 256 {
+                                            menu_framebuffer[y * 256 + xr] = MENU_GOLD;
+                                        }
                                     }
                                 }
                             }
@@ -5906,30 +8142,84 @@ fn main() {
                             } else {
                                 achievement_engine.game_title.to_string()
                             };
-                            draw_text_centered_8x8(&mut menu_framebuffer, &title, ab_top + 1, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                &title,
+                                ab_top + 1,
+                                MENU_GOLD,
+                            );
 
-                            let stats = format!("{}/{} UNLOCKED  {}PTS", achievement_engine.unlocked_count, achievement_engine.achievements.len(), achievement_engine.total_points);
-                            draw_text_centered_8x8(&mut menu_framebuffer, &stats, ab_top + 2, MENU_WHITE);
+                            let stats = format!(
+                                "{}/{} UNLOCKED  {}PTS",
+                                achievement_engine.unlocked_count,
+                                achievement_engine.achievements.len(),
+                                achievement_engine.total_points
+                            );
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                &stats,
+                                ab_top + 2,
+                                MENU_WHITE,
+                            );
 
                             // List achievements (up to 16 visible)
-                            let max_visible = (ab_bottom - ab_top - 4).min(achievement_engine.achievements.len());
-                            for (i, ach) in achievement_engine.achievements.iter().take(max_visible).enumerate() {
+                            let max_visible =
+                                (ab_bottom - ab_top - 4).min(achievement_engine.achievements.len());
+                            for (i, ach) in achievement_engine
+                                .achievements
+                                .iter()
+                                .take(max_visible)
+                                .enumerate()
+                            {
                                 let row = ab_top + 4 + i;
-                                if row >= ab_bottom - 1 { break; }
+                                if row >= ab_bottom - 1 {
+                                    break;
+                                }
                                 let icon = if ach.unlocked { "\x0F" } else { "." };
                                 let label = format!("{} {} ({})", icon, ach.title, ach.points);
                                 let color = if ach.unlocked { 0x44FF44u32 } else { MENU_GRAY };
-                                draw_text_8x8(&mut menu_framebuffer, &label, ab_left + 1, row, color);
+                                draw_text_8x8(
+                                    &mut menu_framebuffer,
+                                    &label,
+                                    ab_left + 1,
+                                    row,
+                                    color,
+                                );
                             }
 
                             if achievement_engine.achievements.is_empty() {
-                                draw_text_centered_8x8(&mut menu_framebuffer, "NO ACHIEVEMENTS LOADED", ab_top + 6, MENU_DARK_GRAY);
-                                draw_text_centered_8x8(&mut menu_framebuffer, "PLACE JSON FILES IN", ab_top + 8, MENU_DARK_GRAY);
-                                draw_text_centered_8x8(&mut menu_framebuffer, "~/.nes-emulator/", ab_top + 10, MENU_DARK_GRAY);
-                                draw_text_centered_8x8(&mut menu_framebuffer, "achievements/", ab_top + 11, MENU_DARK_GRAY);
+                                draw_text_centered_8x8(
+                                    &mut menu_framebuffer,
+                                    "NO ACHIEVEMENTS LOADED",
+                                    ab_top + 6,
+                                    MENU_DARK_GRAY,
+                                );
+                                draw_text_centered_8x8(
+                                    &mut menu_framebuffer,
+                                    "PLACE JSON FILES IN",
+                                    ab_top + 8,
+                                    MENU_DARK_GRAY,
+                                );
+                                draw_text_centered_8x8(
+                                    &mut menu_framebuffer,
+                                    "~/.nes-emulator/",
+                                    ab_top + 10,
+                                    MENU_DARK_GRAY,
+                                );
+                                draw_text_centered_8x8(
+                                    &mut menu_framebuffer,
+                                    "achievements/",
+                                    ab_top + 11,
+                                    MENU_DARK_GRAY,
+                                );
                             }
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC:BACK", ab_bottom - 1, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "ESC:BACK",
+                                ab_bottom - 1,
+                                MENU_DARK_GRAY,
+                            );
                         }
 
                         // Controls reference page overlay
@@ -5940,7 +8230,12 @@ fn main() {
                             }
 
                             // Title
-                            draw_text_centered_8x8(&mut menu_framebuffer, "\x11 CONTROLS \x11", 1, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "\x11 CONTROLS \x11",
+                                1,
+                                MENU_GOLD,
+                            );
 
                             // Separator
                             let sep_y = 2 * 8 + 4;
@@ -5957,16 +8252,16 @@ fn main() {
                             let kb1 = &config.input_bindings.keyboard_p1;
                             let kb2 = &config.input_bindings.keyboard_p2;
                             let kb_rows: [(&str, &str, &str); 10] = [
-                                ("Up",     &kb1.up,      &kb2.up),
-                                ("Down",   &kb1.down,    &kb2.down),
-                                ("Left",   &kb1.left,    &kb2.left),
-                                ("Right",  &kb1.right,   &kb2.right),
-                                ("A",      &kb1.a,       &kb2.a),
-                                ("B",      &kb1.b,       &kb2.b),
-                                ("Start",  &kb1.start,   &kb2.start),
-                                ("Select", &kb1.select,  &kb2.select),
-                                ("TrboA",  &kb1.turbo_a, &kb2.turbo_a),
-                                ("TrboB",  &kb1.turbo_b, &kb2.turbo_b),
+                                ("Up", &kb1.up, &kb2.up),
+                                ("Down", &kb1.down, &kb2.down),
+                                ("Left", &kb1.left, &kb2.left),
+                                ("Right", &kb1.right, &kb2.right),
+                                ("A", &kb1.a, &kb2.a),
+                                ("B", &kb1.b, &kb2.b),
+                                ("Start", &kb1.start, &kb2.start),
+                                ("Select", &kb1.select, &kb2.select),
+                                ("TrboA", &kb1.turbo_a, &kb2.turbo_a),
+                                ("TrboB", &kb1.turbo_b, &kb2.turbo_b),
                             ];
                             for (i, (label, v1, v2)) in kb_rows.iter().enumerate() {
                                 let y = 4 + i;
@@ -5978,17 +8273,23 @@ fn main() {
 
                             // --- Controller P1 & P2 ---
                             draw_text_8x8(&mut menu_framebuffer, "CONTROLLER P1", 2, 15, MENU_GOLD);
-                            draw_text_8x8(&mut menu_framebuffer, "CONTROLLER P2", 18, 15, MENU_GOLD);
+                            draw_text_8x8(
+                                &mut menu_framebuffer,
+                                "CONTROLLER P2",
+                                18,
+                                15,
+                                MENU_GOLD,
+                            );
 
                             let ct1 = &config.input_bindings.controller_p1;
                             let ct2 = &config.input_bindings.controller_p2;
                             let ct_rows: [(&str, &str, &str); 6] = [
-                                ("A",      &ct1.a,       &ct2.a),
-                                ("B",      &ct1.b,       &ct2.b),
-                                ("TrboA",  &ct1.turbo_a, &ct2.turbo_a),
-                                ("TrboB",  &ct1.turbo_b, &ct2.turbo_b),
-                                ("Start",  &ct1.start,   &ct2.start),
-                                ("Select", &ct1.select,  &ct2.select),
+                                ("A", &ct1.a, &ct2.a),
+                                ("B", &ct1.b, &ct2.b),
+                                ("TrboA", &ct1.turbo_a, &ct2.turbo_a),
+                                ("TrboB", &ct1.turbo_b, &ct2.turbo_b),
+                                ("Start", &ct1.start, &ct2.start),
+                                ("Select", &ct1.select, &ct2.select),
                             ];
                             for (i, (label, v1, v2)) in ct_rows.iter().enumerate() {
                                 let y = 16 + i;
@@ -5999,49 +8300,103 @@ fn main() {
                             }
 
                             // --- System Shortcuts ---
-                            draw_text_centered_8x8(&mut menu_framebuffer, "SYSTEM SHORTCUTS", 23, MENU_GOLD);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "SYSTEM SHORTCUTS",
+                                23,
+                                MENU_GOLD,
+                            );
 
-                            draw_text_8x8(&mut menu_framebuffer, "Pause",  2, 24, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Pause", 2, 24, MENU_GRAY);
                             draw_text_8x8(&mut menu_framebuffer, "Escape", 9, 24, MENU_WHITE);
-                            draw_text_8x8(&mut menu_framebuffer, "Save",   18, 24, MENU_GRAY);
-                            draw_text_8x8(&mut menu_framebuffer, "F5",     25, 24, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Save", 18, 24, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "F5", 25, 24, MENU_WHITE);
 
-                            draw_text_8x8(&mut menu_framebuffer, "Load",   2, 25, MENU_GRAY);
-                            draw_text_8x8(&mut menu_framebuffer, "F9",     9, 25, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Load", 2, 25, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "F9", 9, 25, MENU_WHITE);
                             draw_text_8x8(&mut menu_framebuffer, "Rewind", 18, 25, MENU_GRAY);
-                            draw_text_8x8(&mut menu_framebuffer, "Bksp",   25, 25, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Bksp", 25, 25, MENU_WHITE);
 
-                            draw_text_8x8(&mut menu_framebuffer, "FF",     2, 26, MENU_GRAY);
-                            draw_text_8x8(&mut menu_framebuffer, "Tab",    9, 26, MENU_WHITE);
-                            draw_text_8x8(&mut menu_framebuffer, "Reset",  18, 26, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "FF", 2, 26, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Tab", 9, 26, MENU_WHITE);
+                            draw_text_8x8(&mut menu_framebuffer, "Reset", 18, 26, MENU_GRAY);
                             draw_text_8x8(&mut menu_framebuffer, "Ctrl+R", 25, 26, MENU_WHITE);
 
                             draw_text_8x8(&mut menu_framebuffer, "Record", 2, 27, MENU_GRAY);
                             draw_text_8x8(&mut menu_framebuffer, "Shft+R", 9, 27, MENU_WHITE);
-                            draw_text_8x8(&mut menu_framebuffer, "Play",   18, 27, MENU_GRAY);
+                            draw_text_8x8(&mut menu_framebuffer, "Play", 18, 27, MENU_GRAY);
                             draw_text_8x8(&mut menu_framebuffer, "Shft+P", 25, 27, MENU_WHITE);
 
-                            draw_text_centered_8x8(&mut menu_framebuffer, "ESC TO GO BACK", 29, MENU_DARK_GRAY);
+                            draw_text_centered_8x8(
+                                &mut menu_framebuffer,
+                                "ESC TO GO BACK",
+                                29,
+                                MENU_DARK_GRAY,
+                            );
                         }
-                        
+
                         // Now pass through CRT filter (same as menu rendering)
-                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                        let dt = if barrel_distortion {
+                            &distortion_table
+                        } else {
+                            &flat_distortion_table
+                        };
                         if crt_enabled {
-                            crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
+                            crt_filter(
+                                &menu_framebuffer,
+                                &mut crt_buffer,
+                                &sv_table,
+                                dt,
+                                &config.crt_config,
+                                &mask_table,
+                                config.crt_config.brightness as i32,
+                                config.crt_config.contrast as i32,
+                            );
                             // Phosphor bloom — bright pixels glow into neighbors
-                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            apply_phosphor_bloom(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
+                            apply_scanline_glow(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
                             // Apply chromatic aberration to crt_buffer (screen area only)
                             if glass_intensity > 30 {
-                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                apply_chromatic_aberration(
+                                    &mut ca_temp,
+                                    &crt_buffer,
+                                    &ca_table,
+                                    SCREEN_W,
+                                    SCREEN_H,
+                                );
                                 std::mem::swap(&mut crt_buffer, &mut ca_temp);
                             }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
+                        composite_screen_fast(
+                            &mut composite_buffer,
+                            &crt_buffer,
+                            &screen_curve_table,
+                            WINDOW_WIDTH,
+                        );
                         if crt_enabled && glass_intensity > 0 {
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
+                            apply_glass_effects(
+                                &mut composite_buffer,
+                                &crt_buffer,
+                                &glare_table,
+                                &glass_thickness_table,
+                                &ghost_alpha_table,
+                                WINDOW_WIDTH,
+                                glass_intensity,
+                                false,
+                                SCREEN_W,
+                            );
                         }
 
                         // Render save state thumbnail in pause menu(composite buffer)
@@ -6063,7 +8418,9 @@ fn main() {
                             for ty in 0..60usize {
                                 for tx in 0..64usize {
                                     let src = (ty * 64 + tx) * 3;
-                                    if src + 2 >= thumb_data.len() { continue; }
+                                    if src + 2 >= thumb_data.len() {
+                                        continue;
+                                    }
                                     let r = thumb_data[src] as u32;
                                     let g = thumb_data[src + 1] as u32;
                                     let b = thumb_data[src + 2] as u32;
@@ -6111,7 +8468,14 @@ fn main() {
                             }
                             // Slot label above thumbnail
                             let label = format!("SLOT {}", current_save_slot);
-                            draw_text(&mut composite_buffer, &label, thumb_cx, thumb_cy.saturating_sub(10), 0xF8D878, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                &label,
+                                thumb_cx,
+                                thumb_cy.saturating_sub(10),
+                                0xF8D878,
+                                WINDOW_WIDTH,
+                            );
                         } else {
                             // Empty slot: dark background with "EMPTY" text
                             for dy in 0..thumb_h {
@@ -6154,10 +8518,24 @@ fn main() {
                                 }
                             }
                             let label = format!("SLOT {}", current_save_slot);
-                            draw_text(&mut composite_buffer, &label, thumb_cx, thumb_cy.saturating_sub(10), 0xF8D878, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                &label,
+                                thumb_cx,
+                                thumb_cy.saturating_sub(10),
+                                0xF8D878,
+                                WINDOW_WIDTH,
+                            );
                             let empty_x = thumb_cx + (thumb_w - 5 * 4) / 2;
                             let empty_y = thumb_cy + (thumb_h - 5) / 2;
-                            draw_text(&mut composite_buffer, "EMPTY", empty_x, empty_y, 0x666688, WINDOW_WIDTH);
+                            draw_text(
+                                &mut composite_buffer,
+                                "EMPTY",
+                                empty_x,
+                                empty_y,
+                                0x666688,
+                                WINDOW_WIDTH,
+                            );
                         }
                     } else if quick_overlay {
                         // Quick overlay rendering
@@ -6202,11 +8580,15 @@ fn main() {
                                 let yb = box_bottom * 8 - 1;
                                 if yt < 240 && x < 256 {
                                     menu_framebuffer[yt * 256 + x] = 0x4080C0;
-                                    if yt + 1 < 240 { menu_framebuffer[(yt + 1) * 256 + x] = 0x4080C0; }
+                                    if yt + 1 < 240 {
+                                        menu_framebuffer[(yt + 1) * 256 + x] = 0x4080C0;
+                                    }
                                 }
                                 if yb < 240 && x < 256 {
                                     menu_framebuffer[yb * 256 + x] = 0x4080C0;
-                                    if yb > 0 { menu_framebuffer[(yb - 1) * 256 + x] = 0x4080C0; }
+                                    if yb > 0 {
+                                        menu_framebuffer[(yb - 1) * 256 + x] = 0x4080C0;
+                                    }
                                 }
                             }
                         }
@@ -6217,14 +8599,27 @@ fn main() {
                                 if y < 240 {
                                     let xl = box_left * 8;
                                     let xr = box_right * 8 - 1;
-                                    if xl < 256 { menu_framebuffer[y * 256 + xl] = 0x4080C0; menu_framebuffer[y * 256 + xl + 1] = 0x4080C0; }
-                                    if xr < 256 { menu_framebuffer[y * 256 + xr] = 0x4080C0; if xr > 0 { menu_framebuffer[y * 256 + xr - 1] = 0x4080C0; } }
+                                    if xl < 256 {
+                                        menu_framebuffer[y * 256 + xl] = 0x4080C0;
+                                        menu_framebuffer[y * 256 + xl + 1] = 0x4080C0;
+                                    }
+                                    if xr < 256 {
+                                        menu_framebuffer[y * 256 + xr] = 0x4080C0;
+                                        if xr > 0 {
+                                            menu_framebuffer[y * 256 + xr - 1] = 0x4080C0;
+                                        }
+                                    }
                                 }
                             }
                         }
 
                         // Title
-                        draw_text_centered_8x8(&mut menu_framebuffer, "\x11 QUICK MENU \x11", box_top + 1, MENU_GOLD);
+                        draw_text_centered_8x8(
+                            &mut menu_framebuffer,
+                            "\x11 QUICK MENU \x11",
+                            box_top + 1,
+                            MENU_GOLD,
+                        );
 
                         // Separator
                         let sep_y = (box_top + 2) * 8 + 4;
@@ -6256,35 +8651,97 @@ fn main() {
                             let is_selected = i == quick_overlay_selected;
 
                             if is_selected {
-                                draw_highlight_bar(&mut menu_framebuffer, row * 8, 8, box_left * 8 + 4, box_right * 8 - 4, 0x2A2A6A);
+                                draw_highlight_bar(
+                                    &mut menu_framebuffer,
+                                    row * 8,
+                                    8,
+                                    box_left * 8 + 4,
+                                    box_right * 8 - 4,
+                                    0x2A2A6A,
+                                );
                             }
 
                             let color = if is_selected { 0xFFFFFF } else { 0xA0A0A0 };
                             if is_selected {
-                                draw_char_8x8(&mut menu_framebuffer, '\x10', box_left + 1, row, 0xFFFFFF);
+                                draw_char_8x8(
+                                    &mut menu_framebuffer,
+                                    '\x10',
+                                    box_left + 1,
+                                    row,
+                                    0xFFFFFF,
+                                );
                             }
                             draw_text_8x8(&mut menu_framebuffer, item, box_left + 2, row, color);
                         }
 
                         // Hint at bottom
-                        draw_text_centered_8x8(&mut menu_framebuffer, "B:CLOSE  L/R:SLOT", box_bottom - 1, 0x606060);
+                        draw_text_centered_8x8(
+                            &mut menu_framebuffer,
+                            "B:CLOSE  L/R:SLOT",
+                            box_bottom - 1,
+                            0x606060,
+                        );
 
                         // Pass through CRT filter (same as pause menu rendering)
-                        let dt = if barrel_distortion { &distortion_table } else { &flat_distortion_table };
+                        let dt = if barrel_distortion {
+                            &distortion_table
+                        } else {
+                            &flat_distortion_table
+                        };
                         if crt_enabled {
-                            crt_filter(&menu_framebuffer, &mut crt_buffer, &sv_table, dt, &config.crt_config, &mask_table, config.crt_config.brightness as i32, config.crt_config.contrast as i32);
-                            apply_phosphor_bloom(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
-                            apply_scanline_glow(&mut crt_buffer, SCREEN_W, SCREEN_H, config.crt_config.phosphor_warmth as u32);
+                            crt_filter(
+                                &menu_framebuffer,
+                                &mut crt_buffer,
+                                &sv_table,
+                                dt,
+                                &config.crt_config,
+                                &mask_table,
+                                config.crt_config.brightness as i32,
+                                config.crt_config.contrast as i32,
+                            );
+                            apply_phosphor_bloom(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
+                            apply_scanline_glow(
+                                &mut crt_buffer,
+                                SCREEN_W,
+                                SCREEN_H,
+                                config.crt_config.phosphor_warmth as u32,
+                            );
                             if glass_intensity > 30 {
-                                apply_chromatic_aberration(&mut ca_temp, &crt_buffer, &ca_table, SCREEN_W, SCREEN_H);
+                                apply_chromatic_aberration(
+                                    &mut ca_temp,
+                                    &crt_buffer,
+                                    &ca_table,
+                                    SCREEN_W,
+                                    SCREEN_H,
+                                );
                                 std::mem::swap(&mut crt_buffer, &mut ca_temp);
                             }
                         } else {
                             scale_simple(&menu_framebuffer, &mut crt_buffer);
                         }
-                        composite_screen_fast(&mut composite_buffer, &crt_buffer, &screen_curve_table, WINDOW_WIDTH);
+                        composite_screen_fast(
+                            &mut composite_buffer,
+                            &crt_buffer,
+                            &screen_curve_table,
+                            WINDOW_WIDTH,
+                        );
                         if crt_enabled && glass_intensity > 0 {
-                            apply_glass_effects(&mut composite_buffer, &crt_buffer, &glare_table, &glass_thickness_table, &ghost_alpha_table, WINDOW_WIDTH, glass_intensity, false, SCREEN_W);
+                            apply_glass_effects(
+                                &mut composite_buffer,
+                                &crt_buffer,
+                                &glare_table,
+                                &glass_thickness_table,
+                                &ghost_alpha_table,
+                                WINDOW_WIDTH,
+                                glass_intensity,
+                                false,
+                                SCREEN_W,
+                            );
                         }
                     }
 
@@ -6328,14 +8785,15 @@ fn main() {
             let next = frame_start + std::time::Duration::from_nanos(frame_duration_ns);
             frame_start = match now.checked_duration_since(next) {
                 // More than 3 frames behind: reset to prevent burst catch-up
-                Some(behind) if behind > std::time::Duration::from_nanos(frame_duration_ns * 3) => now,
+                Some(behind) if behind > std::time::Duration::from_nanos(frame_duration_ns * 3) => {
+                    now
+                }
                 // Normal case: advance to ideal next frame time (additive timing)
                 _ => next,
             };
         }
     }
 }
-
 
 /// Convert analog stick to NES D-pad with circular deadzone, cardinal snapping, and hysteresis.
 /// Returns (up, down, left, right) as booleans.
@@ -6383,7 +8841,11 @@ fn stick_to_dpad(
 
     let angle_dist = |target: f32| -> f32 {
         let d = (angle - target).abs();
-        if d > 180.0 { 360.0 - d } else { d }
+        if d > 180.0 {
+            360.0 - d
+        } else {
+            d
+        }
     };
 
     let dist_right = angle_dist(0.0);
@@ -6395,27 +8857,52 @@ fn stick_to_dpad(
 
     if min_dist <= cardinal_half_angle {
         // Pure cardinal zone
-        if min_dist == dist_right { right = true; }
-        else if min_dist == dist_up { up = true; }
-        else if min_dist == dist_left { left = true; }
-        else { down = true; }
+        if min_dist == dist_right {
+            right = true;
+        } else if min_dist == dist_up {
+            up = true;
+        } else if min_dist == dist_left {
+            left = true;
+        } else {
+            down = true;
+        }
     } else if push_strength >= diagonal_min_strength {
         // Diagonal zone with sufficient push
-        if angle > 0.0 && angle < 90.0 { right = true; up = true; }
-        else if angle > 90.0 && angle < 180.0 { left = true; up = true; }
-        else if angle > 180.0 && angle < 270.0 { left = true; down = true; }
-        else { right = true; down = true; }
+        if angle > 0.0 && angle < 90.0 {
+            right = true;
+            up = true;
+        } else if angle > 90.0 && angle < 180.0 {
+            left = true;
+            up = true;
+        } else if angle > 180.0 && angle < 270.0 {
+            left = true;
+            down = true;
+        } else {
+            right = true;
+            down = true;
+        }
     } else {
         // Diagonal zone but not pushed hard enough — snap to nearest cardinal
-        if min_dist == dist_right { right = true; }
-        else if min_dist == dist_up { up = true; }
-        else if min_dist == dist_left { left = true; }
-        else { down = true; }
+        if min_dist == dist_right {
+            right = true;
+        } else if min_dist == dist_up {
+            up = true;
+        } else if min_dist == dist_left {
+            left = true;
+        } else {
+            down = true;
+        }
     }
 
     // SOCD cleaning: prevent simultaneous opposite directions
-    if up && down { up = false; down = false; }
-    if left && right { left = false; right = false; }
+    if up && down {
+        up = false;
+        down = false;
+    }
+    if left && right {
+        left = false;
+        right = false;
+    }
 
     prev_state.up = up;
     prev_state.down = down;
@@ -6425,7 +8912,15 @@ fn stick_to_dpad(
     (up, down, left, right)
 }
 
-fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame_counter: u32, input_bindings: &InputBindings, stick_state_p1: &mut StickState, stick_state_p2: &mut StickState) -> (bool, bool, bool, bool) {
+fn handle_input(
+    window: &Window,
+    bus: &mut Bus,
+    gilrs: &mut Option<Gilrs>,
+    frame_counter: u32,
+    input_bindings: &InputBindings,
+    stick_state_p1: &mut StickState,
+    stick_state_p2: &mut StickState,
+) -> (bool, bool, bool, bool) {
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
 
@@ -6498,11 +8993,11 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
 
         // Get all connected gamepads
         let mut gp_iter = g.gamepads().filter(|(_, gp)| gp.is_connected());
-        
+
         // Player 1 controller
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl1 = &input_bindings.controller_p1;
-            
+
             // D-pad buttons
             p1_up |= gamepad.is_pressed(Button::DPadUp);
             p1_down |= gamepad.is_pressed(Button::DPadDown);
@@ -6512,12 +9007,11 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
-                stick_x, stick_y, ctrl1.deadzone, stick_state_p1
-            );
-            p1_up    |= s_up;
-            p1_down  |= s_down;
-            p1_left  |= s_left;
+            let (s_up, s_down, s_left, s_right) =
+                stick_to_dpad(stick_x, stick_y, ctrl1.deadzone, stick_state_p1);
+            p1_up |= s_up;
+            p1_down |= s_down;
+            p1_left |= s_left;
             p1_right |= s_right;
 
             // Face buttons - configurable
@@ -6543,14 +9037,16 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             if let Some(btn) = string_to_gilrs_button(&ctrl1.select) {
                 p1_select |= gamepad.is_pressed(btn);
             }
-            l_trigger |= gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
-            r_trigger |= gamepad.is_pressed(Button::RightTrigger) || gamepad.is_pressed(Button::RightTrigger2);
+            l_trigger |=
+                gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
+            r_trigger |= gamepad.is_pressed(Button::RightTrigger)
+                || gamepad.is_pressed(Button::RightTrigger2);
         }
 
         // Player 2 controller
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl2 = &input_bindings.controller_p2;
-            
+
             // D-pad buttons
             p2_up |= gamepad.is_pressed(Button::DPadUp);
             p2_down |= gamepad.is_pressed(Button::DPadDown);
@@ -6560,12 +9056,11 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
             // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) = stick_to_dpad(
-                stick_x, stick_y, ctrl2.deadzone, stick_state_p2
-            );
-            p2_up    |= s_up;
-            p2_down  |= s_down;
-            p2_left  |= s_left;
+            let (s_up, s_down, s_left, s_right) =
+                stick_to_dpad(stick_x, stick_y, ctrl2.deadzone, stick_state_p2);
+            p2_up |= s_up;
+            p2_down |= s_down;
+            p2_left |= s_left;
             p2_right |= s_right;
 
             // Face buttons - configurable
@@ -6597,21 +9092,27 @@ fn handle_input(window: &Window, bus: &mut Bus, gilrs: &mut Option<Gilrs>, frame
     // Apply all input to joypads
     bus.joypad1.set_button_pressed(JoypadButton::A, p1_a);
     bus.joypad1.set_button_pressed(JoypadButton::B, p1_b);
-    bus.joypad1.set_button_pressed(JoypadButton::Select, p1_select);
-    bus.joypad1.set_button_pressed(JoypadButton::Start, p1_start);
+    bus.joypad1
+        .set_button_pressed(JoypadButton::Select, p1_select);
+    bus.joypad1
+        .set_button_pressed(JoypadButton::Start, p1_start);
     bus.joypad1.set_button_pressed(JoypadButton::Up, p1_up);
     bus.joypad1.set_button_pressed(JoypadButton::Down, p1_down);
     bus.joypad1.set_button_pressed(JoypadButton::Left, p1_left);
-    bus.joypad1.set_button_pressed(JoypadButton::Right, p1_right);
+    bus.joypad1
+        .set_button_pressed(JoypadButton::Right, p1_right);
 
     bus.joypad2.set_button_pressed(JoypadButton::A, p2_a);
     bus.joypad2.set_button_pressed(JoypadButton::B, p2_b);
-    bus.joypad2.set_button_pressed(JoypadButton::Select, p2_select);
-    bus.joypad2.set_button_pressed(JoypadButton::Start, p2_start);
+    bus.joypad2
+        .set_button_pressed(JoypadButton::Select, p2_select);
+    bus.joypad2
+        .set_button_pressed(JoypadButton::Start, p2_start);
     bus.joypad2.set_button_pressed(JoypadButton::Up, p2_up);
     bus.joypad2.set_button_pressed(JoypadButton::Down, p2_down);
     bus.joypad2.set_button_pressed(JoypadButton::Left, p2_left);
-    bus.joypad2.set_button_pressed(JoypadButton::Right, p2_right);
+    bus.joypad2
+        .set_button_pressed(JoypadButton::Right, p2_right);
 
     (p1_start, p1_select, l_trigger, r_trigger)
 }
@@ -6777,7 +9278,11 @@ fn draw_speaker_grille(frame: &mut [u32], rect: PixelRect) {
         let ly = y - rect.y;
         let taper = ly * 28 / rect.h.max(1);
         let x1 = if mirror { rect.x + taper } else { rect.x };
-        let x2 = if mirror { rect.x2() } else { rect.x2().saturating_sub(taper) };
+        let x2 = if mirror {
+            rect.x2()
+        } else {
+            rect.x2().saturating_sub(taper)
+        };
         for x in x1..x2.min(WINDOW_WIDTH) {
             let shade = if ly < 2 {
                 0x2F3234
@@ -6793,8 +9298,16 @@ fn draw_speaker_grille(frame: &mut [u32], rect: PixelRect) {
     for row in 0..8usize {
         let y = rect.y + 5 + row * 4;
         let taper = (y - rect.y) * 28 / rect.h.max(1);
-        let x1 = if mirror { rect.x + taper + 4 } else { rect.x + 5 };
-        let x2 = if mirror { rect.x2() - 5 } else { rect.x2().saturating_sub(taper + 4) };
+        let x1 = if mirror {
+            rect.x + taper + 4
+        } else {
+            rect.x + 5
+        };
+        let x2 = if mirror {
+            rect.x2() - 5
+        } else {
+            rect.x2().saturating_sub(taper + 4)
+        };
         draw_hline(frame, x1, x2, y, 0x0B0C0D);
         draw_hline(frame, x1, x2, y + 1, 0x17191A);
         if y > rect.y {
@@ -7055,8 +9568,20 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
         let base = (26.0 + highlight - side_falloff * 10.0 - ly as f32 * 0.45).clamp(6.0, 54.0);
         rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
     });
-    draw_hline(frame, top_hood.x + 18, top_hood.x2() - 18, top_hood.y + 2, 0x53585A);
-    draw_hline(frame, top_hood.x + 34, top_hood.x2() - 34, top_hood.y2() - 2, 0x060707);
+    draw_hline(
+        frame,
+        top_hood.x + 18,
+        top_hood.x2() - 18,
+        top_hood.y + 2,
+        0x53585A,
+    );
+    draw_hline(
+        frame,
+        top_hood.x + 34,
+        top_hood.x2() - 34,
+        top_hood.y2() - 2,
+        0x060707,
+    );
 
     let left_cheek = PixelRect {
         x: body.x + 12,
@@ -7084,11 +9609,25 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
             let base = (18.0 + edge * 15.0 - vertical * 8.0 + texture).clamp(4.0, 39.0);
             rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
         });
-        let edge_x = if mirror { cheek.x } else { cheek.x2().saturating_sub(2) };
-        draw_vline(frame, edge_x, cheek.y + 18, cheek.y2().saturating_sub(18), 0x080909);
+        let edge_x = if mirror {
+            cheek.x
+        } else {
+            cheek.x2().saturating_sub(2)
+        };
         draw_vline(
             frame,
-            if mirror { cheek.x + 2 } else { cheek.x2().saturating_sub(4) },
+            edge_x,
+            cheek.y + 18,
+            cheek.y2().saturating_sub(18),
+            0x080909,
+        );
+        draw_vline(
+            frame,
+            if mirror {
+                cheek.x + 2
+            } else {
+                cheek.x2().saturating_sub(4)
+            },
             cheek.y + 22,
             cheek.y2().saturating_sub(22),
             0x2E3234,
@@ -7108,20 +9647,15 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
         let fy = ly as f32 / bezel.h as f32;
         let edge = (fx - 0.5).abs() * 2.0;
         let upper = (1.0 - fy).max(0.0) * 9.0;
-        let recess =
-            if (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x)
-                && (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y)
-            {
-                -20.0
-            } else {
-                0.0
-            };
+        let recess = if (SCREEN_X..SCREEN_X + SCREEN_W).contains(&x)
+            && (SCREEN_Y..SCREEN_Y + SCREEN_H).contains(&y)
+        {
+            -20.0
+        } else {
+            0.0
+        };
         let base = (18.0 + upper - edge * 6.0 + recess).clamp(2.0, 34.0);
-        rgb(
-            base as u32,
-            (base + 1.0) as u32,
-            (base + 2.0) as u32,
-        )
+        rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
     });
 
     let tube_recess = PixelRect {
@@ -7229,7 +9763,11 @@ fn build_tv_frame(frame: &mut Vec<u32>) {
         let ly = y - center_controls.y;
         let fx = lx as f32 / center_controls.w as f32;
         let top = if ly < 3 { 10.0 } else { 0.0 };
-        let bottom = if ly + 3 >= center_controls.h { -11.0 } else { 0.0 };
+        let bottom = if ly + 3 >= center_controls.h {
+            -11.0
+        } else {
+            0.0
+        };
         let side = (fx - 0.5).abs() * -4.0;
         let base = (17.0 + top + bottom + side).clamp(5.0, 31.0);
         rgb(base as u32, (base + 1.0) as u32, (base + 2.0) as u32)
@@ -7383,10 +9921,10 @@ fn build_glare_table() -> Vec<u8> {
 
     for y in 0..SCREEN_H {
         for x in 0..SCREEN_W {
-            let fx = x as f64 / SCREEN_W as f64;  // 0..1
-            let fy = y as f64 / SCREEN_H as f64;  // 0..1
-            let nx = fx * 2.0 - 1.0;  // -1..1
-            let ny = fy * 2.0 - 1.0;  // -1..1
+            let fx = x as f64 / SCREEN_W as f64; // 0..1
+            let fy = y as f64 / SCREEN_H as f64; // 0..1
+            let nx = fx * 2.0 - 1.0; // -1..1
+            let ny = fy * 2.0 - 1.0; // -1..1
 
             // Edge distance for Fresnel and fading
             let edge_dist = nx.abs().max(ny.abs()).min(1.0);
@@ -7424,14 +9962,9 @@ fn build_glare_table() -> Vec<u8> {
             let bottom_center = (-(nx * nx) * 3.0).exp();
             let bottom = bottom_glow_t * bottom_center * 12.0;
 
-            let total = (fresnel
-                + top_sheen
-                + broad_sheen
-                + side_left
-                + side_right
-                + small_glint
-                + bottom)
-                .clamp(0.0, 96.0) as u8;
+            let total =
+                (fresnel + top_sheen + broad_sheen + side_left + side_right + small_glint + bottom)
+                    .clamp(0.0, 96.0) as u8;
 
             // Zero out near border (glass-bezel junction has no glare)
             let in_border = !(4..SCREEN_W - 4).contains(&x) || !(4..SCREEN_H - 4).contains(&y);
@@ -7458,9 +9991,13 @@ fn build_glass_thickness_table() -> Vec<u16> {
 
 fn build_ghost_alpha_table(glass_intensity: u8) -> Vec<u8> {
     let mut table = vec![0u8; SCREEN_W * SCREEN_H];
-    if glass_intensity < 20 { return table; }
+    if glass_intensity < 20 {
+        return table;
+    }
     let base_alpha = ((glass_intensity as f64) - 20.0) * 16.0 / 80.0;
-    if base_alpha <= 0.0 { return table; }
+    if base_alpha <= 0.0 {
+        return table;
+    }
 
     for y in 0..SCREEN_H {
         let fy = ((y as f64 / SCREEN_H as f64) * 2.0 - 1.0).abs();
@@ -7489,7 +10026,9 @@ fn apply_glass_effects(
     do_ghost: bool,
     ghost_stride: usize,
 ) {
-    if glass_intensity == 0 { return; }
+    if glass_intensity == 0 {
+        return;
+    }
 
     const CORNER_R: usize = SCREEN_CURVE_CORNER_R;
     let intensity_factor = glass_intensity as u32;
@@ -7503,13 +10042,43 @@ fn apply_glass_effects(
 
     // Monomorphize on do_ghost so compiler eliminates dead ghost code
     if do_ghost {
-        glass_inner_loop(buffer, ghost_source, glare_table, thickness_table, ghost_alpha_table,
-            window_width, intensity_factor, tint_strength, true,
-            corner_x_max, corner_y_max, ghost_shift_x, ghost_shift_y, ghost_h, ghost_w, ghost_stride);
+        glass_inner_loop(
+            buffer,
+            ghost_source,
+            glare_table,
+            thickness_table,
+            ghost_alpha_table,
+            window_width,
+            intensity_factor,
+            tint_strength,
+            true,
+            corner_x_max,
+            corner_y_max,
+            ghost_shift_x,
+            ghost_shift_y,
+            ghost_h,
+            ghost_w,
+            ghost_stride,
+        );
     } else {
-        glass_inner_loop(buffer, ghost_source, glare_table, thickness_table, ghost_alpha_table,
-            window_width, intensity_factor, tint_strength, false,
-            corner_x_max, corner_y_max, ghost_shift_x, ghost_shift_y, ghost_h, ghost_w, ghost_stride);
+        glass_inner_loop(
+            buffer,
+            ghost_source,
+            glare_table,
+            thickness_table,
+            ghost_alpha_table,
+            window_width,
+            intensity_factor,
+            tint_strength,
+            false,
+            corner_x_max,
+            corner_y_max,
+            ghost_shift_x,
+            ghost_shift_y,
+            ghost_h,
+            ghost_w,
+            ghost_stride,
+        );
     }
 }
 
@@ -7551,7 +10120,13 @@ fn build_ca_table(width: usize, height: usize, glass_intensity: u8) -> CaTable {
 
 // Optimized: Use unsafe for bounds-checked accesses, inline function
 #[inline]
-fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaTable, width: usize, height: usize) {
+fn apply_chromatic_aberration(
+    buffer: &mut [u32],
+    source: &[u32],
+    ca_table: &CaTable,
+    width: usize,
+    height: usize,
+) {
     let w = width as i32;
     let h = height as i32;
 
@@ -7559,7 +10134,9 @@ fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaT
         let row = y * width;
         for x in 0..width {
             let (sx, sy) = unsafe { *ca_table.shifts.get_unchecked(row + x) };
-            if sx == 0 && sy == 0 { continue; }
+            if sx == 0 && sy == 0 {
+                continue;
+            }
 
             let r_x = ((x as i32) - sx as i32).clamp(0, w - 1) as usize;
             let r_y = ((y as i32) - sy as i32).clamp(0, h - 1) as usize;
@@ -7570,7 +10147,9 @@ fn apply_chromatic_aberration(buffer: &mut [u32], source: &[u32], ca_table: &CaT
             let g = unsafe { (*source.get_unchecked(row + x) >> 8) & 0xFF };
             let b = unsafe { *source.get_unchecked(b_y * width + b_x) & 0xFF };
 
-            unsafe { *buffer.get_unchecked_mut(row + x) = (r << 16) | (g << 8) | b; }
+            unsafe {
+                *buffer.get_unchecked_mut(row + x) = (r << 16) | (g << 8) | b;
+            }
         }
     }
 }
@@ -7611,7 +10190,14 @@ fn get_small_glyph(ch: char) -> [u8; 5] {
 }
 
 #[allow(clippy::ptr_arg)]
-fn draw_text(frame: &mut Vec<u32>, text: &str, start_x: usize, start_y: usize, color: u32, stride: usize) {
+fn draw_text(
+    frame: &mut Vec<u32>,
+    text: &str,
+    start_x: usize,
+    start_y: usize,
+    color: u32,
+    stride: usize,
+) {
     let mut cursor_x = start_x;
     for ch in text.chars() {
         let glyph = get_small_glyph(ch);
@@ -7639,7 +10225,11 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
             if idx < frame.len() {
                 let dy = y - tv_h;
                 let fy = dy as f32 / table_h as f32;
-                let top_shadow = if dy < 30 { (30 - dy) as f32 / 30.0 } else { 0.0 };
+                let top_shadow = if dy < 30 {
+                    (30 - dy) as f32 / 30.0
+                } else {
+                    0.0
+                };
                 let front_rolloff = ((fy - 0.76).max(0.0) / 0.24).min(1.0);
                 let center_lift = (1.0 - (fy - 0.48).abs() * 1.8).max(0.0) * 15.0;
 
@@ -7647,7 +10237,11 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
                 let plank_tint = ((plank.wrapping_mul(29) % 19) as i32) - 9;
                 let seam = x % 168;
                 let seam_shadow = if !(2..=165).contains(&seam) { -16 } else { 0 };
-                let long_grain = if ((x / 21 + y / 5 + plank * 3) % 7) == 0 { -7 } else { 0 };
+                let long_grain = if ((x / 21 + y / 5 + plank * 3) % 7) == 0 {
+                    -7
+                } else {
+                    0
+                };
                 let fine_grain =
                     ((x.wrapping_mul(17) ^ y.wrapping_mul(31) ^ (x / 13).wrapping_mul(11)) % 21)
                         as i32
@@ -7659,8 +10253,16 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
                 };
 
                 let shade = center_lift - top_shadow * 48.0 - front_rolloff * 24.0;
-                let r = (92.0 + shade) as i32 + plank_tint + seam_shadow + fine_grain + long_grain + knot;
-                let g = (50.0 + shade * 0.48) as i32 + plank_tint / 2 + seam_shadow / 2 + fine_grain / 2;
+                let r = (92.0 + shade) as i32
+                    + plank_tint
+                    + seam_shadow
+                    + fine_grain
+                    + long_grain
+                    + knot;
+                let g = (50.0 + shade * 0.48) as i32
+                    + plank_tint / 2
+                    + seam_shadow / 2
+                    + fine_grain / 2;
                 let b = (25.0 + shade * 0.22) as i32 + plank_tint / 4 + fine_grain / 4;
                 frame[idx] = rgb(
                     r.clamp(0, 255) as u32,
@@ -7712,22 +10314,46 @@ fn build_console_overlay(frame: &mut Vec<u32>, tv_h: usize, win_w: usize, win_h:
 
 /// Read joypad state as a byte (bit layout: A=0, B=1, Select=2, Start=3, Up=4, Down=5, Left=6, Right=7)
 fn joypad_to_byte(bus: &Bus, player: u8) -> u8 {
-    let jp = if player == 1 { &bus.joypad1 } else { &bus.joypad2 };
+    let jp = if player == 1 {
+        &bus.joypad1
+    } else {
+        &bus.joypad2
+    };
     let mut b: u8 = 0;
-    if jp.get_button(JoypadButton::A) { b |= 0x01; }
-    if jp.get_button(JoypadButton::B) { b |= 0x02; }
-    if jp.get_button(JoypadButton::Select) { b |= 0x04; }
-    if jp.get_button(JoypadButton::Start) { b |= 0x08; }
-    if jp.get_button(JoypadButton::Up) { b |= 0x10; }
-    if jp.get_button(JoypadButton::Down) { b |= 0x20; }
-    if jp.get_button(JoypadButton::Left) { b |= 0x40; }
-    if jp.get_button(JoypadButton::Right) { b |= 0x80; }
+    if jp.get_button(JoypadButton::A) {
+        b |= 0x01;
+    }
+    if jp.get_button(JoypadButton::B) {
+        b |= 0x02;
+    }
+    if jp.get_button(JoypadButton::Select) {
+        b |= 0x04;
+    }
+    if jp.get_button(JoypadButton::Start) {
+        b |= 0x08;
+    }
+    if jp.get_button(JoypadButton::Up) {
+        b |= 0x10;
+    }
+    if jp.get_button(JoypadButton::Down) {
+        b |= 0x20;
+    }
+    if jp.get_button(JoypadButton::Left) {
+        b |= 0x40;
+    }
+    if jp.get_button(JoypadButton::Right) {
+        b |= 0x80;
+    }
     b
 }
 
 /// Apply a byte of button state onto a joypad
 fn byte_to_joypad(bus: &mut Bus, player: u8, buttons: u8) {
-    let jp = if player == 1 { &mut bus.joypad1 } else { &mut bus.joypad2 };
+    let jp = if player == 1 {
+        &mut bus.joypad1
+    } else {
+        &mut bus.joypad2
+    };
     jp.set_button_pressed(JoypadButton::A, buttons & 0x01 != 0);
     jp.set_button_pressed(JoypadButton::B, buttons & 0x02 != 0);
     jp.set_button_pressed(JoypadButton::Select, buttons & 0x04 != 0);
@@ -7742,11 +10368,15 @@ fn byte_to_joypad(bus: &mut Bus, player: u8, buttons: u8) {
 fn recordings_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        std::env::var("USERPROFILE").ok().map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
     }
     #[cfg(not(windows))]
     {
-        std::env::var("HOME").ok().map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
+        std::env::var("HOME")
+            .ok()
+            .map(|p| PathBuf::from(p).join(".nes-emulator").join("recordings"))
     }
 }
 
@@ -7765,7 +10395,6 @@ fn fmt_basic_line(buf: &mut String, fps: u32, frame_ms: f32) {
 /// Write the detailed stage breakdown into `buf` without allocating.
 /// Format: `"C:1234 B:567 CS:234 GL:891"` (all values in µs)
 fn fmt_detail_line(buf: &mut String, snap: &PerfSnapshot) {
-
     use std::fmt::Write;
     buf.clear();
     let _ = write!(
@@ -7814,8 +10443,11 @@ mod tests {
     fn sv_table_correct_size() {
         let vignette = build_vignette_table_with_strength(20);
         let sv = build_sv_table(&vignette, 40);
-        assert_eq!(sv.len(), SCREEN_W * SCREEN_H,
-            "sv_table must have exactly SCREEN_W * SCREEN_H entries");
+        assert_eq!(
+            sv.len(),
+            SCREEN_W * SCREEN_H,
+            "sv_table must have exactly SCREEN_W * SCREEN_H entries"
+        );
     }
 
     // ── TEST 2: sv_table matches (scan_mul * vig) >> 8 at sampled pixels ───
@@ -7832,11 +10464,22 @@ mod tests {
         let mid_x = SCREEN_W / 2;
         let bottom = SCREEN_H - 1;
         let samples: &[(usize, usize)] = &[
-            (0, 0), (0, mid_x.saturating_sub(1)), (0, right),
-            (1, 0), (1, 200.min(right)), (1, right),
-            (2, 0), (2, mid_x), (2, right),
-            (3, 0), (3, bottom), (3, right),
-            (100.min(bottom), 300.min(right)), (240.min(bottom), 500.min(right)), (400.min(bottom), 0), (bottom, right),
+            (0, 0),
+            (0, mid_x.saturating_sub(1)),
+            (0, right),
+            (1, 0),
+            (1, 200.min(right)),
+            (1, right),
+            (2, 0),
+            (2, mid_x),
+            (2, right),
+            (3, 0),
+            (3, bottom),
+            (3, right),
+            (100.min(bottom), 300.min(right)),
+            (240.min(bottom), 500.min(right)),
+            (400.min(bottom), 0),
+            (bottom, right),
         ];
         for &(dst_y, dst_x) in samples {
             let idx = dst_y * SCREEN_W + dst_x;
@@ -7875,7 +10518,16 @@ mod tests {
         let sv = build_sv_table(&vignette, 100);
         let scan_muls = make_scan_muls(100);
 
-        for dst_y in [0usize, 1, 2, 3, SCREEN_H - 4, SCREEN_H - 3, SCREEN_H - 2, SCREEN_H - 1] {
+        for dst_y in [
+            0usize,
+            1,
+            2,
+            3,
+            SCREEN_H - 4,
+            SCREEN_H - 3,
+            SCREEN_H - 2,
+            SCREEN_H - 1,
+        ] {
             for dst_x in [0usize, 1, SCREEN_W / 2, SCREEN_W - 2, SCREEN_W - 1] {
                 let idx = dst_y * SCREEN_W + dst_x;
                 let vig = vignette[idx] as u32;
@@ -7892,12 +10544,21 @@ mod tests {
     // ── TEST: PerfOverlayLevel cycling ──────────────────────────────────────
     #[test]
     fn perf_overlay_level_cycles_correctly() {
-        assert_eq!(PerfOverlayLevel::Off.next(), PerfOverlayLevel::Basic,
-            "Off -> Basic");
-        assert_eq!(PerfOverlayLevel::Basic.next(), PerfOverlayLevel::Detailed,
-            "Basic -> Detailed");
-        assert_eq!(PerfOverlayLevel::Detailed.next(), PerfOverlayLevel::Off,
-            "Detailed -> Off (wraps)");
+        assert_eq!(
+            PerfOverlayLevel::Off.next(),
+            PerfOverlayLevel::Basic,
+            "Off -> Basic"
+        );
+        assert_eq!(
+            PerfOverlayLevel::Basic.next(),
+            PerfOverlayLevel::Detailed,
+            "Basic -> Detailed"
+        );
+        assert_eq!(
+            PerfOverlayLevel::Detailed.next(),
+            PerfOverlayLevel::Off,
+            "Detailed -> Off (wraps)"
+        );
         // Full round-trip
         let level = PerfOverlayLevel::Off;
         let level = level.next(); // Basic
@@ -7993,19 +10654,31 @@ mod tests {
     // ── TEST: detail row moves below REC/PLAY HUD when active ────────────────
     #[test]
     fn perf_detail_overlay_row_avoids_transport_hud() {
-        assert_eq!(perf_detail_overlay_y(false), SCREEN_Y + 20,
-            "without REC/PLAY, detail line stays on the second row");
-        assert_eq!(perf_detail_overlay_y(true), SCREEN_Y + 32,
-            "with REC/PLAY, detail line shifts down to avoid overlap");
+        assert_eq!(
+            perf_detail_overlay_y(false),
+            SCREEN_Y + 20,
+            "without REC/PLAY, detail line stays on the second row"
+        );
+        assert_eq!(
+            perf_detail_overlay_y(true),
+            SCREEN_Y + 32,
+            "with REC/PLAY, detail line shifts down to avoid overlap"
+        );
     }
 
     // ── TEST: basic row moves below rewind bar when active ────────────────────
     #[test]
     fn perf_basic_overlay_row_avoids_rewind_bar() {
-        assert_eq!(perf_basic_overlay_y(false), SCREEN_Y + 8,
-            "without rewind bar, basic FPS line stays on the top row");
-        assert_eq!(perf_basic_overlay_y(true), SCREEN_Y + 20,
-            "with rewind bar, basic FPS line shifts down to avoid overlap");
+        assert_eq!(
+            perf_basic_overlay_y(false),
+            SCREEN_Y + 8,
+            "without rewind bar, basic FPS line stays on the top row"
+        );
+        assert_eq!(
+            perf_basic_overlay_y(true),
+            SCREEN_Y + 20,
+            "with rewind bar, basic FPS line shifts down to avoid overlap"
+        );
     }
 
     // ── TEST 5: live-preview regression – scanline_intensity slider ──────────
@@ -8022,8 +10695,10 @@ mod tests {
         apply_scanline_intensity_change(&mut sv, &vignette, 60);
 
         let expected = build_sv_table(&vignette, 60);
-        assert_eq!(sv, expected,
-            "sv_table must immediately reflect new scanline_intensity for live preview");
+        assert_eq!(
+            sv, expected,
+            "sv_table must immediately reflect new scanline_intensity for live preview"
+        );
     }
 
     // ── TEST 6: live-preview regression – vignette_strength slider ───────────
@@ -8040,9 +10715,13 @@ mod tests {
 
         let expected_vignette = build_vignette_table_with_strength(50);
         let expected_sv = build_sv_table(&expected_vignette, scanline_intensity);
-        assert_eq!(sv, expected_sv,
-            "sv_table must immediately reflect new vignette_strength for live preview");
-        assert_eq!(vignette, expected_vignette,
-            "vignette_table must immediately reflect new vignette_strength for live preview");
+        assert_eq!(
+            sv, expected_sv,
+            "sv_table must immediately reflect new vignette_strength for live preview"
+        );
+        assert_eq!(
+            vignette, expected_vignette,
+            "vignette_table must immediately reflect new vignette_strength for live preview"
+        );
     }
 }

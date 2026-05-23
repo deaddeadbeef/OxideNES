@@ -71,13 +71,21 @@ fn strobe_high_always_returns_first_button() {
 
     // While strobe is 1, read() always returns the A button state
     for _ in 0..5 {
-        assert_eq!(joypad.read(), 1, "Strobe high should always return A button");
+        assert_eq!(
+            joypad.read(),
+            1,
+            "Strobe high should always return A button"
+        );
     }
 
     // Verify with A released
     joypad.set_button_pressed(JoypadButton::A, false);
     for _ in 0..5 {
-        assert_eq!(joypad.read(), 0, "Strobe high with A released should return 0");
+        assert_eq!(
+            joypad.read(),
+            0,
+            "Strobe high with A released should return 0"
+        );
     }
 }
 
@@ -124,10 +132,16 @@ fn release_button() {
     let mut joypad = Joypad::new();
 
     joypad.set_button_pressed(JoypadButton::Start, true);
-    assert!(joypad.get_button(JoypadButton::Start), "Start should be pressed");
+    assert!(
+        joypad.get_button(JoypadButton::Start),
+        "Start should be pressed"
+    );
 
     joypad.set_button_pressed(JoypadButton::Start, false);
-    assert!(!joypad.get_button(JoypadButton::Start), "Start should be released");
+    assert!(
+        !joypad.get_button(JoypadButton::Start),
+        "Start should be released"
+    );
 }
 
 #[test]

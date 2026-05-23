@@ -1,7 +1,7 @@
-use crate::cartridge::Cartridge;
-use crate::ppu::Ppu;
-use crate::joypad::Joypad;
 use crate::apu::Apu;
+use crate::cartridge::Cartridge;
+use crate::joypad::Joypad;
+use crate::ppu::Ppu;
 
 #[derive(Clone)]
 pub struct GameGenieCode {
@@ -16,10 +16,11 @@ impl GameGenieCode {
     pub fn decode(code: &str) -> Option<Self> {
         let letters = "APZLGITYEOXUKSVN";
         let code = code.to_uppercase();
-        let vals: Vec<u8> = code.chars()
+        let vals: Vec<u8> = code
+            .chars()
             .filter_map(|c| letters.find(c).map(|i| i as u8))
             .collect();
-        
+
         if vals.len() == 6 {
             let address = 0x8000
                 | ((vals[3] as u16 & 0x07) << 12)
@@ -33,7 +34,13 @@ impl GameGenieCode {
                 | ((vals[0] & 0x08) << 4)
                 | (vals[0] & 0x07)
                 | (vals[5] & 0x08);
-            Some(GameGenieCode { address, replace, compare: None, enabled: true, code_str: code.clone() })
+            Some(GameGenieCode {
+                address,
+                replace,
+                compare: None,
+                enabled: true,
+                code_str: code.clone(),
+            })
         } else if vals.len() == 8 {
             let address = 0x8000
                 | ((vals[3] as u16 & 0x07) << 12)
@@ -51,7 +58,13 @@ impl GameGenieCode {
                 | ((vals[6] & 0x08) << 4)
                 | (vals[6] & 0x07)
                 | (vals[5] & 0x08);
-            Some(GameGenieCode { address, replace, compare: Some(compare), enabled: true, code_str: code.clone() })
+            Some(GameGenieCode {
+                address,
+                replace,
+                compare: Some(compare),
+                enabled: true,
+                code_str: code.clone(),
+            })
         } else {
             None
         }
@@ -129,7 +142,7 @@ impl Bus {
             0x4016 => self.joypad1.read(),
             0x4017 => self.joypad2.read(),
             0x4000..=0x4015 => self.apu.read(addr), // APU
-            0x4018..=0x401F => 0, // APU test mode
+            0x4018..=0x401F => 0,                   // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.read_prg(addr),
         }
     }
@@ -159,7 +172,7 @@ impl Bus {
                 self.joypad2.write(data);
             }
             0x4000..=0x4013 | 0x4015 | 0x4017 => self.apu.write(addr, data), // APU
-            0x4018..=0x401F => {} // APU test mode
+            0x4018..=0x401F => {}                                            // APU test mode
             0x4020..=0xFFFF => self.cartridge.mapper.write_prg(addr, data),
         }
     }
@@ -227,7 +240,7 @@ impl Bus {
         self.apu.external_audio = self.cartridge.mapper.audio_output();
         self.apu.tick();
     }
-    
+
     #[inline]
     pub fn service_dmc_dma(&mut self) {
         if self.apu.dmc.dma_request {
@@ -248,29 +261,29 @@ impl Bus {
     pub fn dmc_stall_tick(&mut self) {
         self.dmc_stall_cycles -= 1;
     }
-    
+
     // ── Save state support ──────────────────────────────────────────
     pub fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        
+
         // CPU RAM (2048 bytes)
         data.extend_from_slice(&self.cpu_ram);
-        
+
         // PPU state
         let ppu_state = self.ppu.save_state();
         data.extend_from_slice(&(ppu_state.len() as u32).to_le_bytes());
         data.extend(ppu_state);
-        
+
         // Mapper SRAM
         let sram = self.cartridge.mapper.get_sram();
         data.extend_from_slice(&(sram.len() as u32).to_le_bytes());
         data.extend(sram);
-        
+
         // Mapper state
         let mapper_state = self.cartridge.mapper.save_state();
         data.extend_from_slice(&(mapper_state.len() as u32).to_le_bytes());
         data.extend(mapper_state);
-        
+
         // Bus state
         data.extend_from_slice(&self.cycles.to_le_bytes());
         data.push(self.dma_page);
@@ -278,73 +291,102 @@ impl Bus {
         data.push(self.dma_data);
         data.push(if self.dma_transfer { 1 } else { 0 });
         data.push(if self.dma_dummy { 1 } else { 0 });
-        
+
         // APU state
         let apu_state = self.apu.save_state();
         data.extend_from_slice(&(apu_state.len() as u32).to_le_bytes());
         data.extend(apu_state);
-        
+
         data
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        if data.len() < 2048 { return false; }
+        if data.len() < 2048 {
+            return false;
+        }
         let mut pos = 0;
-        
+
         // CPU RAM
-        self.cpu_ram.copy_from_slice(&data[pos..pos+2048]);
+        self.cpu_ram.copy_from_slice(&data[pos..pos + 2048]);
         pos += 2048;
-        
+
         // PPU state
-        if pos + 4 > data.len() { return false; }
-        let ppu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        if pos + 4 > data.len() {
+            return false;
+        }
+        let ppu_len =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         pos += 4;
-        if pos + ppu_len > data.len() { return false; }
-        if !self.ppu.load_state(&data[pos..pos+ppu_len]) { return false; }
+        if pos + ppu_len > data.len() {
+            return false;
+        }
+        if !self.ppu.load_state(&data[pos..pos + ppu_len]) {
+            return false;
+        }
         pos += ppu_len;
-        
+
         // Mapper SRAM
-        if pos + 4 > data.len() { return true; } // Optional sections
-        let sram_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        if pos + 4 > data.len() {
+            return true;
+        } // Optional sections
+        let sram_len =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         pos += 4;
         if pos + sram_len <= data.len() {
-            self.cartridge.mapper.set_sram(&data[pos..pos+sram_len]);
+            self.cartridge.mapper.set_sram(&data[pos..pos + sram_len]);
             pos += sram_len;
         }
-        
+
         // Mapper state
-        if pos + 4 > data.len() { return true; }
-        let mapper_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        if pos + 4 > data.len() {
+            return true;
+        }
+        let mapper_len =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         pos += 4;
         if pos + mapper_len <= data.len() {
-            self.cartridge.mapper.load_state(&data[pos..pos+mapper_len]);
+            self.cartridge
+                .mapper
+                .load_state(&data[pos..pos + mapper_len]);
             pos += mapper_len;
         }
-        
-        // Bus state  
+
+        // Bus state
         if pos + 13 <= data.len() {
             self.cycles = usize::from_le_bytes([
-                data[pos], data[pos+1], data[pos+2], data[pos+3],
-                data[pos+4], data[pos+5], data[pos+6], data[pos+7]
+                data[pos],
+                data[pos + 1],
+                data[pos + 2],
+                data[pos + 3],
+                data[pos + 4],
+                data[pos + 5],
+                data[pos + 6],
+                data[pos + 7],
             ]);
             pos += 8;
-            self.dma_page = data[pos]; pos += 1;
-            self.dma_addr = data[pos]; pos += 1;
-            self.dma_data = data[pos]; pos += 1;
-            self.dma_transfer = data[pos] != 0; pos += 1;
+            self.dma_page = data[pos];
+            pos += 1;
+            self.dma_addr = data[pos];
+            pos += 1;
+            self.dma_data = data[pos];
+            pos += 1;
+            self.dma_transfer = data[pos] != 0;
+            pos += 1;
             self.dma_dummy = data[pos] != 0;
             pos += 1;
         }
-        
+
         // APU state (optional - backwards compatible with old saves)
         if pos + 4 <= data.len() {
-            let apu_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            let apu_len =
+                u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
+                    as usize;
             pos += 4;
             if pos + apu_len <= data.len() {
-                self.apu.load_state(&data[pos..pos+apu_len]);
+                self.apu.load_state(&data[pos..pos + apu_len]);
             }
         }
-        
+
         true
     }
 }

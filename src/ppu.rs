@@ -28,10 +28,10 @@ pub struct Ppu {
     nmi_occurred: bool,
     nmi_output: bool,
     // Background rendering
-    v: u16,    // current VRAM address
-    t: u16,    // temporary VRAM address
-    x: u8,     // fine X scroll
-    w: bool,   // write toggle
+    v: u16,  // current VRAM address
+    t: u16,  // temporary VRAM address
+    x: u8,   // fine X scroll
+    w: bool, // write toggle
     bg_next_tile_id: u8,
     bg_next_tile_attrib: u8,
     bg_next_tile_lsb: u8,
@@ -66,20 +66,25 @@ struct OamEntry {
 
 impl Default for OamEntry {
     fn default() -> Self {
-        OamEntry { y: 0xFF, tile_id: 0, attribute: 0, x: 0xFF }
+        OamEntry {
+            y: 0xFF,
+            tile_id: 0,
+            attribute: 0,
+            x: 0xFF,
+        }
     }
 }
 
 // NES system palette (RGB values)
 const NES_PALETTE: [u32; 64] = [
-    0x666666, 0x002A88, 0x1412A7, 0x3B00A4, 0x5C007E, 0x6E0040, 0x6C0600, 0x561D00,
-    0x333500, 0x0B4800, 0x005200, 0x004F08, 0x00404D, 0x000000, 0x000000, 0x000000,
-    0xADADAD, 0x155FD9, 0x4240FF, 0x7527FE, 0xA01ACC, 0xB71E7B, 0xB53120, 0x994E00,
-    0x6B6D00, 0x388700, 0x0C9300, 0x008F32, 0x007C8D, 0x000000, 0x000000, 0x000000,
-    0xFFFEFF, 0x64B0FF, 0x9290FF, 0xC676FF, 0xF36AFF, 0xFE6ECC, 0xFE8170, 0xEA9E22,
-    0xBCBE00, 0x88D800, 0x5CE430, 0x45E082, 0x48CDDE, 0x4F4F4F, 0x000000, 0x000000,
-    0xFFFEFF, 0xC0DFFF, 0xD3D2FF, 0xE8C8FF, 0xFBC2FF, 0xFEC4EA, 0xFECCC5, 0xF7D8A5,
-    0xE4E594, 0xCFEF96, 0xBDF4AB, 0xB3F3CC, 0xB5EBF2, 0xB8B8B8, 0x000000, 0x000000,
+    0x666666, 0x002A88, 0x1412A7, 0x3B00A4, 0x5C007E, 0x6E0040, 0x6C0600, 0x561D00, 0x333500,
+    0x0B4800, 0x005200, 0x004F08, 0x00404D, 0x000000, 0x000000, 0x000000, 0xADADAD, 0x155FD9,
+    0x4240FF, 0x7527FE, 0xA01ACC, 0xB71E7B, 0xB53120, 0x994E00, 0x6B6D00, 0x388700, 0x0C9300,
+    0x008F32, 0x007C8D, 0x000000, 0x000000, 0x000000, 0xFFFEFF, 0x64B0FF, 0x9290FF, 0xC676FF,
+    0xF36AFF, 0xFE6ECC, 0xFE8170, 0xEA9E22, 0xBCBE00, 0x88D800, 0x5CE430, 0x45E082, 0x48CDDE,
+    0x4F4F4F, 0x000000, 0x000000, 0xFFFEFF, 0xC0DFFF, 0xD3D2FF, 0xE8C8FF, 0xFBC2FF, 0xFEC4EA,
+    0xFECCC5, 0xF7D8A5, 0xE4E594, 0xCFEF96, 0xBDF4AB, 0xB3F3CC, 0xB5EBF2, 0xB8B8B8, 0x000000,
+    0x000000,
 ];
 
 impl Ppu {
@@ -232,7 +237,9 @@ impl Ppu {
                     data = self.ppu_data_buffer;
                     self.ppu_data_buffer = self.ppu_read(addr, cart);
                 }
-                self.v = self.v.wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
+                self.v = self
+                    .v
+                    .wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
                 self.open_bus = data;
                 data
             }
@@ -268,7 +275,8 @@ impl Ppu {
                     self.t = (self.t & 0xFFE0) | ((data as u16) >> 3);
                     self.w = true;
                 } else {
-                    self.t = (self.t & 0x8C1F) | (((data as u16) & 0x07) << 12)
+                    self.t = (self.t & 0x8C1F)
+                        | (((data as u16) & 0x07) << 12)
                         | (((data as u16) & 0xF8) << 2);
                     self.w = false;
                 }
@@ -286,7 +294,9 @@ impl Ppu {
             0x2007 => {
                 let addr = self.v;
                 self.ppu_write(addr, data, cart);
-                self.v = self.v.wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
+                self.v = self
+                    .v
+                    .wrapping_add(if self.ctrl & 0x04 != 0 { 32 } else { 1 });
             }
             _ => {}
         }
@@ -299,7 +309,9 @@ impl Ppu {
 
     #[inline]
     fn increment_scroll_x(&mut self) {
-        if !self.rendering_enabled() { return; }
+        if !self.rendering_enabled() {
+            return;
+        }
         if self.v & 0x001F == 31 {
             self.v &= !0x001F;
             self.v ^= 0x0400;
@@ -310,7 +322,9 @@ impl Ppu {
 
     #[inline]
     fn increment_scroll_y(&mut self) {
-        if !self.rendering_enabled() { return; }
+        if !self.rendering_enabled() {
+            return;
+        }
         if self.v & 0x7000 != 0x7000 {
             self.v += 0x1000;
         } else {
@@ -330,22 +344,38 @@ impl Ppu {
 
     #[inline]
     fn transfer_address_x(&mut self) {
-        if !self.rendering_enabled() { return; }
+        if !self.rendering_enabled() {
+            return;
+        }
         self.v = (self.v & !0x041F) | (self.t & 0x041F);
     }
 
     #[inline]
     fn transfer_address_y(&mut self) {
-        if !self.rendering_enabled() { return; }
+        if !self.rendering_enabled() {
+            return;
+        }
         self.v = (self.v & !0x7BE0) | (self.t & 0x7BE0);
     }
 
     #[inline]
     fn load_background_shifters(&mut self) {
-        self.bg_shifter_pattern_lo = (self.bg_shifter_pattern_lo & 0xFF00) | self.bg_next_tile_lsb as u16;
-        self.bg_shifter_pattern_hi = (self.bg_shifter_pattern_hi & 0xFF00) | self.bg_next_tile_msb as u16;
-        self.bg_shifter_attrib_lo = (self.bg_shifter_attrib_lo & 0xFF00) | if self.bg_next_tile_attrib & 0x01 != 0 { 0xFF } else { 0x00 };
-        self.bg_shifter_attrib_hi = (self.bg_shifter_attrib_hi & 0xFF00) | if self.bg_next_tile_attrib & 0x02 != 0 { 0xFF } else { 0x00 };
+        self.bg_shifter_pattern_lo =
+            (self.bg_shifter_pattern_lo & 0xFF00) | self.bg_next_tile_lsb as u16;
+        self.bg_shifter_pattern_hi =
+            (self.bg_shifter_pattern_hi & 0xFF00) | self.bg_next_tile_msb as u16;
+        self.bg_shifter_attrib_lo = (self.bg_shifter_attrib_lo & 0xFF00)
+            | if self.bg_next_tile_attrib & 0x01 != 0 {
+                0xFF
+            } else {
+                0x00
+            };
+        self.bg_shifter_attrib_hi = (self.bg_shifter_attrib_hi & 0xFF00)
+            | if self.bg_next_tile_attrib & 0x02 != 0 {
+                0xFF
+            } else {
+                0x00
+            };
     }
 
     #[inline]
@@ -401,8 +431,12 @@ impl Ppu {
                             | ((self.v >> 4) & 0x38)
                             | ((self.v >> 2) & 0x07);
                         self.bg_next_tile_attrib = self.ppu_read(addr, cart);
-                        if self.v & 0x40 != 0 { self.bg_next_tile_attrib >>= 4; }
-                        if self.v & 0x02 != 0 { self.bg_next_tile_attrib >>= 2; }
+                        if self.v & 0x40 != 0 {
+                            self.bg_next_tile_attrib >>= 4;
+                        }
+                        if self.v & 0x02 != 0 {
+                            self.bg_next_tile_attrib >>= 2;
+                        }
                         self.bg_next_tile_attrib &= 0x03;
                     }
                     4 => {
@@ -416,7 +450,8 @@ impl Ppu {
                         let bg_pattern = if self.ctrl & 0x10 != 0 { 0x1000u16 } else { 0 };
                         let addr = bg_pattern
                             + (self.bg_next_tile_id as u16) * 16
-                            + ((self.v >> 12) & 0x07) + 8;
+                            + ((self.v >> 12) & 0x07)
+                            + 8;
                         self.bg_next_tile_msb = self.ppu_read(addr, cart);
                     }
                     7 => {
@@ -551,12 +586,28 @@ impl Ppu {
 
             if self.mask & 0x08 != 0 && (self.mask & 0x02 != 0 || self.cycle > 8) {
                 let mux = 0x8000 >> self.x;
-                let p0 = if self.bg_shifter_pattern_lo & mux != 0 { 1 } else { 0 };
-                let p1 = if self.bg_shifter_pattern_hi & mux != 0 { 1 } else { 0 };
+                let p0 = if self.bg_shifter_pattern_lo & mux != 0 {
+                    1
+                } else {
+                    0
+                };
+                let p1 = if self.bg_shifter_pattern_hi & mux != 0 {
+                    1
+                } else {
+                    0
+                };
                 bg_pixel = (p1 << 1) | p0;
 
-                let a0 = if self.bg_shifter_attrib_lo & mux != 0 { 1 } else { 0 };
-                let a1 = if self.bg_shifter_attrib_hi & mux != 0 { 1 } else { 0 };
+                let a0 = if self.bg_shifter_attrib_lo & mux != 0 {
+                    1
+                } else {
+                    0
+                };
+                let a1 = if self.bg_shifter_attrib_hi & mux != 0 {
+                    1
+                } else {
+                    0
+                };
                 bg_palette = (a1 << 1) | a0;
             }
 
@@ -569,8 +620,16 @@ impl Ppu {
             if self.mask & 0x10 != 0 && (self.mask & 0x04 != 0 || self.cycle > 8) {
                 for i in 0..self.sprite_count as usize {
                     if self.sprite_scanline[i].x == 0 {
-                        let p0 = if self.sprite_shifter_pattern_lo[i] & 0x80 != 0 { 1 } else { 0 };
-                        let p1 = if self.sprite_shifter_pattern_hi[i] & 0x80 != 0 { 1 } else { 0 };
+                        let p0 = if self.sprite_shifter_pattern_lo[i] & 0x80 != 0 {
+                            1
+                        } else {
+                            0
+                        };
+                        let p1 = if self.sprite_shifter_pattern_hi[i] & 0x80 != 0 {
+                            1
+                        } else {
+                            0
+                        };
                         fg_pixel = (p1 << 1) | p0;
                         fg_palette = (self.sprite_scanline[i].attribute & 0x03) + 4;
                         fg_priority = self.sprite_scanline[i].attribute & 0x20 == 0;
@@ -592,7 +651,8 @@ impl Ppu {
                 (_, 0) => (bg_pixel, bg_palette),
                 (_, _) => {
                     // Sprite zero hit detection
-                    if self.sprite_zero_hit_possible && self.sprite_zero_being_rendered
+                    if self.sprite_zero_hit_possible
+                        && self.sprite_zero_being_rendered
                         && self.mask & 0x18 == 0x18
                     {
                         if self.mask & 0x06 != 0x06 {
@@ -603,7 +663,11 @@ impl Ppu {
                             self.status |= 0x40;
                         }
                     }
-                    if fg_priority { (fg_pixel, fg_palette) } else { (bg_pixel, bg_palette) }
+                    if fg_priority {
+                        (fg_pixel, fg_palette)
+                    } else {
+                        (bg_pixel, bg_palette)
+                    }
                 }
             };
 
@@ -611,9 +675,8 @@ impl Ppu {
             // SAFETY: palette is 0-7 (2 bits for BG palette, or 4-7 for sprite palette)
             // pixel is 0-3 (2 bits). So palette_idx is at most 7*4+3 = 31, which is always valid
             // for palette_table (size = 32 elements)
-            let mut color_index = unsafe {
-                *self.palette_table.get_unchecked(palette_idx) as usize & 0x3F
-            };
+            let mut color_index =
+                unsafe { *self.palette_table.get_unchecked(palette_idx) as usize & 0x3F };
 
             // Greyscale mode: AND with 0x30 to only use grey column colors
             if self.greyscale {
@@ -709,20 +772,20 @@ impl Ppu {
         self.frame_complete = false;
         complete
     }
-    
+
     // ── Save state support ──────────────────────────────────────────
     pub fn save_state(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        
+
         // VRAM (2048 bytes)
         data.extend_from_slice(&self.vram);
-        
+
         // Palette table (32 bytes)
         data.extend_from_slice(&self.palette_table);
-        
-        // OAM data (256 bytes)  
+
+        // OAM data (256 bytes)
         data.extend_from_slice(&self.oam_data);
-        
+
         // Registers and state
         data.push(self.ctrl);
         data.push(self.mask);
@@ -733,14 +796,14 @@ impl Ppu {
         data.push(if self.addr_latch { 1 } else { 0 });
         data.extend_from_slice(&self.ppu_addr.to_le_bytes());
         data.push(self.ppu_data_buffer);
-        
+
         // Rendering state
         data.extend_from_slice(&self.scanline.to_le_bytes());
         data.extend_from_slice(&self.cycle.to_le_bytes());
         data.push(if self.frame_complete { 1 } else { 0 });
         data.push(if self.nmi_occurred { 1 } else { 0 });
         data.push(if self.nmi_output { 1 } else { 0 });
-        
+
         // Background rendering
         data.extend_from_slice(&self.v.to_le_bytes());
         data.extend_from_slice(&self.t.to_le_bytes());
@@ -754,92 +817,139 @@ impl Ppu {
         data.extend_from_slice(&self.bg_shifter_pattern_hi.to_le_bytes());
         data.extend_from_slice(&self.bg_shifter_attrib_lo.to_le_bytes());
         data.extend_from_slice(&self.bg_shifter_attrib_hi.to_le_bytes());
-        
+
         // Sprite rendering
         data.push(self.sprite_count);
         data.extend_from_slice(&self.sprite_shifter_pattern_lo);
         data.extend_from_slice(&self.sprite_shifter_pattern_hi);
         data.push(if self.sprite_zero_hit_possible { 1 } else { 0 });
-        data.push(if self.sprite_zero_being_rendered { 1 } else { 0 });
+        data.push(if self.sprite_zero_being_rendered {
+            1
+        } else {
+            0
+        });
         data.push(if self.odd_frame { 1 } else { 0 });
         data.push(if self.nmi_previous { 1 } else { 0 });
         data.push(if self.region == Region::Pal { 1 } else { 0 });
-        
+
         data
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
         // Calculate expected size: 2048 + 32 + 256 + registers + state
         let min_size = 2048 + 32 + 256 + 30; // Approximate minimum
-        if data.len() < min_size { return false; }
-        
+        if data.len() < min_size {
+            return false;
+        }
+
         let mut pos = 0;
-        
+
         // VRAM
-        self.vram.copy_from_slice(&data[pos..pos+2048]);
+        self.vram.copy_from_slice(&data[pos..pos + 2048]);
         pos += 2048;
-        
+
         // Palette table
-        self.palette_table.copy_from_slice(&data[pos..pos+32]);
+        self.palette_table.copy_from_slice(&data[pos..pos + 32]);
         pos += 32;
-        
+
         // OAM data
-        self.oam_data.copy_from_slice(&data[pos..pos+256]);
+        self.oam_data.copy_from_slice(&data[pos..pos + 256]);
         pos += 256;
-        
+
         // Registers and state
-        self.ctrl = data[pos]; pos += 1;
-        self.mask = data[pos]; pos += 1;
+        self.ctrl = data[pos];
+        pos += 1;
+        self.mask = data[pos];
+        pos += 1;
         self.greyscale = self.mask & 0x01 != 0;
         self.emphasis = (self.mask >> 5) & 0x07;
-        self.status = data[pos]; pos += 1;
-        self.oam_addr = data[pos]; pos += 1;
-        self.scroll_x = data[pos]; pos += 1;
-        self.scroll_y = data[pos]; pos += 1;
-        self.addr_latch = data[pos] != 0; pos += 1;
-        self.ppu_addr = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.ppu_data_buffer = data[pos]; pos += 1;
-        
+        self.status = data[pos];
+        pos += 1;
+        self.oam_addr = data[pos];
+        pos += 1;
+        self.scroll_x = data[pos];
+        pos += 1;
+        self.scroll_y = data[pos];
+        pos += 1;
+        self.addr_latch = data[pos] != 0;
+        pos += 1;
+        self.ppu_addr = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.ppu_data_buffer = data[pos];
+        pos += 1;
+
         // Rendering state
-        self.scanline = i16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.cycle = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.frame_complete = data[pos] != 0; pos += 1;
-        self.nmi_occurred = data[pos] != 0; pos += 1;
-        self.nmi_output = data[pos] != 0; pos += 1;
-        
+        self.scanline = i16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.cycle = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.frame_complete = data[pos] != 0;
+        pos += 1;
+        self.nmi_occurred = data[pos] != 0;
+        pos += 1;
+        self.nmi_output = data[pos] != 0;
+        pos += 1;
+
         // Background rendering
-        self.v = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.t = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.x = data[pos]; pos += 1;
-        self.w = data[pos] != 0; pos += 1;
-        self.bg_next_tile_id = data[pos]; pos += 1;
-        self.bg_next_tile_attrib = data[pos]; pos += 1;
-        self.bg_next_tile_lsb = data[pos]; pos += 1;
-        self.bg_next_tile_msb = data[pos]; pos += 1;
-        self.bg_shifter_pattern_lo = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.bg_shifter_pattern_hi = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.bg_shifter_attrib_lo = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        self.bg_shifter_attrib_hi = u16::from_le_bytes([data[pos], data[pos+1]]); pos += 2;
-        
+        self.v = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.t = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.x = data[pos];
+        pos += 1;
+        self.w = data[pos] != 0;
+        pos += 1;
+        self.bg_next_tile_id = data[pos];
+        pos += 1;
+        self.bg_next_tile_attrib = data[pos];
+        pos += 1;
+        self.bg_next_tile_lsb = data[pos];
+        pos += 1;
+        self.bg_next_tile_msb = data[pos];
+        pos += 1;
+        self.bg_shifter_pattern_lo = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.bg_shifter_pattern_hi = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.bg_shifter_attrib_lo = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        self.bg_shifter_attrib_hi = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
         // Sprite rendering
-        if pos + 18 > data.len() { return false; }
-        self.sprite_count = data[pos]; pos += 1;
-        self.sprite_shifter_pattern_lo.copy_from_slice(&data[pos..pos+8]); pos += 8;
-        self.sprite_shifter_pattern_hi.copy_from_slice(&data[pos..pos+8]); pos += 8;
-        self.sprite_zero_hit_possible = data[pos] != 0; pos += 1;
-        self.sprite_zero_being_rendered = data[pos] != 0; pos += 1;
-        self.odd_frame = data[pos] != 0; pos += 1;
+        if pos + 18 > data.len() {
+            return false;
+        }
+        self.sprite_count = data[pos];
+        pos += 1;
+        self.sprite_shifter_pattern_lo
+            .copy_from_slice(&data[pos..pos + 8]);
+        pos += 8;
+        self.sprite_shifter_pattern_hi
+            .copy_from_slice(&data[pos..pos + 8]);
+        pos += 8;
+        self.sprite_zero_hit_possible = data[pos] != 0;
+        pos += 1;
+        self.sprite_zero_being_rendered = data[pos] != 0;
+        pos += 1;
+        self.odd_frame = data[pos] != 0;
+        pos += 1;
 
         // nmi_previous (optional, backwards compatible)
         if pos < data.len() {
-            self.nmi_previous = data[pos] != 0; pos += 1;
+            self.nmi_previous = data[pos] != 0;
+            pos += 1;
         }
 
         // Region (optional, backwards compatible)
         if pos < data.len() {
-            self.region = if data[pos] == 1 { Region::Pal } else { Region::Ntsc };
+            self.region = if data[pos] == 1 {
+                Region::Pal
+            } else {
+                Region::Ntsc
+            };
         }
-        
+
         true
     }
 }

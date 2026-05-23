@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RomEntry {
@@ -74,7 +74,9 @@ const BUILTIN_DB: &str = r#"
 
 impl RomDatabase {
     pub fn new() -> Self {
-        let mut db = RomDatabase { entries: HashMap::new() };
+        let mut db = RomDatabase {
+            entries: HashMap::new(),
+        };
         db.load_builtin();
         db.load_user_db();
         db
@@ -103,7 +105,9 @@ impl RomDatabase {
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .unwrap_or_else(|_| ".".to_string());
-        let path = std::path::Path::new(&home).join(".nes-emulator").join("romdb.json");
+        let path = std::path::Path::new(&home)
+            .join(".nes-emulator")
+            .join("romdb.json");
         if let Ok(data) = std::fs::read_to_string(&path) {
             if let Ok(map) = serde_json::from_str::<HashMap<String, RomEntry>>(&data) {
                 self.entries.extend(map);
