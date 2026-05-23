@@ -16,6 +16,10 @@ pub struct RomDatabase {
     entries: HashMap<String, RomEntry>,
 }
 
+// Built-in entries are limited to factual compatibility metadata for
+// user-provided ROMs. Do not add descriptions, artwork, publisher copy, or
+// other promotional fields here. User metadata is loaded after this table and
+// intentionally overrides matching CRCs.
 const BUILTIN_DB: &str = r#"
 {
   "3337EC46": { "title": "Super Mario Bros.", "region": "US", "mapper": 0, "mirroring": "vertical", "prg_size": 32768, "chr_size": 8192, "battery": false },
@@ -103,7 +107,12 @@ impl RomDatabase {
         let Ok(map) = serde_json::from_str::<HashMap<String, RomEntry>>(data) else {
             return false;
         };
-        self.entries.extend(map);
+
+        for (crc, entry) in map {
+            if let Some(key) = normalize_crc_key(&crc) {
+                self.entries.insert(key, entry);
+            }
+        }
         true
     }
 
@@ -117,6 +126,15 @@ impl RomDatabase {
         if let Ok(data) = std::fs::read_to_string(&path) {
             self.load_json_entries(&data);
         }
+    }
+}
+
+fn normalize_crc_key(crc: &str) -> Option<String> {
+    let trimmed = crc.trim();
+    if trimmed.len() == 8 && trimmed.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Some(trimmed.to_ascii_uppercase())
+    } else {
+        None
     }
 }
 
@@ -155,5 +173,64 @@ mod tests {
         let entry = db.lookup(0x1234_ABCD).expect("entry should load");
         assert_eq!(entry.title, "Homebrew Test");
         assert_eq!(entry.mapper, 0);
+    }
+
+    #[test]
+    fn load_json_entries_normalizes_crc_keys_for_user_overrides() {
+        let mut db = RomDatabase {
+            entries: HashMap::new(),
+        };
+        let builtin_json = r#"{
+            "1234ABCD": {
+                "title": "Original Metadata",
+                "region": "US",
+                "mapper": 0,
+                "mirroring": "horizontal",
+                "prg_size": 32768,
+                "chr_size": 8192,
+                "battery": false
+            }
+        }"#;
+        let user_json = r#"{
+            "1234abcd": {
+                "title": "User Metadata",
+                "region": "PAL",
+                "mapper": 2,
+                "mirroring": "vertical",
+                "prg_size": 131072,
+                "chr_size": 0,
+                "battery": true
+            }
+        }"#;
+
+        assert!(db.load_json_entries(builtin_json));
+        assert!(db.load_json_entries(user_json));
+        let entry = db.lookup(0x1234_ABCD).expect("entry should load");
+
+        assert_eq!(entry.title, "User Metadata");
+        assert_eq!(entry.mapper, 2);
+        assert_eq!(entry.region, "PAL");
+        assert!(entry.battery);
+    }
+
+    #[test]
+    fn load_json_entries_ignores_invalid_crc_keys() {
+        let mut db = RomDatabase {
+            entries: HashMap::new(),
+        };
+        let json = r#"{
+            "not-a-crc": {
+                "title": "Invalid Key",
+                "region": "US",
+                "mapper": 0,
+                "mirroring": "horizontal",
+                "prg_size": 32768,
+                "chr_size": 8192,
+                "battery": false
+            }
+        }"#;
+
+        assert!(db.load_json_entries(json));
+        assert!(db.entries.is_empty());
     }
 }

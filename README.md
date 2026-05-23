@@ -21,7 +21,7 @@ A feature-rich NES-compatible emulator written in Rust.
 - **Lua scripting** — Write scripts to read memory, draw overlays
 - **Achievement system** — Local achievement definitions with unlock notifications
 - **Input recording** — Record and playback with FM2 export for TAS
-- **ROM database** — Auto-identifies ~50 popular games, fixes bad headers
+- **ROM database** — CRC-based compatibility metadata with user overrides for mapper, mirroring, and battery fixes
 - **Game Genie cheats** — Enter cheat codes in the pause menu
 - **Battery save** — Automatic SRAM persistence for cartridges that use SRAM
 - **Auto-updater** — Checks GitHub Releases for new versions
@@ -77,6 +77,28 @@ cargo build --release
 ## Configuration
 
 Settings are stored in `~/.nes-emulator/config.json` and can be edited in-app via the Settings menu.
+
+### ROM Metadata
+
+OxideNES includes a small built-in compatibility metadata table and loads user overrides from `~/.nes-emulator/romdb.json`. Metadata is limited to factual cartridge fields used for compatibility, such as mapper, mirroring, PRG/CHR sizes, region, and battery-backed RAM.
+
+User metadata is loaded after the built-in table, so matching CRC entries override built-in entries:
+
+```json
+{
+  "1234ABCD": {
+    "title": "Homebrew Test",
+    "region": "US",
+    "mapper": 0,
+    "mirroring": "horizontal",
+    "prg_size": 32768,
+    "chr_size": 8192,
+    "battery": false
+  }
+}
+```
+
+See [docs/ROM_METADATA_POLICY.md](docs/ROM_METADATA_POLICY.md) before adding or sharing metadata.
 
 ## Lua Scripting
 
@@ -144,7 +166,7 @@ cargo build --release
 
 This is a clean-room NES-compatible emulator implementation. No proprietary Nintendo code, ROMs, BIOS files, artwork, screenshots, logos, manuals, or music are included. Users must supply their own legally obtained `.nes` ROM files.
 
-See [docs/IP_COMPLIANCE.md](docs/IP_COMPLIANCE.md) for contributor and release rules that keep the public repository safe to distribute.
+See [docs/IP_COMPLIANCE.md](docs/IP_COMPLIANCE.md) and [docs/ROM_METADATA_POLICY.md](docs/ROM_METADATA_POLICY.md) for contributor and release rules that keep the public repository safe to distribute.
 
 ## License
 
