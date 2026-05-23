@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.2] - 2026-05-23
+
+### Security
+- Updated the updater TLS dependency path by moving `rustls-webpki` from 0.103.9 to 0.103.13.
+- Added `cargo audit` to CI and release workflows so dependency advisories block future releases when they become actionable vulnerabilities.
+
+### Compliance
+- Removed the bundled `nestest.nes` binary test fixture and replaced it with generated in-memory CPU program coverage.
+- Added an executable IP compliance audit and documented final M4 release-candidate evidence.
+
+### Changed
+- Updated `minifb` from 0.27 to 0.28.
+- Tightened release checklist validation, issue-template YAML, and public no-ROM guidance.
 ## [0.3.1] - 2026-04-26
 
 ### Added
