@@ -836,9 +836,10 @@ impl Ppu {
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        // Calculate expected size: 2048 + 32 + 256 + registers + state
-        let min_size = 2048 + 32 + 256 + 30; // Approximate minimum
-        if data.len() < min_size {
+        // Required prefix before sprite rendering state:
+        // VRAM + palette + OAM + register/background fields.
+        let required_prefix_size = 2048 + 32 + 256 + 35;
+        if data.len() < required_prefix_size {
             return false;
         }
 
@@ -917,7 +918,7 @@ impl Ppu {
         pos += 2;
 
         // Sprite rendering
-        if pos + 18 > data.len() {
+        if pos + 20 > data.len() {
             return false;
         }
         self.sprite_count = data[pos];

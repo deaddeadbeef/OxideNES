@@ -183,6 +183,34 @@ fn ppu_save_load_state() {
 }
 
 #[test]
+fn ppu_load_state_rejects_truncated_required_prefix_without_panic() {
+    let mut ppu = Ppu::new();
+    let truncated_prefix = vec![0; 2048 + 32 + 256 + 30];
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ppu.load_state(&truncated_prefix)
+    }));
+
+    assert!(result.is_ok(), "truncated PPU state should not panic");
+    assert!(!result.unwrap(), "truncated PPU state should be rejected");
+}
+
+#[test]
+fn ppu_load_state_rejects_truncated_sprite_state_without_panic() {
+    let mut ppu = Ppu::new();
+    let truncated_sprite_state = vec![0; 2048 + 32 + 256 + 35 + 18];
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ppu.load_state(&truncated_sprite_state)
+    }));
+
+    assert!(result.is_ok(), "truncated sprite state should not panic");
+    assert!(
+        !result.unwrap(),
+        "truncated sprite state should be rejected"
+    );
+}
+#[test]
 fn ppu_data_read_write_roundtrip() {
     let mut ppu = Ppu::new();
     let mut cart = make_cart();
