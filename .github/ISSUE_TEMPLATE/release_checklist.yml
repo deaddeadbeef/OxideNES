@@ -1,0 +1,84 @@
+name: Release checklist
+description: Track a release candidate with validation, packaging, tagging, and IP compliance gates.
+title: "[Release]: "
+labels: ["release"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this checklist before publishing a tag or GitHub Release.
+
+        Release artifacts must not include commercial ROMs, BIOS files, copyrighted screenshots, box art, manuals, music, logos, trademarked character artwork, or recordings containing proprietary game content.
+  - type: input
+    id: version
+    attributes:
+      label: Version or milestone tag
+      placeholder: "v0.3.2 or product-polish-m1-complete"
+    validations:
+      required: true
+  - type: dropdown
+    id: release_type
+    attributes:
+      label: Release type
+      options:
+        - Small milestone tag only
+        - Major milestone tag only
+        - GitHub Release with binaries
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Release scope
+      description: Summarize what changed and why it is meaningful to users or maintainers.
+    validations:
+      required: true
+  - type: checkboxes
+    id: validation
+    attributes:
+      label: Required validation
+      options:
+        - label: `cargo fmt -- --check`
+          required: true
+        - label: `cargo check`
+          required: true
+        - label: `cargo test`
+          required: true
+        - label: `cargo clippy -- -D warnings`
+          required: true
+        - label: `git diff --check`
+          required: true
+        - label: GitHub Actions are green on Windows, macOS, Linux, clippy, and fmt jobs.
+          required: true
+  - type: checkboxes
+    id: packaging
+    attributes:
+      label: Packaging checks
+      options:
+        - label: Release artifacts have clear platform-specific names.
+          required: false
+        - label: Windows installer builds and includes only redistributable files.
+          required: false
+        - label: Binary launches or reports version on each published platform.
+          required: false
+  - type: checkboxes
+    id: tags
+    attributes:
+      label: Tags and releases
+      options:
+        - label: Small milestone tags use names such as `product-polish-m1-formatting`.
+          required: false
+        - label: Major milestone tags use names such as `product-polish-m1-complete`.
+          required: false
+        - label: GitHub Releases are published only for user-meaningful binary, packaging, compatibility, or stability changes.
+          required: true
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: IP compliance confirmation
+      options:
+        - label: No ROMs, BIOS files, copyrighted screenshots, box art, manuals, music, logos, trademarked character artwork, or proprietary recordings are included.
+          required: true
+        - label: Any screenshots or recordings use homebrew, public-domain, or original test content.
+          required: true
+        - label: Release notes use third-party names only as factual compatibility references and do not imply endorsement.
