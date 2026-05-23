@@ -9,23 +9,25 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use gilrs::{Axis, Button, Gilrs};
 use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
 use ringbuf::{traits::*, HeapRb};
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub mod rendering;
-use rendering::*;
-
 use oxidenes::achievements::{md5_hex, AchievementEngine};
 use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
+use oxidenes::config::{
+    add_recent_game, config_dir, is_favorite, load_config, save_config, toggle_favorite,
+    EmulatorConfig, InputBindings,
+};
 use oxidenes::cpu::Cpu;
+use oxidenes::file_browser::FileBrowser;
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
 use oxidenes::ppu::Region;
 use oxidenes::recording::{sha256, InputRecording};
+use oxidenes::rendering::*;
 use oxidenes::romdb::RomDatabase;
 use oxidenes::scripting::ScriptEngine;
 use oxidenes::state_io::StateReader;
@@ -49,57 +51,6 @@ const MENU_GRAY: u32 = 0x9C9C9C;
 const MENU_DARK_GRAY: u32 = 0x585858;
 const MENU_LIGHT_BLUE: u32 = 0x6888FC;
 
-// =====================================================================
-// Config persistence
-// =====================================================================
-
-#[derive(Serialize, Deserialize, Clone)]
-struct KeyBindings {
-    up: String,
-    down: String,
-    left: String,
-    right: String,
-    a: String,
-    b: String,
-    start: String,
-    select: String,
-    turbo_a: String,
-    turbo_b: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct KeyboardBindings {
-    up: String,
-    down: String,
-    left: String,
-    right: String,
-    a: String,
-    b: String,
-    start: String,
-    select: String,
-    turbo_a: String,
-    turbo_b: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct ControllerBindings {
-    a: String,
-    b: String,
-    turbo_a: String,
-    turbo_b: String,
-    start: String,
-    select: String,
-    deadzone: f32,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct InputBindings {
-    keyboard_p1: KeyboardBindings,
-    keyboard_p2: KeyboardBindings,
-    controller_p1: ControllerBindings,
-    controller_p2: ControllerBindings,
-}
-
 #[derive(Default, Clone)]
 struct StickState {
     up: bool,
@@ -118,76 +69,6 @@ impl StickState {
         self.down = false;
         self.left = false;
         self.right = false;
-    }
-}
-
-impl Default for KeyBindings {
-    fn default() -> Self {
-        Self {
-            up: "W".to_string(),
-            down: "S".to_string(),
-            left: "A".to_string(),
-            right: "D".to_string(),
-            a: "K".to_string(),
-            b: "J".to_string(),
-            start: "Enter".to_string(),
-            select: "RightShift".to_string(),
-            turbo_a: "Z".to_string(),
-            turbo_b: "X".to_string(),
-        }
-    }
-}
-
-impl Default for KeyboardBindings {
-    fn default() -> Self {
-        Self {
-            up: "W".to_string(),
-            down: "S".to_string(),
-            left: "A".to_string(),
-            right: "D".to_string(),
-            a: "K".to_string(),
-            b: "J".to_string(),
-            start: "Enter".to_string(),
-            select: "RightShift".to_string(),
-            turbo_a: "Z".to_string(),
-            turbo_b: "X".to_string(),
-        }
-    }
-}
-
-impl Default for ControllerBindings {
-    fn default() -> Self {
-        Self {
-            a: "South".to_string(),
-            b: "West".to_string(),
-            turbo_a: "East".to_string(),
-            turbo_b: "North".to_string(),
-            start: "Start".to_string(),
-            select: "Select".to_string(),
-            deadzone: 0.3,
-        }
-    }
-}
-
-impl Default for InputBindings {
-    fn default() -> Self {
-        Self {
-            keyboard_p1: KeyboardBindings::default(),
-            keyboard_p2: KeyboardBindings {
-                up: "Up".to_string(),
-                down: "Down".to_string(),
-                left: "Left".to_string(),
-                right: "Right".to_string(),
-                a: "Period".to_string(),
-                b: "Comma".to_string(),
-                start: "Slash".to_string(),
-                select: "RightCtrl".to_string(),
-                turbo_a: "Semicolon".to_string(),
-                turbo_b: "Apostrophe".to_string(),
-            },
-            controller_p1: ControllerBindings::default(),
-            controller_p2: ControllerBindings::default(),
-        }
     }
 }
 
@@ -461,152 +342,11 @@ fn gilrs_button_to_string(button: gilrs::Button) -> String {
     }
 }
 
-fn default_region() -> String {
-    "ntsc".to_string()
-}
-fn default_glass_intensity() -> u8 {
-    60
-}
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Clone, Copy, PartialEq)]
 enum OsdType {
     None,
     Brightness,
     Contrast,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct EmulatorConfig {
-    recent_games: Vec<String>,
-    crt_enabled: bool,
-    barrel_distortion: bool,
-    audio_volume: u32,
-    #[serde(default)]
-    key_bindings: Option<KeyBindings>,
-    #[serde(default = "default_region")]
-    region: String,
-    #[serde(default)]
-    input_bindings: InputBindings,
-    #[serde(default = "default_glass_intensity")]
-    glass_intensity: u8,
-    #[serde(default)]
-    config_version: u32,
-    #[serde(default)]
-    crt_config: CrtConfig,
-    #[serde(default = "default_true")]
-    check_for_updates: bool,
-    #[serde(default)]
-    favorite_games: Vec<String>,
-    #[serde(default)]
-    rom_directory: Option<String>,
-}
-
-impl Default for EmulatorConfig {
-    fn default() -> Self {
-        Self {
-            recent_games: Vec::new(),
-            crt_enabled: true,
-            barrel_distortion: false,
-            audio_volume: 100,
-            key_bindings: None,
-            region: "ntsc".to_string(),
-            input_bindings: InputBindings::default(),
-            glass_intensity: 60,
-            config_version: 3,
-            crt_config: CrtConfig::default(),
-            check_for_updates: true,
-            favorite_games: Vec::new(),
-            rom_directory: None,
-        }
-    }
-}
-
-fn config_dir() -> PathBuf {
-    let home = env::var("USERPROFILE")
-        .or_else(|_| env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    Path::new(&home).join(".nes-emulator")
-}
-
-fn config_path() -> PathBuf {
-    config_dir().join("config.json")
-}
-
-fn load_config() -> EmulatorConfig {
-    let path = config_path();
-    if path.exists() {
-        if let Ok(data) = fs::read_to_string(&path) {
-            if let Ok(mut cfg) = serde_json::from_str::<EmulatorConfig>(&data) {
-                let mut migrated = false;
-
-                // Handle migration from old key_bindings to new input_bindings
-                if cfg.config_version < 2 {
-                    if let Some(old) = &cfg.key_bindings {
-                        cfg.input_bindings.keyboard_p1 = KeyboardBindings {
-                            up: old.up.clone(),
-                            down: old.down.clone(),
-                            left: old.left.clone(),
-                            right: old.right.clone(),
-                            a: old.a.clone(),
-                            b: old.b.clone(),
-                            start: old.start.clone(),
-                            select: old.select.clone(),
-                            turbo_a: old.turbo_a.clone(),
-                            turbo_b: old.turbo_b.clone(),
-                        };
-                        cfg.key_bindings = None;
-                    }
-                    cfg.config_version = 2;
-                    migrated = true;
-                }
-
-                if cfg.config_version < 3 {
-                    // rom_directory defaults to None via serde(default) — triggers first-run setup
-                    cfg.config_version = 3;
-                    migrated = true;
-                }
-
-                if migrated {
-                    save_config(&cfg);
-                }
-                return cfg;
-            }
-        }
-    }
-    let cfg = EmulatorConfig::default();
-    save_config(&cfg);
-    cfg
-}
-
-fn save_config(cfg: &EmulatorConfig) {
-    let dir = config_dir();
-    let _ = fs::create_dir_all(&dir);
-    if let Ok(data) = serde_json::to_string_pretty(cfg) {
-        let _ = fs::write(config_path(), data);
-    }
-}
-
-fn add_recent_game(cfg: &mut EmulatorConfig, path: &str) {
-    cfg.recent_games.retain(|p| p != path);
-    cfg.recent_games.insert(0, path.to_string());
-    cfg.recent_games.truncate(10);
-}
-
-fn toggle_favorite(config: &mut EmulatorConfig, path: &str) -> bool {
-    if let Some(pos) = config.favorite_games.iter().position(|g| g == path) {
-        config.favorite_games.remove(pos);
-        false // removed
-    } else {
-        config.favorite_games.push(path.to_string());
-        true // added
-    }
-}
-
-fn is_favorite(config: &EmulatorConfig, path: &str) -> bool {
-    config.favorite_games.iter().any(|g| g == path)
 }
 
 // =====================================================================
@@ -1024,118 +764,6 @@ struct InputSettingsState {
     bindings: InputBindings, // working copy
     conflict_message: Option<String>,
     conflict_timer: u32,
-}
-
-struct FileBrowserEntry {
-    name: String,
-    is_dir: bool,
-    full_path: PathBuf,
-    size_kb: u32,
-}
-
-struct FileBrowser {
-    current_dir: PathBuf,
-    entries: Vec<FileBrowserEntry>,
-    selected: usize,
-    scroll_offset: usize,
-    error_message: Option<String>,
-    error_timer: u32,
-}
-
-impl FileBrowser {
-    fn new(start_dir: Option<&str>) -> Self {
-        let dir = if let Some(d) = start_dir {
-            let p = PathBuf::from(d);
-            if p.is_dir() {
-                p
-            } else {
-                Self::default_dir()
-            }
-        } else {
-            Self::default_dir()
-        };
-        let entries = scan_directory(&dir);
-        FileBrowser {
-            current_dir: dir,
-            entries,
-            selected: 0,
-            scroll_offset: 0,
-            error_message: None,
-            error_timer: 0,
-        }
-    }
-
-    fn default_dir() -> PathBuf {
-        let home = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        let roms_dir = PathBuf::from(&home).join(".nes-emulator").join("roms");
-        let downloads = PathBuf::from(&home).join("Downloads");
-        if roms_dir.is_dir() {
-            roms_dir
-        } else if downloads.is_dir() {
-            downloads
-        } else {
-            PathBuf::from(".")
-        }
-    }
-
-    fn navigate_to(&mut self, dir: &Path) {
-        match scan_directory_result(dir) {
-            Ok(entries) => {
-                self.current_dir = dir.to_path_buf();
-                self.entries = entries;
-                self.selected = 0;
-                self.scroll_offset = 0;
-                self.error_message = None;
-                self.error_timer = 0;
-            }
-            Err(_) => {
-                self.error_message = Some("ACCESS DENIED".to_string());
-                self.error_timer = 180;
-            }
-        }
-    }
-}
-
-fn scan_directory(dir: &Path) -> Vec<FileBrowserEntry> {
-    scan_directory_result(dir).unwrap_or_default()
-}
-
-fn scan_directory_result(dir: &Path) -> Result<Vec<FileBrowserEntry>, std::io::Error> {
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
-
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        if path.is_dir() {
-            dirs.push(FileBrowserEntry {
-                name,
-                is_dir: true,
-                full_path: path,
-                size_kb: 0,
-            });
-        } else if name.to_lowercase().ends_with(".nes") {
-            let size_kb = if path.is_file() {
-                (fs::metadata(&path).map(|m| m.len()).unwrap_or(0) / 1024) as u32
-            } else {
-                0
-            };
-            files.push(FileBrowserEntry {
-                name,
-                is_dir: false,
-                full_path: path,
-                size_kb,
-            });
-        }
-    }
-
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    files.extend(dirs);
-    Ok(files)
 }
 
 enum MenuAction {
