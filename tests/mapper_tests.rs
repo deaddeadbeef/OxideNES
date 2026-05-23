@@ -1,6 +1,9 @@
 use oxidenes::cartridge::{Cartridge, Mirroring};
 use oxidenes::mapper::MapperEnum;
 
+mod common;
+use common::synthetic_rom::{make_ines_rom, prg_bank_marker, FIXTURE_PROVENANCE};
+
 fn make_rom(prg_banks: u8, chr_banks: u8, mapper: u8, flags: u8) -> Vec<u8> {
     let prg_size = prg_banks as usize * 16384;
     let chr_size = chr_banks as usize * 8192;
@@ -22,6 +25,54 @@ fn make_rom(prg_banks: u8, chr_banks: u8, mapper: u8, flags: u8) -> Vec<u8> {
     rom
 }
 
+fn assert_mapper_variant(mapper: u16, mapper_enum: &MapperEnum) {
+    match mapper {
+        0 => assert!(matches!(mapper_enum, MapperEnum::Mapper000(_))),
+        1 => assert!(matches!(mapper_enum, MapperEnum::Mapper001(_))),
+        2 => assert!(matches!(mapper_enum, MapperEnum::Mapper002(_))),
+        3 => assert!(matches!(mapper_enum, MapperEnum::Mapper003(_))),
+        4 => assert!(matches!(mapper_enum, MapperEnum::Mapper004(_))),
+        5 => assert!(matches!(mapper_enum, MapperEnum::Mapper005(_))),
+        7 => assert!(matches!(mapper_enum, MapperEnum::Mapper007(_))),
+        9 => assert!(matches!(mapper_enum, MapperEnum::Mapper009(_))),
+        10 => assert!(matches!(mapper_enum, MapperEnum::Mapper010(_))),
+        11 => assert!(matches!(mapper_enum, MapperEnum::Mapper011(_))),
+        19 => assert!(matches!(mapper_enum, MapperEnum::Mapper019(_))),
+        24 => assert!(matches!(mapper_enum, MapperEnum::Mapper024(_))),
+        26 => assert!(matches!(mapper_enum, MapperEnum::Mapper026(_))),
+        34 => assert!(matches!(mapper_enum, MapperEnum::Mapper034(_))),
+        66 => assert!(matches!(mapper_enum, MapperEnum::Mapper066(_))),
+        69 => assert!(matches!(mapper_enum, MapperEnum::Mapper069(_))),
+        71 => assert!(matches!(mapper_enum, MapperEnum::Mapper071(_))),
+        79 => assert!(matches!(mapper_enum, MapperEnum::Mapper079(_))),
+        85 => assert!(matches!(mapper_enum, MapperEnum::Mapper085(_))),
+        206 => assert!(matches!(mapper_enum, MapperEnum::Mapper206(_))),
+        _ => panic!("missing synthetic mapper assertion for mapper {mapper}"),
+    }
+}
+
+#[test]
+fn synthetic_fixture_provenance_is_declared() {
+    assert!(FIXTURE_PROVENANCE.contains("Generated synthetic iNES fixture"));
+    assert!(FIXTURE_PROVENANCE.contains("no ROM content"));
+}
+
+#[test]
+fn supported_mappers_construct_from_synthetic_ines_headers() {
+    let supported_mappers = [
+        0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 19, 24, 26, 34, 66, 69, 71, 79, 85, 206,
+    ];
+
+    for mapper in supported_mappers {
+        let (prg_banks, chr_banks) = if mapper == 0 { (2, 1) } else { (4, 4) };
+        let rom = make_ines_rom(prg_banks, chr_banks, mapper, 0);
+        let cart = Cartridge::new(&rom).unwrap_or_else(|err| {
+            panic!("synthetic mapper {mapper} fixture should construct: {err}")
+        });
+
+        assert_mapper_variant(mapper, &cart.mapper);
+    }
+}
 /// Write a 5-bit value to an MMC1 register via the serial shift interface.
 fn mmc1_write(mapper: &mut MapperEnum, addr: u16, value: u8) {
     for bit in 0..5 {
@@ -290,4 +341,25 @@ fn mapper4_irq_countdown() {
         !cart.mapper.irq_pending(),
         "IRQ should clear after irq_clear()"
     );
+}
+
+#[test]
+fn mapper7_switches_32k_prg_bank_and_single_screen_mirroring() {
+    let rom = make_ines_rom(4, 0, 7, 0);
+    let mut cart = Cartridge::new(&rom).unwrap();
+
+    assert_eq!(cart.mapper.read_prg(0x8000), prg_bank_marker(0));
+    assert_eq!(cart.mapper.mirroring(), Mirroring::SingleScreenLower);
+
+    cart.mapper.write_prg(0x8000, 0x01);
+    assert_eq!(
+        cart.mapper.read_prg(0x8000),
+        prg_bank_marker(2),
+        "mapper 7 switches 32KB PRG banks"
+    );
+    assert_eq!(cart.mapper.mirroring(), Mirroring::SingleScreenLower);
+
+    cart.mapper.write_prg(0x8000, 0x10);
+    assert_eq!(cart.mapper.read_prg(0x8000), prg_bank_marker(0));
+    assert_eq!(cart.mapper.mirroring(), Mirroring::SingleScreenUpper);
 }

@@ -1,6 +1,9 @@
 use oxidenes::cartridge::Cartridge;
 use oxidenes::ppu::Ppu;
 
+mod common;
+use common::synthetic_rom::make_ines_rom;
+
 fn make_rom(prg_banks: u8, chr_banks: u8, mapper: u8, flags: u8) -> Vec<u8> {
     let prg_size = prg_banks as usize * 16384;
     let chr_size = chr_banks as usize * 8192;
@@ -26,6 +29,48 @@ fn make_cart() -> Cartridge {
     Cartridge::new(&make_rom(1, 1, 0, 0)).unwrap()
 }
 
+fn make_synthetic_mapper0_cart(flags6_low: u8) -> Cartridge {
+    Cartridge::new(&make_ines_rom(1, 1, 0, flags6_low)).unwrap()
+}
+
+fn write_ppu_vram(ppu: &mut Ppu, cart: &mut Cartridge, addr: u16, value: u8) {
+    ppu.cpu_write(0x2006, (addr >> 8) as u8, cart);
+    ppu.cpu_write(0x2006, addr as u8, cart);
+    ppu.cpu_write(0x2007, value, cart);
+}
+
+fn read_ppu_vram(ppu: &mut Ppu, cart: &mut Cartridge, addr: u16) -> u8 {
+    ppu.cpu_write(0x2006, (addr >> 8) as u8, cart);
+    ppu.cpu_write(0x2006, addr as u8, cart);
+    let _ = ppu.cpu_read(0x2007, cart);
+    ppu.cpu_read(0x2007, cart)
+}
+
+#[test]
+fn ppu_horizontal_nametable_mirroring_uses_synthetic_fixture() {
+    let mut ppu = Ppu::new();
+    let mut cart = make_synthetic_mapper0_cart(0x00);
+
+    write_ppu_vram(&mut ppu, &mut cart, 0x2000, 0x42);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2400), 0x42);
+
+    write_ppu_vram(&mut ppu, &mut cart, 0x2800, 0x77);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2C00), 0x77);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2000), 0x42);
+}
+
+#[test]
+fn ppu_vertical_nametable_mirroring_uses_synthetic_fixture() {
+    let mut ppu = Ppu::new();
+    let mut cart = make_synthetic_mapper0_cart(0x01);
+
+    write_ppu_vram(&mut ppu, &mut cart, 0x2000, 0x11);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2800), 0x11);
+
+    write_ppu_vram(&mut ppu, &mut cart, 0x2400, 0x22);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2C00), 0x22);
+    assert_eq!(read_ppu_vram(&mut ppu, &mut cart, 0x2000), 0x11);
+}
 #[test]
 fn ppu_initial_state() {
     let ppu = Ppu::new();
