@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible OxideNES problem without uploading ROMs or copyrighted media.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve OxideNES.
+
+        Do not upload ROMs, BIOS files, save files from commercial games, copyrighted screenshots, box art, manuals, music, logos, or recordings that contain proprietary game content. A ROM title/name is enough for compatibility triage.
+  - type: input
+    id: version
+    attributes:
+      label: OxideNES version
+      description: Use the release version or `oxidenes --version` output.
+      placeholder: "0.3.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: rom_name
+    attributes:
+      label: ROM name only
+      description: Provide only the homebrew, test ROM, or game title name. Do not upload or link ROM files.
+      placeholder: "Example: nestest, a homebrew title, or a compatibility title name"
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the shortest steps that reproduce the problem.
+      placeholder: |
+        1. Launch OxideNES.
+        2. Load the ROM by name above.
+        3. Press ...
+        4. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include logs or text output if available.
+    validations:
+      required: true
+  - type: textarea
+    id: media_policy
+    attributes:
+      label: Screenshots or recordings
+      description: Attach media only if it shows homebrew, public-domain, or original test content. Otherwise describe the visual problem in words.
+    validations:
+      required: false
