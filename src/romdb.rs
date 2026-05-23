@@ -96,9 +96,15 @@ impl RomDatabase {
     }
 
     fn load_builtin(&mut self) {
-        if let Ok(map) = serde_json::from_str::<HashMap<String, RomEntry>>(BUILTIN_DB) {
-            self.entries.extend(map);
-        }
+        self.load_json_entries(BUILTIN_DB);
+    }
+
+    fn load_json_entries(&mut self, data: &str) -> bool {
+        let Ok(map) = serde_json::from_str::<HashMap<String, RomEntry>>(data) else {
+            return false;
+        };
+        self.entries.extend(map);
+        true
     }
 
     fn load_user_db(&mut self) {
@@ -109,9 +115,45 @@ impl RomDatabase {
             .join(".nes-emulator")
             .join("romdb.json");
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(map) = serde_json::from_str::<HashMap<String, RomEntry>>(&data) {
-                self.entries.extend(map);
-            }
+            self.load_json_entries(&data);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_json_entries_rejects_malformed_metadata_without_panic() {
+        let mut db = RomDatabase {
+            entries: HashMap::new(),
+        };
+
+        assert!(!db.load_json_entries("not json"));
+        assert!(db.entries.is_empty());
+    }
+
+    #[test]
+    fn load_json_entries_accepts_valid_user_metadata() {
+        let mut db = RomDatabase {
+            entries: HashMap::new(),
+        };
+        let json = r#"{
+            "1234ABCD": {
+                "title": "Homebrew Test",
+                "region": "US",
+                "mapper": 0,
+                "mirroring": "horizontal",
+                "prg_size": 32768,
+                "chr_size": 8192,
+                "battery": false
+            }
+        }"#;
+
+        assert!(db.load_json_entries(json));
+        let entry = db.lookup(0x1234_ABCD).expect("entry should load");
+        assert_eq!(entry.title, "Homebrew Test");
+        assert_eq!(entry.mapper, 0);
     }
 }

@@ -185,3 +185,63 @@ impl ScriptEngine {
         engine
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_script_path(name: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxidenes_{name}_{nonce}.lua"))
+    }
+
+    #[test]
+    fn load_script_reports_syntax_error_without_activating() {
+        let path = temp_script_path("bad_syntax");
+        std::fs::write(&path, "function broken(").unwrap();
+        let mut engine = ScriptEngine::init();
+
+        let err = engine.load_script(path.to_str().unwrap()).unwrap_err();
+
+        assert!(err.contains("Lua error"));
+        assert!(!engine.active);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn on_frame_returns_script_error_without_panicking() {
+        let path = temp_script_path("on_frame_error");
+        std::fs::write(
+            &path,
+            "nes.onframe(function() error('script frame failed') end)",
+        )
+        .unwrap();
+        let mut engine = ScriptEngine::init();
+        engine.load_script(path.to_str().unwrap()).unwrap();
+
+        let err = engine.on_frame(&[0; 8], 1).unwrap_err();
+
+        assert!(err.contains("on_frame"));
+        assert!(err.contains("script frame failed"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sandboxed_globals_are_unavailable_to_scripts() {
+        let path = temp_script_path("sandbox");
+        std::fs::write(
+            &path,
+            "assert(os == nil); assert(io == nil); assert(debug == nil)",
+        )
+        .unwrap();
+        let mut engine = ScriptEngine::init();
+
+        engine.load_script(path.to_str().unwrap()).unwrap();
+
+        let _ = std::fs::remove_file(path);
+    }
+}

@@ -360,6 +360,60 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rejects_bad_magic() {
+        let dir = std::env::temp_dir().join("nes_test_recording_bad_magic");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bad.nrec");
+        std::fs::write(&path, b"BAD!").unwrap();
+
+        let err = InputRecording::load_from_file(path.to_str().unwrap())
+            .err()
+            .expect("recording load should fail");
+        assert!(err.contains("bad magic") || err.contains("Read failed"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_rejects_truncated_frame_data() {
+        let dir = std::env::temp_dir().join("nes_test_recording_truncated");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("truncated.nrec");
+        let mut data = Vec::new();
+        data.extend_from_slice(MAGIC);
+        data.extend_from_slice(&VERSION.to_le_bytes());
+        data.extend_from_slice(&[0u8; 32]);
+        data.extend_from_slice(&1u32.to_le_bytes());
+        std::fs::write(&path, data).unwrap();
+
+        let err = InputRecording::load_from_file(path.to_str().unwrap())
+            .err()
+            .expect("recording load should fail");
+        assert!(err.contains("Read failed"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_rejects_excessive_frame_count_before_allocation() {
+        let dir = std::env::temp_dir().join("nes_test_recording_huge");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("huge.nrec");
+        let mut data = Vec::new();
+        data.extend_from_slice(MAGIC);
+        data.extend_from_slice(&VERSION.to_le_bytes());
+        data.extend_from_slice(&[0u8; 32]);
+        data.extend_from_slice(&10_000_001u32.to_le_bytes());
+        std::fs::write(&path, data).unwrap();
+
+        let err = InputRecording::load_from_file(path.to_str().unwrap())
+            .err()
+            .expect("recording load should fail");
+        assert!(err.contains("Recording too large"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
     fn test_export_fm2() {
         let mut rec = InputRecording::new([0u8; 32]);
         rec.start_recording();
@@ -383,6 +437,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn test_export_fm2_reports_create_failure() {
+        let rec = InputRecording::new([0u8; 32]);
+        let dir = std::env::temp_dir().join("nes_test_fm2_create_failure");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let err = rec
+            .export_fm2(dir.to_str().unwrap(), "TestRom")
+            .unwrap_err();
+        assert!(err.contains("Create failed"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test]
     fn test_record_frame_ignored_when_idle() {
         let mut rec = InputRecording::new([0u8; 32]);
