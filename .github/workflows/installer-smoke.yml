@@ -1,0 +1,59 @@
+name: Installer Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master, main]
+    paths:
+      - '.github/workflows/installer-smoke.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/ci.yml'
+      - 'scripts/check_release_assets.py'
+      - 'scripts/smoke_windows_installer.ps1'
+      - 'wix/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'build.rs'
+      - 'src/**'
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Windows release binary
+        run: cargo build --release --target x86_64-pc-windows-msvc
+        env:
+          OXIDENES_RELEASE: "1"
+
+      - name: Smoke Windows binary
+        shell: pwsh
+        run: |
+          & "target\x86_64-pc-windows-msvc\release\oxidenes.exe" --version
+          $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+          if ($exitCode -ne 0) { exit $exitCode }
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix
+
+      - name: Build Windows MSI
+        run: cargo wix --target x86_64-pc-windows-msvc --nocapture
+        env:
+          OXIDENES_RELEASE: "1"
+
+      - name: Stage Windows binary
+        shell: bash
+        run: |
+          mkdir -p target/release-assets
+          cp "target/x86_64-pc-windows-msvc/release/oxidenes.exe" "target/release-assets/oxidenes-windows-x64.exe"
+
+      - name: Validate release assets
+        run: python scripts/check_release_assets.py --asset-dir target/release-assets --expected-asset-name oxidenes-windows-x64.exe --installer-glob "target/wix/*.msi" --wix-source wix/main.wxs
+
+      - name: Smoke Windows installer
+        shell: pwsh
+        run: .\scripts\smoke_windows_installer.ps1
