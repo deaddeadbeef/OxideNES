@@ -31,7 +31,7 @@ A feature-rich NES-compatible emulator written in Rust.
 ## Quick Start
 
 ### Pre-built Binaries
-Download the latest release from the [Releases](../../releases) page.
+Download the latest release from the [Releases](../../releases) page. See the [user guide](docs/USER_GUIDE.md) for platform support, first-run setup, Linux dependencies, and data locations.
 
 ### Build from Source
 ```bash
@@ -48,7 +48,11 @@ cargo build --release
 ./target/release/oxidenes
 ```
 
+On first launch without a configured ROM directory, OxideNES opens a folder setup screen. Select the folder that contains your legally obtained `.nes` files; files are not bundled with the emulator.
+
 ## Controls
+
+The table below lists default gameplay bindings. Menu controls, save slots, screenshots, recording, CRT hotkeys, and troubleshooting are covered in the [user guide](docs/USER_GUIDE.md).
 
 | Action | Keyboard (P1) | Keyboard (P2) | Controller |
 |--------|---------------|---------------|------------|
@@ -76,7 +80,9 @@ cargo build --release
 
 ## Configuration
 
-Settings are stored in `~/.nes-emulator/config.json` and can be edited in-app via the Settings menu.
+Settings are stored in `%USERPROFILE%\.nes-emulator\config.json` on Windows and `~/.nes-emulator/config.json` on Linux/macOS. They can be edited in-app via the Settings menu.
+
+See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for save-state, SRAM, screenshot, recording, cheat, achievement, and user metadata paths.
 
 ### ROM Metadata
 
@@ -138,7 +144,7 @@ Place achievement JSON files in `~/.nes-emulator/achievements/{rom_md5}.json`:
 
 ### Prerequisites
 - Rust 1.70+ (install via [rustup](https://rustup.rs))
-- Linux: `sudo apt install libasound2-dev libxkbcommon-dev libwayland-dev`
+- Linux: `sudo apt-get install libudev-dev pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev`
 - Windows/macOS: No additional dependencies
 
 ### Commands
@@ -155,6 +161,12 @@ Requires [WiX Toolset](https://wixtoolset.org/):
 cargo build --release
 # Then use WiX to compile wix/main.wxs
 ```
+
+## Support
+
+For installation help, first-run setup, troubleshooting, and the support matrix, read [docs/USER_GUIDE.md](docs/USER_GUIDE.md) and [SUPPORT.md](SUPPORT.md).
+
+Public issues must not include ROMs, BIOS files, save files from commercial games, copyrighted screenshots, box art, manuals, music, logos, or recordings containing proprietary content. Provide the ROM name only when compatibility context is needed.
 
 ## Credits & Acknowledgments
 
