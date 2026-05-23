@@ -13,4 +13,5 @@ pub mod recording;
 pub mod rendering;
 pub mod romdb;
 pub mod scripting;
+pub mod state_io;
 pub mod updater;

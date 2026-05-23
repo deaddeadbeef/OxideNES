@@ -28,6 +28,7 @@ use oxidenes::ppu::Region;
 use oxidenes::recording::{sha256, InputRecording};
 use oxidenes::romdb::RomDatabase;
 use oxidenes::scripting::ScriptEngine;
+use oxidenes::state_io::StateReader;
 use oxidenes::updater::Updater;
 
 // Single source of truth for all screen/window dimensions
@@ -743,53 +744,41 @@ fn load_state(bus: &mut Bus, cpu: &mut Cpu, config: &EmulatorConfig, slot: u8) -
         return false;
     };
 
-    // Check magic header (accept V02 for backward compat, V03 with ROM fingerprint)
-    if data.len() < 8 {
-        return false;
-    }
-    let is_v03 = &data[0..8] == b"NESSAV03";
-    let is_v02 = &data[0..8] == b"NESSAV02";
-    if !is_v02 && !is_v03 {
-        return false;
-    }
-    let mut pos = 8;
+    load_state_from_bytes(bus, cpu, &data)
+}
 
-    // V03: skip ROM fingerprint (deprecated — validation was too aggressive)
+fn parse_save_state_payload(data: &[u8]) -> Option<(&[u8], &[u8])> {
+    let header = data.get(0..8)?;
+    let is_v03 = header == b"NESSAV03";
+    if header != b"NESSAV02" && !is_v03 {
+        return None;
+    }
+
+    let mut reader = StateReader::new(data.get(8..)?);
+
+    // V03: skip ROM fingerprint (deprecated — validation was too aggressive).
     if is_v03 {
-        if pos + 4 > data.len() {
-            return false;
-        }
-        pos += 4; // skip hash, don't validate
+        reader.skip(4)?;
     }
 
-    // CPU state
-    if pos + 4 > data.len() {
-        return false;
-    }
-    let cpu_len =
-        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-    pos += 4;
-    if pos + cpu_len > data.len() {
-        return false;
-    }
-    if !cpu.load_state(&data[pos..pos + cpu_len]) {
-        return false;
-    }
-    pos += cpu_len;
+    let cpu_state = reader.read_len_prefixed_u32()?;
+    let bus_state = reader.read_len_prefixed_u32()?;
+    Some((cpu_state, bus_state))
+}
 
-    // Bus state
-    if pos + 4 > data.len() {
+fn load_state_from_bytes(bus: &mut Bus, cpu: &mut Cpu, data: &[u8]) -> bool {
+    let Some((cpu_state, bus_state)) = parse_save_state_payload(data) else {
+        return false;
+    };
+
+    let mut cpu_next = Cpu::new();
+    if !cpu_next.load_state(cpu_state) {
         return false;
     }
-    let bus_len =
-        u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-    pos += 4;
-    if pos + bus_len > data.len() {
+    if !bus.load_state(bus_state) {
         return false;
     }
-    if !bus.load_state(&data[pos..pos + bus_len]) {
-        return false;
-    }
+    *cpu = cpu_next;
 
     true
 }
@@ -857,57 +846,38 @@ impl RewindBuffer {
     fn pop_frame(&mut self, bus: &mut Bus, cpu: &mut Cpu) -> bool {
         if let Some(snapshot) = self.snapshots.pop_back() {
             self.total_bytes = self.total_bytes.saturating_sub(snapshot.len());
-            let mut pos = 0;
-            if pos + 4 > snapshot.len() {
+            let mut reader = StateReader::new(&snapshot);
+            let Some(cpu_state) = reader.read_len_prefixed_u32() else {
                 return false;
-            }
-            let cpu_len = u32::from_le_bytes([
-                snapshot[pos],
-                snapshot[pos + 1],
-                snapshot[pos + 2],
-                snapshot[pos + 3],
-            ]) as usize;
-            pos += 4;
-            if pos + cpu_len > snapshot.len() {
-                return false;
-            }
-            if !cpu.load_state(&snapshot[pos..pos + cpu_len]) {
-                return false;
-            }
-            pos += cpu_len;
+            };
 
-            if pos + 4 > snapshot.len() {
+            let Some(bus_state) = reader.read_len_prefixed_u32() else {
+                return false;
+            };
+
+            let mut cpu_next = Cpu::new();
+            if !cpu_next.load_state(cpu_state) {
                 return false;
             }
-            let bus_len = u32::from_le_bytes([
-                snapshot[pos],
-                snapshot[pos + 1],
-                snapshot[pos + 2],
-                snapshot[pos + 3],
-            ]) as usize;
-            pos += 4;
-            if pos + bus_len > snapshot.len() {
+            if !bus.load_state(bus_state) {
                 return false;
             }
-            if !bus.load_state(&snapshot[pos..pos + bus_len]) {
-                return false;
-            }
-            pos += bus_len;
+            *cpu = cpu_next;
+
             // Restore PPU frame buffer for smooth rewind playback
-            if pos + 4 <= snapshot.len() {
-                let frame_len = u32::from_le_bytes([
-                    snapshot[pos],
-                    snapshot[pos + 1],
-                    snapshot[pos + 2],
-                    snapshot[pos + 3],
-                ]) as usize;
-                pos += 4;
-                if pos + frame_len * 4 <= snapshot.len() {
-                    bus.ppu.frame_data.resize(frame_len, 0);
-                    let src = &snapshot[pos..pos + frame_len * 4];
-                    for (pixel, chunk) in bus.ppu.frame_data.iter_mut().zip(src.chunks_exact(4)) {
-                        *pixel = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                    }
+            if reader.remaining() > 0 {
+                let Some(frame_len) = reader.read_u32_le().map(|len| len as usize) else {
+                    return false;
+                };
+                let Some(frame_byte_len) = frame_len.checked_mul(4) else {
+                    return false;
+                };
+                let Some(src) = reader.read_bytes(frame_byte_len) else {
+                    return false;
+                };
+                bus.ppu.frame_data.resize(frame_len, 0);
+                for (pixel, chunk) in bus.ppu.frame_data.iter_mut().zip(src.chunks_exact(4)) {
+                    *pixel = u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
                 }
             }
             true
@@ -10426,6 +10396,94 @@ fn perf_detail_overlay_y(has_transport_hud: bool) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_state_test_bus() -> Bus {
+        let mut rom = vec![0u8; 16 + 16384 + 8192];
+        rom[0] = 0x4E;
+        rom[1] = 0x45;
+        rom[2] = 0x53;
+        rom[3] = 0x1A;
+        rom[4] = 1;
+        rom[5] = 1;
+        Bus::new(Cartridge::new(&rom).expect("test ROM should load"))
+    }
+
+    fn save_state_bytes_for_test(bus: &Bus, cpu: &Cpu) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"NESSAV02");
+        let cpu_state = cpu.save_state();
+        data.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
+        data.extend(cpu_state);
+        let bus_state = bus.save_state();
+        data.extend_from_slice(&(bus_state.len() as u32).to_le_bytes());
+        data.extend(bus_state);
+        data
+    }
+
+    #[test]
+    fn load_state_from_bytes_restores_v02_state() {
+        let mut source_bus = make_state_test_bus();
+        source_bus.cpu_write(0x0000, 0x42);
+        let mut source_cpu = Cpu::new();
+        source_cpu.a = 0x99;
+        source_cpu.pc = 0x1234;
+        let data = save_state_bytes_for_test(&source_bus, &source_cpu);
+
+        let mut target_bus = make_state_test_bus();
+        let mut target_cpu = Cpu::new();
+
+        assert!(load_state_from_bytes(
+            &mut target_bus,
+            &mut target_cpu,
+            &data
+        ));
+        assert_eq!(target_bus.cpu_read(0x0000), 0x42);
+        assert_eq!(target_cpu.a, 0x99);
+        assert_eq!(target_cpu.pc, 0x1234);
+    }
+
+    #[test]
+    fn load_state_from_bytes_rejects_truncated_cpu_payload_without_panic() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"NESSAV02");
+        data.extend_from_slice(&2u32.to_le_bytes());
+        data.push(0xAA);
+
+        let mut bus = make_state_test_bus();
+        let mut cpu = Cpu::new();
+        cpu.a = 0x42;
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            load_state_from_bytes(&mut bus, &mut cpu, &data)
+        }));
+
+        assert!(result.is_ok(), "truncated save state should not panic");
+        assert!(!result.unwrap(), "truncated CPU payload should be rejected");
+        assert_eq!(cpu.a, 0x42);
+    }
+
+    #[test]
+    fn load_state_from_bytes_rejects_truncated_bus_payload_without_panic() {
+        let bus_source = make_state_test_bus();
+        let cpu_source = Cpu::new();
+        let cpu_state = cpu_source.save_state();
+        let mut data = Vec::new();
+        data.extend_from_slice(b"NESSAV02");
+        data.extend_from_slice(&(cpu_state.len() as u32).to_le_bytes());
+        data.extend(cpu_state);
+        data.extend_from_slice(&64u32.to_le_bytes());
+        data.extend_from_slice(&bus_source.save_state()[..8]);
+
+        let mut bus = make_state_test_bus();
+        let mut cpu = Cpu::new();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            load_state_from_bytes(&mut bus, &mut cpu, &data)
+        }));
+
+        assert!(result.is_ok(), "truncated save state should not panic");
+        assert!(!result.unwrap(), "truncated bus payload should be rejected");
+    }
 
     /// Helper: compute scan_muls from scanline_intensity (mirrors crt_filter logic).
     fn make_scan_muls(scanline_intensity: u8) -> [u32; 4] {

@@ -2,6 +2,7 @@ use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::joypad::Joypad;
 use crate::ppu::Ppu;
+use crate::state_io::StateReader;
 
 #[derive(Clone)]
 pub struct GameGenieCode {
@@ -301,90 +302,79 @@ impl Bus {
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        if data.len() < 2048 {
-            return false;
-        }
-        let mut pos = 0;
+        let mut reader = StateReader::new(data);
 
-        // CPU RAM
-        self.cpu_ram.copy_from_slice(&data[pos..pos + 2048]);
-        pos += 2048;
+        let Some(cpu_ram) = reader.read_bytes(2048) else {
+            return false;
+        };
 
         // PPU state
-        if pos + 4 > data.len() {
+        let Some(ppu_state) = reader.read_len_prefixed_u32() else {
+            return false;
+        };
+        if !self.ppu.load_state(ppu_state) {
             return false;
         }
-        let ppu_len =
-            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        pos += 4;
-        if pos + ppu_len > data.len() {
-            return false;
-        }
-        if !self.ppu.load_state(&data[pos..pos + ppu_len]) {
-            return false;
-        }
-        pos += ppu_len;
+
+        self.cpu_ram.copy_from_slice(cpu_ram);
 
         // Mapper SRAM
-        if pos + 4 > data.len() {
+        if reader.remaining() == 0 {
             return true;
-        } // Optional sections
-        let sram_len =
-            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        pos += 4;
-        if pos + sram_len <= data.len() {
-            self.cartridge.mapper.set_sram(&data[pos..pos + sram_len]);
-            pos += sram_len;
         }
+        let Some(sram) = reader.read_len_prefixed_u32() else {
+            return false;
+        };
+        self.cartridge.mapper.set_sram(sram);
 
         // Mapper state
-        if pos + 4 > data.len() {
+        if reader.remaining() == 0 {
             return true;
         }
-        let mapper_len =
-            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        pos += 4;
-        if pos + mapper_len <= data.len() {
-            self.cartridge
-                .mapper
-                .load_state(&data[pos..pos + mapper_len]);
-            pos += mapper_len;
-        }
+        let Some(mapper_state) = reader.read_len_prefixed_u32() else {
+            return false;
+        };
+        self.cartridge.mapper.load_state(mapper_state);
 
         // Bus state
-        if pos + 13 <= data.len() {
-            self.cycles = usize::from_le_bytes([
-                data[pos],
-                data[pos + 1],
-                data[pos + 2],
-                data[pos + 3],
-                data[pos + 4],
-                data[pos + 5],
-                data[pos + 6],
-                data[pos + 7],
-            ]);
-            pos += 8;
-            self.dma_page = data[pos];
-            pos += 1;
-            self.dma_addr = data[pos];
-            pos += 1;
-            self.dma_data = data[pos];
-            pos += 1;
-            self.dma_transfer = data[pos] != 0;
-            pos += 1;
-            self.dma_dummy = data[pos] != 0;
-            pos += 1;
+        if reader.remaining() == 0 {
+            return true;
         }
+        let Some(cycles) = reader.read_usize_le() else {
+            return false;
+        };
+        let Some(dma_page) = reader.read_u8() else {
+            return false;
+        };
+        let Some(dma_addr) = reader.read_u8() else {
+            return false;
+        };
+        let Some(dma_data) = reader.read_u8() else {
+            return false;
+        };
+        let Some(dma_transfer) = reader.read_bool() else {
+            return false;
+        };
+        let Some(dma_dummy) = reader.read_bool() else {
+            return false;
+        };
+
+        self.cycles = cycles;
+        self.dma_page = dma_page;
+        self.dma_addr = dma_addr;
+        self.dma_data = dma_data;
+        self.dma_transfer = dma_transfer;
+        self.dma_dummy = dma_dummy;
 
         // APU state (optional - backwards compatible with old saves)
-        if pos + 4 <= data.len() {
-            let apu_len =
-                u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
-                    as usize;
-            pos += 4;
-            if pos + apu_len <= data.len() {
-                self.apu.load_state(&data[pos..pos + apu_len]);
-            }
+        if reader.remaining() == 0 {
+            return true;
+        }
+        let Some(apu_state) = reader.read_len_prefixed_u32() else {
+            return false;
+        };
+        if !self.apu.load_state(apu_state) {
+            return false;
         }
 
         true
