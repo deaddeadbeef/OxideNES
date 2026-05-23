@@ -33,6 +33,8 @@ Thanks for your interest in contributing!
 | `src/bus.rs` | Memory bus / address space |
 | `src/mapper.rs` | Cartridge mapper implementations |
 | `src/cartridge.rs` | ROM loading, header parsing |
+| `src/config.rs` | User config schema, migration, persistence, recent games, favorites |
+| `src/file_browser.rs` | ROM-folder browser model, directory scanning, navigation state |
 | `src/joypad.rs` | Joypad register emulation |
 | `src/netplay.rs` | UDP netplay |
 | `src/scripting.rs` | Lua scripting engine |
@@ -45,4 +47,5 @@ Thanks for your interest in contributing!
 
 - Include the ROM name (no ROM files please)
 - Include your OS and emulator version
-- Screenshots or recordings help!
+- Screenshots or recordings help only when they show homebrew, public-domain, or original test content
+- Follow [SUPPORT.md](SUPPORT.md) for the support matrix, troubleshooting checklist, and no-ROM upload policy
