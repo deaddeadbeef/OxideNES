@@ -1,4 +1,5 @@
 use crate::bus::Bus;
+use crate::state_io::StateReader;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AddressingMode {
@@ -1807,38 +1808,49 @@ impl Cpu {
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> bool {
-        if data.len() < 18 {
+        let mut reader = StateReader::new(data);
+
+        let Some(pc) = reader.read_u16_le() else {
             return false;
-        } // 2+1+1+1+1+1+1+8+1+1 = 18 bytes minimum
-        let mut pos = 0;
-        self.pc = u16::from_le_bytes([data[pos], data[pos + 1]]);
-        pos += 2;
-        self.sp = data[pos];
-        pos += 1;
-        self.a = data[pos];
-        pos += 1;
-        self.x = data[pos];
-        pos += 1;
-        self.y = data[pos];
-        pos += 1;
-        self.status = data[pos];
-        pos += 1;
-        self.cycles = data[pos];
-        pos += 1;
-        self.total_cycles = usize::from_le_bytes([
-            data[pos],
-            data[pos + 1],
-            data[pos + 2],
-            data[pos + 3],
-            data[pos + 4],
-            data[pos + 5],
-            data[pos + 6],
-            data[pos + 7],
-        ]);
-        pos += 8;
-        self.nmi_pending = data[pos] != 0;
-        pos += 1;
-        self.irq_pending = data[pos] != 0;
+        };
+        let Some(sp) = reader.read_u8() else {
+            return false;
+        };
+        let Some(a) = reader.read_u8() else {
+            return false;
+        };
+        let Some(x) = reader.read_u8() else {
+            return false;
+        };
+        let Some(y) = reader.read_u8() else {
+            return false;
+        };
+        let Some(status) = reader.read_u8() else {
+            return false;
+        };
+        let Some(cycles) = reader.read_u8() else {
+            return false;
+        };
+        let Some(total_cycles) = reader.read_usize_le() else {
+            return false;
+        };
+        let Some(nmi_pending) = reader.read_bool() else {
+            return false;
+        };
+        let Some(irq_pending) = reader.read_bool() else {
+            return false;
+        };
+
+        self.pc = pc;
+        self.sp = sp;
+        self.a = a;
+        self.x = x;
+        self.y = y;
+        self.status = status;
+        self.cycles = cycles;
+        self.total_cycles = total_cycles;
+        self.nmi_pending = nmi_pending;
+        self.irq_pending = irq_pending;
         true
     }
 }

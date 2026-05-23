@@ -102,6 +102,42 @@ fn bus_save_load_state() {
 }
 
 #[test]
+fn bus_load_state_rejects_truncated_ppu_payload_without_panic() {
+    let bus = make_test_bus();
+    let state = bus.save_state();
+    let ppu_len = u32::from_le_bytes([state[2048], state[2049], state[2050], state[2051]]) as usize;
+    let truncated_len = 2048 + 4 + ppu_len.saturating_sub(1);
+    let truncated = &state[..truncated_len];
+
+    let mut target = make_test_bus();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        target.load_state(truncated)
+    }));
+
+    assert!(result.is_ok(), "truncated bus state should not panic");
+    assert!(!result.unwrap(), "truncated PPU payload should be rejected");
+}
+
+#[test]
+fn bus_load_state_rejects_truncated_optional_payload_without_panic() {
+    let bus = make_test_bus();
+    let state = bus.save_state();
+    let ppu_len = u32::from_le_bytes([state[2048], state[2049], state[2050], state[2051]]) as usize;
+    let mut corrupt = state[..2048 + 4 + ppu_len].to_vec();
+    corrupt.extend_from_slice(&4u32.to_le_bytes());
+
+    let mut target = make_test_bus();
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| target.load_state(&corrupt)));
+
+    assert!(result.is_ok(), "truncated bus state should not panic");
+    assert!(
+        !result.unwrap(),
+        "truncated optional payload should be rejected"
+    );
+}
+
+#[test]
 fn bus_cartridge_space_read() {
     let mut bus = make_test_bus();
     // Mapper 0 maps PRG ROM at 0x8000+

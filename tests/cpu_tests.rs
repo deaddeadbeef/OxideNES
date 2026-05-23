@@ -464,3 +464,23 @@ fn cpu_save_load_state_roundtrip() {
     assert_eq!(cpu2.pc, 0x1234);
     assert_eq!(cpu2.status, 0x65);
 }
+
+#[test]
+fn cpu_load_state_rejects_truncated_data_without_mutating() {
+    let mut source = Cpu::new();
+    source.a = 0x99;
+    let mut truncated = source.save_state();
+    truncated.pop();
+
+    let mut cpu = Cpu::new();
+    cpu.a = 0x42;
+    cpu.pc = 0x1234;
+
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cpu.load_state(&truncated)));
+
+    assert!(result.is_ok(), "truncated CPU state should not panic");
+    assert!(!result.unwrap(), "truncated CPU state should be rejected");
+    assert_eq!(cpu.a, 0x42);
+    assert_eq!(cpu.pc, 0x1234);
+}
