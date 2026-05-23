@@ -713,7 +713,7 @@ impl RewindBuffer {
 }
 
 // =====================================================================
-// Battery SRAM persistence (automatic save for Zelda, FF, etc.)
+// Battery SRAM persistence for cartridges that expose save RAM.
 // =====================================================================
 
 fn sram_path(config: &EmulatorConfig) -> Option<PathBuf> {
@@ -2295,7 +2295,7 @@ fn main() {
         println!("OxideNES v{}", env!("CARGO_PKG_VERSION"));
         println!();
         println!("USAGE:");
-        println!("    nes-emulator [OPTIONS] [ROM_FILE]");
+        println!("    oxidenes [OPTIONS] [ROM_FILE]");
         println!();
         println!("ARGS:");
         println!("    <ROM_FILE>    Path to a .nes ROM file (optional, opens file browser if omitted)");
@@ -2315,7 +2315,7 @@ fn main() {
         std::process::exit(0);
     }
     if args.contains(&"--version".to_string()) {
-        println!("nes-emulator {}", env!("CARGO_PKG_VERSION"));
+        println!("oxidenes {}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
     }
 

@@ -1,10 +1,10 @@
-# 🎮 OxideNES
+# OxideNES
 
 [![CI](https://github.com/deaddeadbeef/OxideNES/actions/workflows/ci.yml/badge.svg)](https://github.com/deaddeadbeef/OxideNES/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-A feature-rich NES (Nintendo Entertainment System) emulator written in Rust.
+A feature-rich NES-compatible emulator written in Rust.
 
 > **Note:** This emulator does not include any game ROMs. You must provide your own legally obtained .nes ROM files.
 
@@ -23,7 +23,7 @@ A feature-rich NES (Nintendo Entertainment System) emulator written in Rust.
 - **Input recording** — Record and playback with FM2 export for TAS
 - **ROM database** — Auto-identifies ~50 popular games, fixes bad headers
 - **Game Genie cheats** — Enter cheat codes in the pause menu
-- **Battery save** — Automatic SRAM persistence for games like Zelda
+- **Battery save** — Automatic SRAM persistence for cartridges that use SRAM
 - **Auto-updater** — Checks GitHub Releases for new versions
 - **CRT settings** — Real-time adjustable scanlines, phosphor, vignette, blur, curvature, glass intensity
 - **Fullscreen** — Toggle with F11
@@ -76,11 +76,11 @@ cargo build --release
 
 ## Configuration
 
-Settings are stored in `~/.oxidenes/config.json` and can be edited in-app via the Settings menu.
+Settings are stored in `~/.nes-emulator/config.json` and can be edited in-app via the Settings menu.
 
 ## Lua Scripting
 
-Place `.lua` scripts in `~/.oxidenes/scripts/` or load via `--script` flag:
+Load `.lua` scripts via the `--script` flag:
 ```bash
 oxidenes game.nes --script myscript.lua
 ```
@@ -96,7 +96,7 @@ nes.log(text)         -- Print to stderr
 
 ## Achievements
 
-Place achievement JSON files in `~/.oxidenes/achievements/{rom_md5}.json`:
+Place achievement JSON files in `~/.nes-emulator/achievements/{rom_md5}.json`:
 ```json
 {
     "game_title": "Game Name",
@@ -142,7 +142,9 @@ cargo build --release
 
 ## Legal
 
-This is a clean-room NES emulator implementation. No proprietary Nintendo code or assets are included. NES ROMs are not provided — users must supply their own legally obtained ROM files.
+This is a clean-room NES-compatible emulator implementation. No proprietary Nintendo code, ROMs, BIOS files, artwork, screenshots, logos, manuals, or music are included. Users must supply their own legally obtained `.nes` ROM files.
+
+See [docs/IP_COMPLIANCE.md](docs/IP_COMPLIANCE.md) for contributor and release rules that keep the public repository safe to distribute.
 
 ## License
 
