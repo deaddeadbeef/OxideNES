@@ -1,6 +1,6 @@
 [package]
 name = "oxidenes"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["pf-github-code"]
 description = "A cycle-accurate NES emulator with CRT simulation"
