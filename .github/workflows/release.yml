@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ['v*']
 
@@ -40,10 +41,35 @@ jobs:
         env:
           OXIDENES_RELEASE: "1"
 
+      - name: Smoke Windows binary
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          & "target\${{ matrix.target }}\release\${{ matrix.artifact_name }}" --version
+          $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+          if ($exitCode -ne 0) { exit $exitCode }
+
+      - name: Smoke Unix binary
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          chmod +x "$binary"
+          "$binary" --version
+
       - name: Run tests
         run: cargo test --target ${{ matrix.target }}
         env:
           OXIDENES_RELEASE: "1"
+
+      - name: Stage platform binary
+        shell: bash
+        run: |
+          mkdir -p target/release-assets
+          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "target/release-assets/${{ matrix.asset_name }}"
+
+      - name: Validate staged binary artifact
+        run: python scripts/check_release_assets.py --asset-dir target/release-assets --expected-asset-name ${{ matrix.asset_name }}
 
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
@@ -53,11 +79,14 @@ jobs:
         env:
           OXIDENES_RELEASE: "1"
 
-      - name: Stage platform binary
-        shell: bash
-        run: |
-          mkdir -p target/release-assets
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "target/release-assets/${{ matrix.asset_name }}"
+      - name: Validate Windows installer package
+        if: matrix.os == 'windows-latest'
+        run: python scripts/check_release_assets.py --asset-dir target/release-assets --expected-asset-name ${{ matrix.asset_name }} --installer-glob "target/wix/*.msi" --wix-source wix/main.wxs
+
+      - name: Smoke Windows installer
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: .\scripts\smoke_windows_installer.ps1
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

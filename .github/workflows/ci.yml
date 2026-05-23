@@ -24,12 +24,15 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: oxidenes.exe
+            asset_name: oxidenes-windows-x64.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: oxidenes
+            asset_name: oxidenes-linux-x64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: oxidenes
+            asset_name: oxidenes-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -39,19 +42,48 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          OXIDENES_RELEASE: "1"
 
       - name: Test
         run: cargo test --target ${{ matrix.target }}
+        env:
+          OXIDENES_RELEASE: "1"
+
+      - name: Smoke Windows binary
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          & "target\${{ matrix.target }}\release\${{ matrix.artifact }}" --version
+          $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+          if ($exitCode -ne 0) { exit $exitCode }
+
+      - name: Smoke Unix binary
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/${{ matrix.artifact }}"
+          chmod +x "$binary"
+          "$binary" --version
+
+      - name: Stage release-named artifact
+        shell: bash
+        run: |
+          mkdir -p target/release-assets
+          cp "target/${{ matrix.target }}/release/${{ matrix.artifact }}" "target/release-assets/${{ matrix.asset_name }}"
+
+      - name: Validate staged artifact
+        run: python scripts/check_release_assets.py --asset-dir target/release-assets --expected-asset-name ${{ matrix.asset_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: oxidenes-${{ matrix.os }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          name: ${{ matrix.asset_name }}
+          path: target/release-assets/${{ matrix.asset_name }}
 
   clippy:
     runs-on: ubuntu-latest
@@ -61,5 +93,5 @@ jobs:
         with:
           components: clippy
       - name: Install Linux dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
       - run: cargo clippy -- -D warnings
