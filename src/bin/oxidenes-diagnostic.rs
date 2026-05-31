@@ -12,9 +12,9 @@ use oxidenes::diagnostic::{
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
-const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 2;
+const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 6;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 7;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Serialize)]
@@ -36,8 +36,12 @@ struct DiagnosticBundleConfig {
     max_cpu_cycles: u64,
     joypad1_mask: u8,
     joypad1_mask_hex: String,
+    expected_joypad1_mask: u8,
+    expected_joypad1_mask_hex: String,
     joypad2_mask: u8,
     joypad2_mask_hex: String,
+    expected_joypad2_mask: u8,
+    expected_joypad2_mask_hex: String,
     fault_injection: Option<String>,
 }
 
@@ -631,11 +635,25 @@ fn run() -> Result<bool, String> {
                 config.joypad1_mask = parse_byte(&value)?;
                 config_overridden = true;
             }
+            "--expect-joypad1" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--expect-joypad1 requires a byte mask".to_string())?;
+                config.expected_joypad1_mask = parse_byte(&value)?;
+                config_overridden = true;
+            }
             "--joypad2" => {
                 let value = args
                     .next()
                     .ok_or_else(|| "--joypad2 requires a byte mask".to_string())?;
                 config.joypad2_mask = parse_byte(&value)?;
+                config_overridden = true;
+            }
+            "--expect-joypad2" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--expect-joypad2 requires a byte mask".to_string())?;
+                config.expected_joypad2_mask = parse_byte(&value)?;
                 config_overridden = true;
             }
             "--no-stdout" => {
@@ -782,7 +800,9 @@ fn print_help() {
     );
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");
+    println!("    --expect-joypad1 <BYTE>  Override the joypad-1 mask expected by the cartridge");
     println!("    --joypad2 <BYTE>     Override joypad-2 mask, decimal or 0x-prefixed hex");
+    println!("    --expect-joypad2 <BYTE>  Override the joypad-2 mask expected by the cartridge");
     println!("    --no-stdout          Do not print telemetry JSON to stdout");
     println!("    -h, --help           Show this help");
 }
@@ -1683,7 +1703,23 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(20),
+            expected_focus_test_id: Some(21),
+            expected_focus_domain: None,
+        },
+        DiagnosticScenarioSpec {
+            id: "input_mask_matrix_pass",
+            title: "Configured alternate input-mask pass",
+            purpose: "Healthy fixture proving the cartridge can validate non-default joypad masks without rebuilding the ROM.",
+            config: DiagnosticConfig {
+                joypad1_mask: 0xAA,
+                expected_joypad1_mask: 0xAA,
+                joypad2_mask: 0x55,
+                expected_joypad2_mask: 0x55,
+                ..default.clone()
+            },
+            expected_passed: true,
+            expected_health: DiagnosticHealth::Healthy,
+            expected_focus_test_id: Some(21),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1832,6 +1868,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("joypad.strobe_reset"),
         },
         DiagnosticScenarioSpec {
+            id: "joypad_strobe_high_hold_fault",
+            title: "Intentional joypad strobe-high hold assertion failure",
+            purpose:
+                "Failure-localization fixture for $4016 strobe-high reads that fail to hold the A bit.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::JoypadStrobeHighHold),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(21),
+            expected_focus_domain: Some("joypad.strobe_high_hold"),
+        },
+        DiagnosticScenarioSpec {
             id: "ppu_vram_increment_32_fault",
             title: "Intentional PPUDATA increment-32 assertion failure",
             purpose:
@@ -1903,8 +1953,12 @@ fn diagnostic_bundle_config(config: &DiagnosticConfig) -> DiagnosticBundleConfig
         max_cpu_cycles: config.max_cpu_cycles,
         joypad1_mask: config.joypad1_mask,
         joypad1_mask_hex: hex_byte(config.joypad1_mask),
+        expected_joypad1_mask: config.expected_joypad1_mask,
+        expected_joypad1_mask_hex: hex_byte(config.expected_joypad1_mask),
         joypad2_mask: config.joypad2_mask,
         joypad2_mask_hex: hex_byte(config.joypad2_mask),
+        expected_joypad2_mask: config.expected_joypad2_mask,
+        expected_joypad2_mask_hex: hex_byte(config.expected_joypad2_mask),
         fault_injection: config
             .fault_injection
             .map(DiagnosticFaultInjection::as_str)

@@ -91,17 +91,17 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(29));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(7));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(30));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
-    assert_eq!(manifest["bundle_schema_version"], Value::from(2));
+    assert_eq!(manifest["bundle_schema_version"], Value::from(3));
     assert_eq!(manifest["passed"], Value::Bool(true));
     assert_eq!(manifest["recommended_exit_code"], Value::from(0));
     assert_eq!(
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(16));
+    assert_eq!(manifest["scenario_count"], Value::from(18));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -122,10 +122,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(16));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(18));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(16)
+        Value::from(18)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -137,7 +137,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         manifest["analysis"]["baseline_divergence_count"],
-        Value::from(15)
+        Value::from(16)
     );
     assert_eq!(
         manifest["analysis"]["critical_scenario_ids"],
@@ -177,6 +177,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .as_array()
         .expect("known divergence scenario ids should be an array")
         .iter()
+        .any(|id| id == &Value::String("joypad_strobe_high_hold_fault".to_string())));
+    assert!(manifest["analysis"]["known_divergence_scenario_ids"]
+        .as_array()
+        .expect("known divergence scenario ids should be an array")
+        .iter()
         .any(|id| id == &Value::String("ppu_vram_increment_32_fault".to_string())));
     assert!(manifest["analysis"]["known_divergence_scenario_ids"]
         .as_array()
@@ -186,7 +191,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let attention_queue = manifest["analysis"]["attention_queue"]
         .as_array()
         .expect("attention queue should be an array");
-    assert_eq!(attention_queue.len(), 15);
+    assert_eq!(attention_queue.len(), 16);
     let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
     assert_eq!(
         timeout_attention["priority"],
@@ -202,7 +207,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         timeout_attention["comparison_difference_count"],
-        Value::from(110)
+        Value::from(113)
     );
     let ppu_attention = find_attention_item(attention_queue, "ppu_read_buffer_fault");
     assert_eq!(
@@ -243,6 +248,20 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         joypad_reset_attention["next_artifact"],
         Value::String("joypad_strobe_reset_fault/comparison.json".to_string())
+    );
+    let joypad_hold_attention =
+        find_attention_item(attention_queue, "joypad_strobe_high_hold_fault");
+    assert_eq!(
+        joypad_hold_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        joypad_hold_attention["focus_domain"],
+        Value::String("joypad.strobe_high_hold".to_string())
+    );
+    assert_eq!(
+        joypad_hold_attention["next_artifact"],
+        Value::String("joypad_strobe_high_hold_fault/comparison.json".to_string())
     );
     let ppu_increment_32_attention =
         find_attention_item(attention_queue, "ppu_vram_increment_32_fault");
@@ -377,19 +396,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(1));
-    assert_eq!(observer["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(29));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(7));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(30));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
-    assert_eq!(observer["bundle_schema_version"], Value::from(2));
+    assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(16));
+    assert_eq!(observer["scenario_count"], Value::from(18));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
-    assert_eq!(observer["baseline_divergence_count"], Value::from(15));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(16));
     let observer_actions = observer["next_actions"]
         .as_array()
         .expect("observer next_actions should be an array");
-    assert_eq!(observer_actions.len(), 15);
+    assert_eq!(observer_actions.len(), 16);
     let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
     assert_eq!(
         timeout_action["priority"],
@@ -412,7 +431,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .as_array()
         .expect("timeout action evidence should be an array")
         .iter()
-        .any(|entry| entry == &Value::String("comparison_difference_count=110".to_string())));
+        .any(|entry| entry == &Value::String("comparison_difference_count=113".to_string())));
     assert!(timeout_action["evidence"]
         .as_array()
         .expect("timeout action evidence should be an array")
@@ -476,6 +495,25 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .any(|entry| entry
             == &Value::String(
                 "failed_probe_ids=cartridge.status.pass,cartridge.test.18.result".to_string()
+            )));
+    let joypad_hold_action =
+        find_observer_action(observer_actions, "joypad_strobe_high_hold_fault");
+    assert_eq!(
+        joypad_hold_action["primary_artifact"],
+        Value::String("joypad_strobe_high_hold_fault/comparison.json".to_string())
+    );
+    assert!(joypad_hold_action["evidence"]
+        .as_array()
+        .expect("joypad strobe-high action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("focus_domain=joypad.strobe_high_hold".to_string())));
+    assert!(joypad_hold_action["evidence"]
+        .as_array()
+        .expect("joypad strobe-high action evidence should be an array")
+        .iter()
+        .any(|entry| entry
+            == &Value::String(
+                "failed_probe_ids=cartridge.status.pass,cartridge.test.21.result".to_string()
             )));
     let ppu_increment_32_action =
         find_observer_action(observer_actions, "ppu_vram_increment_32_fault");
@@ -653,7 +691,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 16);
+    assert_eq!(observations.len(), 18);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -666,6 +704,24 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         pass_observation["next_artifact"],
         Value::String("pass/triage.json".to_string())
+    );
+    let input_matrix_observation =
+        find_observer_observation(observations, "input_mask_matrix_pass");
+    assert_eq!(
+        input_matrix_observation["role"],
+        Value::String("expected_pass_fixture".to_string())
+    );
+    assert_eq!(
+        input_matrix_observation["outcome"],
+        Value::String("matches_baseline".to_string())
+    );
+    assert_eq!(
+        input_matrix_observation["health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(
+        input_matrix_observation["next_artifact"],
+        Value::String("input_mask_matrix_pass/triage.json".to_string())
     );
     let timeout_observation = find_observer_observation(observations, "timeout_cycle_limit");
     assert_eq!(
@@ -682,7 +738,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         timeout_observation["comparison_difference_count"],
-        Value::from(110)
+        Value::from(113)
     );
     assert_eq!(
         timeout_observation["next_artifact"],
@@ -790,6 +846,28 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         joypad_reset_observation["next_artifact"],
         Value::String("joypad_strobe_reset_fault/comparison.json".to_string())
+    );
+    let joypad_hold_observation =
+        find_observer_observation(observations, "joypad_strobe_high_hold_fault");
+    assert_eq!(
+        joypad_hold_observation["role"],
+        Value::String("expected_failure_fixture".to_string())
+    );
+    assert_eq!(
+        joypad_hold_observation["outcome"],
+        Value::String("expected_baseline_divergence".to_string())
+    );
+    assert_eq!(
+        joypad_hold_observation["health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(
+        joypad_hold_observation["focus_domain"],
+        Value::String("joypad.strobe_high_hold".to_string())
+    );
+    assert_eq!(
+        joypad_hold_observation["next_artifact"],
+        Value::String("joypad_strobe_high_hold_fault/comparison.json".to_string())
     );
     let ppu_increment_32_observation =
         find_observer_observation(observations, "ppu_vram_increment_32_fault");
@@ -948,6 +1026,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_read_buffer_fault | ppu_read_buffer_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_nametable_mirroring_fault | ppu_nametable_mirroring_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | joypad_strobe_reset_fault | joypad_strobe_reset_fault/comparison.json |"));
+    assert!(observer_report.contains("| known_divergence | inspect_known_divergence | joypad_strobe_high_hold_fault | joypad_strobe_high_hold_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_vram_increment_32_fault | ppu_vram_increment_32_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_status_latch_reset_fault | ppu_status_latch_reset_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | mapper2_bank_switch_fault | mapper2_bank_switch_fault/comparison.json |"));
@@ -958,12 +1037,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("## Observations"));
     assert!(observer_report
         .contains("| pass | baseline | matches_baseline | healthy | - | 0 | pass/triage.json |"));
-    assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 110 | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("| input_mask_matrix_pass | expected_pass_fixture | matches_baseline | healthy | - | 5 | input_mask_matrix_pass/triage.json |"));
+    assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 113 | timeout_cycle_limit/comparison.json |"));
     assert!(observer_report.contains("| dma_oam_transfer_fault | expected_failure_fixture | expected_baseline_divergence | host_validation_failed | dma.oam_transfer |"));
     assert!(observer_report.contains("| apu_status_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | apu.status |"));
     assert!(observer_report.contains("| ppu_read_buffer_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(observer_report.contains("| ppu_nametable_mirroring_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.nametables.horizontal_mirroring |"));
     assert!(observer_report.contains("| joypad_strobe_reset_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | joypad.strobe_reset |"));
+    assert!(observer_report.contains("| joypad_strobe_high_hold_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | joypad.strobe_high_hold |"));
     assert!(observer_report.contains("| ppu_vram_increment_32_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.registers.ppudata_increment_32 |"));
     assert!(observer_report.contains("| ppu_status_latch_reset_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.registers.status_latch_reset |"));
     assert!(observer_report.contains("| mapper2_bank_switch_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_bank_switch |"));
@@ -978,14 +1059,15 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
     assert!(suite_report.contains("## Suite Analysis"));
     assert!(suite_report.contains("| Status | passed |"));
-    assert!(suite_report.contains("| Baseline divergences | 15 |"));
+    assert!(suite_report.contains("| Baseline divergences | 16 |"));
     assert!(suite_report.contains("## Attention Queue"));
-    assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 110 | timeout_cycle_limit/comparison.json |"));
+    assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 113 | timeout_cycle_limit/comparison.json |"));
     assert!(suite_report.contains("| known_divergence | dma_oam_transfer_fault | scenario_diverges_from_pass_baseline | host_validation_failed | dma.oam_transfer |"));
     assert!(suite_report.contains("| known_divergence | apu_status_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | apu.status |"));
     assert!(suite_report.contains("| known_divergence | ppu_read_buffer_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| known_divergence | ppu_nametable_mirroring_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.nametables.horizontal_mirroring |"));
     assert!(suite_report.contains("| known_divergence | joypad_strobe_reset_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | joypad.strobe_reset |"));
+    assert!(suite_report.contains("| known_divergence | joypad_strobe_high_hold_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | joypad.strobe_high_hold |"));
     assert!(suite_report.contains("| known_divergence | ppu_vram_increment_32_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.ppudata_increment_32 |"));
     assert!(suite_report.contains("| known_divergence | ppu_status_latch_reset_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.status_latch_reset |"));
     assert!(suite_report.contains("| known_divergence | mapper2_bank_switch_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | mapper.uxrom.prg_bank_switch |"));
@@ -994,6 +1076,9 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| known_divergence | cpu_zero_page_wrap_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.addressing.zero_page_x_wrap |"));
     assert!(suite_report.contains("| known_divergence | cpu_indirect_jmp_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(suite_report.contains("| Scenario | Expected pass | Actual pass |"));
+    assert!(
+        suite_report.contains("| input_mask_matrix_pass | true | true | true | healthy | 21 | - |")
+    );
     assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
     assert!(suite_report.contains("| dma_oam_transfer_fault | false | false | true | host_validation_failed | 5 | dma.oam_transfer |"));
     assert!(suite_report.contains(
@@ -1004,6 +1089,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| ppu_read_buffer_fault | false | false | true | cartridge_assertion_failed | 14 | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| ppu_nametable_mirroring_fault | false | false | true | cartridge_assertion_failed | 17 | ppu.nametables.horizontal_mirroring |"));
     assert!(suite_report.contains("| joypad_strobe_reset_fault | false | false | true | cartridge_assertion_failed | 18 | joypad.strobe_reset |"));
+    assert!(suite_report.contains("| joypad_strobe_high_hold_fault | false | false | true | cartridge_assertion_failed | 21 | joypad.strobe_high_hold |"));
     assert!(suite_report.contains("| ppu_vram_increment_32_fault | false | false | true | cartridge_assertion_failed | 19 | ppu.registers.ppudata_increment_32 |"));
     assert!(suite_report.contains("| ppu_status_latch_reset_fault | false | false | true | cartridge_assertion_failed | 20 | ppu.registers.status_latch_reset |"));
     assert!(suite_report.contains("| mapper2_bank_switch_fault | false | false | true | cartridge_assertion_failed | 15 | mapper.uxrom.prg_bank_switch |"));
@@ -1027,6 +1113,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(
         suite_report.contains("| joypad_strobe_reset_fault | true | true | true | true | true |")
     );
+    assert!(suite_report
+        .contains("| joypad_strobe_high_hold_fault | true | true | true | true | true |"));
     assert!(
         suite_report.contains("| ppu_vram_increment_32_fault | true | true | true | true | true |")
     );
@@ -1053,7 +1141,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(pass["actual_passed"], Value::Bool(true));
     assert_eq!(pass["expectation_met"], Value::Bool(true));
     assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
-    assert_eq!(pass["actual_focus_test_id"], Value::from(20));
+    assert_eq!(pass["actual_focus_test_id"], Value::from(21));
     assert_eq!(pass["contract"]["all_matched"], Value::Bool(true));
     assert_eq!(pass["contract"]["passed_matches"], Value::Bool(true));
     assert_eq!(pass["contract"]["health_matches"], Value::Bool(true));
@@ -1069,8 +1157,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         pass["contract"]["actual_health"],
         Value::String("healthy".to_string())
     );
-    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(20));
-    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(20));
+    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(21));
+    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(21));
     assert_eq!(pass["comparison"]["passed"], Value::Bool(true));
     assert_eq!(pass["comparison"]["difference_count"], Value::from(0));
     assert_eq!(pass["comparison"]["failure_count"], Value::from(0));
@@ -1083,6 +1171,40 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Value::String("pass/triage.json".to_string())
     );
     assert_bundle_artifacts(&suite_dir.join("pass"), true, true);
+
+    let input_matrix = find_scenario(scenarios, "input_mask_matrix_pass");
+    assert_eq!(input_matrix["expected_passed"], Value::Bool(true));
+    assert_eq!(input_matrix["actual_passed"], Value::Bool(true));
+    assert_eq!(input_matrix["expectation_met"], Value::Bool(true));
+    assert_eq!(
+        input_matrix["actual_health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(input_matrix["actual_focus_test_id"], Value::from(21));
+    assert_eq!(input_matrix["comparison"]["passed"], Value::Bool(true));
+    assert_eq!(
+        input_matrix["config"]["joypad1_mask_hex"],
+        Value::String("0xAA".to_string())
+    );
+    assert_eq!(
+        input_matrix["config"]["expected_joypad1_mask_hex"],
+        Value::String("0xAA".to_string())
+    );
+    assert_eq!(
+        input_matrix["config"]["joypad2_mask_hex"],
+        Value::String("0x55".to_string())
+    );
+    assert_eq!(
+        input_matrix["config"]["expected_joypad2_mask_hex"],
+        Value::String("0x55".to_string())
+    );
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("input_mask_matrix_pass"),
+        true,
+        true,
+        "0x55",
+        None,
+    );
 
     let joypad1 = find_scenario(scenarios, "joypad1_mismatch");
     assert_eq!(joypad1["expected_runner_exit_code"], Value::from(1));
@@ -1925,7 +2047,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(29));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(30));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -1933,7 +2055,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     );
     assert_eq!(
         triage["debug_focus"]["focus_test_name"],
-        Value::String("ppu_status_latch_reset".to_string())
+        Value::String("joypad_strobe_high_hold".to_string())
     );
     assert_eq!(
         triage["debug_focus"]["terminal_instruction"]["symbol"],
@@ -1942,7 +2064,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(triage["debug_focus"]["terminal_instruction"]["instruction"]
         .as_str()
         .is_some_and(|instruction| instruction.starts_with("JMP 0x")));
-    assert_eq!(triage["coverage"]["passed_tests"], Value::from(20));
+    assert_eq!(triage["coverage"]["passed_tests"], Value::from(21));
     assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
     assert!(triage["dma"]["oam_dma_active_cycles"]
         .as_u64()
@@ -2019,8 +2141,8 @@ fn assert_bundle_artifacts_with_config(
     expected_fault_injection: Option<&str>,
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
-    assert_eq!(manifest["bundle_schema_version"], Value::from(2));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(29));
+    assert_eq!(manifest["bundle_schema_version"], Value::from(3));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(30));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],
