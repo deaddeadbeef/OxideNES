@@ -661,6 +661,80 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failu
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuIndirectJmpPageWrap),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU control-flow failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_indirect_jmp_page_wrap")
+    );
+    assert_eq!(telemetry.verdict.current_test, 13);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_indirect_jmp_page_wrap")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xC0);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU control-flow failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 13);
+    assert_eq!(failure.test_name, Some("cpu_indirect_jmp_page_wrap"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0xC0");
+    assert_eq!(
+        failure.likely_domain,
+        "cpu.control_flow.indirect_jmp_page_wrap"
+    );
+    assert!(failure.assertion.contains("Indirect JMP pointer"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_indirect_jmp_page_wrap")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.control_flow.indirect_jmp_page_wrap")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 13);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.control_flow.indirect_jmp_page_wrap")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.13.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(13)
+            && probe.likely_domain == "cpu.control_flow.indirect_jmp_page_wrap"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 13);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 13);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_indirect_jmp_page_wrap_before_jump")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_indirect_jmp_page_wrap (13) |"));
+    assert!(report.contains("| Focus domain | cpu.control_flow.indirect_jmp_page_wrap |"));
+    assert!(report.contains("| Likely domain | cpu.control_flow.indirect_jmp_page_wrap |"));
+    assert!(report.contains("| 13 | cpu_indirect_jmp_page_wrap | cpu | edge_case | failed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::PpuVramReadBuffer),

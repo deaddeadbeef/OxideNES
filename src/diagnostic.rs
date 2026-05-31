@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 19;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 20;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v19";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v20";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -48,6 +48,7 @@ const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
+const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -624,6 +625,7 @@ impl Default for DiagnosticConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticFaultInjection {
+    CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     PpuVramReadBuffer,
 }
@@ -631,6 +633,7 @@ pub enum DiagnosticFaultInjection {
 impl DiagnosticFaultInjection {
     pub fn as_str(self) -> &'static str {
         match self {
+            DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
@@ -638,6 +641,7 @@ impl DiagnosticFaultInjection {
 
     fn injection_label(self) -> &'static str {
         match self {
+            DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
@@ -3687,6 +3691,9 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x0400);
         self.asm.lda_label_high(&wrong_target);
         self.asm.sta_abs(0x0500);
+        self.asm
+            .label(CPU_INDIRECT_JMP_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
         self.asm.jmp_indirect(0x04FF);
 
         self.asm.pad_until_low_byte(0x00);
@@ -4148,6 +4155,10 @@ fn maybe_apply_diagnostic_fault_injection(
 
 fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjection) {
     match fault {
+        DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
+            let wrong_target_high = bus.cpu_read(0x0500);
+            bus.cpu_write(0x0400, wrong_target_high);
+        }
         DiagnosticFaultInjection::CpuZeroPageIndexWrap => {
             bus.cpu_write(0x0080, 0x00);
         }

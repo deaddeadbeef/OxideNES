@@ -1726,6 +1726,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("cpu.addressing.zero_page_x_wrap"),
         },
         DiagnosticScenarioSpec {
+            id: "cpu_indirect_jmp_fault",
+            title: "Intentional indirect-JMP page-wrap assertion failure",
+            purpose: "Failure-localization fixture for indirect JMP page-wrap control-flow regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuIndirectJmpPageWrap),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(13),
+            expected_focus_domain: Some("cpu.control_flow.indirect_jmp_page_wrap"),
+        },
+        DiagnosticScenarioSpec {
             id: "ppu_read_buffer_fault",
             title: "Intentional PPUDATA read-buffer assertion failure",
             purpose:
