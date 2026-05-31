@@ -89,8 +89,9 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
-`joypad2_mismatch`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
-`ppu_read_buffer_fault`, and `timeout_cycle_limit`. The
+`joypad2_mismatch`, `dma_oam_transfer_fault`, `cpu_zero_page_wrap_fault`,
+`cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`, and
+`timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
 an automated debugger can decide which artifact to open without traversing every
@@ -99,11 +100,12 @@ code, expected health, expected focus test/domain, actual `debug_focus`, failed
 probe ids, per-scenario baseline comparison summaries, explicit contract-match
 breakdowns, a suite-level attention queue, and artifact paths. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, and
-`ppu_read_buffer_fault` scenarios use
-telemetry-visible fault injection to corrupt deterministic CPU RAM and VRAM
-sentinels just before the cartridge assertion reads them, so the suite can prove
-CPU addressing, CPU control-flow, and PPU failure localization without requiring
-a broken emulator build. The Markdown reports add suite analysis, observer next actions, an
+`ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
+corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
+assertion reads them, while `dma_oam_transfer_fault` corrupts the host-observed
+OAM DMA source byte before `$4014`. The suite can prove CPU addressing, CPU
+control-flow, DMA host-observation, and PPU failure localization without
+requiring a broken emulator build. The Markdown reports add suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
 matrix, AI drilldown order, and bundle artifact maps for humans or agents
 inspecting CI artifacts. The command exits `0` when all known-good and
@@ -292,3 +294,9 @@ The fixture injects an indirect-JMP pointer high-byte mismatch just before
 `JMP ($04FF)` in the generated cartridge, proving that AI handoff artifacts can
 localize CPU control-flow page-wrap failures to
 `cpu.control_flow.indirect_jmp_page_wrap`.
+
+Schema version `21` adds the `dma_oam_transfer_fault` scenario-suite fixture and
+host-validation debug-focus localization from the first failed probe. The fixture
+corrupts the `$0300` OAM DMA source byte just before `$4014`, leaving the
+cartridge assertions passing while host telemetry reports `oam.dma_checksum` and
+focuses AI triage on `dma.oam_transfer`.
