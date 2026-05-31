@@ -9,6 +9,15 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 1;
+pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v1";
+
+const DIAGNOSTIC_AI_GOALS: &[&str] = &[
+    "headless end-to-end emulator validation",
+    "machine-readable subsystem coverage",
+    "failure localization for automated debugging",
+];
 
 const PROGRAM_BASE: u16 = 0x8000;
 const PRG_BANKS: u8 = 2;
@@ -28,44 +37,121 @@ const STATUS_PASS: u8 = 0x80;
 const STATUS_FAIL: u8 = 0xE0;
 const RESULT_PASS: u8 = 0x01;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSubsystem {
+    Cpu,
+    Bus,
+    Ppu,
+    Apu,
+    Dma,
+    Joypad,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticTestTier {
+    Smoke,
+    EdgeCase,
+    Integration,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct DiagnosticTestSpec {
     pub id: u8,
     pub name: &'static str,
+    pub subsystem: DiagnosticSubsystem,
+    pub tier: DiagnosticTestTier,
+    pub intent: &'static str,
+    pub expected_observations: &'static [&'static str],
 }
 
 pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
     DiagnosticTestSpec {
         id: 1,
         name: "cpu_arithmetic_flags",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify ADC/SBC arithmetic results and flag-driven carry/overflow behavior.",
+        expected_observations: &["A register reaches 0x32, 0x20, and 0x80"],
     },
     DiagnosticTestSpec {
         id: 2,
         name: "stack_jsr_rts",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify stack push/pop and subroutine return through the CPU execution path.",
+        expected_observations: &["PLA restores 0x42", "JSR/RTS returns 0x77"],
     },
     DiagnosticTestSpec {
         id: 3,
         name: "cpu_ram_mirroring",
+        subsystem: DiagnosticSubsystem::Bus,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify 2 KiB CPU RAM mirrors across the $0000-$1FFF bus window.",
+        expected_observations: &["$0002 mirrors to $0802", "$07FF mirrors to $1FFF"],
     },
     DiagnosticTestSpec {
         id: 4,
         name: "ppu_palette_register_roundtrip",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify palette writes can be read back through PPUADDR/PPUDATA.",
+        expected_observations: &["palette byte 0x25 is read back masked to 6 bits"],
     },
     DiagnosticTestSpec {
         id: 5,
         name: "oam_dma_transfer",
+        subsystem: DiagnosticSubsystem::Dma,
+        tier: DiagnosticTestTier::Integration,
+        intent: "Verify CPU-page OAM DMA transfers a full 256-byte pattern into PPU OAM.",
+        expected_observations: &["OAM checksum matches ascending 0x00..0xFF pattern"],
     },
     DiagnosticTestSpec {
         id: 6,
         name: "apu_status_register",
+        subsystem: DiagnosticSubsystem::Apu,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify enabling pulse channel 1 is reflected through the APU status register.",
+        expected_observations: &["$4015 bit 0 remains set after pulse setup"],
     },
     DiagnosticTestSpec {
         id: 7,
         name: "joypad_strobe_shift",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::Smoke,
+        intent: "Verify joypad strobe latches the configured A + Right button mask in read order.",
+        expected_observations: &["read sequence is 1,0,0,0,0,0,0,1"],
     },
     DiagnosticTestSpec {
         id: 8,
+        name: "cpu_branch_page_crossing",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify a taken relative branch can cross a CPU page boundary.",
+        expected_observations: &[
+            "BEQ target is reached from a branch placed at page low byte 0xFC",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 9,
+        name: "joypad_overread_returns_one",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify joypad reads after the eighth latched button return 1.",
+        expected_observations: &["ninth and tenth serial reads both return 1"],
+    },
+    DiagnosticTestSpec {
+        id: 10,
         name: "ppu_nmi_and_render_frame",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::Integration,
+        intent:
+            "Verify PPU background rendering advances through NMI and produces host-visible frames.",
+        expected_observations: &[
+            "at least two NMIs",
+            "rendered frame contains multiple colors",
+        ],
     },
 ];
 
@@ -86,7 +172,9 @@ impl Default for DiagnosticConfig {
 
 #[derive(Debug, Serialize)]
 pub struct DiagnosticTelemetry {
+    pub schema_version: u16,
     pub provenance: &'static str,
+    pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
     pub verdict: VerdictTelemetry,
     pub cycles: u64,
@@ -98,6 +186,14 @@ pub struct DiagnosticTelemetry {
     pub frame: FrameTelemetry,
     pub audio: AudioTelemetry,
     pub events: Vec<EventTelemetry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticSuiteTelemetry {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub test_count: usize,
+    pub goals: &'static [&'static str],
 }
 
 #[derive(Debug, Serialize)]
@@ -146,6 +242,11 @@ pub struct RamTelemetry {
 pub struct TestTelemetry {
     pub id: u8,
     pub name: &'static str,
+    pub subsystem: DiagnosticSubsystem,
+    pub tier: DiagnosticTestTier,
+    pub intent: &'static str,
+    pub expected_observations: &'static [&'static str],
+    pub result_addr: u16,
     pub result: u8,
     pub passed: bool,
 }
@@ -170,12 +271,24 @@ pub struct AudioTelemetry {
     pub peak_abs: f32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticEventKind {
+    Reset,
+    TestChanged,
+    StatusChanged,
+    FrameComplete,
+    PostPassFrameComplete,
+}
+
 #[derive(Debug, Serialize)]
 pub struct EventTelemetry {
+    pub kind: DiagnosticEventKind,
     pub cycle: u64,
     pub frame: u64,
     pub status: u8,
     pub current_test: u8,
+    pub current_test_name: Option<&'static str>,
     pub pc: u16,
     pub note: String,
 }
@@ -224,16 +337,18 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut audio_peak_abs = 0.0f32;
     let mut events = Vec::new();
     let mut last_status = read_ram_byte(&mut bus, STATUS_ADDR);
+    let mut last_current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
     let mut timeout = true;
 
-    events.push(EventTelemetry {
-        cycle: 0,
-        frame: 0,
-        status: last_status,
-        current_test: read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
-        pc: cpu.pc,
-        note: "reset".to_string(),
-    });
+    events.push(event_telemetry(
+        0,
+        0,
+        last_status,
+        last_current_test,
+        cpu.pc,
+        DiagnosticEventKind::Reset,
+        "reset",
+    ));
 
     while cycles < config.max_cpu_cycles {
         cpu.clock(&mut bus);
@@ -250,27 +365,44 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             for sample in samples {
                 audio_peak_abs = audio_peak_abs.max(sample.abs());
             }
-            events.push(EventTelemetry {
-                cycle: cycles,
-                frame: frames,
-                status: read_ram_byte(&mut bus, STATUS_ADDR),
-                current_test: read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
-                pc: cpu.pc,
-                note: "frame_complete".to_string(),
-            });
+            let status = read_ram_byte(&mut bus, STATUS_ADDR);
+            let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+            events.push(event_telemetry(
+                cycles,
+                frames,
+                status,
+                current_test,
+                cpu.pc,
+                DiagnosticEventKind::FrameComplete,
+                "frame_complete",
+            ));
         }
 
         let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+        if current_test != last_current_test {
+            last_current_test = current_test;
+            events.push(event_telemetry(
+                cycles,
+                frames,
+                status,
+                current_test,
+                cpu.pc,
+                DiagnosticEventKind::TestChanged,
+                "test_changed",
+            ));
+        }
         if status != last_status {
             last_status = status;
-            events.push(EventTelemetry {
-                cycle: cycles,
-                frame: frames,
+            events.push(event_telemetry(
+                cycles,
+                frames,
                 status,
-                current_test: read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
-                pc: cpu.pc,
-                note: "status_changed".to_string(),
-            });
+                current_test,
+                cpu.pc,
+                DiagnosticEventKind::StatusChanged,
+                "status_changed",
+            ));
         }
 
         if status == STATUS_PASS || status == STATUS_FAIL {
@@ -297,14 +429,17 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 for sample in samples {
                     audio_peak_abs = audio_peak_abs.max(sample.abs());
                 }
-                events.push(EventTelemetry {
-                    cycle: cycles,
-                    frame: frames,
-                    status: read_ram_byte(&mut bus, STATUS_ADDR),
-                    current_test: read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
-                    pc: cpu.pc,
-                    note: "post_pass_frame_complete".to_string(),
-                });
+                let status = read_ram_byte(&mut bus, STATUS_ADDR);
+                let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+                events.push(event_telemetry(
+                    cycles,
+                    frames,
+                    status,
+                    current_test,
+                    cpu.pc,
+                    DiagnosticEventKind::PostPassFrameComplete,
+                    "post_pass_frame_complete",
+                ));
             }
         }
     }
@@ -337,7 +472,9 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let passed = status == STATUS_PASS && !timeout && host_failures.is_empty();
 
     Ok(DiagnosticTelemetry {
+        schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
         provenance: DIAGNOSTIC_PROVENANCE,
+        suite: suite_telemetry(),
         cartridge: cartridge_info,
         verdict: VerdictTelemetry {
             passed,
@@ -469,6 +606,8 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.oam_dma_transfer();
     program.apu_status_register();
     program.joypad_strobe_shift();
+    program.cpu_branch_page_crossing();
+    program.joypad_overread_returns_one();
     program.ppu_nmi_and_render_frame();
 
     program.asm.lda_imm(STATUS_PASS);
@@ -649,8 +788,44 @@ impl DiagnosticProgram {
         self.pass_test(7);
     }
 
-    fn ppu_nmi_and_render_frame(&mut self) {
+    fn cpu_branch_page_crossing(&mut self) {
         self.begin_test(8);
+        self.asm.lda_imm(0x00);
+        self.asm.cmp_imm(0x00);
+        self.asm.pad_until_low_byte(0xFC);
+        let target = self.unique_label("branch_page_target");
+        self.asm.beq(&target);
+        self.asm.lda_imm(0x81);
+        self.asm.sta_zp(FAILURE_CODE_ADDR);
+        self.asm.jmp_label("fail");
+        self.asm
+            .label(&target)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0x5C);
+        self.expect_a_eq(0x5C, 0x82);
+        self.pass_test(8);
+    }
+
+    fn joypad_overread_returns_one(&mut self) {
+        self.begin_test(9);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+
+        for _ in 0..8 {
+            self.asm.lda_abs(0x4016);
+        }
+        for index in 0..2 {
+            self.asm.lda_abs(0x4016);
+            self.asm.and_imm(0x01);
+            self.expect_a_eq(0x01, 0x90 + index);
+        }
+        self.pass_test(9);
+    }
+
+    fn ppu_nmi_and_render_frame(&mut self) {
+        self.begin_test(10);
         self.asm.lda_abs(0x2002);
         self.asm.lda_imm(0x20);
         self.asm.sta_abs(0x2006);
@@ -691,7 +866,7 @@ impl DiagnosticProgram {
         self.asm.lda_zp(NMI_COUNT_ADDR);
         self.asm.cmp_imm(0x02);
         self.asm.bne(&wait);
-        self.pass_test(8);
+        self.pass_test(10);
     }
 }
 
@@ -769,6 +944,16 @@ impl Assembler {
 
     fn emit(&mut self, byte: u8) {
         self.bytes.push(byte);
+    }
+
+    fn current_addr(&self) -> u16 {
+        self.base + self.bytes.len() as u16
+    }
+
+    fn pad_until_low_byte(&mut self, low_byte: u8) {
+        while self.current_addr() as u8 != low_byte {
+            self.nop();
+        }
     }
 
     fn emit_u16(&mut self, value: u16) {
@@ -920,6 +1105,10 @@ impl Assembler {
     fn sec(&mut self) {
         self.emit(0x38);
     }
+
+    fn nop(&mut self) {
+        self.emit(0xEA);
+    }
 }
 
 fn build_chr_rom() -> Vec<u8> {
@@ -996,14 +1185,50 @@ fn read_ram_byte(bus: &mut Bus, addr: u8) -> u8 {
     bus.cpu_read(addr as u16)
 }
 
+fn suite_telemetry() -> DiagnosticSuiteTelemetry {
+    DiagnosticSuiteTelemetry {
+        name: DIAGNOSTIC_SUITE_NAME,
+        version: DIAGNOSTIC_SUITE_VERSION,
+        test_count: DIAGNOSTIC_TESTS.len(),
+        goals: DIAGNOSTIC_AI_GOALS,
+    }
+}
+
+fn event_telemetry(
+    cycle: u64,
+    frame: u64,
+    status: u8,
+    current_test: u8,
+    pc: u16,
+    kind: DiagnosticEventKind,
+    note: &str,
+) -> EventTelemetry {
+    EventTelemetry {
+        kind,
+        cycle,
+        frame,
+        status,
+        current_test,
+        current_test_name: test_name(current_test),
+        pc,
+        note: note.to_string(),
+    }
+}
+
 fn test_telemetry(ram: &[u8]) -> Vec<TestTelemetry> {
     DIAGNOSTIC_TESTS
         .iter()
         .map(|spec| {
-            let result = ram[((result_addr(spec.id)) & 0x07FF) as usize];
+            let result_addr = result_addr(spec.id);
+            let result = ram[(result_addr & 0x07FF) as usize];
             TestTelemetry {
                 id: spec.id,
                 name: spec.name,
+                subsystem: spec.subsystem,
+                tier: spec.tier,
+                intent: spec.intent,
+                expected_observations: spec.expected_observations,
+                result_addr,
                 result,
                 passed: result == RESULT_PASS,
             }
@@ -1078,9 +1303,30 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_test_metadata_is_unique_and_ai_readable() {
+        let mut ids = BTreeSet::new();
+        let mut has_edge_case = false;
+
+        for spec in DIAGNOSTIC_TESTS {
+            assert!(ids.insert(spec.id), "duplicate diagnostic id {}", spec.id);
+            assert!(!spec.name.is_empty());
+            assert!(!spec.intent.is_empty());
+            assert!(!spec.expected_observations.is_empty());
+            has_edge_case |= spec.tier == DiagnosticTestTier::EdgeCase;
+        }
+
+        assert!(has_edge_case, "diagnostic suite should include edge cases");
+    }
+
+    #[test]
     fn headless_diagnostic_passes_and_collects_telemetry() {
         let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic runs");
 
+        assert_eq!(
+            telemetry.schema_version,
+            DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
+        );
+        assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
         assert!(
             telemetry.verdict.passed,
             "diagnostic should pass: {:?}",
@@ -1091,5 +1337,9 @@ mod tests {
         assert!(telemetry.audio.sample_count > 0);
         assert!(telemetry.frame.unique_colors >= 2);
         assert!(telemetry.tests.iter().all(|test| test.passed));
+        assert!(telemetry.events.iter().any(|event| {
+            matches!(event.kind, DiagnosticEventKind::TestChanged)
+                && event.current_test_name == Some("cpu_branch_page_crossing")
+        }));
     }
 }
