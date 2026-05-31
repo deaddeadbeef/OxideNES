@@ -1,9 +1,10 @@
 use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
-    DiagnosticComparisonSeverity, DiagnosticConfig, DiagnosticFailureKind, DiagnosticHealth,
-    DiagnosticProbeStatus, DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome,
-    DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    DiagnosticComparisonSeverity, DiagnosticConfig, DiagnosticFailureKind,
+    DiagnosticFaultInjection, DiagnosticHealth, DiagnosticProbeStatus, DiagnosticSubsystem,
+    TestTimelineEndReason, TestTimelineOutcome, DIAGNOSTIC_PROVENANCE,
+    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -137,6 +138,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
     assert_eq!(telemetry.input.joypad2_expected_mask_hex, "0x28");
+    assert_eq!(telemetry.input.fault_injection, None);
+    assert_eq!(telemetry.input.fault_injection_label, None);
     assert!(telemetry.dma.oam_dma_observed);
     assert!(telemetry.dma.oam_dma_completed);
     assert!((513..=514).contains(&telemetry.dma.oam_dma_active_cycles));
@@ -584,6 +587,77 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
             && probe.test_id == Some(11)
             && probe.likely_domain == "joypad2.strobe_shift"
     }));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuVramReadBuffer),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_vram_read_buffer")
+    );
+    assert_eq!(telemetry.verdict.current_test, 14);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("ppu_vram_read_buffer")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xD0);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 14);
+    assert_eq!(failure.test_name, Some("ppu_vram_read_buffer"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0xD0");
+    assert_eq!(failure.likely_domain, "ppu.registers.ppudata_buffer");
+    assert!(failure.assertion.contains("buffered VRAM byte"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_vram_read_buffer")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.registers.ppudata_buffer")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 14);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.registers.ppudata_buffer")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.14.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(14)
+            && probe.likely_domain == "ppu.registers.ppudata_buffer"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 14);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 14);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "ppu_vram_read_buffer_before_first_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_vram_read_buffer (14) |"));
+    assert!(report.contains("| Focus domain | ppu.registers.ppudata_buffer |"));
+    assert!(report.contains("| Likely domain | ppu.registers.ppudata_buffer |"));
+    assert!(report.contains("| 14 | ppu_vram_read_buffer | ppu | edge_case | failed |"));
 }
 
 #[test]

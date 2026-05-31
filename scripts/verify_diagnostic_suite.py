@@ -12,13 +12,14 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 17
-EXPECTED_TRIAGE_SCHEMA = 5
-EXPECTED_BUNDLE_SCHEMA = 1
+EXPECTED_TELEMETRY_SCHEMA = 18
+EXPECTED_TRIAGE_SCHEMA = 6
+EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
     "pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
+    "ppu_read_buffer_fault",
     "timeout_cycle_limit",
 }
 
@@ -70,7 +71,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            3,
+            4,
             "analysis baseline_divergence_count",
         )
 
@@ -120,13 +121,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            3,
+            4,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 3, "observer next_actions count")
+        self.expect_equal(len(actions), 4, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -155,6 +156,7 @@ class SuiteVerifier:
         expected_action_ids = {
             "joypad1_mismatch",
             "joypad2_mismatch",
+            "ppu_read_buffer_fault",
             "timeout_cycle_limit",
         }
         self.expect_equal(set(by_scenario), expected_action_ids, "observer action scenario ids")
@@ -184,6 +186,38 @@ class SuiteVerifier:
             "comparison_difference_count=92",
             evidence,
             "timeout observer evidence",
+        )
+
+        ppu = by_scenario.get("ppu_read_buffer_fault")
+        if not isinstance(ppu, dict):
+            self.errors.append("missing observer action for ppu_read_buffer_fault")
+            return
+
+        self.expect_equal(
+            ppu.get("priority"),
+            "known_divergence",
+            "PPU observer action priority",
+        )
+        self.expect_equal(
+            ppu.get("action_type"),
+            "inspect_known_divergence",
+            "PPU observer action type",
+        )
+        self.expect_equal(
+            ppu.get("primary_artifact"),
+            "ppu_read_buffer_fault/comparison.json",
+            "PPU observer primary_artifact",
+        )
+        ppu_evidence = self.expect_list(ppu.get("evidence"), "PPU observer evidence")
+        self.expect_in(
+            "focus_domain=ppu.registers.ppudata_buffer",
+            ppu_evidence,
+            "PPU observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result",
+            ppu_evidence,
+            "PPU observer evidence",
         )
         self.expect_in(
             "top_difference_path=dma.oam_dma_observed",
@@ -244,6 +278,31 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for timeout_cycle_limit")
+
+        ppu = by_scenario.get("ppu_read_buffer_fault")
+        if isinstance(ppu, dict):
+            self.expect_equal(
+                ppu.get("role"),
+                "expected_failure_fixture",
+                "PPU observer role",
+            )
+            self.expect_equal(
+                ppu.get("outcome"),
+                "expected_baseline_divergence",
+                "PPU observer outcome",
+            )
+            self.expect_equal(
+                ppu.get("focus_domain"),
+                "ppu.registers.ppudata_buffer",
+                "PPU observer focus_domain",
+            )
+            self.expect_equal(
+                ppu.get("next_artifact"),
+                "ppu_read_buffer_fault/comparison.json",
+                "PPU observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for ppu_read_buffer_fault")
 
     def verify_artifact_paths(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
         root_artifacts = self.expect_dict(manifest.get("artifacts"), "scenario-suite artifacts")

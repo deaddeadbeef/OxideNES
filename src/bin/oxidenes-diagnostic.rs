@@ -6,14 +6,14 @@ use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
     DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticDebugEventFocusTelemetry,
-    DiagnosticDebugInstructionFocusTelemetry, DiagnosticHealth, DiagnosticProbeStatus,
-    DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE,
+    DiagnosticDebugInstructionFocusTelemetry, DiagnosticFaultInjection, DiagnosticHealth,
+    DiagnosticProbeStatus, DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE,
 };
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
-const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
+const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 2;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
 const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 6;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 1;
 
@@ -38,6 +38,7 @@ struct DiagnosticBundleConfig {
     joypad1_mask_hex: String,
     joypad2_mask: u8,
     joypad2_mask_hex: String,
+    fault_injection: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -322,6 +323,7 @@ struct DiagnosticTriageInput {
     joypad1_expected_mask_hex: String,
     joypad2_mask_hex: String,
     joypad2_expected_mask_hex: String,
+    fault_injection: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1711,6 +1713,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("joypad2.strobe_shift"),
         },
         DiagnosticScenarioSpec {
+            id: "ppu_read_buffer_fault",
+            title: "Intentional PPUDATA read-buffer assertion failure",
+            purpose:
+                "Failure-localization fixture for non-palette $2007 read-buffer regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuVramReadBuffer),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(14),
+            expected_focus_domain: Some("ppu.registers.ppudata_buffer"),
+        },
+        DiagnosticScenarioSpec {
             id: "timeout_cycle_limit",
             title: "Intentional one-cycle timeout",
             purpose: "Progress watchdog fixture for runs that fail before the cartridge can start a test.",
@@ -1742,6 +1758,10 @@ fn diagnostic_bundle_config(config: &DiagnosticConfig) -> DiagnosticBundleConfig
         joypad1_mask_hex: hex_byte(config.joypad1_mask),
         joypad2_mask: config.joypad2_mask,
         joypad2_mask_hex: hex_byte(config.joypad2_mask),
+        fault_injection: config
+            .fault_injection
+            .map(DiagnosticFaultInjection::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -1879,6 +1899,7 @@ fn diagnostic_triage_report(
             joypad1_expected_mask_hex: telemetry.input.joypad1_expected_mask_hex.clone(),
             joypad2_mask_hex: telemetry.input.joypad2_mask_hex.clone(),
             joypad2_expected_mask_hex: telemetry.input.joypad2_expected_mask_hex.clone(),
+            fault_injection: telemetry.input.fault_injection_label.map(str::to_string),
         },
         failure: triage_failure(telemetry)?,
         coverage: triage_coverage(telemetry)?,

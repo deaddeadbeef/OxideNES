@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 17;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 18;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v17";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v18";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -47,6 +47,7 @@ const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
+const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -605,6 +606,7 @@ pub struct DiagnosticConfig {
     pub max_cpu_cycles: u64,
     pub joypad1_mask: u8,
     pub joypad2_mask: u8,
+    pub fault_injection: Option<DiagnosticFaultInjection>,
 }
 
 impl Default for DiagnosticConfig {
@@ -613,6 +615,27 @@ impl Default for DiagnosticConfig {
             max_cpu_cycles: 500_000,
             joypad1_mask: EXPECTED_JOYPAD1_MASK,
             joypad2_mask: EXPECTED_JOYPAD2_MASK,
+            fault_injection: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticFaultInjection {
+    PpuVramReadBuffer,
+}
+
+impl DiagnosticFaultInjection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
+        }
+    }
+
+    fn injection_label(self) -> &'static str {
+        match self {
+            DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
     }
 }
@@ -672,6 +695,8 @@ pub struct DiagnosticInputTelemetry {
     pub joypad2_mask_hex: String,
     pub joypad2_expected_mask: u8,
     pub joypad2_expected_mask_hex: String,
+    pub fault_injection: Option<DiagnosticFaultInjection>,
+    pub fault_injection_label: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1169,6 +1194,10 @@ fn build_diagnostic_cartridge_from_program(
 pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, String> {
     let (program, labels) = build_program_with_labels()?;
     let trace_context = DiagnosticTraceContext::from_labels(&labels);
+    let fault_injection_pc = match config.fault_injection {
+        Some(fault) => Some(label_addr(&labels, fault.injection_label())?),
+        None => None,
+    };
     let rom = build_diagnostic_cartridge_from_program(&program, &labels)?;
     let cartridge_info = cartridge_telemetry(&rom);
     let cartridge = Cartridge::new(&rom)?;
@@ -1189,6 +1218,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut timeout = true;
     let mut dma_observation = DmaObservation::default();
     let mut instruction_trace = InstructionTraceObservation::default();
+    let mut fault_injected = false;
 
     let reset_cpu = cpu_telemetry(&cpu);
     let reset_ram = diagnostic_ram_watch_telemetry(&mut bus, last_status, last_current_test);
@@ -1205,6 +1235,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     }));
 
     while cycles < config.max_cpu_cycles {
+        maybe_apply_diagnostic_fault_injection(
+            &mut bus,
+            config.fault_injection,
+            fault_injection_pc,
+            &mut fault_injected,
+            cpu.pc,
+        );
         observe_instruction_trace(
             &mut instruction_trace,
             &trace_context,
@@ -1302,6 +1339,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let target_frames = frames + 1;
         let cycle_limit = cycles.saturating_add(40_000);
         while cycles < cycle_limit && frames < target_frames {
+            maybe_apply_diagnostic_fault_injection(
+                &mut bus,
+                config.fault_injection,
+                fault_injection_pc,
+                &mut fault_injected,
+                cpu.pc,
+            );
             observe_instruction_trace(
                 &mut instruction_trace,
                 &trace_context,
@@ -3676,6 +3720,9 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x2006);
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x2006);
+        self.asm
+            .label(PPU_READ_BUFFER_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
         self.asm.lda_abs(0x2007);
         self.asm.lda_abs(0x2007);
         self.expect_a_eq(0x2A, 0xD0);
@@ -4071,6 +4118,36 @@ fn diagnostic_input_telemetry(config: &DiagnosticConfig) -> DiagnosticInputTelem
         joypad2_mask_hex: hex_byte(config.joypad2_mask),
         joypad2_expected_mask: EXPECTED_JOYPAD2_MASK,
         joypad2_expected_mask_hex: hex_byte(EXPECTED_JOYPAD2_MASK),
+        fault_injection: config.fault_injection,
+        fault_injection_label: config.fault_injection.map(DiagnosticFaultInjection::as_str),
+    }
+}
+
+fn maybe_apply_diagnostic_fault_injection(
+    bus: &mut Bus,
+    fault: Option<DiagnosticFaultInjection>,
+    fault_pc: Option<u16>,
+    fault_injected: &mut bool,
+    pc: u16,
+) {
+    if *fault_injected || fault_pc != Some(pc) {
+        return;
+    }
+    if let Some(fault) = fault {
+        apply_diagnostic_fault_injection(bus, fault);
+        *fault_injected = true;
+    }
+}
+
+fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjection) {
+    match fault {
+        DiagnosticFaultInjection::PpuVramReadBuffer => {
+            bus.cpu_write(0x2006, 0x20);
+            bus.cpu_write(0x2006, 0x00);
+            bus.cpu_write(0x2007, 0x00);
+            bus.cpu_write(0x2006, 0x20);
+            bus.cpu_write(0x2006, 0x00);
+        }
     }
 }
 

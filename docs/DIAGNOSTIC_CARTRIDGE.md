@@ -89,20 +89,23 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
-`joypad2_mismatch`, and `timeout_cycle_limit`. The observer JSON is the compact
-machine entry point: it turns the root attention queue into ordered next
-actions, scenario observations, and evidence pointers so an automated debugger
-can decide which artifact to open without traversing every bundle first. The
-root manifest records each scenario's expected runner exit code, expected
-health, expected focus test/domain, actual `debug_focus`, failed probe ids,
-per-scenario baseline comparison summaries, explicit contract-match breakdowns,
-a suite-level attention queue, and artifact paths. The Markdown reports add
-suite analysis, observer next actions, an attention queue, compact scenario
-matrices, contract matrix, baseline comparison matrix, AI drilldown order, and
-bundle artifact maps for humans or agents inspecting CI artifacts. The command
-exits `0` when all known-good and intentionally failing scenarios match their
-expected debug-focus contracts. CI and release workflows upload this corpus as
-`oxidenes-diagnostic-scenario-suite`.
+`joypad2_mismatch`, `ppu_read_buffer_fault`, and `timeout_cycle_limit`. The
+observer JSON is the compact machine entry point: it turns the root attention
+queue into ordered next actions, scenario observations, and evidence pointers so
+an automated debugger can decide which artifact to open without traversing every
+bundle first. The root manifest records each scenario's expected runner exit
+code, expected health, expected focus test/domain, actual `debug_focus`, failed
+probe ids, per-scenario baseline comparison summaries, explicit contract-match
+breakdowns, a suite-level attention queue, and artifact paths. The
+`ppu_read_buffer_fault` scenario uses telemetry-visible fault injection to
+corrupt the `$2000` VRAM sentinel just before the cartridge reads `$2007`, so the
+suite can prove PPU failure localization without requiring a broken emulator
+build. The Markdown reports add suite analysis, observer next actions, an
+attention queue, compact scenario matrices, contract matrix, baseline comparison
+matrix, AI drilldown order, and bundle artifact maps for humans or agents
+inspecting CI artifacts. The command exits `0` when all known-good and
+intentionally failing scenarios match their expected debug-focus contracts. CI
+and release workflows upload this corpus as `oxidenes-diagnostic-scenario-suite`.
 
 To validate a generated suite artifact before handing it to an automated
 debugger or attaching it to a release, run:
@@ -270,3 +273,8 @@ verifies that non-palette `$2007` reads are delayed through the PPU read buffer
 and auto-increment across `$2000`/`$2001`, giving AI triage specific
 `ppu.registers.ppudata_buffer` and `ppu.registers.ppudata_increment` failure
 domains.
+
+Schema version `18` adds telemetry-visible diagnostic fault injection and the
+`ppu_read_buffer_fault` scenario-suite fixture. The fixture keeps the generated
+cartridge IP-safe and deterministic while proving that AI handoff artifacts can
+localize a PPUDATA read-buffer assertion to `ppu.registers.ppudata_buffer`.
