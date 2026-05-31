@@ -122,6 +122,16 @@ nes.pixel(x, y, color) -- Draw overlay pixel
 nes.log(text)         -- Print to stderr
 ```
 
+## Headless Diagnostics
+
+OxideNES can generate and run an IP-safe diagnostic cartridge headlessly:
+
+```powershell
+cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json --dump-rom target/diagnostics/oxidenes-diagnostic.nes
+```
+
+The generated cartridge exercises CPU, bus, PPU, APU, DMA, joypad, and frame/NMI paths, then emits JSON telemetry for debugging. See [docs/DIAGNOSTIC_CARTRIDGE.md](docs/DIAGNOSTIC_CARTRIDGE.md).
+
 ## Achievements
 
 Place achievement JSON files in `~/.nes-emulator/achievements/{rom_md5}.json`:

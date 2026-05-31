@@ -6,6 +6,7 @@ pub mod bus;
 pub mod cartridge;
 pub mod config;
 pub mod cpu;
+pub mod diagnostic;
 pub mod file_browser;
 pub mod joypad;
 pub mod mapper;
