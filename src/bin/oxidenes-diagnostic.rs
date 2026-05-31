@@ -11,7 +11,7 @@ use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 3;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -221,6 +221,11 @@ struct DiagnosticTriageInstructionTraceEntry {
     current_test_name: Option<&'static str>,
     pc_hex: String,
     opcode_hex: Option<String>,
+    instruction: Option<String>,
+    mnemonic: Option<&'static str>,
+    addressing_mode: Option<&'static str>,
+    symbol: Option<String>,
+    symbol_offset_hex: Option<String>,
     cpu_a_hex: String,
     cpu_x_hex: String,
     cpu_y_hex: String,
@@ -867,6 +872,23 @@ fn triage_instruction_trace(telemetry: &DiagnosticTelemetry) -> DiagnosticTriage
             current_test_name: entry.diagnostic_ram.current_test_name,
             pc_hex: entry.pc_hex.clone(),
             opcode_hex: entry.opcode_hex.clone(),
+            instruction: entry
+                .instruction
+                .as_ref()
+                .map(|instruction| instruction.text.clone()),
+            mnemonic: entry
+                .instruction
+                .as_ref()
+                .map(|instruction| instruction.mnemonic),
+            addressing_mode: entry
+                .instruction
+                .as_ref()
+                .map(|instruction| instruction.addressing_mode),
+            symbol: entry.symbol.as_ref().map(format_symbol),
+            symbol_offset_hex: entry
+                .symbol
+                .as_ref()
+                .map(|symbol| symbol.offset_hex.clone()),
             cpu_a_hex: hex_byte(entry.cpu.a),
             cpu_x_hex: hex_byte(entry.cpu.x),
             cpu_y_hex: hex_byte(entry.cpu.y),
@@ -1038,4 +1060,12 @@ fn sha256_hex(data: &[u8]) -> String {
 
 fn hex_byte(value: u8) -> String {
     format!("0x{value:02X}")
+}
+
+fn format_symbol(symbol: &oxidenes::diagnostic::DiagnosticSymbolTelemetry) -> String {
+    if symbol.offset == 0 {
+        symbol.name.clone()
+    } else {
+        format!("{}+{}", symbol.name, symbol.offset_hex)
+    }
 }

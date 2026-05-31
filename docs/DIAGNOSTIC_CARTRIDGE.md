@@ -191,3 +191,10 @@ cartridge space, and retains the final 64 entries as a bounded tail. The report
 and compact triage JSON expose the last 16 entries so automated debuggers can
 start from the final executed instructions, while baseline comparison warns
 when retained trace counts drift from a known-good run.
+
+Schema version `13` makes instruction trace tails self-describing. Each trace
+entry now includes decoded instruction text, mnemonic, addressing mode, operand
+bytes, and nearest diagnostic cartridge symbol plus offset. The generated
+cartridge labels each test start and control-flow helper, so a failing run can
+point automated debuggers at locations such as `test_07_joypad_strobe_shift`
+or `hang` without requiring separate disassembly of `diagnostic.nes`.

@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 12;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 13;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v12";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v13";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -916,8 +916,29 @@ pub struct InstructionTraceEntryTelemetry {
     pub pc_hex: String,
     pub opcode: Option<u8>,
     pub opcode_hex: Option<String>,
+    pub instruction: Option<InstructionDecodeTelemetry>,
+    pub symbol: Option<DiagnosticSymbolTelemetry>,
     pub cpu: CpuTelemetry,
     pub diagnostic_ram: DiagnosticRamWatchTelemetry,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InstructionDecodeTelemetry {
+    pub mnemonic: &'static str,
+    pub addressing_mode: &'static str,
+    pub byte_len: u8,
+    pub operand_bytes: Vec<u8>,
+    pub operand_hex: Vec<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticSymbolTelemetry {
+    pub name: String,
+    pub address: u16,
+    pub address_hex: String,
+    pub offset: u16,
+    pub offset_hex: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -981,6 +1002,13 @@ pub struct DiagnosticComparisonDifferenceTelemetry {
 
 pub fn build_diagnostic_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_program_with_labels()?;
+    build_diagnostic_cartridge_from_program(&program, &labels)
+}
+
+fn build_diagnostic_cartridge_from_program(
+    program: &[u8],
+    labels: &HashMap<String, u16>,
+) -> Result<Vec<u8>, String> {
     if program.len() > PRG_SIZE {
         return Err(format!(
             "diagnostic program is too large: {} bytes > {} bytes",
@@ -998,17 +1026,19 @@ pub fn build_diagnostic_cartridge() -> Result<Vec<u8>, String> {
     rom.extend_from_slice(&[0; 8]);
 
     let mut prg = vec![0xEA; PRG_SIZE];
-    prg[..program.len()].copy_from_slice(&program);
-    write_vector(&mut prg, 0xFFFA, label_addr(&labels, "nmi")?);
+    prg[..program.len()].copy_from_slice(program);
+    write_vector(&mut prg, 0xFFFA, label_addr(labels, "nmi")?);
     write_vector(&mut prg, 0xFFFC, PROGRAM_BASE);
-    write_vector(&mut prg, 0xFFFE, label_addr(&labels, "irq")?);
+    write_vector(&mut prg, 0xFFFE, label_addr(labels, "irq")?);
     rom.extend_from_slice(&prg);
     rom.extend_from_slice(&build_chr_rom());
     Ok(rom)
 }
 
 pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, String> {
-    let rom = build_diagnostic_cartridge()?;
+    let (program, labels) = build_program_with_labels()?;
+    let trace_context = DiagnosticTraceContext::from_labels(&labels);
+    let rom = build_diagnostic_cartridge_from_program(&program, &labels)?;
     let cartridge_info = cartridge_telemetry(&rom);
     let cartridge = Cartridge::new(&rom)?;
     let mut bus = Bus::new(cartridge);
@@ -1044,7 +1074,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     }));
 
     while cycles < config.max_cpu_cycles {
-        observe_instruction_trace(&mut instruction_trace, &mut bus, &cpu, cycles, frames);
+        observe_instruction_trace(
+            &mut instruction_trace,
+            &trace_context,
+            &mut bus,
+            &cpu,
+            cycles,
+            frames,
+        );
         let dma_active_before = bus.dma_active();
         let dmc_stall_before = bus.dmc_stall_active();
         cpu.clock(&mut bus);
@@ -1134,7 +1171,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let target_frames = frames + 1;
         let cycle_limit = cycles.saturating_add(40_000);
         while cycles < cycle_limit && frames < target_frames {
-            observe_instruction_trace(&mut instruction_trace, &mut bus, &cpu, cycles, frames);
+            observe_instruction_trace(
+                &mut instruction_trace,
+                &trace_context,
+                &mut bus,
+                &cpu,
+                cycles,
+                frames,
+            );
             let dma_active_before = bus.dma_active();
             let dmc_stall_before = bus.dmc_stall_active();
             cpu.clock(&mut bus);
@@ -1922,19 +1966,19 @@ fn write_instruction_trace_section(report: &mut String, telemetry: &DiagnosticTe
 
     writeln!(
         report,
-        "| Seq | Cycle | Frame | Test | PC | Opcode | CPU A/X/Y | SP/P | Result |"
+        "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
     )
     .expect("write report");
     writeln!(
         report,
-        "| ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |"
+        "| ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |"
     )
     .expect("write report");
     let start = telemetry.instruction_trace.tail.len().saturating_sub(16);
     for entry in &telemetry.instruction_trace.tail[start..] {
         writeln!(
             report,
-            "| {} | {} | {} | {} | {} | {} | {}/{}/{} | {}/{} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {}/{}/{} | {}/{} | {} |",
             entry.sequence,
             entry.cycle,
             entry.frame,
@@ -1943,7 +1987,17 @@ fn write_instruction_trace_section(report: &mut String, telemetry: &DiagnosticTe
                 .current_test_name
                 .unwrap_or("unknown_test"),
             entry.pc_hex,
-            entry.opcode_hex.as_deref().unwrap_or("none"),
+            entry
+                .instruction
+                .as_ref()
+                .map(|instruction| instruction.text.as_str())
+                .or(entry.opcode_hex.as_deref())
+                .unwrap_or("none"),
+            entry
+                .symbol
+                .as_ref()
+                .map(format_symbol)
+                .unwrap_or_else(|| "none".to_string()),
             hex_byte(entry.cpu.a),
             hex_byte(entry.cpu.x),
             hex_byte(entry.cpu.y),
@@ -2052,8 +2106,54 @@ impl InstructionTraceObservation {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DiagnosticTraceContext {
+    symbols: Vec<DiagnosticTraceSymbol>,
+}
+
+#[derive(Debug, Clone)]
+struct DiagnosticTraceSymbol {
+    name: String,
+    address: u16,
+}
+
+impl DiagnosticTraceContext {
+    fn from_labels(labels: &HashMap<String, u16>) -> Self {
+        let mut symbols = labels
+            .iter()
+            .map(|(name, address)| DiagnosticTraceSymbol {
+                name: name.clone(),
+                address: *address,
+            })
+            .collect::<Vec<_>>();
+        symbols.sort_by(|left, right| {
+            left.address
+                .cmp(&right.address)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        Self { symbols }
+    }
+
+    fn symbol_for_pc(&self, pc: u16) -> Option<DiagnosticSymbolTelemetry> {
+        let symbol = self
+            .symbols
+            .iter()
+            .rev()
+            .find(|symbol| symbol.address <= pc)?;
+        let offset = pc.wrapping_sub(symbol.address);
+        Some(DiagnosticSymbolTelemetry {
+            name: symbol.name.clone(),
+            address: symbol.address,
+            address_hex: format_pc(symbol.address),
+            offset,
+            offset_hex: format!("0x{offset:04X}"),
+        })
+    }
+}
+
 fn observe_instruction_trace(
     trace: &mut InstructionTraceObservation,
+    trace_context: &DiagnosticTraceContext,
     bus: &mut Bus,
     cpu: &Cpu,
     cycle: u64,
@@ -2067,6 +2167,7 @@ fn observe_instruction_trace(
     let current_test = read_ram_byte(bus, CURRENT_TEST_ADDR);
     let diagnostic_ram = diagnostic_ram_watch_telemetry(bus, status, current_test);
     let opcode = instruction_opcode(bus, cpu.pc);
+    let instruction = instruction_decode_telemetry(bus, cpu.pc, opcode);
     trace.observe(InstructionTraceEntryTelemetry {
         sequence: 0,
         cycle,
@@ -2075,6 +2176,8 @@ fn observe_instruction_trace(
         pc_hex: format_pc(cpu.pc),
         opcode,
         opcode_hex: opcode.map(hex_byte),
+        instruction,
+        symbol: trace_context.symbol_for_pc(cpu.pc),
         cpu: cpu_telemetry(cpu),
         diagnostic_ram,
     });
@@ -2082,6 +2185,155 @@ fn observe_instruction_trace(
 
 fn instruction_opcode(bus: &Bus, pc: u16) -> Option<u8> {
     (pc >= 0x4020).then(|| bus.cartridge.mapper.read_prg(pc))
+}
+
+fn instruction_decode_telemetry(
+    bus: &Bus,
+    pc: u16,
+    opcode: Option<u8>,
+) -> Option<InstructionDecodeTelemetry> {
+    let decode = decode_opcode(opcode?)?;
+    let bytes = instruction_prg_bytes(bus, pc, decode.byte_len)?;
+    let operand_bytes = bytes[1..].to_vec();
+    let operand_hex = operand_bytes.iter().copied().map(hex_byte).collect();
+    Some(InstructionDecodeTelemetry {
+        mnemonic: decode.mnemonic,
+        addressing_mode: decode.addressing_mode,
+        byte_len: decode.byte_len,
+        text: format_instruction_text(decode, pc, &operand_bytes),
+        operand_bytes,
+        operand_hex,
+    })
+}
+
+fn instruction_prg_bytes(bus: &Bus, pc: u16, byte_len: u8) -> Option<Vec<u8>> {
+    if pc < 0x4020 {
+        return None;
+    }
+
+    Some(
+        (0..byte_len)
+            .map(|offset| {
+                bus.cartridge
+                    .mapper
+                    .read_prg(pc.wrapping_add(offset as u16))
+            })
+            .collect(),
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpcodeDecode {
+    mnemonic: &'static str,
+    addressing_mode: &'static str,
+    byte_len: u8,
+}
+
+fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
+    let decode = match opcode {
+        0x18 => OpcodeDecode::implied("CLC"),
+        0x20 => OpcodeDecode::absolute("JSR"),
+        0x29 => OpcodeDecode::immediate("AND"),
+        0x38 => OpcodeDecode::implied("SEC"),
+        0x40 => OpcodeDecode::implied("RTI"),
+        0x48 => OpcodeDecode::implied("PHA"),
+        0x4C => OpcodeDecode::absolute("JMP"),
+        0x60 => OpcodeDecode::implied("RTS"),
+        0x68 => OpcodeDecode::implied("PLA"),
+        0x69 => OpcodeDecode::immediate("ADC"),
+        0x78 => OpcodeDecode::implied("SEI"),
+        0x85 => OpcodeDecode::zero_page("STA"),
+        0x8A => OpcodeDecode::implied("TXA"),
+        0x8D => OpcodeDecode::absolute("STA"),
+        0x9A => OpcodeDecode::implied("TXS"),
+        0x9D => OpcodeDecode::absolute_x("STA"),
+        0xA2 => OpcodeDecode::immediate("LDX"),
+        0xA5 => OpcodeDecode::zero_page("LDA"),
+        0xA9 => OpcodeDecode::immediate("LDA"),
+        0xAD => OpcodeDecode::absolute("LDA"),
+        0xC9 => OpcodeDecode::immediate("CMP"),
+        0xD0 => OpcodeDecode::relative("BNE"),
+        0xD8 => OpcodeDecode::implied("CLD"),
+        0xE6 => OpcodeDecode::zero_page("INC"),
+        0xE8 => OpcodeDecode::implied("INX"),
+        0xE9 => OpcodeDecode::immediate("SBC"),
+        0xEA => OpcodeDecode::implied("NOP"),
+        0xF0 => OpcodeDecode::relative("BEQ"),
+        _ => return None,
+    };
+    Some(decode)
+}
+
+impl OpcodeDecode {
+    fn implied(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "implied",
+            byte_len: 1,
+        }
+    }
+
+    fn immediate(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "immediate",
+            byte_len: 2,
+        }
+    }
+
+    fn zero_page(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "zero_page",
+            byte_len: 2,
+        }
+    }
+
+    fn absolute(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "absolute",
+            byte_len: 3,
+        }
+    }
+
+    fn absolute_x(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "absolute_x",
+            byte_len: 3,
+        }
+    }
+
+    fn relative(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "relative",
+            byte_len: 2,
+        }
+    }
+}
+
+fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) -> String {
+    match decode.addressing_mode {
+        "immediate" => format!("{} #${:02X}", decode.mnemonic, operand_bytes[0]),
+        "zero_page" => format!("{} ${:02X}", decode.mnemonic, operand_bytes[0]),
+        "absolute" => format!(
+            "{} {}",
+            decode.mnemonic,
+            format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
+        ),
+        "absolute_x" => format!(
+            "{} {},X",
+            decode.mnemonic,
+            format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
+        ),
+        "relative" => {
+            let target = (pc as i32 + 2 + operand_bytes[0] as i8 as i32) as u16;
+            format!("{} {}", decode.mnemonic, format_pc(target))
+        }
+        _ => decode.mnemonic.to_string(),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2868,6 +3120,11 @@ impl DiagnosticProgram {
     }
 
     fn begin_test(&mut self, id: u8) {
+        if let Some(name) = test_name(id) {
+            self.asm
+                .label(&format!("test_{id:02}_{name}"))
+                .expect("test label should not collide");
+        }
         self.asm.lda_imm(id);
         self.asm.sta_zp(CURRENT_TEST_ADDR);
     }
@@ -4948,6 +5205,14 @@ fn optional_u8(value: Option<u8>) -> String {
 
 fn optional_pc(value: Option<u16>) -> String {
     value.map(format_pc).unwrap_or_else(|| "none".to_string())
+}
+
+fn format_symbol(symbol: &DiagnosticSymbolTelemetry) -> String {
+    if symbol.offset == 0 {
+        symbol.name.clone()
+    } else {
+        format!("{}+{}", symbol.name, symbol.offset_hex)
+    }
 }
 
 fn format_pc(value: u16) -> String {
