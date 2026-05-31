@@ -42,10 +42,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 11);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 12);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("joypad2_strobe_shift")
+        Some("cpu_zero_page_index_wrap")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -64,6 +64,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .debug_focus
             .terminal_instruction
             .as_ref()
+            .and_then(|instruction| instruction.current_test_name),
+        Some("cpu_zero_page_index_wrap")
+    );
+    assert_eq!(
+        telemetry
+            .analysis
+            .debug_focus
+            .terminal_instruction
+            .as_ref()
             .and_then(|instruction| instruction.symbol.as_deref()),
         Some("hang")
     );
@@ -73,11 +82,16 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 3));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 4));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0x70
             && failure.test_name == Some("joypad_strobe_shift")
             && failure.likely_domain == "joypad.strobe_shift"
+    }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0xB0
+            && failure.test_name == Some("cpu_zero_page_index_wrap")
+            && failure.likely_domain == "cpu.addressing.zero_page_x_wrap"
     }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
@@ -92,6 +106,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     }));
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "joypad2_strobe_shift" && test.intent.contains("player-2") && test.passed
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "cpu_zero_page_index_wrap"
+            && test.intent.contains("zero-page indexed")
+            && test.passed
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
@@ -287,7 +306,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | joypad2_strobe_shift (11) |"));
+    assert!(report.contains("| Focus test | cpu_zero_page_index_wrap (12) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -306,6 +325,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
+    assert!(report.contains("| 12 | cpu_zero_page_index_wrap | cpu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -444,7 +464,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -606,7 +626,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 11 |"));
+    assert!(report.contains("| Not started tests | 12 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }
