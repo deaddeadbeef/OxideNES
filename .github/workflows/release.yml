@@ -36,12 +36,20 @@ jobs:
           mkdir -p target/diagnostics
           cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/release-baseline.json --no-stdout
           cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/release-bundle --baseline-json target/diagnostics/release-baseline.json --no-stdout
+          cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/release-scenario-suite --no-stdout
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oxidenes-diagnostic-bundle
           path: target/diagnostics/release-bundle
+          if-no-files-found: warn
+      - name: Upload diagnostic scenario suite
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-scenario-suite
+          path: target/diagnostics/release-scenario-suite
           if-no-files-found: warn
 
   build:

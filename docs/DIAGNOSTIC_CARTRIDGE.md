@@ -71,6 +71,22 @@ handoff package for automated debugging, release evidence, and failure triage.
 Start with `manifest.json` for integrity and `triage.json` for the compact
 machine-readable failure focus before loading `telemetry.json`.
 
+To generate a reusable AI debugging corpus with both healthy and known-bad
+outcomes, write a diagnostic scenario suite:
+
+```powershell
+cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/scenario-suite --no-stdout
+```
+
+The scenario suite writes `scenario-suite.json` at the root and one full bundle
+per scenario: `pass`, `joypad1_mismatch`, `joypad2_mismatch`, and
+`timeout_cycle_limit`. The root manifest records each scenario's expected
+runner exit code, expected health, expected focus test/domain, actual
+`debug_focus`, failed probe ids, and artifact paths. The command exits `0` when
+all known-good and intentionally failing scenarios match their expected
+debug-focus contracts. CI and release workflows upload this corpus as
+`oxidenes-diagnostic-scenario-suite`.
+
 ## Coverage
 
 The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU, APU, DMA, and joypad paths:

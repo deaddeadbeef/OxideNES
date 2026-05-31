@@ -42,12 +42,21 @@ jobs:
           mkdir -p target/diagnostics
           cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/ci-baseline.json --no-stdout
           cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/ci-bundle --baseline-json target/diagnostics/ci-baseline.json --no-stdout
+          cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/ci-scenario-suite --no-stdout
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oxidenes-diagnostic-bundle
           path: target/diagnostics/ci-bundle
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload diagnostic scenario suite
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-scenario-suite
+          path: target/diagnostics/ci-scenario-suite
           if-no-files-found: warn
           retention-days: 14
 
