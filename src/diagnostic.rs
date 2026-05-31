@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 11;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 12;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v11";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v12";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -46,6 +46,7 @@ const OAM_DMA_EXPECTED_MAX_CYCLES: u64 = 514;
 const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
+const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -549,6 +550,7 @@ pub struct DiagnosticTelemetry {
     pub oam: OamTelemetry,
     pub frame: FrameTelemetry,
     pub audio: AudioTelemetry,
+    pub instruction_trace: InstructionTraceTelemetry,
     pub events: Vec<EventTelemetry>,
 }
 
@@ -896,6 +898,28 @@ pub struct AudioTelemetry {
     pub peak_abs: f32,
 }
 
+#[derive(Debug, Serialize)]
+pub struct InstructionTraceTelemetry {
+    pub captured_instruction_count: u64,
+    pub retained_instruction_count: usize,
+    pub retention_limit: usize,
+    pub truncated: bool,
+    pub tail: Vec<InstructionTraceEntryTelemetry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InstructionTraceEntryTelemetry {
+    pub sequence: u64,
+    pub cycle: u64,
+    pub frame: u64,
+    pub pc: u16,
+    pub pc_hex: String,
+    pub opcode: Option<u8>,
+    pub opcode_hex: Option<String>,
+    pub cpu: CpuTelemetry,
+    pub diagnostic_ram: DiagnosticRamWatchTelemetry,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticEventKind {
@@ -1003,6 +1027,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut last_current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
     let mut timeout = true;
     let mut dma_observation = DmaObservation::default();
+    let mut instruction_trace = InstructionTraceObservation::default();
 
     let reset_cpu = cpu_telemetry(&cpu);
     let reset_ram = diagnostic_ram_watch_telemetry(&mut bus, last_status, last_current_test);
@@ -1019,6 +1044,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     }));
 
     while cycles < config.max_cpu_cycles {
+        observe_instruction_trace(&mut instruction_trace, &mut bus, &cpu, cycles, frames);
         let dma_active_before = bus.dma_active();
         let dmc_stall_before = bus.dmc_stall_active();
         cpu.clock(&mut bus);
@@ -1108,6 +1134,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let target_frames = frames + 1;
         let cycle_limit = cycles.saturating_add(40_000);
         while cycles < cycle_limit && frames < target_frames {
+            observe_instruction_trace(&mut instruction_trace, &mut bus, &cpu, cycles, frames);
             let dma_active_before = bus.dma_active();
             let dmc_stall_before = bus.dmc_stall_active();
             cpu.clock(&mut bus);
@@ -1257,6 +1284,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             sample_count: audio_sample_count,
             peak_abs: audio_peak_abs,
         },
+        instruction_trace: instruction_trace.telemetry(),
         events,
     })
 }
@@ -1279,6 +1307,7 @@ pub fn compare_diagnostic_to_baseline(
     compare_probes(&baseline, &current, &mut differences);
     compare_observation_checksums(&baseline, &current, &mut differences);
     compare_timeline(&baseline, &current, &mut differences);
+    compare_instruction_trace(&baseline, &current, &mut differences);
 
     let failure_count = differences
         .iter()
@@ -1469,6 +1498,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_coverage_gaps_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
+    write_instruction_trace_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
     write_next_actions_section(&mut report, telemetry);
     write_host_failures_section(&mut report, telemetry);
@@ -1859,6 +1889,77 @@ fn write_probe_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report).expect("write report");
 }
 
+fn write_instruction_trace_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Instruction Trace Tail").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | ---: |").expect("write report");
+    writeln!(
+        report,
+        "| Captured instructions | {} |",
+        telemetry.instruction_trace.captured_instruction_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Retained instructions | {} |",
+        telemetry.instruction_trace.retained_instruction_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Retention limit | {} |",
+        telemetry.instruction_trace.retention_limit
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Truncated | {} |",
+        telemetry.instruction_trace.truncated
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+
+    writeln!(
+        report,
+        "| Seq | Cycle | Frame | Test | PC | Opcode | CPU A/X/Y | SP/P | Result |"
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |"
+    )
+    .expect("write report");
+    let start = telemetry.instruction_trace.tail.len().saturating_sub(16);
+    for entry in &telemetry.instruction_trace.tail[start..] {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} | {}/{}/{} | {}/{} | {} |",
+            entry.sequence,
+            entry.cycle,
+            entry.frame,
+            entry
+                .diagnostic_ram
+                .current_test_name
+                .unwrap_or("unknown_test"),
+            entry.pc_hex,
+            entry.opcode_hex.as_deref().unwrap_or("none"),
+            hex_byte(entry.cpu.a),
+            hex_byte(entry.cpu.x),
+            hex_byte(entry.cpu.y),
+            hex_byte(entry.cpu.sp),
+            hex_byte(entry.cpu.status),
+            entry
+                .diagnostic_ram
+                .current_result_hex
+                .as_deref()
+                .unwrap_or("none")
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
 fn write_next_actions_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Next Actions").expect("write report");
     writeln!(report).expect("write report");
@@ -1920,6 +2021,67 @@ fn write_event_tail_section(report: &mut String, telemetry: &DiagnosticTelemetry
         .expect("write report");
     }
     writeln!(report).expect("write report");
+}
+
+#[derive(Debug, Default)]
+struct InstructionTraceObservation {
+    captured_instruction_count: u64,
+    tail: Vec<InstructionTraceEntryTelemetry>,
+}
+
+impl InstructionTraceObservation {
+    fn observe(&mut self, mut entry: InstructionTraceEntryTelemetry) {
+        self.captured_instruction_count += 1;
+        entry.sequence = self.captured_instruction_count;
+
+        if self.tail.len() == INSTRUCTION_TRACE_TAIL_LIMIT {
+            self.tail.remove(0);
+        }
+        self.tail.push(entry);
+    }
+
+    fn telemetry(self) -> InstructionTraceTelemetry {
+        let retained_instruction_count = self.tail.len();
+        InstructionTraceTelemetry {
+            captured_instruction_count: self.captured_instruction_count,
+            retained_instruction_count,
+            retention_limit: INSTRUCTION_TRACE_TAIL_LIMIT,
+            truncated: self.captured_instruction_count > retained_instruction_count as u64,
+            tail: self.tail,
+        }
+    }
+}
+
+fn observe_instruction_trace(
+    trace: &mut InstructionTraceObservation,
+    bus: &mut Bus,
+    cpu: &Cpu,
+    cycle: u64,
+    frame: u64,
+) {
+    if cpu.cycles != 0 || bus.dma_active() || bus.dmc_stall_active() {
+        return;
+    }
+
+    let status = read_ram_byte(bus, STATUS_ADDR);
+    let current_test = read_ram_byte(bus, CURRENT_TEST_ADDR);
+    let diagnostic_ram = diagnostic_ram_watch_telemetry(bus, status, current_test);
+    let opcode = instruction_opcode(bus, cpu.pc);
+    trace.observe(InstructionTraceEntryTelemetry {
+        sequence: 0,
+        cycle,
+        frame,
+        pc: cpu.pc,
+        pc_hex: format_pc(cpu.pc),
+        opcode,
+        opcode_hex: opcode.map(hex_byte),
+        cpu: cpu_telemetry(cpu),
+        diagnostic_ram,
+    });
+}
+
+fn instruction_opcode(bus: &Bus, pc: u16) -> Option<u8> {
+    (pc >= 0x4020).then(|| bus.cartridge.mapper.read_prg(pc))
 }
 
 #[derive(Debug, Default)]
@@ -3688,7 +3850,7 @@ fn analysis_next_actions(health: DiagnosticHealth, verdict: &VerdictTelemetry) -
     match health {
         DiagnosticHealth::Healthy => vec![
             "Use this telemetry as the current generated-cartridge baseline.".to_string(),
-            "Diff future failing runs against the coverage summary, event transitions, and frame/audio checks.".to_string(),
+            "Diff future failing runs against the coverage summary, instruction trace tail, event transitions, and frame/audio checks.".to_string(),
         ],
         DiagnosticHealth::CartridgeAssertionFailed => {
             if let Some(failure) = &verdict.failure {
@@ -3700,7 +3862,7 @@ fn analysis_next_actions(health: DiagnosticHealth, verdict: &VerdictTelemetry) -
                         failure.test_name.unwrap_or("unknown_test"),
                         failure.failure_code_hex
                     ),
-                    "Use test_changed events to inspect the last transition before failure.".to_string(),
+                    "Use instruction_trace.tail and test_changed events to inspect the last executed instructions before failure.".to_string(),
                 ]
             } else {
                 vec![
@@ -3710,12 +3872,12 @@ fn analysis_next_actions(health: DiagnosticHealth, verdict: &VerdictTelemetry) -
             }
         }
         DiagnosticHealth::TimedOut => vec![
-            "Inspect the current test, CPU PC, and final test_changed event to locate the likely loop.".to_string(),
+            "Inspect instruction_trace.tail, the current test, CPU PC, and final test_changed event to locate the likely loop.".to_string(),
             "Rerun with a higher --max-cycles only after confirming progress is still being made.".to_string(),
         ],
         DiagnosticHealth::HostValidationFailed => vec![
             "Inspect host_failures first; they validate emulator-side state the cartridge cannot read.".to_string(),
-            "Compare OAM, frame, audio, RAM signature, and per-test result telemetry against expected values.".to_string(),
+            "Compare OAM, frame, audio, RAM signature, instruction trace, and per-test result telemetry against expected values.".to_string(),
         ],
     }
 }
@@ -4386,6 +4548,29 @@ fn compare_observation_checksums(
             "observation",
             DiagnosticComparisonSeverity::Warning,
             "observable diagnostic artifact changed from baseline",
+            differences,
+        );
+    }
+}
+
+fn compare_instruction_trace(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    for path in [
+        &["instruction_trace", "captured_instruction_count"][..],
+        &["instruction_trace", "retained_instruction_count"][..],
+        &["instruction_trace", "retention_limit"][..],
+        &["instruction_trace", "truncated"][..],
+    ] {
+        compare_optional_value(
+            baseline,
+            current,
+            path,
+            "trace",
+            DiagnosticComparisonSeverity::Warning,
+            "instruction trace telemetry changed from baseline",
             differences,
         );
     }
