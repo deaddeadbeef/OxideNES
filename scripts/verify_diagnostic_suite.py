@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 28
+EXPECTED_TELEMETRY_SCHEMA = 29
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -28,6 +28,7 @@ EXPECTED_SCENARIOS = {
     "ppu_nametable_mirroring_fault",
     "joypad_strobe_reset_fault",
     "ppu_vram_increment_32_fault",
+    "ppu_status_latch_reset_fault",
     "mapper2_bank_switch_fault",
     "mapper2_prg_ram_fault",
     "timeout_cycle_limit",
@@ -81,7 +82,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            14,
+            15,
             "analysis baseline_divergence_count",
         )
 
@@ -131,13 +132,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            14,
+            15,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 14, "observer next_actions count")
+        self.expect_equal(len(actions), 15, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -175,6 +176,7 @@ class SuiteVerifier:
             "ppu_nametable_mirroring_fault",
             "joypad_strobe_reset_fault",
             "ppu_vram_increment_32_fault",
+            "ppu_status_latch_reset_fault",
             "mapper2_bank_switch_fault",
             "mapper2_prg_ram_fault",
             "timeout_cycle_limit",
@@ -203,7 +205,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=107",
+            "comparison_difference_count=110",
             evidence,
             "timeout observer evidence",
         )
@@ -340,6 +342,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.19.result",
             ppu_increment_32_evidence,
             "PPU increment-32 observer evidence",
+        )
+
+        ppu_status_latch = by_scenario.get("ppu_status_latch_reset_fault")
+        if not isinstance(ppu_status_latch, dict):
+            self.errors.append("missing observer action for ppu_status_latch_reset_fault")
+            return
+
+        self.expect_equal(
+            ppu_status_latch.get("priority"),
+            "known_divergence",
+            "PPU status latch observer action priority",
+        )
+        self.expect_equal(
+            ppu_status_latch.get("action_type"),
+            "inspect_known_divergence",
+            "PPU status latch observer action type",
+        )
+        self.expect_equal(
+            ppu_status_latch.get("primary_artifact"),
+            "ppu_status_latch_reset_fault/comparison.json",
+            "PPU status latch observer primary_artifact",
+        )
+        ppu_status_latch_evidence = self.expect_list(
+            ppu_status_latch.get("evidence"), "PPU status latch observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=ppu.registers.status_latch_reset",
+            ppu_status_latch_evidence,
+            "PPU status latch observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.20.result",
+            ppu_status_latch_evidence,
+            "PPU status latch observer evidence",
         )
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
@@ -627,7 +663,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                107,
+                110,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -812,6 +848,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_vram_increment_32_fault")
+
+        ppu_status_latch = by_scenario.get("ppu_status_latch_reset_fault")
+        if isinstance(ppu_status_latch, dict):
+            self.expect_equal(
+                ppu_status_latch.get("role"),
+                "expected_failure_fixture",
+                "PPU status latch observer role",
+            )
+            self.expect_equal(
+                ppu_status_latch.get("outcome"),
+                "expected_baseline_divergence",
+                "PPU status latch observer outcome",
+            )
+            self.expect_equal(
+                ppu_status_latch.get("health"),
+                "cartridge_assertion_failed",
+                "PPU status latch observer health",
+            )
+            self.expect_equal(
+                ppu_status_latch.get("focus_domain"),
+                "ppu.registers.status_latch_reset",
+                "PPU status latch observer focus_domain",
+            )
+            self.expect_equal(
+                ppu_status_latch.get("next_artifact"),
+                "ppu_status_latch_reset_fault/comparison.json",
+                "PPU status latch observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for ppu_status_latch_reset_fault")
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
         if isinstance(mapper, dict):

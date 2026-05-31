@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 28;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 29;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v28";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v29";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -70,6 +70,7 @@ const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
     "ppu_horizontal_nametable_mirroring_before_first_mirror_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
+const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -310,6 +311,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "clearing PPUCTRL bit 2 returns PPUDATA writes to increment-by-1 behavior",
         ],
     },
+    DiagnosticTestSpec {
+        id: 20,
+        name: "ppu_status_latch_reset",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify reading PPUSTATUS resets the shared PPUADDR/PPUSCROLL write latch before subsequent PPUADDR writes.",
+        expected_observations: &[
+            "a half-written PPUADDR latch is reset by reading $2002",
+            "the next $2006 high/low pair writes PPUDATA to the intended $2100 address",
+        ],
+    },
 ];
 
 const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
@@ -501,6 +513,15 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         observed: "$2101 did not contain the increment-by-1 sentinel",
         likely_domain: "ppu.registers.ppudata_increment",
         remediation_hint: "Inspect PPUCTRL writes and make sure clearing bit 2 restores the 1-byte PPUDATA increment.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x7C,
+        test_id: 20,
+        assertion: "PPUSTATUS read resets the PPUADDR write latch before the next address pair",
+        expected: "after reading $2002, $2006 writes 0x21 then 0x00 and $2007 stores a sentinel at $2100",
+        observed: "$2100 did not contain the sentinel written after the PPUSTATUS latch reset",
+        likely_domain: "ppu.registers.status_latch_reset",
+        remediation_hint: "Inspect PPUSTATUS reads and the shared PPUADDR/PPUSCROLL write latch; reading $2002 must reset the latch to expect the high byte.",
     },
     DiagnosticFailureSpec {
         code: 0x81,
@@ -769,7 +790,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, horizontal nametable mirroring, NMI delivery, completed frames, and host-visible multi-color background output.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, NMI delivery, completed frames, and host-visible multi-color background output.",
         missing_coverage: "Sprite evaluation, sprite/background priority, scrolling seams, vblank timing, and per-dot rendering behavior.",
         suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
     },
@@ -838,6 +859,7 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuStatusLatchReset,
     PpuVramIncrement32,
     PpuVramReadBuffer,
 }
@@ -854,6 +876,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuStatusLatchReset => "ppu_status_latch_reset",
             DiagnosticFaultInjection::PpuVramIncrement32 => "ppu_vram_increment_32",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
@@ -870,6 +893,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuStatusLatchReset => PPU_STATUS_LATCH_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramIncrement32 => PPU_VRAM_INCREMENT_32_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
@@ -3630,6 +3654,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_horizontal_nametable_mirroring();
     program.joypad_strobe_reset_midstream();
     program.ppu_vram_increment_32();
+    program.ppu_status_latch_reset();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -4179,6 +4204,37 @@ impl DiagnosticProgram {
         self.pass_test(19);
     }
 
+    fn ppu_status_latch_reset(&mut self) {
+        self.begin_test(20);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2002);
+        self.asm
+            .label(PPU_STATUS_LATCH_RESET_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x5D);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x5D, 0x7C);
+        self.pass_test(20);
+    }
+
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
         for (index, expected_bit) in expected.iter().copied().enumerate() {
             self.asm.lda_abs(addr);
@@ -4632,6 +4688,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
+        }
+        DiagnosticFaultInjection::PpuStatusLatchReset => {
+            bus.cpu_write(0x2006, 0x20);
         }
         DiagnosticFaultInjection::PpuVramIncrement32 => {
             bus.cpu_write(0x2006, 0x20);

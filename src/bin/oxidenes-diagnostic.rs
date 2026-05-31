@@ -1683,7 +1683,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(19),
+            expected_focus_test_id: Some(20),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1844,6 +1844,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(19),
             expected_focus_domain: Some("ppu.registers.ppudata_increment_32"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_status_latch_reset_fault",
+            title: "Intentional PPUSTATUS latch-reset assertion failure",
+            purpose:
+                "Failure-localization fixture for PPUSTATUS PPUADDR/PPUSCROLL latch-reset regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuStatusLatchReset),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(20),
+            expected_focus_domain: Some("ppu.registers.status_latch_reset"),
         },
         DiagnosticScenarioSpec {
             id: "ppu_nmi_timeout_fault",
