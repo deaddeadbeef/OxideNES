@@ -71,6 +71,11 @@ impl Cpu {
     }
 
     #[inline(always)]
+    pub fn is_odd_cycle(&self) -> bool {
+        self.total_cycles % 2 == 1
+    }
+
+    #[inline(always)]
     pub fn set_flag(&mut self, flag: u8, value: bool) {
         if value {
             self.status |= flag;

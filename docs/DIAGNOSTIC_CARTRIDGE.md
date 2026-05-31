@@ -168,3 +168,10 @@ window, the overlap cycle/test context, and the queued/post-OAM DMC stall
 cycles. The report, triage JSON, probes, and baseline comparison all expose
 these fields so timing regressions can be localized to DMA interleaving rather
 than reduced to a final OAM checksum.
+
+Schema version `10` makes DMC sample-DMA stall timing phase-aware. DMC DMA
+service now records the CPU cycle parity used for the fetch and assigns the
+expected 3-cycle or 4-cycle CPU stall bucket from that phase. The diagnostic
+bundle reports the first DMC fetch parity/bucket, the first DMC/OAM overlap
+parity/bucket, 3-cycle versus 4-cycle fetch counts, and verifies that the
+post-OAM DMC stall window matches the overlap service bucket.

@@ -144,8 +144,16 @@ struct DiagnosticTriageDma {
     dmc_dma_oam_overlap_observed: bool,
     dmc_dma_first_fetch_cycle: Option<u64>,
     dmc_dma_first_fetch_address: Option<u16>,
+    dmc_dma_first_fetch_cpu_cycle_parity: Option<&'static str>,
+    dmc_dma_first_fetch_stall_cycles: Option<u8>,
     dmc_dma_first_oam_overlap_cycle: Option<u64>,
     dmc_dma_first_oam_overlap_test_name: Option<&'static str>,
+    dmc_dma_first_oam_overlap_cpu_cycle_parity: Option<&'static str>,
+    dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    dmc_dma_three_cycle_fetches: u64,
+    dmc_dma_four_cycle_fetches: u64,
+    dmc_dma_expected_min_stall_cycles: u8,
+    dmc_dma_expected_max_stall_cycles: u8,
     dmc_dma_stall_cycles: u64,
     dmc_dma_stall_cycles_after_oam_dma: u64,
     dmc_dma_queued_during_oam_dma_cycles: u64,
@@ -642,8 +650,22 @@ fn diagnostic_triage_report(
             dmc_dma_oam_overlap_observed: telemetry.dma.dmc_dma_oam_overlap_observed,
             dmc_dma_first_fetch_cycle: telemetry.dma.dmc_dma_first_fetch_cycle,
             dmc_dma_first_fetch_address: telemetry.dma.dmc_dma_first_fetch_address,
+            dmc_dma_first_fetch_cpu_cycle_parity: telemetry
+                .dma
+                .dmc_dma_first_fetch_cpu_cycle_parity,
+            dmc_dma_first_fetch_stall_cycles: telemetry.dma.dmc_dma_first_fetch_stall_cycles,
             dmc_dma_first_oam_overlap_cycle: telemetry.dma.dmc_dma_first_oam_overlap_cycle,
             dmc_dma_first_oam_overlap_test_name: telemetry.dma.dmc_dma_first_oam_overlap_test_name,
+            dmc_dma_first_oam_overlap_cpu_cycle_parity: telemetry
+                .dma
+                .dmc_dma_first_oam_overlap_cpu_cycle_parity,
+            dmc_dma_first_oam_overlap_stall_cycles: telemetry
+                .dma
+                .dmc_dma_first_oam_overlap_stall_cycles,
+            dmc_dma_three_cycle_fetches: telemetry.dma.dmc_dma_three_cycle_fetches,
+            dmc_dma_four_cycle_fetches: telemetry.dma.dmc_dma_four_cycle_fetches,
+            dmc_dma_expected_min_stall_cycles: telemetry.dma.dmc_dma_expected_min_stall_cycles,
+            dmc_dma_expected_max_stall_cycles: telemetry.dma.dmc_dma_expected_max_stall_cycles,
             dmc_dma_stall_cycles: telemetry.dma.dmc_dma_stall_cycles,
             dmc_dma_stall_cycles_after_oam_dma: telemetry.dma.dmc_dma_stall_cycles_after_oam_dma,
             dmc_dma_queued_during_oam_dma_cycles: telemetry

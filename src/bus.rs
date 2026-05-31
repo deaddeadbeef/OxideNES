@@ -90,6 +90,13 @@ pub struct Bus {
     has_enabled_cheats: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DmcDmaService {
+    pub address: u16,
+    pub odd_cpu_cycle: bool,
+    pub stall_cycles: u8,
+}
+
 impl Bus {
     pub fn new(cartridge: Cartridge) -> Self {
         Bus {
@@ -243,13 +250,20 @@ impl Bus {
     }
 
     #[inline]
-    pub fn service_dmc_dma(&mut self) {
+    pub fn service_dmc_dma(&mut self, odd_cpu_cycle: bool) -> Option<DmcDmaService> {
         if self.apu.dmc.dma_request {
             let addr = self.apu.dmc.dma_address;
             let data = self.cpu_read(addr);
             self.apu.dmc.receive_sample(data);
-            // DMC DMA steals CPU cycles: 4 on even cycle, 3 on odd (approximate: always 4)
-            self.dmc_stall_cycles = 4;
+            let stall_cycles = if odd_cpu_cycle { 3 } else { 4 };
+            self.dmc_stall_cycles = stall_cycles;
+            Some(DmcDmaService {
+                address: addr,
+                odd_cpu_cycle,
+                stall_cycles,
+            })
+        } else {
+            None
         }
     }
 

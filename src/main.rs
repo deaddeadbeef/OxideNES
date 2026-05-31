@@ -5331,7 +5331,7 @@ fn main() {
                                         cpu.clock(bus);
                                         bus.tick(1);
                                         bus.tick_apu();
-                                        bus.service_dmc_dma();
+                                        let _ = bus.service_dmc_dma(cpu.is_odd_cycle());
 
                                         if bus.ppu.frame_complete() {
                                             break;
