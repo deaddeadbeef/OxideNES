@@ -93,7 +93,8 @@ plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `joypad_strobe_reset_fault`,
-`ppu_nmi_timeout_fault`, and `timeout_cycle_limit`. The
+`ppu_vram_increment_32_fault`, `ppu_nmi_timeout_fault`, and
+`timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
 an automated debugger can decide which artifact to open without traversing every
@@ -120,12 +121,16 @@ horizontal mirroring regressions localize to
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
+`ppu_vram_increment_32_fault` corrupts the `$2020` stride target after the
+cartridge writes through `$2007` with PPUCTRL bit 2 set, proving PPUDATA
+increment-by-32 regressions localize to `ppu.registers.ppudata_increment_32`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, joypad
-strobe-reset behavior, DMA host-observation, APU status, PPU assertion, and PPU
-progress-timeout failure localization without requiring a broken emulator build. The Markdown reports add
+strobe-reset behavior, PPUDATA register increment behavior, DMA host-observation,
+APU status, PPU assertion, and PPU progress-timeout failure localization without
+requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
 matrix, AI drilldown order, and bundle artifact maps for humans or agents
@@ -155,6 +160,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Indirect `JMP ($xxFF)` page-wrap behavior
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
+- PPU non-palette PPUDATA read buffering and PPUCTRL-driven increment-by-32 behavior
 - PPU horizontal nametable mirroring through CPU-driven PPUDATA reads
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
@@ -367,3 +373,11 @@ reads `$4016`, toggles strobe high then low mid-stream, verifies the next read
 returns the A-button bit again, and verifies serial advancement resumes at the B
 button. The intentional fault fixture consumes the reset A bit and localizes
 reset-index regressions to `joypad.strobe_reset`.
+
+Schema version `28` adds the `ppu_vram_increment_32` edge-case cartridge test
+plus the `ppu_vram_increment_32_fault` scenario-suite fixture. The cartridge
+sets PPUCTRL bit 2, verifies sequential `$2007` writes stride from `$2000` to
+`$2020`, then clears bit 2 and verifies `$2007` returns to increment-by-1
+behavior. The intentional fault fixture corrupts the `$2020` stride sentinel and
+localizes PPU register increment regressions to
+`ppu.registers.ppudata_increment_32`.
