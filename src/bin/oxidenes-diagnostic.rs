@@ -11,7 +11,7 @@ use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 2;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -62,6 +62,7 @@ struct DiagnosticTriageReport {
     dma: DiagnosticTriageDma,
     probes: DiagnosticTriageProbeSummary,
     timing: DiagnosticTriageTiming,
+    instruction_trace: DiagnosticTriageInstructionTrace,
     comparison: Option<DiagnosticTriageComparison>,
     next_actions: Vec<String>,
     artifact_hints: Vec<DiagnosticTriageArtifactHint>,
@@ -199,6 +200,34 @@ struct DiagnosticTriageSlowestTest {
     tier: String,
     duration_cycles: u64,
     duration_frames: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageInstructionTrace {
+    captured_instruction_count: u64,
+    retained_instruction_count: usize,
+    retention_limit: usize,
+    truncated: bool,
+    triage_tail_count: usize,
+    tail: Vec<DiagnosticTriageInstructionTraceEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageInstructionTraceEntry {
+    sequence: u64,
+    cycle: u64,
+    frame: u64,
+    current_test: u8,
+    current_test_name: Option<&'static str>,
+    pc_hex: String,
+    opcode_hex: Option<String>,
+    cpu_a_hex: String,
+    cpu_x_hex: String,
+    cpu_y_hex: String,
+    cpu_sp_hex: String,
+    cpu_status_hex: String,
+    current_result_hex: Option<String>,
+    failure_code_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -581,8 +610,8 @@ fn bundle_ai_handoff(
 ) -> Vec<String> {
     let mut handoff = vec![
         "Start with manifest.json to verify artifact hashes and bundle result.".to_string(),
-        "Read triage.json for a compact machine-readable failure focus before loading full telemetry.".to_string(),
-        "Read report.md for human triage and telemetry.json for exact probe, timeline, event, and execution-snapshot data.".to_string(),
+        "Read triage.json for a compact machine-readable failure focus, event tail, and instruction trace tail before loading full telemetry.".to_string(),
+        "Read report.md for human triage and telemetry.json for exact probe, timeline, event, instruction trace, and execution-snapshot data.".to_string(),
     ];
     if comparison.is_some() {
         handoff.push(
@@ -591,7 +620,7 @@ fn bundle_ai_handoff(
     }
     if !telemetry_passed {
         handoff.push(
-            "Prioritize verdict.failure, analysis.probe_summary, failed probes, and the event tail."
+            "Prioritize verdict.failure, analysis.probe_summary, failed probes, instruction_trace.tail, and the event tail."
                 .to_string(),
         );
     }
@@ -685,6 +714,7 @@ fn diagnostic_triage_report(
         },
         probes: triage_probe_summary(telemetry)?,
         timing: triage_timing(telemetry)?,
+        instruction_trace: triage_instruction_trace(telemetry),
         comparison: comparison.map(triage_comparison).transpose()?,
         next_actions: telemetry.analysis.next_actions.clone(),
         artifact_hints: triage_artifact_hints(comparison.is_some()),
@@ -825,6 +855,38 @@ fn triage_timing(telemetry: &DiagnosticTelemetry) -> Result<DiagnosticTriageTimi
     })
 }
 
+fn triage_instruction_trace(telemetry: &DiagnosticTelemetry) -> DiagnosticTriageInstructionTrace {
+    let start = telemetry.instruction_trace.tail.len().saturating_sub(16);
+    let tail = telemetry.instruction_trace.tail[start..]
+        .iter()
+        .map(|entry| DiagnosticTriageInstructionTraceEntry {
+            sequence: entry.sequence,
+            cycle: entry.cycle,
+            frame: entry.frame,
+            current_test: entry.diagnostic_ram.current_test,
+            current_test_name: entry.diagnostic_ram.current_test_name,
+            pc_hex: entry.pc_hex.clone(),
+            opcode_hex: entry.opcode_hex.clone(),
+            cpu_a_hex: hex_byte(entry.cpu.a),
+            cpu_x_hex: hex_byte(entry.cpu.x),
+            cpu_y_hex: hex_byte(entry.cpu.y),
+            cpu_sp_hex: hex_byte(entry.cpu.sp),
+            cpu_status_hex: hex_byte(entry.cpu.status),
+            current_result_hex: entry.diagnostic_ram.current_result_hex.clone(),
+            failure_code_hex: entry.diagnostic_ram.failure_code_hex.clone(),
+        })
+        .collect();
+
+    DiagnosticTriageInstructionTrace {
+        captured_instruction_count: telemetry.instruction_trace.captured_instruction_count,
+        retained_instruction_count: telemetry.instruction_trace.retained_instruction_count,
+        retention_limit: telemetry.instruction_trace.retention_limit,
+        truncated: telemetry.instruction_trace.truncated,
+        triage_tail_count: telemetry.instruction_trace.tail[start..].len(),
+        tail,
+    }
+}
+
 fn triage_comparison(
     comparison: &DiagnosticComparisonTelemetry,
 ) -> Result<DiagnosticTriageComparison, String> {
@@ -874,7 +936,7 @@ fn triage_artifact_hints(comparison_included: bool) -> Vec<DiagnosticTriageArtif
             path: "telemetry.json",
             kind: "telemetry_json",
             purpose:
-                "Full-fidelity telemetry for exact probe, timeline, event, and host state analysis.",
+                "Full-fidelity telemetry for exact probe, timeline, event, instruction trace, and host state analysis.",
         },
         DiagnosticTriageArtifactHint {
             path: "diagnostic.nes",

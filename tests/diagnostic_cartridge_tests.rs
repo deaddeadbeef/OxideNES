@@ -106,6 +106,31 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .dmc_dma_first_oam_overlap_stall_cycles
             .expect("overlap stall bucket should be observed") as u64
     );
+    assert_eq!(telemetry.instruction_trace.retention_limit, 64);
+    assert_eq!(
+        telemetry.instruction_trace.retained_instruction_count,
+        telemetry.instruction_trace.tail.len()
+    );
+    assert!(telemetry.instruction_trace.captured_instruction_count > telemetry.events.len() as u64);
+    assert!(telemetry.instruction_trace.truncated);
+    assert!(telemetry
+        .instruction_trace
+        .tail
+        .iter()
+        .all(|entry| entry.cpu.pc == entry.pc));
+    assert!(telemetry
+        .instruction_trace
+        .tail
+        .iter()
+        .any(|entry| entry.diagnostic_ram.signature_hex == "0xA5"));
+    let last_instruction = telemetry
+        .instruction_trace
+        .tail
+        .last()
+        .expect("diagnostic should retain an instruction trace tail");
+    assert!(last_instruction.sequence <= telemetry.instruction_trace.captured_instruction_count);
+    assert!(last_instruction.pc >= 0x8000);
+    assert!(last_instruction.opcode_hex.is_some());
     assert!(telemetry
         .events
         .iter()
@@ -240,6 +265,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
+    assert!(report.contains("## Instruction Trace Tail"));
+    assert!(
+        report.contains("| Seq | Cycle | Frame | Test | PC | Opcode | CPU A/X/Y | SP/P | Result |")
+    );
     assert!(report.contains("## Event Tail"));
     assert!(report.contains("| CPU A/X/Y | SP/P | Result | Failure |"));
     assert!(telemetry.cycles > 0);
@@ -509,6 +538,7 @@ fn generated_diagnostic_cartridge_comparison_warns_on_execution_state_drift() {
     let mut baseline = serde_json::to_value(&telemetry).expect("telemetry should serialize");
     baseline["cpu"]["pc"] = serde_json::Value::from(0);
     baseline["ram"]["checksum"] = serde_json::Value::from(0);
+    baseline["instruction_trace"]["captured_instruction_count"] = serde_json::Value::from(1);
     let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
 
     let comparison =
@@ -524,6 +554,11 @@ fn generated_diagnostic_cartridge_comparison_warns_on_execution_state_drift() {
         difference.severity == DiagnosticComparisonSeverity::Warning
             && difference.category == "state"
             && difference.path == "ram.checksum"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "trace"
+            && difference.path == "instruction_trace.captured_instruction_count"
     }));
 }
 

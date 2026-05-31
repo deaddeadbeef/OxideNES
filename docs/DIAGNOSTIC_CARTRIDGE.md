@@ -20,16 +20,16 @@ exiting `1`.
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
 report contains the verdict, derived analysis, failure localization, coverage
-summary, timing/timeline table, observation probe table, next actions, host
-failures, and final event tail. This gives CI logs, issue attachments, and AI
-debugging sessions a stable human-readable entry point while preserving the raw
-JSON for exact tooling.
+summary, timing/timeline table, bounded instruction trace tail, observation
+probe table, next actions, host failures, and final event tail. This gives CI
+logs, issue attachments, and AI debugging sessions a stable human-readable
+entry point while preserving the raw JSON for exact tooling.
 
 Use `--triage-json <FILE>` for a compact machine-readable handoff artifact. It
 summarizes verdict, health, current test, first failure, failed/skipped probes,
-timing, optional baseline comparison, next actions, artifact hints, and the
-final event tail without requiring tools to scrape `report.md` or load the full
-telemetry envelope first.
+timing, optional baseline comparison, next actions, artifact hints, the bounded
+instruction trace tail, and the final event tail without requiring tools to
+scrape `report.md` or load the full telemetry envelope first.
 
 To compare a run against a known-good telemetry baseline:
 
@@ -136,9 +136,9 @@ The cartridge writes status bytes into CPU RAM:
 The host runner adds emulator-side telemetry that the cartridge cannot inspect
 directly: CPU registers, frame count, RAM checksum, OAM checksum,
 rendered-frame checksum/color count, audio sample count/peak, status/frame
-events, current-test transition events, failure-localization metadata, per-test
-timeline/duration telemetry, structured observation probes, and a derived
-analysis summary.
+events, current-test transition events, a bounded instruction-boundary trace,
+failure-localization metadata, per-test timeline/duration telemetry, structured
+observation probes, and a derived analysis summary.
 
 Schema version `6` adds `analysis.coverage_gaps` and includes the same
 high-level limits in `triage.json`. These records name known untested risk
@@ -183,3 +183,11 @@ result byte. The compact triage JSON event tail exposes the same snapshot data
 so automated debuggers can start from the final transitions without loading the
 full event stream, and baseline comparison warns when final CPU or diagnostic
 RAM state drifts from a known-good run.
+
+Schema version `12` adds top-level `instruction_trace` telemetry. The host
+runner samples instruction-boundary CPU state before opcode fetches, skips
+OAM DMA and DMC stall cycles, records the PRG opcode when the PC points into
+cartridge space, and retains the final 64 entries as a bounded tail. The report
+and compact triage JSON expose the last 16 entries so automated debuggers can
+start from the final executed instructions, while baseline comparison warns
+when retained trace counts drift from a known-good run.
