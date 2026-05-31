@@ -11,14 +11,15 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 4;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 5;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v4";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v5";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
     "machine-readable subsystem coverage",
     "failure localization for automated debugging",
+    "structured expected-vs-observed probes for AI triage",
 ];
 
 const PROGRAM_BASE: u16 = 0x8000;
@@ -389,6 +390,7 @@ pub struct DiagnosticTelemetry {
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
     pub timeline: Vec<TestTimelineTelemetry>,
+    pub probes: Vec<DiagnosticProbeTelemetry>,
     pub oam: OamTelemetry,
     pub frame: FrameTelemetry,
     pub audio: AudioTelemetry,
@@ -480,6 +482,7 @@ pub struct DiagnosticAnalysisTelemetry {
     pub summary: String,
     pub coverage: DiagnosticCoverageTelemetry,
     pub timing: DiagnosticTimingSummaryTelemetry,
+    pub probe_summary: DiagnosticProbeSummaryTelemetry,
     pub failing_subsystem: Option<DiagnosticSubsystem>,
     pub failing_test: Option<&'static str>,
     pub first_failure_domain: Option<String>,
@@ -529,6 +532,44 @@ pub struct TestDurationTelemetry {
     pub tier: DiagnosticTestTier,
     pub duration_cycles: u64,
     pub duration_frames: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticProbeSource {
+    CartridgeResult,
+    HostObservation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticProbeStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticProbeTelemetry {
+    pub id: String,
+    pub source: DiagnosticProbeSource,
+    pub subsystem: Option<DiagnosticSubsystem>,
+    pub test_id: Option<u8>,
+    pub test_name: Option<&'static str>,
+    pub status: DiagnosticProbeStatus,
+    pub description: String,
+    pub expected: String,
+    pub observed: String,
+    pub likely_domain: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticProbeSummaryTelemetry {
+    pub total_probes: usize,
+    pub passed_probes: usize,
+    pub failed_probes: usize,
+    pub skipped_probes: usize,
+    pub first_failed_probe: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -872,7 +913,27 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         host_failures,
     };
     let timeline = test_timeline(&test_results, &events, &verdict, cycles, frames, cpu.pc);
-    let analysis = analysis_telemetry(&verdict, &test_results, &timeline, &events, cycles, frames);
+    let probes = probe_telemetry(ProbeTelemetryInput {
+        status,
+        timeout,
+        current_test,
+        failure_code,
+        tests: &test_results,
+        ram: &ram,
+        oam: &oam,
+        frame: &frame,
+        audio_sample_count,
+        frames,
+    });
+    let analysis = analysis_telemetry(
+        &verdict,
+        &test_results,
+        &timeline,
+        &probes,
+        &events,
+        cycles,
+        frames,
+    );
 
     Ok(DiagnosticTelemetry {
         schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
@@ -900,6 +961,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         },
         tests: test_results,
         timeline,
+        probes,
         oam,
         frame,
         audio: AudioTelemetry {
@@ -923,6 +985,7 @@ pub fn compare_diagnostic_to_baseline(
     compare_schema(&baseline, &current, &mut differences);
     compare_verdict(&baseline, &current, &mut differences);
     compare_coverage(&baseline, &current, &mut differences);
+    compare_probes(&baseline, &current, &mut differences);
     compare_observation_checksums(&baseline, &current, &mut differences);
     compare_timeline(&baseline, &current, &mut differences);
 
@@ -1112,6 +1175,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
+    write_probe_section(&mut report, telemetry);
     write_next_actions_section(&mut report, telemetry);
     write_host_failures_section(&mut report, telemetry);
     write_event_tail_section(&mut report, telemetry);
@@ -1262,6 +1326,75 @@ fn write_timing_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report).expect("write report");
 }
 
+fn write_probe_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Observation Probes").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | ---: |").expect("write report");
+    writeln!(
+        report,
+        "| Total probes | {} |",
+        telemetry.analysis.probe_summary.total_probes
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Passed probes | {} |",
+        telemetry.analysis.probe_summary.passed_probes
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Failed probes | {} |",
+        telemetry.analysis.probe_summary.failed_probes
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Skipped probes | {} |",
+        telemetry.analysis.probe_summary.skipped_probes
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| First failed probe | {} |",
+        telemetry
+            .analysis
+            .probe_summary
+            .first_failed_probe
+            .as_deref()
+            .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+
+    writeln!(
+        report,
+        "| Status | Probe | Source | Subsystem | Test | Expected | Observed | Likely domain |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- | --- | --- |").expect("write report");
+    for probe in &telemetry.probes {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            diagnostic_probe_status_label(probe.status),
+            probe.id,
+            diagnostic_probe_source_label(probe.source),
+            probe
+                .subsystem
+                .map(diagnostic_subsystem_label)
+                .unwrap_or("none"),
+            probe.test_name.unwrap_or("none"),
+            probe.expected,
+            probe.observed,
+            probe.likely_domain
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
 fn write_next_actions_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Next Actions").expect("write report");
     writeln!(report).expect("write report");
@@ -1309,6 +1442,19 @@ fn write_event_tail_section(report: &mut String, telemetry: &DiagnosticTelemetry
 struct HostValidationInput<'a> {
     status: u8,
     timeout: bool,
+    tests: &'a [TestTelemetry],
+    ram: &'a [u8],
+    oam: &'a OamTelemetry,
+    frame: &'a FrameTelemetry,
+    audio_sample_count: usize,
+    frames: u64,
+}
+
+struct ProbeTelemetryInput<'a> {
+    status: u8,
+    timeout: bool,
+    current_test: u8,
+    failure_code: u8,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     oam: &'a OamTelemetry,
@@ -1376,6 +1522,264 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
 
     failures
+}
+
+fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemetry> {
+    let mut probes = Vec::new();
+
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "runtime.completed".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: None,
+            test_id: None,
+            test_name: None,
+            status: if !input.timeout && matches!(input.status, STATUS_PASS | STATUS_FAIL) {
+                DiagnosticProbeStatus::Passed
+            } else {
+                DiagnosticProbeStatus::Failed
+            },
+            description: "Host runner reached a terminal cartridge status before the cycle budget"
+                .to_string(),
+            expected: "timeout=false and status is PASS or FAIL".to_string(),
+            observed: format!(
+                "timeout={}, status={}",
+                input.timeout,
+                hex_byte(input.status)
+            ),
+            likely_domain: "emulator.progress_or_infinite_loop".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ram.signature".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Bus),
+            test_id: None,
+            test_name: None,
+            status: passed_or_failed(input.ram[SIGNATURE_ADDR as usize] == 0xA5),
+            description: "Diagnostic cartridge wrote its RAM signature byte".to_string(),
+            expected: "signature byte 0xA5 at $00F3".to_string(),
+            observed: format!(
+                "signature byte {}",
+                hex_byte(input.ram[SIGNATURE_ADDR as usize])
+            ),
+            likely_domain: "bus.cpu_ram_or_reset_vector".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cartridge.status.pass".to_string(),
+            source: DiagnosticProbeSource::CartridgeResult,
+            subsystem: None,
+            test_id: known_test_id(input.current_test),
+            test_name: test_name(input.current_test),
+            status: passed_or_failed(input.status == STATUS_PASS),
+            description: "Diagnostic cartridge reported the full suite passed".to_string(),
+            expected: "status byte 0x80".to_string(),
+            observed: format!("status byte {}", hex_byte(input.status)),
+            likely_domain: status_probe_domain(input.status, input.failure_code),
+        },
+    );
+
+    for test in input.tests {
+        push_probe(
+            &mut probes,
+            ProbeTelemetryRecord {
+                id: format!("cartridge.test.{}.result", test.id),
+                source: DiagnosticProbeSource::CartridgeResult,
+                subsystem: Some(test.subsystem),
+                test_id: Some(test.id),
+                test_name: Some(test.name),
+                status: test_probe_status(test, input.status, input.timeout, input.current_test),
+                description: format!("{} result byte", test.name),
+                expected: "result byte 0x01".to_string(),
+                observed: format!("result byte {}", hex_byte(test.result)),
+                likely_domain: test_probe_domain(test, input.current_test, input.failure_code),
+            },
+        );
+    }
+
+    let passed_suite = input.status == STATUS_PASS;
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.nmi_count".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(10),
+            test_name: test_name(10),
+            status: gated_probe_status(passed_suite, input.ram[NMI_COUNT_ADDR as usize] >= 2),
+            description: "PPU generated repeated NMIs during the render-frame test".to_string(),
+            expected: "NMI count >= 2".to_string(),
+            observed: format!("NMI count {}", input.ram[NMI_COUNT_ADDR as usize]),
+            likely_domain: "ppu.nmi".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "oam.dma_checksum".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(5),
+            test_name: test_name(5),
+            status: gated_probe_status(
+                passed_suite,
+                input.oam.checksum == input.oam.expected_checksum,
+            ),
+            description: "Host-observed PPU OAM contents match the diagnostic DMA pattern"
+                .to_string(),
+            expected: format!("OAM checksum 0x{:016X}", input.oam.expected_checksum),
+            observed: format!("OAM checksum 0x{:016X}", input.oam.checksum),
+            likely_domain: "dma.oam_transfer".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.frame_count".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(10),
+            test_name: test_name(10),
+            status: gated_probe_status(passed_suite, input.frames >= 2),
+            description: "Host observed completed frames during the diagnostic run".to_string(),
+            expected: "completed frames >= 2".to_string(),
+            observed: format!("completed frames {}", input.frames),
+            likely_domain: "ppu.frame_progress".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.frame_unique_colors".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(10),
+            test_name: test_name(10),
+            status: gated_probe_status(passed_suite, input.frame.unique_colors >= 2),
+            description: "Rendered diagnostic frame contains multiple colors".to_string(),
+            expected: "unique rendered colors >= 2".to_string(),
+            observed: format!("unique rendered colors {}", input.frame.unique_colors),
+            likely_domain: "ppu.rendering.background".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "apu.sample_count".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Apu),
+            test_id: Some(6),
+            test_name: test_name(6),
+            status: gated_probe_status(passed_suite, input.audio_sample_count > 0),
+            description: "APU produced samples that the host runner drained at frame boundaries"
+                .to_string(),
+            expected: "drained audio samples > 0".to_string(),
+            observed: format!("drained audio samples {}", input.audio_sample_count),
+            likely_domain: "apu.frame_output".to_string(),
+        },
+    );
+
+    probes
+}
+
+struct ProbeTelemetryRecord {
+    id: String,
+    source: DiagnosticProbeSource,
+    subsystem: Option<DiagnosticSubsystem>,
+    test_id: Option<u8>,
+    test_name: Option<&'static str>,
+    status: DiagnosticProbeStatus,
+    description: String,
+    expected: String,
+    observed: String,
+    likely_domain: String,
+}
+
+fn push_probe(probes: &mut Vec<DiagnosticProbeTelemetry>, record: ProbeTelemetryRecord) {
+    probes.push(DiagnosticProbeTelemetry {
+        id: record.id,
+        source: record.source,
+        subsystem: record.subsystem,
+        test_id: record.test_id,
+        test_name: record.test_name,
+        status: record.status,
+        description: record.description,
+        expected: record.expected,
+        observed: record.observed,
+        likely_domain: record.likely_domain,
+    });
+}
+
+fn passed_or_failed(passed: bool) -> DiagnosticProbeStatus {
+    if passed {
+        DiagnosticProbeStatus::Passed
+    } else {
+        DiagnosticProbeStatus::Failed
+    }
+}
+
+fn gated_probe_status(gate: bool, passed: bool) -> DiagnosticProbeStatus {
+    if !gate {
+        DiagnosticProbeStatus::Skipped
+    } else {
+        passed_or_failed(passed)
+    }
+}
+
+fn test_probe_status(
+    test: &TestTelemetry,
+    status: u8,
+    timeout: bool,
+    current_test: u8,
+) -> DiagnosticProbeStatus {
+    if test.passed {
+        return DiagnosticProbeStatus::Passed;
+    }
+    if status == STATUS_PASS {
+        return DiagnosticProbeStatus::Failed;
+    }
+    if status == STATUS_FAIL && test.id <= current_test {
+        return DiagnosticProbeStatus::Failed;
+    }
+    if timeout && current_test != 0 && test.id == current_test {
+        return DiagnosticProbeStatus::Failed;
+    }
+    DiagnosticProbeStatus::Skipped
+}
+
+fn status_probe_domain(status: u8, failure_code: u8) -> String {
+    if status == STATUS_PASS {
+        return "diagnostic.suite_status".to_string();
+    }
+    failure_spec(failure_code)
+        .map(|failure| failure.likely_domain.to_string())
+        .unwrap_or_else(|| "diagnostic.suite_status".to_string())
+}
+
+fn test_probe_domain(test: &TestTelemetry, current_test: u8, failure_code: u8) -> String {
+    if test.id == current_test {
+        if let Some(failure) = failure_spec(failure_code) {
+            return failure.likely_domain.to_string();
+        }
+    }
+    diagnostic_subsystem_probe_domain(test.subsystem).to_string()
+}
+
+fn diagnostic_subsystem_probe_domain(subsystem: DiagnosticSubsystem) -> &'static str {
+    match subsystem {
+        DiagnosticSubsystem::Cpu => "cpu.execution",
+        DiagnosticSubsystem::Bus => "bus.memory",
+        DiagnosticSubsystem::Ppu => "ppu.rendering",
+        DiagnosticSubsystem::Apu => "apu.audio",
+        DiagnosticSubsystem::Dma => "dma.transfer",
+        DiagnosticSubsystem::Joypad => "joypad.input",
+    }
 }
 
 fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String> {
@@ -2111,12 +2515,14 @@ fn analysis_telemetry(
     verdict: &VerdictTelemetry,
     tests: &[TestTelemetry],
     timeline: &[TestTimelineTelemetry],
+    probes: &[DiagnosticProbeTelemetry],
     events: &[EventTelemetry],
     cycles: u64,
     frames: u64,
 ) -> DiagnosticAnalysisTelemetry {
     let coverage = coverage_telemetry(tests);
     let timing = timing_summary(timeline);
+    let probe_summary = probe_summary(probes);
     let health = diagnostic_health(verdict);
     let test_transition_count = events
         .iter()
@@ -2154,11 +2560,39 @@ fn analysis_telemetry(
         summary,
         coverage,
         timing,
+        probe_summary,
         failing_subsystem,
         failing_test,
         first_failure_domain,
         next_actions,
         test_transition_count,
+    }
+}
+
+fn probe_summary(probes: &[DiagnosticProbeTelemetry]) -> DiagnosticProbeSummaryTelemetry {
+    let passed_probes = probes
+        .iter()
+        .filter(|probe| probe.status == DiagnosticProbeStatus::Passed)
+        .count();
+    let failed_probes = probes
+        .iter()
+        .filter(|probe| probe.status == DiagnosticProbeStatus::Failed)
+        .count();
+    let skipped_probes = probes
+        .iter()
+        .filter(|probe| probe.status == DiagnosticProbeStatus::Skipped)
+        .count();
+    let first_failed_probe = probes
+        .iter()
+        .find(|probe| probe.status == DiagnosticProbeStatus::Failed)
+        .map(|probe| probe.id.clone());
+
+    DiagnosticProbeSummaryTelemetry {
+        total_probes: probes.len(),
+        passed_probes,
+        failed_probes,
+        skipped_probes,
+        first_failed_probe,
     }
 }
 
@@ -2618,6 +3052,10 @@ fn test_name(id: u8) -> Option<&'static str> {
     test_spec(id).map(|spec| spec.name)
 }
 
+fn known_test_id(id: u8) -> Option<u8> {
+    test_spec(id).map(|spec| spec.id)
+}
+
 fn first_failed_test(tests: &[TestTelemetry]) -> Option<&TestTelemetry> {
     tests.iter().find(|test| !test.passed)
 }
@@ -2754,6 +3192,118 @@ fn compare_coverage(
         },
         differences,
     );
+}
+
+fn compare_probes(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    compare_u64_regression(
+        baseline,
+        current,
+        U64RegressionComparison {
+            path: &["analysis", "probe_summary", "passed_probes"],
+            category: "probes",
+            lower_is_regression: true,
+            regression_note: "fewer observation probes passed than in baseline",
+            improvement_note: "more observation probes passed than in baseline",
+        },
+        differences,
+    );
+    compare_u64_regression(
+        baseline,
+        current,
+        U64RegressionComparison {
+            path: &["analysis", "probe_summary", "failed_probes"],
+            category: "probes",
+            lower_is_regression: false,
+            regression_note: "more observation probes failed than in baseline",
+            improvement_note: "fewer observation probes failed than in baseline",
+        },
+        differences,
+    );
+
+    let baseline_probes = probe_by_id(baseline);
+    let current_probes = probe_by_id(current);
+    if baseline_probes.is_empty() || current_probes.is_empty() {
+        return;
+    }
+
+    for (probe_id, current_probe) in &current_probes {
+        let path = format!("probes[{probe_id}]");
+        let Some(baseline_probe) = baseline_probes.get(probe_id) else {
+            push_difference(
+                differences,
+                DiagnosticComparisonSeverity::Info,
+                "probes",
+                &path,
+                None,
+                Some("present".to_string()),
+                "current run includes an observation probe absent from baseline",
+            );
+            continue;
+        };
+
+        let baseline_status = json_string(baseline_probe, &["status"]);
+        let current_status = json_string(current_probe, &["status"]);
+        if baseline_status != current_status {
+            push_difference(
+                differences,
+                probe_status_change_severity(current_status.as_deref()),
+                "probes",
+                &format!("{path}.status"),
+                baseline_status,
+                current_status.clone(),
+                "observation probe status changed from baseline",
+            );
+        } else if current_status.as_deref() == Some("passed") {
+            compare_probe_observed_value(probe_id, baseline_probe, current_probe, differences);
+        }
+    }
+
+    for probe_id in baseline_probes.keys() {
+        if !current_probes.contains_key(probe_id) {
+            push_difference(
+                differences,
+                DiagnosticComparisonSeverity::Failure,
+                "probes",
+                &format!("probes[{probe_id}]"),
+                Some("present".to_string()),
+                None,
+                "baseline observation probe is missing from current run",
+            );
+        }
+    }
+}
+
+fn compare_probe_observed_value(
+    probe_id: &str,
+    baseline_probe: &Value,
+    current_probe: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    let baseline_observed = json_string(baseline_probe, &["observed"]);
+    let current_observed = json_string(current_probe, &["observed"]);
+    if baseline_observed != current_observed {
+        push_difference(
+            differences,
+            DiagnosticComparisonSeverity::Warning,
+            "probes",
+            &format!("probes[{probe_id}].observed"),
+            baseline_observed,
+            current_observed,
+            "observation probe value changed from baseline while status still passed",
+        );
+    }
+}
+
+fn probe_status_change_severity(current_status: Option<&str>) -> DiagnosticComparisonSeverity {
+    match current_status {
+        Some("failed") => DiagnosticComparisonSeverity::Failure,
+        Some("skipped") => DiagnosticComparisonSeverity::Warning,
+        _ => DiagnosticComparisonSeverity::Info,
+    }
 }
 
 fn compare_observation_checksums(
@@ -3007,6 +3557,18 @@ fn timeline_by_id(value: &Value) -> HashMap<u64, &Value> {
     timeline
 }
 
+fn probe_by_id(value: &Value) -> HashMap<String, &Value> {
+    let mut probes = HashMap::new();
+    if let Some(entries) = json_at(value, &["probes"]).and_then(Value::as_array) {
+        for entry in entries {
+            if let Some(probe_id) = json_string(entry, &["id"]) {
+                probes.insert(probe_id, entry);
+            }
+        }
+    }
+    probes
+}
+
 fn json_path_display(value: &Value, path: &[&str]) -> Option<String> {
     json_at(value, path).and_then(display_json_value)
 }
@@ -3095,6 +3657,21 @@ fn test_timeline_end_reason_label(reason: TestTimelineEndReason) -> &'static str
         TestTimelineEndReason::CartridgePassed => "cartridge_passed",
         TestTimelineEndReason::CartridgeFailed => "cartridge_failed",
         TestTimelineEndReason::Timeout => "timeout",
+    }
+}
+
+fn diagnostic_probe_source_label(source: DiagnosticProbeSource) -> &'static str {
+    match source {
+        DiagnosticProbeSource::CartridgeResult => "cartridge_result",
+        DiagnosticProbeSource::HostObservation => "host_observation",
+    }
+}
+
+fn diagnostic_probe_status_label(status: DiagnosticProbeStatus) -> &'static str {
+    match status {
+        DiagnosticProbeStatus::Passed => "passed",
+        DiagnosticProbeStatus::Failed => "failed",
+        DiagnosticProbeStatus::Skipped => "skipped",
     }
 }
 

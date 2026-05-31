@@ -13,9 +13,10 @@ The runner exits `0` only when the cartridge and host-side checks pass. It exits
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
 report contains the verdict, derived analysis, failure localization, coverage
-summary, timing/timeline table, next actions, host failures, and final event
-tail. This gives CI logs, issue attachments, and AI debugging sessions a stable
-human-readable entry point while preserving the raw JSON for exact tooling.
+summary, timing/timeline table, observation probe table, next actions, host
+failures, and final event tail. This gives CI logs, issue attachments, and AI
+debugging sessions a stable human-readable entry point while preserving the raw
+JSON for exact tooling.
 
 To compare a run against a known-good telemetry baseline:
 
@@ -23,10 +24,11 @@ To compare a run against a known-good telemetry baseline:
 cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/current.json --report target/diagnostics/current.md --baseline-json target/diagnostics/baseline.json --comparison-json target/diagnostics/comparison.json --comparison-report target/diagnostics/comparison.md --no-stdout
 ```
 
-Baseline comparison hard-fails on result, health, coverage, or per-test outcome
-regressions and exits `1`. It records warning-level differences for timing and
-observable artifact drift such as frame/OAM checksums, allowing CI and AI agents
-to separate real correctness regressions from values that need review.
+Baseline comparison hard-fails on result, health, coverage, structured probe, or
+per-test outcome regressions and exits `1`. It records warning-level
+differences for timing and observable artifact drift such as frame/OAM
+checksums, allowing CI and AI agents to separate real correctness regressions
+from values that need review.
 
 ## Coverage
 
@@ -72,6 +74,14 @@ status byte, and terminal PC. This makes slow tests, skipped tests, assertion
 failures, and mid-test timeouts explicit without forcing automated consumers to
 reconstruct timing from raw events first.
 
+Schema version `5` adds top-level `probes` and `analysis.probe_summary`.
+Probes normalize each cartridge result byte and host-observed emulator signal
+into `passed`, `failed`, or `skipped` records with expected value, observed
+value, subsystem, test context, and likely domain. This lets CI or an AI
+debugger rank concrete failed observations without scraping report text or
+guessing whether downstream checks were merely not reached after an early
+cartridge assertion.
+
 The cartridge writes status bytes into CPU RAM:
 
 - `$00F0`: status, `0x01` running, `0x80` pass, `0xE0` fail
@@ -81,4 +91,9 @@ The cartridge writes status bytes into CPU RAM:
 - `$00F4`: NMI count
 - `$0200..`: per-test result slots, `0x01` means pass
 
-The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, failure-localization metadata, per-test timeline/duration telemetry, and a derived analysis summary.
+The host runner adds emulator-side telemetry that the cartridge cannot inspect
+directly: CPU registers, frame count, RAM checksum, OAM checksum,
+rendered-frame checksum/color count, audio sample count/peak, status/frame
+events, current-test transition events, failure-localization metadata, per-test
+timeline/duration telemetry, structured observation probes, and a derived
+analysis summary.
