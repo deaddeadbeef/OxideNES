@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 24;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 25;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v24";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v25";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -35,6 +35,10 @@ const MAPPER2_SWITCHABLE_ADDR: u16 = 0x8000;
 const MAPPER2_FIXED_SENTINEL_ADDR: u16 = 0xFF00;
 const MAPPER2_BANK_SENTINELS: &[(u8, u8)] = &[(0, 0xA0), (1, 0xB1), (2, 0xC2)];
 const MAPPER2_FIXED_SENTINEL: u8 = 0xD3;
+const MAPPER2_PRG_RAM_LOW_ADDR: u16 = 0x6000;
+const MAPPER2_PRG_RAM_HIGH_ADDR: u16 = 0x7FFF;
+const MAPPER2_PRG_RAM_LOW_SENTINEL: u8 = 0x5C;
+const MAPPER2_PRG_RAM_HIGH_SENTINEL: u8 = 0xA7;
 
 const STATUS_ADDR: u8 = 0xF0;
 const CURRENT_TEST_ADDR: u8 = 0xF1;
@@ -60,6 +64,7 @@ const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_re
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
 const MAPPER2_BANK_SWITCH_FAULT_LABEL: &str = "mapper2_prg_bank_switch_before_read";
+const MAPPER2_PRG_RAM_FAULT_LABEL: &str = "mapper2_prg_ram_roundtrip_before_high_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
@@ -254,6 +259,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "$8000 exposes distinct sentinels after selecting switchable PRG banks 0, 1, and 2",
             "$FF00 remains mapped to the fixed final PRG bank after switchable bank writes",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 16,
+        name: "mapper2_prg_ram_roundtrip",
+        subsystem: DiagnosticSubsystem::Cartridge,
+        tier: DiagnosticTestTier::Integration,
+        intent: "Verify Mapper 2 PRG RAM reads and writes through the CPU $6000-$7FFF cartridge window.",
+        expected_observations: &[
+            "$6000 and $7FFF retain CPU-written PRG RAM sentinels",
+            "PRG RAM remains visible after Mapper 2 switchable PRG bank writes",
         ],
     },
 ];
@@ -610,6 +626,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         likely_domain: "mapper.uxrom.fixed_prg_bank",
         remediation_hint: "Inspect Mapper 2 fixed-bank mapping for CPU $C000-$FFFF reads.",
     },
+    DiagnosticFailureSpec {
+        code: 0xF4,
+        test_id: 16,
+        assertion: "Mapper 2 PRG RAM lower boundary round-trips through $6000",
+        expected: "$6000 reads the low PRG RAM sentinel after a CPU write",
+        observed: "$6000 did not expose the low PRG RAM sentinel",
+        likely_domain: "mapper.uxrom.prg_ram",
+        remediation_hint: "Inspect Mapper 2 CPU $6000-$7FFF PRG RAM read/write dispatch and address masking.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xF5,
+        test_id: 16,
+        assertion: "Mapper 2 PRG RAM upper boundary round-trips through $7FFF",
+        expected: "$7FFF reads the high PRG RAM sentinel after a CPU write",
+        observed: "$7FFF did not expose the high PRG RAM sentinel",
+        likely_domain: "mapper.uxrom.prg_ram",
+        remediation_hint: "Inspect Mapper 2 PRG RAM upper-bound indexing for CPU $7FFF reads and writes.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xF6,
+        test_id: 16,
+        assertion: "Mapper 2 PRG RAM persists across switchable PRG bank writes",
+        expected: "$6000 still reads the low PRG RAM sentinel after changing the PRG bank select",
+        observed: "$6000 changed after Mapper 2 bank-select writes",
+        likely_domain: "mapper.uxrom.prg_ram",
+        remediation_hint: "Inspect Mapper 2 bank-select writes; they must not mutate or remap the $6000-$7FFF PRG RAM window.",
+    },
 ];
 
 const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
@@ -633,8 +676,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
         risk: "The diagnostic cartridge now exercises one PRG bank-switching mapper, but broader mapper behavior can still regress outside this fixture.",
-        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching and the fixed final-bank window end to end.",
-        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, mirroring changes, MMC register edge cases, and battery-backed RAM behavior.",
+        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, and PRG RAM round-trips end to end.",
+        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, mirroring changes, MMC register edge cases, and battery-backed RAM persistence.",
         suggested_next_test: "Generate additional mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
     },
     DiagnosticCoverageGapSpec {
@@ -690,6 +733,7 @@ pub enum DiagnosticFaultInjection {
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
     Mapper2PrgBankSwitch,
+    Mapper2PrgRam,
     PpuNmiTimeout,
     PpuVramReadBuffer,
 }
@@ -702,6 +746,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
+            DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
@@ -714,6 +759,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
+            DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
@@ -3470,6 +3516,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_indirect_jmp_page_wrap();
     program.ppu_vram_read_buffer();
     program.mapper2_prg_bank_switch();
+    program.mapper2_prg_ram_roundtrip();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3857,6 +3904,31 @@ impl DiagnosticProgram {
         self.asm.lda_abs(MAPPER2_FIXED_SENTINEL_ADDR);
         self.expect_a_eq(MAPPER2_FIXED_SENTINEL, 0xF3);
         self.pass_test(15);
+    }
+
+    fn mapper2_prg_ram_roundtrip(&mut self) {
+        self.begin_test(16);
+        self.asm.lda_imm(MAPPER2_PRG_RAM_LOW_SENTINEL);
+        self.asm.sta_abs(MAPPER2_PRG_RAM_LOW_ADDR);
+        self.asm.lda_imm(MAPPER2_PRG_RAM_HIGH_SENTINEL);
+        self.asm.sta_abs(MAPPER2_PRG_RAM_HIGH_ADDR);
+
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(MAPPER2_SWITCHABLE_ADDR);
+        self.asm.lda_abs(MAPPER2_PRG_RAM_LOW_ADDR);
+        self.expect_a_eq(MAPPER2_PRG_RAM_LOW_SENTINEL, 0xF4);
+        self.asm.nop();
+        self.asm
+            .label(MAPPER2_PRG_RAM_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_abs(MAPPER2_PRG_RAM_HIGH_ADDR);
+        self.expect_a_eq(MAPPER2_PRG_RAM_HIGH_SENTINEL, 0xF5);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(MAPPER2_SWITCHABLE_ADDR);
+        self.asm.lda_abs(MAPPER2_PRG_RAM_LOW_ADDR);
+        self.expect_a_eq(MAPPER2_PRG_RAM_LOW_SENTINEL, 0xF6);
+        self.pass_test(16);
     }
 
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
@@ -4297,6 +4369,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::Mapper2PrgBankSwitch => {
             bus.cpu_write(MAPPER2_SWITCHABLE_ADDR, 0x00);
+        }
+        DiagnosticFaultInjection::Mapper2PrgRam => {
+            bus.cpu_write(MAPPER2_PRG_RAM_HIGH_ADDR, 0x00);
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);

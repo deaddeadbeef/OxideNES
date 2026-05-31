@@ -1683,7 +1683,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(15),
+            expected_focus_test_id: Some(16),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1791,6 +1791,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(15),
             expected_focus_domain: Some("mapper.uxrom.prg_bank_switch"),
+        },
+        DiagnosticScenarioSpec {
+            id: "mapper2_prg_ram_fault",
+            title: "Intentional Mapper 2 PRG RAM assertion failure",
+            purpose: "Failure-localization fixture for UXROM PRG RAM read/write regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::Mapper2PrgRam),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(16),
+            expected_focus_domain: Some("mapper.uxrom.prg_ram"),
         },
         DiagnosticScenarioSpec {
             id: "ppu_nmi_timeout_fault",

@@ -1,6 +1,6 @@
 # OxideNES Diagnostic Cartridge
 
-OxideNES includes a generated, IP-safe diagnostic cartridge for headless emulator validation. The cartridge is assembled from deterministic 6502 instructions and CHR byte patterns at runtime; no `.nes` file or third-party ROM content is committed. The generated ROM uses Mapper 2/UXROM so the same cartridge can validate PRG bank switching through the normal CPU bus.
+OxideNES includes a generated, IP-safe diagnostic cartridge for headless emulator validation. The cartridge is assembled from deterministic 6502 instructions and CHR byte patterns at runtime; no `.nes` file or third-party ROM content is committed. The generated ROM uses Mapper 2/UXROM so the same cartridge can validate PRG bank switching and PRG RAM access through the normal CPU bus.
 
 Run it with:
 
@@ -91,7 +91,8 @@ The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
 `joypad2_mismatch`, `dma_oam_transfer_fault`, `apu_status_fault`,
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
-`mapper2_bank_switch_fault`, `ppu_nmi_timeout_fault`, and
+`mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
+`ppu_nmi_timeout_fault`, and
 `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
@@ -109,10 +110,13 @@ just before the cartridge reads the APU status register.
 `mapper2_bank_switch_fault` switches the UXROM bank select back to bank 0 just
 before the bank-1 sentinel read, proving mapper PRG bank-switch regressions
 localize to `mapper.uxrom.prg_bank_switch`.
+`mapper2_prg_ram_fault` corrupts the `$7FFF` PRG RAM sentinel just before the
+cartridge reads it, proving Mapper 2 PRG RAM regressions localize to
+`mapper.uxrom.prg_ram`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
-mapper PRG switching, DMA host-observation, APU status, PPU assertion, and PPU
+mapper PRG switching, mapper PRG RAM, DMA host-observation, APU status, PPU assertion, and PPU
 progress-timeout failure localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -146,7 +150,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
-- Mapper 2/UXROM PRG bank switching and fixed final-bank reads
+- Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Joypad strobe and shift reads
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
@@ -330,3 +334,11 @@ the fixed final PRG bank, writes mapper-select values through `$8000`, verifies
 distinct switchable-bank sentinels at `$8000`, and verifies the fixed-bank
 sentinel at `$FF00`. The intentional fault fixture localizes bank-select
 regressions to `mapper.uxrom.prg_bank_switch`.
+
+Schema version `25` adds the `mapper2_prg_ram_roundtrip` integration test plus
+the `mapper2_prg_ram_fault` scenario-suite fixture. The cartridge writes
+sentinels to `$6000` and `$7FFF`, verifies both boundaries through the CPU
+cartridge RAM window, changes Mapper 2 bank select through `$8000`, and verifies
+the lower sentinel still persists. The intentional fault fixture corrupts the
+upper sentinel before the read and localizes PRG RAM regressions to
+`mapper.uxrom.prg_ram`.
