@@ -78,18 +78,23 @@ outcomes, write a diagnostic scenario suite:
 cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/scenario-suite --no-stdout
 ```
 
-The scenario suite writes `scenario-suite.json` and `scenario-suite.md` at the
-root, plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
-`joypad2_mismatch`, and `timeout_cycle_limit`. The root manifest records each
-scenario's expected runner exit code, expected health, expected focus
-test/domain, actual `debug_focus`, failed probe ids, per-scenario baseline
-comparison summaries, explicit contract-match breakdowns, a suite-level
-attention queue, and artifact paths. The Markdown report adds suite analysis,
-an attention queue, a compact scenario matrix, contract matrix, baseline
-comparison matrix, AI drilldown order, and bundle artifact map for humans or
-agents inspecting CI artifacts. The command exits `0` when all known-good and
-intentionally failing scenarios match their expected debug-focus contracts. CI
-and release workflows upload this corpus as `oxidenes-diagnostic-scenario-suite`.
+The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
+`scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
+plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
+`joypad2_mismatch`, and `timeout_cycle_limit`. The observer JSON is the compact
+machine entry point: it turns the root attention queue into ordered next
+actions, scenario observations, and evidence pointers so an automated debugger
+can decide which artifact to open without traversing every bundle first. The
+root manifest records each scenario's expected runner exit code, expected
+health, expected focus test/domain, actual `debug_focus`, failed probe ids,
+per-scenario baseline comparison summaries, explicit contract-match breakdowns,
+a suite-level attention queue, and artifact paths. The Markdown reports add
+suite analysis, observer next actions, an attention queue, compact scenario
+matrices, contract matrix, baseline comparison matrix, AI drilldown order, and
+bundle artifact maps for humans or agents inspecting CI artifacts. The command
+exits `0` when all known-good and intentionally failing scenarios match their
+expected debug-focus contracts. CI and release workflows upload this corpus as
+`oxidenes-diagnostic-scenario-suite`.
 
 ## Coverage
 
