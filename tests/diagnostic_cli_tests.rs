@@ -92,7 +92,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
     assert_eq!(manifest["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(20));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(21));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(2));
     assert_eq!(manifest["passed"], Value::Bool(true));
@@ -101,7 +101,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(7));
+    assert_eq!(manifest["scenario_count"], Value::from(8));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -122,10 +122,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(7));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(8));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(7)
+        Value::from(8)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -137,7 +137,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         manifest["analysis"]["baseline_divergence_count"],
-        Value::from(6)
+        Value::from(7)
     );
     assert_eq!(
         manifest["analysis"]["critical_scenario_ids"],
@@ -151,7 +151,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let attention_queue = manifest["analysis"]["attention_queue"]
         .as_array()
         .expect("attention queue should be an array");
-    assert_eq!(attention_queue.len(), 6);
+    assert_eq!(attention_queue.len(), 7);
     let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
     assert_eq!(
         timeout_attention["priority"],
@@ -181,6 +181,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         ppu_attention["next_artifact"],
         Value::String("ppu_read_buffer_fault/comparison.json".to_string())
+    );
+    let dma_attention = find_attention_item(attention_queue, "dma_oam_transfer_fault");
+    assert_eq!(
+        dma_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        dma_attention["focus_domain"],
+        Value::String("dma.oam_transfer".to_string())
+    );
+    assert_eq!(
+        dma_attention["next_artifact"],
+        Value::String("dma_oam_transfer_fault/comparison.json".to_string())
     );
     let cpu_attention = find_attention_item(attention_queue, "cpu_zero_page_wrap_fault");
     assert_eq!(
@@ -219,18 +232,18 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(1));
     assert_eq!(observer["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(20));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(21));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(2));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(7));
+    assert_eq!(observer["scenario_count"], Value::from(8));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
-    assert_eq!(observer["baseline_divergence_count"], Value::from(6));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(7));
     let observer_actions = observer["next_actions"]
         .as_array()
         .expect("observer next_actions should be an array");
-    assert_eq!(observer_actions.len(), 6);
+    assert_eq!(observer_actions.len(), 7);
     let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
     assert_eq!(
         timeout_action["priority"],
@@ -280,6 +293,21 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             == &Value::String(
                 "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result".to_string()
             )));
+    let dma_action = find_observer_action(observer_actions, "dma_oam_transfer_fault");
+    assert_eq!(
+        dma_action["primary_artifact"],
+        Value::String("dma_oam_transfer_fault/comparison.json".to_string())
+    );
+    assert!(dma_action["evidence"]
+        .as_array()
+        .expect("DMA action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("focus_domain=dma.oam_transfer".to_string())));
+    assert!(dma_action["evidence"]
+        .as_array()
+        .expect("DMA action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("failed_probe_ids=oam.dma_checksum".to_string())));
     let cpu_action = find_observer_action(observer_actions, "cpu_zero_page_wrap_fault");
     assert_eq!(
         cpu_action["primary_artifact"],
@@ -322,7 +350,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 7);
+    assert_eq!(observations.len(), 8);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -356,6 +384,27 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         timeout_observation["next_artifact"],
         Value::String("timeout_cycle_limit/comparison.json".to_string())
+    );
+    let dma_observation = find_observer_observation(observations, "dma_oam_transfer_fault");
+    assert_eq!(
+        dma_observation["role"],
+        Value::String("expected_failure_fixture".to_string())
+    );
+    assert_eq!(
+        dma_observation["outcome"],
+        Value::String("expected_baseline_divergence".to_string())
+    );
+    assert_eq!(
+        dma_observation["health"],
+        Value::String("host_validation_failed".to_string())
+    );
+    assert_eq!(
+        dma_observation["focus_domain"],
+        Value::String("dma.oam_transfer".to_string())
+    );
+    assert_eq!(
+        dma_observation["next_artifact"],
+        Value::String("dma_oam_transfer_fault/comparison.json".to_string())
     );
     let ppu_observation = find_observer_observation(observations, "ppu_read_buffer_fault");
     assert_eq!(
@@ -419,6 +468,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("# Diagnostic Scenario Suite Observer"));
     assert!(observer_report.contains("## Next Actions"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | timeout_cycle_limit | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("| known_divergence | inspect_known_divergence | dma_oam_transfer_fault | dma_oam_transfer_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_read_buffer_fault | ppu_read_buffer_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_indirect_jmp_fault | cpu_indirect_jmp_fault/comparison.json |"));
     assert!(observer_report.contains("top_difference_path=dma.oam_dma_observed"));
@@ -426,6 +476,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report
         .contains("| pass | baseline | matches_baseline | healthy | - | 0 | pass/triage.json |"));
     assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 92 | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("| dma_oam_transfer_fault | expected_failure_fixture | expected_baseline_divergence | host_validation_failed | dma.oam_transfer |"));
     assert!(observer_report.contains("| ppu_read_buffer_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(observer_report.contains("| cpu_indirect_jmp_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(observer_report.contains("## Artifact Hints"));
@@ -436,14 +487,16 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
     assert!(suite_report.contains("## Suite Analysis"));
     assert!(suite_report.contains("| Status | passed |"));
-    assert!(suite_report.contains("| Baseline divergences | 6 |"));
+    assert!(suite_report.contains("| Baseline divergences | 7 |"));
     assert!(suite_report.contains("## Attention Queue"));
     assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 92 | timeout_cycle_limit/comparison.json |"));
+    assert!(suite_report.contains("| known_divergence | dma_oam_transfer_fault | scenario_diverges_from_pass_baseline | host_validation_failed | dma.oam_transfer |"));
     assert!(suite_report.contains("| known_divergence | ppu_read_buffer_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| known_divergence | cpu_zero_page_wrap_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.addressing.zero_page_x_wrap |"));
     assert!(suite_report.contains("| known_divergence | cpu_indirect_jmp_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(suite_report.contains("| Scenario | Expected pass | Actual pass |"));
     assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
+    assert!(suite_report.contains("| dma_oam_transfer_fault | false | false | true | host_validation_failed | 5 | dma.oam_transfer |"));
     assert!(suite_report.contains("| cpu_zero_page_wrap_fault | false | false | true | cartridge_assertion_failed | 12 | cpu.addressing.zero_page_x_wrap |"));
     assert!(suite_report.contains("| cpu_indirect_jmp_fault | false | false | true | cartridge_assertion_failed | 13 | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(suite_report.contains("| ppu_read_buffer_fault | false | false | true | cartridge_assertion_failed | 14 | ppu.registers.ppudata_buffer |"));
@@ -452,6 +505,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("runtime.completed"));
     assert!(suite_report.contains("## Contract Matrix"));
     assert!(suite_report.contains("| joypad1_mismatch | true | true | true | true | true |"));
+    assert!(suite_report.contains("| dma_oam_transfer_fault | true | true | true | true | true |"));
     assert!(
         suite_report.contains("| cpu_zero_page_wrap_fault | true | true | true | true | true |")
     );
@@ -569,6 +623,60 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             > 0
     );
     assert_bundle_artifacts_with_joypad2(&suite_dir.join("joypad2_mismatch"), true, false, "0x00");
+
+    let dma = find_scenario(scenarios, "dma_oam_transfer_fault");
+    assert_eq!(
+        dma["actual_health"],
+        Value::String("host_validation_failed".to_string())
+    );
+    assert_eq!(dma["actual_focus_test_id"], Value::from(5));
+    assert_eq!(
+        dma["actual_focus_domain"],
+        Value::String("dma.oam_transfer".to_string())
+    );
+    assert_eq!(dma["expectation_met"], Value::Bool(true));
+    assert_eq!(dma["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(
+        dma["contract"]["expected_focus_domain"],
+        Value::String("dma.oam_transfer".to_string())
+    );
+    assert!(dma["failed_probe_ids"]
+        .as_array()
+        .expect("DMA failed probes should be an array")
+        .iter()
+        .any(|probe| probe == &Value::String("oam.dma_checksum".to_string())));
+    assert_eq!(dma["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        dma["comparison"]["difference_count"]
+            .as_u64()
+            .expect("DMA comparison difference_count should be numeric")
+            > 0
+    );
+    let dma_triage = read_json(&suite_dir.join("dma_oam_transfer_fault").join("triage.json"));
+    assert_eq!(
+        dma_triage["input"]["fault_injection"],
+        Value::String("dma_oam_transfer".to_string())
+    );
+    assert_eq!(
+        dma_triage["debug_focus"]["failure_kind"],
+        Value::String("host_validation".to_string())
+    );
+    assert_eq!(
+        dma_triage["failure"]["likely_domain"],
+        Value::String("dma.oam_transfer".to_string())
+    );
+    assert!(dma_triage["probes"]["failed"]
+        .as_array()
+        .expect("DMA triage failed probes should be an array")
+        .iter()
+        .any(|probe| probe["id"] == Value::String("oam.dma_checksum".to_string())));
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("dma_oam_transfer_fault"),
+        true,
+        false,
+        "0x28",
+        Some("dma_oam_transfer"),
+    );
 
     let cpu = find_scenario(scenarios, "cpu_zero_page_wrap_fault");
     assert_eq!(
@@ -853,7 +961,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(20));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(21));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -948,7 +1056,7 @@ fn assert_bundle_artifacts_with_config(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(2));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(20));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(21));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

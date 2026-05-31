@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 20;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 21;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v20";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v21";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -49,6 +49,7 @@ const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
+const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -627,6 +628,7 @@ impl Default for DiagnosticConfig {
 pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
+    DmaOamTransfer,
     PpuVramReadBuffer,
 }
 
@@ -635,6 +637,7 @@ impl DiagnosticFaultInjection {
         match self {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
+            DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
     }
@@ -643,6 +646,7 @@ impl DiagnosticFaultInjection {
         match self {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
+            DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
     }
@@ -1441,26 +1445,6 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ));
     }
 
-    let passed = status == STATUS_PASS && !timeout && host_failures.is_empty();
-    let failure = failure_telemetry(
-        passed,
-        status,
-        timeout,
-        current_test,
-        failure_code,
-        &host_failures,
-    );
-    let verdict = VerdictTelemetry {
-        passed,
-        status,
-        timeout,
-        current_test,
-        current_test_name: test_name(current_test),
-        failure_code,
-        failure,
-        host_failures,
-    };
-    let timeline = test_timeline(&test_results, &events, &verdict, cycles, frames, cpu.pc);
     let probes = probe_telemetry(ProbeTelemetryInput {
         status,
         timeout,
@@ -1474,6 +1458,27 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         audio_sample_count,
         frames,
     });
+    let passed = status == STATUS_PASS && !timeout && host_failures.is_empty();
+    let failure = failure_telemetry(
+        passed,
+        status,
+        timeout,
+        current_test,
+        failure_code,
+        &host_failures,
+        &probes,
+    );
+    let verdict = VerdictTelemetry {
+        passed,
+        status,
+        timeout,
+        current_test,
+        current_test_name: test_name(current_test),
+        failure_code,
+        failure,
+        host_failures,
+    };
+    let timeline = test_timeline(&test_results, &events, &verdict, cycles, frames, cpu.pc);
     let instruction_trace = instruction_trace.telemetry();
     let analysis = analysis_telemetry(AnalysisTelemetryInput {
         verdict: &verdict,
@@ -3536,6 +3541,9 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x4013); // 17 bytes, enough to request again during OAM DMA.
         self.asm.lda_imm(0x10);
         self.asm.sta_abs(0x4015); // Prime an immediate DMC sample fetch.
+        self.asm
+            .label(DMA_OAM_TRANSFER_FAULT_LABEL)
+            .expect("fault injection label should not collide");
         self.asm.lda_imm(0x03);
         self.asm.sta_abs(0x4014);
         self.asm.lda_imm(0x00);
@@ -4162,6 +4170,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuZeroPageIndexWrap => {
             bus.cpu_write(0x0080, 0x00);
         }
+        DiagnosticFaultInjection::DmaOamTransfer => {
+            bus.cpu_write(0x0300, 0xFF);
+        }
         DiagnosticFaultInjection::PpuVramReadBuffer => {
             bus.cpu_write(0x2006, 0x20);
             bus.cpu_write(0x2006, 0x00);
@@ -4253,6 +4264,7 @@ fn failure_telemetry(
     current_test: u8,
     failure_code: u8,
     host_failures: &[String],
+    probes: &[DiagnosticProbeTelemetry],
 ) -> Option<DiagnosticFailureTelemetry> {
     if passed {
         return None;
@@ -4319,25 +4331,60 @@ fn failure_telemetry(
         });
     }
 
+    let failed_probe = primary_failed_probe(probes);
+    let failure_test_id = failed_probe
+        .and_then(|probe| probe.test_id)
+        .unwrap_or(current_test);
+    let failure_spec = test_spec(failure_test_id);
+    let failure_test_name = failed_probe
+        .and_then(|probe| probe.test_name)
+        .or_else(|| failure_spec.map(|spec| spec.name));
+    let failure_subsystem = failed_probe
+        .and_then(|probe| probe.subsystem)
+        .or_else(|| failure_spec.map(|spec| spec.subsystem));
+
     Some(DiagnosticFailureTelemetry {
         kind: DiagnosticFailureKind::HostValidation,
-        test_id: current_test,
-        test_name: current_spec.map(|spec| spec.name),
-        subsystem: current_spec.map(|spec| spec.subsystem),
-        tier: current_spec.map(|spec| spec.tier),
+        test_id: failure_test_id,
+        test_name: failure_test_name,
+        subsystem: failure_subsystem,
+        tier: failure_spec.map(|spec| spec.tier),
         failure_code,
         failure_code_hex: hex_byte(failure_code),
-        assertion: "host-side diagnostic validation completed without failures".to_string(),
-        expected: "host_failures is empty after cartridge completion".to_string(),
-        observed: if host_failures.is_empty() {
-            "host validation failed without a detailed message".to_string()
-        } else {
-            host_failures.join("; ")
-        },
-        likely_domain: "host.validation".to_string(),
-        remediation_hint:
-            "Inspect host telemetry checks for OAM, frame, audio, RAM signature, and per-test result bytes."
-                .to_string(),
+        assertion: failed_probe.map_or_else(
+            || "host-side diagnostic validation completed without failures".to_string(),
+            |probe| probe.description.clone(),
+        ),
+        expected: failed_probe.map_or_else(
+            || "host_failures is empty after cartridge completion".to_string(),
+            |probe| probe.expected.clone(),
+        ),
+        observed: failed_probe.map_or_else(
+            || {
+                if host_failures.is_empty() {
+                    "host validation failed without a detailed message".to_string()
+                } else {
+                    host_failures.join("; ")
+                }
+            },
+            |probe| probe.observed.clone(),
+        ),
+        likely_domain: failed_probe.map_or_else(
+            || "host.validation".to_string(),
+            |probe| probe.likely_domain.clone(),
+        ),
+        remediation_hint: failed_probe.map_or_else(
+            || {
+                "Inspect host telemetry checks for OAM, frame, audio, RAM signature, and per-test result bytes."
+                    .to_string()
+            },
+            |probe| {
+                format!(
+                    "Inspect failed probe {} plus its subsystem telemetry before broadening the search.",
+                    probe.id
+                )
+            },
+        ),
     })
 }
 
@@ -5043,6 +5090,12 @@ fn known_test_id(id: u8) -> Option<u8> {
 
 fn first_failed_test(tests: &[TestTelemetry]) -> Option<&TestTelemetry> {
     tests.iter().find(|test| !test.passed)
+}
+
+fn primary_failed_probe(probes: &[DiagnosticProbeTelemetry]) -> Option<&DiagnosticProbeTelemetry> {
+    probes
+        .iter()
+        .find(|probe| probe.status == DiagnosticProbeStatus::Failed)
 }
 
 fn test_spec(id: u8) -> Option<&'static DiagnosticTestSpec> {

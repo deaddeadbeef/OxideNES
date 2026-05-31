@@ -590,6 +590,91 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::DmaOamTransfer),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported DMA host-observation failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("dma_oam_transfer")
+    );
+    assert_eq!(telemetry.verdict.status, 0x80);
+    assert_eq!(telemetry.verdict.current_test, 14);
+    assert_eq!(telemetry.verdict.failure_code, 0x00);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("host-observation failure should include failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::HostValidation);
+    assert_eq!(failure.test_id, 5);
+    assert_eq!(failure.test_name, Some("oam_dma_transfer"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Dma));
+    assert_eq!(failure.likely_domain, "dma.oam_transfer");
+    assert!(failure.assertion.contains("PPU OAM contents"));
+    assert!(failure.expected.contains("OAM checksum"));
+    assert!(failure.observed.contains("OAM checksum"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::HostValidationFailed
+    );
+    assert_eq!(telemetry.analysis.failing_test, Some("oam_dma_transfer"));
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("dma.oam_transfer")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 5);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_test_name,
+        Some("oam_dma_transfer")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_subsystem,
+        Some(DiagnosticSubsystem::Dma)
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("dma.oam_transfer")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.failure_kind,
+        Some(DiagnosticFailureKind::HostValidation)
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"oam.dma_checksum".to_string()));
+
+    assert_eq!(
+        telemetry.analysis.coverage.passed_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert!(telemetry.dma.oam_dma_completed);
+    assert!((telemetry.dma.oam_dma_expected_min_cycles
+        ..=telemetry.dma.oam_dma_expected_max_cycles)
+        .contains(&telemetry.dma.oam_dma_active_cycles));
+    assert_ne!(telemetry.oam.checksum, telemetry.oam.expected_checksum);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "oam.dma_checksum"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(5)
+            && probe.likely_domain == "dma.oam_transfer"
+    }));
+    assert!(telemetry
+        .verdict
+        .host_failures
+        .iter()
+        .any(|failure| failure.contains("OAM DMA checksum mismatch")));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::CpuZeroPageIndexWrap),

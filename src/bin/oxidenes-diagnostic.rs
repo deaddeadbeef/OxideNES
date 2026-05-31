@@ -1713,6 +1713,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("joypad2.strobe_shift"),
         },
         DiagnosticScenarioSpec {
+            id: "dma_oam_transfer_fault",
+            title: "Intentional OAM DMA host-observation failure",
+            purpose:
+                "Failure-localization fixture for host-visible OAM DMA transfer regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::DmaOamTransfer),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::HostValidationFailed,
+            expected_focus_test_id: Some(5),
+            expected_focus_domain: Some("dma.oam_transfer"),
+        },
+        DiagnosticScenarioSpec {
             id: "cpu_zero_page_wrap_fault",
             title: "Intentional zero-page indexed-wrap assertion failure",
             purpose: "Failure-localization fixture for zero-page indexed addressing wrap regressions.",
