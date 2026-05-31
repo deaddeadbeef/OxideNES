@@ -24,7 +24,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - The generated diagnostic cartridge bundle contains `manifest.json`, `triage.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`; when a baseline is supplied it also contains `comparison.json` and `comparison.md`.
 - `triage.json` and `telemetry.json` include explicit known coverage gaps so release evidence does not overstate cartridge coverage.
 - `telemetry.json` includes actual and expected joypad masks for both controller ports, and the diagnostic cartridge exercises `$4016` and `$4017` serial reads.
-- `telemetry.json` includes OAM DMA start/end and active-cycle telemetry proving the transfer completed within the expected 513-514 CPU-cycle bucket.
+- `telemetry.json` includes OAM DMA start/end, active-cycle, first active-cycle parity, and DMC-overlap telemetry proving the transfer completed within the expected 513-514 CPU-cycle bucket while a DMC sample DMA fetch was serviced during the OAM stall window.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.
 - PPU mirroring and save-state truncation regressions pass.
 - Malformed user inputs for save states, recordings, scripts, updater payloads, ROM metadata, and cartridge headers fail closed without panics.

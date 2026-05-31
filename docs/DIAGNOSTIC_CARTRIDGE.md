@@ -79,6 +79,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
+  and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
 - Joypad strobe and shift reads
 - Taken CPU branch crossing a page boundary
@@ -158,3 +159,12 @@ completed, the active CPU-stall cycle count, the expected 513-514 cycle bucket,
 start/end cycles, and the associated diagnostic test. This turns DMA evidence
 from a final OAM checksum into timing-aware telemetry that automated debuggers
 can compare against baselines.
+
+Schema version `9` makes the OAM DMA test exercise DMC interaction instead of
+only the clean transfer path. The cartridge primes fastest-rate DMC playback
+before starting OAM DMA, and the host runner records first active-cycle parity,
+DMC sample fetch counts, whether a DMC fetch was serviced during the OAM DMA
+window, the overlap cycle/test context, and the queued/post-OAM DMC stall
+cycles. The report, triage JSON, probes, and baseline comparison all expose
+these fields so timing regressions can be localized to DMA interleaving rather
+than reduced to a final OAM checksum.

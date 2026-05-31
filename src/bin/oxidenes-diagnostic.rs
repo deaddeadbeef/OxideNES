@@ -134,8 +134,21 @@ struct DiagnosticTriageDma {
     oam_dma_expected_max_cycles: u64,
     oam_dma_start_cycle: Option<u64>,
     oam_dma_end_cycle: Option<u64>,
+    oam_dma_first_active_cycle: Option<u64>,
+    oam_dma_first_active_cycle_parity: Option<&'static str>,
     oam_dma_start_test_name: Option<&'static str>,
     oam_dma_end_test_name: Option<&'static str>,
+    dmc_dma_fetches_observed: u64,
+    dmc_dma_fetches_during_oam_dma: u64,
+    dmc_dma_expected_min_oam_overlap_fetches: u64,
+    dmc_dma_oam_overlap_observed: bool,
+    dmc_dma_first_fetch_cycle: Option<u64>,
+    dmc_dma_first_fetch_address: Option<u16>,
+    dmc_dma_first_oam_overlap_cycle: Option<u64>,
+    dmc_dma_first_oam_overlap_test_name: Option<&'static str>,
+    dmc_dma_stall_cycles: u64,
+    dmc_dma_stall_cycles_after_oam_dma: u64,
+    dmc_dma_queued_during_oam_dma_cycles: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -617,8 +630,25 @@ fn diagnostic_triage_report(
             oam_dma_expected_max_cycles: telemetry.dma.oam_dma_expected_max_cycles,
             oam_dma_start_cycle: telemetry.dma.oam_dma_start_cycle,
             oam_dma_end_cycle: telemetry.dma.oam_dma_end_cycle,
+            oam_dma_first_active_cycle: telemetry.dma.oam_dma_first_active_cycle,
+            oam_dma_first_active_cycle_parity: telemetry.dma.oam_dma_first_active_cycle_parity,
             oam_dma_start_test_name: telemetry.dma.oam_dma_start_test_name,
             oam_dma_end_test_name: telemetry.dma.oam_dma_end_test_name,
+            dmc_dma_fetches_observed: telemetry.dma.dmc_dma_fetches_observed,
+            dmc_dma_fetches_during_oam_dma: telemetry.dma.dmc_dma_fetches_during_oam_dma,
+            dmc_dma_expected_min_oam_overlap_fetches: telemetry
+                .dma
+                .dmc_dma_expected_min_oam_overlap_fetches,
+            dmc_dma_oam_overlap_observed: telemetry.dma.dmc_dma_oam_overlap_observed,
+            dmc_dma_first_fetch_cycle: telemetry.dma.dmc_dma_first_fetch_cycle,
+            dmc_dma_first_fetch_address: telemetry.dma.dmc_dma_first_fetch_address,
+            dmc_dma_first_oam_overlap_cycle: telemetry.dma.dmc_dma_first_oam_overlap_cycle,
+            dmc_dma_first_oam_overlap_test_name: telemetry.dma.dmc_dma_first_oam_overlap_test_name,
+            dmc_dma_stall_cycles: telemetry.dma.dmc_dma_stall_cycles,
+            dmc_dma_stall_cycles_after_oam_dma: telemetry.dma.dmc_dma_stall_cycles_after_oam_dma,
+            dmc_dma_queued_during_oam_dma_cycles: telemetry
+                .dma
+                .dmc_dma_queued_during_oam_dma_cycles,
         },
         probes: triage_probe_summary(telemetry)?,
         timing: triage_timing(telemetry)?,

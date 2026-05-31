@@ -70,11 +70,24 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.dma.oam_dma_observed);
     assert!(telemetry.dma.oam_dma_completed);
     assert!((513..=514).contains(&telemetry.dma.oam_dma_active_cycles));
+    assert!(matches!(
+        telemetry.dma.oam_dma_first_active_cycle_parity,
+        Some("even") | Some("odd")
+    ));
     assert_eq!(telemetry.dma.oam_dma_start_test, Some(5));
     assert_eq!(
         telemetry.dma.oam_dma_start_test_name,
         Some("oam_dma_transfer")
     );
+    assert!(telemetry.dma.dmc_dma_fetches_observed >= 2);
+    assert!(telemetry.dma.dmc_dma_fetches_during_oam_dma >= 1);
+    assert!(telemetry.dma.dmc_dma_oam_overlap_observed);
+    assert_eq!(telemetry.dma.dmc_dma_first_oam_overlap_test, Some(5));
+    assert_eq!(
+        telemetry.dma.dmc_dma_first_oam_overlap_test_name,
+        Some("oam_dma_transfer")
+    );
+    assert!(telemetry.dma.dmc_dma_stall_cycles_after_oam_dma >= 4);
     assert!(telemetry
         .events
         .iter()
@@ -88,6 +101,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .events
         .iter()
         .any(|event| event.note == "oam_dma_completed"
+            && event.current_test_name == Some("oam_dma_transfer")));
+    assert!(telemetry
+        .events
+        .iter()
+        .any(|event| event.note == "dmc_dma_oam_overlap"
             && event.current_test_name == Some("oam_dma_transfer")));
     assert!(telemetry
         .events
@@ -135,6 +153,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.observed.contains("active cycles")
     }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "dma.dmc_oam_overlap"
+            && probe.test_name == Some("oam_dma_transfer")
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.observed.contains("overlapping fetches")
+    }));
     assert!(telemetry
         .analysis
         .timing
@@ -163,6 +187,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## DMA Timing"));
     assert!(report.contains("| OAM DMA completed | true |"));
     assert!(report.contains("| Active cycles / expected |"));
+    assert!(report.contains("| DMC fetches / overlapping fetches |"));
+    assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
     assert!(report.contains("## Timing"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
@@ -503,6 +529,7 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
     let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic should run");
     let mut baseline = serde_json::to_value(&telemetry).expect("telemetry should serialize");
     baseline["dma"]["oam_dma_active_cycles"] = serde_json::Value::from(1);
+    baseline["dma"]["dmc_dma_fetches_during_oam_dma"] = serde_json::Value::from(0);
     let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
 
     let comparison =
@@ -513,6 +540,11 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
         difference.severity == DiagnosticComparisonSeverity::Warning
             && difference.category == "dma"
             && difference.path == "dma.oam_dma_active_cycles"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "dma"
+            && difference.path == "dma.dmc_dma_fetches_during_oam_dma"
     }));
 }
 
