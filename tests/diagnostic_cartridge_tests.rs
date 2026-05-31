@@ -1,7 +1,7 @@
 use oxidenes::diagnostic::{
     build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DiagnosticFailureKind,
-    DiagnosticHealth, DiagnosticSubsystem, DIAGNOSTIC_PROVENANCE,
-    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    DiagnosticHealth, DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome,
+    DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -58,6 +58,33 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .events
         .iter()
         .any(|event| event.current_test_name == Some("joypad_overread_returns_one")));
+    assert_eq!(telemetry.timeline.len(), DIAGNOSTIC_TESTS.len());
+    assert_eq!(
+        telemetry.analysis.timing.started_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(
+        telemetry.analysis.timing.ended_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.timed_out_tests, 0);
+    assert!(telemetry
+        .analysis
+        .timing
+        .slowest_test
+        .as_ref()
+        .is_some_and(|test| test.duration_cycles > 0));
+    assert!(telemetry.timeline.iter().all(|test| {
+        test.outcome == TestTimelineOutcome::Passed
+            && test.started
+            && test.ended
+            && test.duration_cycles.is_some()
+    }));
+    assert_eq!(
+        telemetry.timeline.last().map(|test| test.end_reason),
+        Some(Some(TestTimelineEndReason::CartridgePassed))
+    );
     assert!(telemetry.cycles > 0);
     assert!(telemetry.frames >= 2);
 }
@@ -116,6 +143,30 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
         .next_actions
         .iter()
         .any(|action| action.contains("joypad strobe")));
+
+    assert_eq!(telemetry.analysis.timing.started_tests, 7);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 7);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    let failing_timeline = telemetry
+        .timeline
+        .iter()
+        .find(|test| test.test_id == 7)
+        .expect("failing test should have timeline telemetry");
+    assert_eq!(failing_timeline.test_name, "joypad_strobe_shift");
+    assert_eq!(failing_timeline.outcome, TestTimelineOutcome::Failed);
+    assert_eq!(
+        failing_timeline.end_reason,
+        Some(TestTimelineEndReason::CartridgeFailed)
+    );
+    assert_eq!(failing_timeline.terminal_status, Some(0xE0));
+    assert!(failing_timeline
+        .duration_cycles
+        .is_some_and(|duration| duration > 0));
+    assert!(telemetry
+        .timeline
+        .iter()
+        .filter(|test| test.test_id > 7)
+        .all(|test| test.outcome == TestTimelineOutcome::NotStarted));
 }
 
 #[test]
@@ -154,6 +205,17 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
         .next_actions
         .iter()
         .any(|action| action.contains("CPU PC")));
+    assert_eq!(telemetry.analysis.timing.started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 0);
+    assert_eq!(
+        telemetry.analysis.timing.not_started_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert!(telemetry.analysis.timing.slowest_test.is_none());
+    assert!(telemetry
+        .timeline
+        .iter()
+        .all(|test| test.outcome == TestTimelineOutcome::NotStarted));
 }
 
 #[test]

@@ -47,6 +47,13 @@ test/subsystem, event transition count, and next debugging actions. This is
 derived from the raw telemetry so an AI or CI report can start with a compact
 diagnostic summary and drill into raw events only when needed.
 
+Schema version `4` adds a top-level `timeline` array and an
+`analysis.timing` summary. Each timeline entry maps one diagnostic test to its
+observed start/end cycles, frame span, duration, outcome, end reason, terminal
+status byte, and terminal PC. This makes slow tests, skipped tests, assertion
+failures, and mid-test timeouts explicit without forcing automated consumers to
+reconstruct timing from raw events first.
+
 The cartridge writes status bytes into CPU RAM:
 
 - `$00F0`: status, `0x01` running, `0x80` pass, `0xE0` fail
@@ -56,4 +63,4 @@ The cartridge writes status bytes into CPU RAM:
 - `$00F4`: NMI count
 - `$0200..`: per-test result slots, `0x01` means pass
 
-The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, failure-localization metadata, and a derived analysis summary.
+The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, failure-localization metadata, per-test timeline/duration telemetry, and a derived analysis summary.
