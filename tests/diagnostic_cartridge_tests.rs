@@ -1,8 +1,9 @@
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, format_diagnostic_report, run_diagnostic, DiagnosticConfig,
-    DiagnosticFailureKind, DiagnosticHealth, DiagnosticSubsystem, TestTimelineEndReason,
-    TestTimelineOutcome, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
-    DIAGNOSTIC_TESTS,
+    build_diagnostic_cartridge, compare_diagnostic_to_baseline,
+    format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
+    DiagnosticComparisonSeverity, DiagnosticConfig, DiagnosticFailureKind, DiagnosticHealth,
+    DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome, DIAGNOSTIC_PROVENANCE,
+    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -240,6 +241,90 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
     assert!(report.contains("| Not started tests | 10 |"));
     assert!(report.contains("| Slowest test | none |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_compares_against_matching_baseline() {
+    let baseline = run_diagnostic(DiagnosticConfig::default()).expect("baseline should run");
+    let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
+    let current = run_diagnostic(DiagnosticConfig::default()).expect("current should run");
+
+    let comparison =
+        compare_diagnostic_to_baseline(&current, &baseline_json).expect("comparison should run");
+
+    assert!(comparison.passed);
+    assert_eq!(comparison.difference_count, 0);
+    assert_eq!(comparison.failure_count, 0);
+    assert_eq!(comparison.warning_count, 0);
+    assert_eq!(
+        comparison.current_schema_version,
+        DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
+    );
+    assert_eq!(
+        comparison.baseline_schema_version,
+        Some(DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION as u64)
+    );
+    let report = format_diagnostic_comparison_report(&comparison);
+    assert!(report.contains("# OxideNES Diagnostic Baseline Comparison"));
+    assert!(report.contains("| Result | pass |"));
+    assert!(report.contains("No baseline differences detected."));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_comparison_fails_on_assertion_regression() {
+    let baseline = run_diagnostic(DiagnosticConfig::default()).expect("baseline should run");
+    let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
+    let current = run_diagnostic(DiagnosticConfig {
+        joypad1_mask: 0x00,
+        ..DiagnosticConfig::default()
+    })
+    .expect("current should run to reported failure");
+
+    let comparison =
+        compare_diagnostic_to_baseline(&current, &baseline_json).expect("comparison should run");
+
+    assert!(!comparison.passed);
+    assert!(comparison.failure_count >= 1);
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Failure
+            && difference.path == "verdict.passed"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Failure
+            && difference.path == "timeline[7].outcome"
+            && difference.current.as_deref() == Some("failed")
+    }));
+    let report = format_diagnostic_comparison_report(&comparison);
+    assert!(report.contains("| Result | fail |"));
+    assert!(report.contains("diagnostic comparison failed"));
+    assert!(report.contains("| failure | timeline | timeline[7].outcome | passed | failed |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_comparison_warns_on_timing_regression() {
+    let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic should run");
+    let mut baseline = serde_json::to_value(&telemetry).expect("telemetry should serialize");
+    let timeline = baseline["timeline"]
+        .as_array_mut()
+        .expect("baseline should include timeline");
+    let test = timeline
+        .iter_mut()
+        .find(|entry| entry["test_id"].as_u64() == Some(10))
+        .expect("baseline should include test 10");
+    test["duration_cycles"] = serde_json::Value::from(1);
+    let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
+
+    let comparison =
+        compare_diagnostic_to_baseline(&telemetry, &baseline_json).expect("comparison should run");
+
+    assert!(comparison.passed);
+    assert_eq!(comparison.failure_count, 0);
+    assert!(comparison.warning_count >= 1);
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "timing"
+            && difference.path == "timeline[10].duration_cycles"
+    }));
 }
 
 #[test]

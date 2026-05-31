@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::bus::Bus;
 use crate::cartridge::Cartridge;
@@ -644,6 +645,37 @@ pub struct EventTelemetry {
     pub note: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DiagnosticComparisonTelemetry {
+    pub baseline_schema_version: Option<u64>,
+    pub current_schema_version: u16,
+    pub passed: bool,
+    pub summary: String,
+    pub difference_count: usize,
+    pub failure_count: usize,
+    pub warning_count: usize,
+    pub info_count: usize,
+    pub differences: Vec<DiagnosticComparisonDifferenceTelemetry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticComparisonSeverity {
+    Failure,
+    Warning,
+    Info,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticComparisonDifferenceTelemetry {
+    pub severity: DiagnosticComparisonSeverity,
+    pub category: &'static str,
+    pub path: String,
+    pub baseline: Option<String>,
+    pub current: Option<String>,
+    pub note: String,
+}
+
 pub fn build_diagnostic_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_program_with_labels()?;
     if program.len() > PRG_SIZE {
@@ -876,6 +908,115 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         },
         events,
     })
+}
+
+pub fn compare_diagnostic_to_baseline(
+    telemetry: &DiagnosticTelemetry,
+    baseline_json: &str,
+) -> Result<DiagnosticComparisonTelemetry, String> {
+    let baseline: Value = serde_json::from_str(baseline_json)
+        .map_err(|err| format!("failed to parse baseline diagnostic JSON: {err}"))?;
+    let current = serde_json::to_value(telemetry)
+        .map_err(|err| format!("failed to serialize current diagnostic telemetry: {err}"))?;
+    let mut differences = Vec::new();
+
+    compare_schema(&baseline, &current, &mut differences);
+    compare_verdict(&baseline, &current, &mut differences);
+    compare_coverage(&baseline, &current, &mut differences);
+    compare_observation_checksums(&baseline, &current, &mut differences);
+    compare_timeline(&baseline, &current, &mut differences);
+
+    let failure_count = differences
+        .iter()
+        .filter(|difference| difference.severity == DiagnosticComparisonSeverity::Failure)
+        .count();
+    let warning_count = differences
+        .iter()
+        .filter(|difference| difference.severity == DiagnosticComparisonSeverity::Warning)
+        .count();
+    let info_count = differences
+        .iter()
+        .filter(|difference| difference.severity == DiagnosticComparisonSeverity::Info)
+        .count();
+    let passed = failure_count == 0;
+    let summary = comparison_summary(passed, failure_count, warning_count, info_count);
+
+    Ok(DiagnosticComparisonTelemetry {
+        baseline_schema_version: json_u64(&baseline, &["schema_version"]),
+        current_schema_version: telemetry.schema_version,
+        passed,
+        summary,
+        difference_count: differences.len(),
+        failure_count,
+        warning_count,
+        info_count,
+        differences,
+    })
+}
+
+pub fn format_diagnostic_comparison_report(comparison: &DiagnosticComparisonTelemetry) -> String {
+    let mut report = String::new();
+
+    writeln!(report, "# OxideNES Diagnostic Baseline Comparison").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "## Verdict").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "{}", comparison.summary).expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Result | {} |",
+        if comparison.passed { "pass" } else { "fail" }
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Schema versions | baseline {}, current {} |",
+        comparison
+            .baseline_schema_version
+            .map(|version| version.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        comparison.current_schema_version
+    )
+    .expect("write report");
+    writeln!(report, "| Differences | {} |", comparison.difference_count).expect("write report");
+    writeln!(report, "| Failures | {} |", comparison.failure_count).expect("write report");
+    writeln!(report, "| Warnings | {} |", comparison.warning_count).expect("write report");
+    writeln!(report, "| Info | {} |", comparison.info_count).expect("write report");
+    writeln!(report).expect("write report");
+
+    writeln!(report, "## Differences").expect("write report");
+    writeln!(report).expect("write report");
+    if comparison.differences.is_empty() {
+        writeln!(report, "No baseline differences detected.").expect("write report");
+        writeln!(report).expect("write report");
+        return report;
+    }
+
+    writeln!(
+        report,
+        "| Severity | Category | Path | Baseline | Current | Note |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- |").expect("write report");
+    for difference in &comparison.differences {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} |",
+            diagnostic_comparison_severity_label(difference.severity),
+            difference.category,
+            difference.path,
+            difference.baseline.as_deref().unwrap_or("missing"),
+            difference.current.as_deref().unwrap_or("missing"),
+            difference.note
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+
+    report
 }
 
 pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
@@ -2491,6 +2632,417 @@ fn failure_spec(code: u8) -> Option<&'static DiagnosticFailureSpec> {
         .find(|failure| failure.code == code)
 }
 
+fn compare_schema(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    compare_optional_value(
+        baseline,
+        current,
+        &["schema_version"],
+        "schema",
+        DiagnosticComparisonSeverity::Warning,
+        "baseline and current telemetry use different schema versions",
+        differences,
+    );
+    compare_optional_value(
+        baseline,
+        current,
+        &["suite", "version"],
+        "suite",
+        DiagnosticComparisonSeverity::Warning,
+        "diagnostic suite version changed from baseline",
+        differences,
+    );
+}
+
+fn compare_verdict(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    if json_bool(baseline, &["verdict", "passed"]) != json_bool(current, &["verdict", "passed"]) {
+        let current_passed = json_bool(current, &["verdict", "passed"]).unwrap_or(false);
+        push_difference(
+            differences,
+            if current_passed {
+                DiagnosticComparisonSeverity::Info
+            } else {
+                DiagnosticComparisonSeverity::Failure
+            },
+            "verdict",
+            "verdict.passed",
+            json_path_display(baseline, &["verdict", "passed"]),
+            json_path_display(current, &["verdict", "passed"]),
+            if current_passed {
+                "current run passes where baseline did not"
+            } else {
+                "current run fails where baseline passed or was missing"
+            },
+        );
+    }
+
+    if json_string(baseline, &["analysis", "health"])
+        != json_string(current, &["analysis", "health"])
+    {
+        let current_health = json_string(current, &["analysis", "health"]);
+        push_difference(
+            differences,
+            if current_health.as_deref() == Some("healthy") {
+                DiagnosticComparisonSeverity::Info
+            } else {
+                DiagnosticComparisonSeverity::Failure
+            },
+            "verdict",
+            "analysis.health",
+            json_path_display(baseline, &["analysis", "health"]),
+            json_path_display(current, &["analysis", "health"]),
+            "diagnostic health changed from baseline",
+        );
+    }
+
+    compare_optional_value(
+        baseline,
+        current,
+        &["analysis", "first_failure_domain"],
+        "verdict",
+        DiagnosticComparisonSeverity::Warning,
+        "first failure domain changed",
+        differences,
+    );
+}
+
+fn compare_coverage(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    compare_u64_regression(
+        baseline,
+        current,
+        U64RegressionComparison {
+            path: &["analysis", "coverage", "passed_tests"],
+            category: "coverage",
+            lower_is_regression: true,
+            regression_note: "fewer diagnostic tests passed than in baseline",
+            improvement_note: "more diagnostic tests passed than in baseline",
+        },
+        differences,
+    );
+    compare_u64_regression(
+        baseline,
+        current,
+        U64RegressionComparison {
+            path: &["analysis", "coverage", "failed_tests"],
+            category: "coverage",
+            lower_is_regression: false,
+            regression_note: "more diagnostic tests failed than in baseline",
+            improvement_note: "fewer diagnostic tests failed than in baseline",
+        },
+        differences,
+    );
+    compare_u64_regression(
+        baseline,
+        current,
+        U64RegressionComparison {
+            path: &["analysis", "timing", "not_started_tests"],
+            category: "coverage",
+            lower_is_regression: false,
+            regression_note: "more diagnostic tests were skipped or not reached than in baseline",
+            improvement_note: "fewer diagnostic tests were skipped or not reached than in baseline",
+        },
+        differences,
+    );
+}
+
+fn compare_observation_checksums(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    compare_optional_value(
+        baseline,
+        current,
+        &["ram", "signature"],
+        "state",
+        DiagnosticComparisonSeverity::Failure,
+        "diagnostic RAM signature changed",
+        differences,
+    );
+    for path in [
+        &["cartridge", "rom_hash"][..],
+        &["oam", "checksum"][..],
+        &["frame", "checksum"][..],
+        &["frame", "unique_colors"][..],
+        &["audio", "sample_count"][..],
+    ] {
+        compare_optional_value(
+            baseline,
+            current,
+            path,
+            "observation",
+            DiagnosticComparisonSeverity::Warning,
+            "observable diagnostic artifact changed from baseline",
+            differences,
+        );
+    }
+}
+
+fn compare_timeline(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    let baseline_timeline = timeline_by_id(baseline);
+    let current_timeline = timeline_by_id(current);
+
+    for (test_id, current_test) in &current_timeline {
+        let path = format!("timeline[{test_id}]");
+        let Some(baseline_test) = baseline_timeline.get(test_id) else {
+            push_difference(
+                differences,
+                DiagnosticComparisonSeverity::Info,
+                "timeline",
+                &path,
+                None,
+                Some("present".to_string()),
+                "current run includes a test that was not present in baseline timeline",
+            );
+            continue;
+        };
+
+        let baseline_outcome = json_string(baseline_test, &["outcome"]);
+        let current_outcome = json_string(current_test, &["outcome"]);
+        if baseline_outcome != current_outcome {
+            push_difference(
+                differences,
+                if current_outcome.as_deref() == Some("passed") {
+                    DiagnosticComparisonSeverity::Info
+                } else {
+                    DiagnosticComparisonSeverity::Failure
+                },
+                "timeline",
+                &format!("{path}.outcome"),
+                baseline_outcome,
+                current_outcome.clone(),
+                "per-test outcome changed from baseline",
+            );
+        }
+
+        compare_test_duration(*test_id, baseline_test, current_test, differences);
+    }
+
+    for test_id in baseline_timeline.keys() {
+        if !current_timeline.contains_key(test_id) {
+            push_difference(
+                differences,
+                DiagnosticComparisonSeverity::Failure,
+                "timeline",
+                &format!("timeline[{test_id}]"),
+                Some("present".to_string()),
+                None,
+                "baseline test is missing from current timeline",
+            );
+        }
+    }
+}
+
+fn compare_test_duration(
+    test_id: u64,
+    baseline_test: &Value,
+    current_test: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    let baseline_duration = json_u64(baseline_test, &["duration_cycles"]);
+    let current_duration = json_u64(current_test, &["duration_cycles"]);
+    match (baseline_duration, current_duration) {
+        (Some(baseline_duration), Some(current_duration)) => {
+            let tolerance = 1_000u64.max(baseline_duration / 4);
+            if current_duration > baseline_duration.saturating_add(tolerance) {
+                push_difference(
+                    differences,
+                    DiagnosticComparisonSeverity::Warning,
+                    "timing",
+                    &format!("timeline[{test_id}].duration_cycles"),
+                    Some(baseline_duration.to_string()),
+                    Some(current_duration.to_string()),
+                    "test duration exceeded baseline by more than 25 percent or 1000 cycles",
+                );
+            }
+        }
+        (Some(baseline_duration), None) => push_difference(
+            differences,
+            DiagnosticComparisonSeverity::Warning,
+            "timing",
+            &format!("timeline[{test_id}].duration_cycles"),
+            Some(baseline_duration.to_string()),
+            None,
+            "baseline had a duration but current run did not",
+        ),
+        _ => {}
+    }
+}
+
+fn compare_optional_value(
+    baseline: &Value,
+    current: &Value,
+    path: &[&str],
+    category: &'static str,
+    severity: DiagnosticComparisonSeverity,
+    note: &'static str,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    let baseline_value = json_path_display(baseline, path);
+    let current_value = json_path_display(current, path);
+    if baseline_value != current_value {
+        push_difference(
+            differences,
+            severity,
+            category,
+            &path.join("."),
+            baseline_value,
+            current_value,
+            note,
+        );
+    }
+}
+
+struct U64RegressionComparison<'a> {
+    path: &'a [&'a str],
+    category: &'static str,
+    lower_is_regression: bool,
+    regression_note: &'static str,
+    improvement_note: &'static str,
+}
+
+fn compare_u64_regression(
+    baseline: &Value,
+    current: &Value,
+    comparison: U64RegressionComparison<'_>,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    let baseline_value = json_u64(baseline, comparison.path);
+    let current_value = json_u64(current, comparison.path);
+    if baseline_value == current_value {
+        return;
+    }
+
+    let severity = match (baseline_value, current_value) {
+        (Some(baseline_value), Some(current_value))
+            if comparison.lower_is_regression && current_value < baseline_value =>
+        {
+            DiagnosticComparisonSeverity::Failure
+        }
+        (Some(baseline_value), Some(current_value))
+            if !comparison.lower_is_regression && current_value > baseline_value =>
+        {
+            DiagnosticComparisonSeverity::Failure
+        }
+        _ => DiagnosticComparisonSeverity::Info,
+    };
+    let note = match severity {
+        DiagnosticComparisonSeverity::Failure => comparison.regression_note,
+        _ => comparison.improvement_note,
+    };
+
+    push_difference(
+        differences,
+        severity,
+        comparison.category,
+        &comparison.path.join("."),
+        baseline_value.map(|value| value.to_string()),
+        current_value.map(|value| value.to_string()),
+        note,
+    );
+}
+
+fn push_difference(
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+    severity: DiagnosticComparisonSeverity,
+    category: &'static str,
+    path: &str,
+    baseline: Option<String>,
+    current: Option<String>,
+    note: &'static str,
+) {
+    differences.push(DiagnosticComparisonDifferenceTelemetry {
+        severity,
+        category,
+        path: path.to_string(),
+        baseline,
+        current,
+        note: note.to_string(),
+    });
+}
+
+fn comparison_summary(
+    passed: bool,
+    failure_count: usize,
+    warning_count: usize,
+    info_count: usize,
+) -> String {
+    if passed && warning_count == 0 && info_count == 0 {
+        return "diagnostic comparison passed: current run matches baseline".to_string();
+    }
+    if passed {
+        return format!(
+            "diagnostic comparison passed with {warning_count} warning(s) and {info_count} informational difference(s)"
+        );
+    }
+    format!(
+        "diagnostic comparison failed: {failure_count} regression(s), {warning_count} warning(s), {info_count} informational difference(s)"
+    )
+}
+
+fn timeline_by_id(value: &Value) -> HashMap<u64, &Value> {
+    let mut timeline = HashMap::new();
+    if let Some(entries) = json_at(value, &["timeline"]).and_then(Value::as_array) {
+        for entry in entries {
+            if let Some(test_id) = json_u64(entry, &["test_id"]) {
+                timeline.insert(test_id, entry);
+            }
+        }
+    }
+    timeline
+}
+
+fn json_path_display(value: &Value, path: &[&str]) -> Option<String> {
+    json_at(value, path).and_then(display_json_value)
+}
+
+fn display_json_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(value) => Some(value.clone()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => Some(value.to_string()),
+    }
+}
+
+fn json_bool(value: &Value, path: &[&str]) -> Option<bool> {
+    json_at(value, path).and_then(Value::as_bool)
+}
+
+fn json_u64(value: &Value, path: &[&str]) -> Option<u64> {
+    json_at(value, path).and_then(Value::as_u64)
+}
+
+fn json_string(value: &Value, path: &[&str]) -> Option<String> {
+    json_at(value, path)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn json_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    Some(current)
+}
+
 fn diagnostic_subsystem_label(subsystem: DiagnosticSubsystem) -> &'static str {
     match subsystem {
         DiagnosticSubsystem::Cpu => "cpu",
@@ -2553,6 +3105,14 @@ fn diagnostic_event_kind_label(kind: DiagnosticEventKind) -> &'static str {
         DiagnosticEventKind::StatusChanged => "status_changed",
         DiagnosticEventKind::FrameComplete => "frame_complete",
         DiagnosticEventKind::PostPassFrameComplete => "post_pass_frame_complete",
+    }
+}
+
+fn diagnostic_comparison_severity_label(severity: DiagnosticComparisonSeverity) -> &'static str {
+    match severity {
+        DiagnosticComparisonSeverity::Failure => "failure",
+        DiagnosticComparisonSeverity::Warning => "warning",
+        DiagnosticComparisonSeverity::Info => "info",
     }
 }
 
