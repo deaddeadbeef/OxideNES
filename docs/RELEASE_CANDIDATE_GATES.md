@@ -21,7 +21,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 ### Compatibility And Safety
 
 - CPU fetch/decode execution is covered by generated in-memory test ROM content.
-- The generated diagnostic cartridge bundle contains `manifest.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`; when a baseline is supplied it also contains `comparison.json` and `comparison.md`.
+- The generated diagnostic cartridge bundle contains `manifest.json`, `triage.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`; when a baseline is supplied it also contains `comparison.json` and `comparison.md`.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.
 - PPU mirroring and save-state truncation regressions pass.
 - Malformed user inputs for save states, recordings, scripts, updater payloads, ROM metadata, and cartridge headers fail closed without panics.

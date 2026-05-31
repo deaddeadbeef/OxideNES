@@ -18,6 +18,12 @@ failures, and final event tail. This gives CI logs, issue attachments, and AI
 debugging sessions a stable human-readable entry point while preserving the raw
 JSON for exact tooling.
 
+Use `--triage-json <FILE>` for a compact machine-readable handoff artifact. It
+summarizes verdict, health, current test, first failure, failed/skipped probes,
+timing, optional baseline comparison, next actions, artifact hints, and the
+final event tail without requiring tools to scrape `report.md` or load the full
+telemetry envelope first.
+
 To compare a run against a known-good telemetry baseline:
 
 ```powershell
@@ -40,6 +46,8 @@ The bundle always includes:
 
 - `manifest.json`: bundle schema, pass/fail state, runner config, artifact list,
   SHA-256 digests, and AI handoff hints
+- `triage.json`: compact AI-readable failure focus, next actions, and artifact
+  pointers
 - `telemetry.json`: full machine-readable diagnostic telemetry
 - `report.md`: Markdown triage report for human and AI review
 - `diagnostic.nes`: the generated IP-safe test cartridge used for the run
@@ -52,6 +60,8 @@ post-failure analysis.
 GitHub Actions runs this bundle path in both CI and release workflows. The
 uploaded artifact is named `oxidenes-diagnostic-bundle` and is the preferred
 handoff package for automated debugging, release evidence, and failure triage.
+Start with `manifest.json` for integrity and `triage.json` for the compact
+machine-readable failure focus before loading `telemetry.json`.
 
 ## Coverage
 
