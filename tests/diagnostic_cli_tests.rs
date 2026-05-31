@@ -91,7 +91,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(1));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(2));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["triage_schema_version"], Value::from(5));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
@@ -102,6 +102,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Value::String("pass".to_string())
     );
     assert_eq!(manifest["scenario_count"], Value::from(4));
+    assert_eq!(
+        manifest["artifacts"]["scenario_suite_json"],
+        Value::String("scenario-suite.json".to_string())
+    );
+    assert_eq!(
+        manifest["artifacts"]["scenario_suite_report"],
+        Value::String("scenario-suite.md".to_string())
+    );
     assert!(manifest["ai_handoff"]
         .as_array()
         .expect("scenario ai_handoff should be an array")
@@ -109,6 +117,18 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .any(|entry| entry
             .as_str()
             .is_some_and(|text| text.contains("debug_focus"))));
+
+    let suite_report = fs::read_to_string(suite_dir.join("scenario-suite.md"))
+        .expect("scenario suite report should be readable");
+    assert!(suite_report.contains("# Diagnostic Scenario Suite"));
+    assert!(suite_report.contains("| Scenario | Expected pass | Actual pass |"));
+    assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
+    assert!(suite_report.contains("cartridge.test.7.result"));
+    assert!(suite_report.contains("| timeout_cycle_limit | false | false | true | timed_out | 0 | emulator.progress_or_infinite_loop |"));
+    assert!(suite_report.contains("runtime.completed"));
+    assert!(suite_report.contains("## AI Drilldown"));
+    assert!(suite_report.contains("pass/triage.json"));
+    assert!(suite_report.contains("joypad2_mismatch/comparison.json"));
 
     let scenarios = manifest["scenarios"]
         .as_array()
