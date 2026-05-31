@@ -36,8 +36,7 @@ jobs:
           mkdir -p target/diagnostics
           cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/release-baseline.json --no-stdout
           cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/release-bundle --baseline-json target/diagnostics/release-baseline.json --no-stdout
-          cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/release-scenario-suite --no-stdout
-          python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/release-scenario-suite
+          python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/release-scenario-suite
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
