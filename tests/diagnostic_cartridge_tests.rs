@@ -43,10 +43,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 17);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 18);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_horizontal_nametable_mirroring")
+        Some("joypad_strobe_reset_midstream")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -66,7 +66,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("ppu_horizontal_nametable_mirroring")
+        Some("joypad_strobe_reset_midstream")
     );
     assert_eq!(
         telemetry
@@ -90,6 +90,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .subsystem_summary
         .iter()
         .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 4));
+    assert!(telemetry
+        .analysis
+        .coverage
+        .subsystem_summary
+        .iter()
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Joypad && entry.total == 4));
     assert!(telemetry
         .analysis
         .coverage
@@ -131,6 +137,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && failure.test_name == Some("ppu_horizontal_nametable_mirroring")
             && failure.likely_domain == "ppu.nametables.horizontal_mirroring"
     }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0x78
+            && failure.test_name == Some("joypad_strobe_reset_midstream")
+            && failure.likely_domain == "joypad.strobe_reset"
+    }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "cpu_branch_page_crossing"
@@ -165,6 +176,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "ppu_horizontal_nametable_mirroring"
             && test.intent.contains("horizontal nametable")
+            && test.passed
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "joypad_strobe_reset_midstream"
+            && test.intent.contains("strobe-high/strobe-low")
             && test.passed
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
@@ -363,7 +379,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | ppu_horizontal_nametable_mirroring (17) |"));
+    assert!(report.contains("| Focus test | joypad_strobe_reset_midstream (18) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -392,6 +408,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(
         report.contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | passed |")
     );
+    assert!(report.contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -530,7 +547,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 10);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 11);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -642,7 +659,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 17);
+    assert_eq!(telemetry.verdict.current_test, 18);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -774,7 +791,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 6);
     assert_eq!(telemetry.analysis.timing.ended_tests, 6);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 11);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 12);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -845,7 +862,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failu
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 12);
     assert_eq!(telemetry.analysis.timing.ended_tests, 12);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 6);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -919,7 +936,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 13);
     assert_eq!(telemetry.analysis.timing.ended_tests, 13);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -990,7 +1007,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 14);
     assert_eq!(telemetry.analysis.timing.ended_tests, 14);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1008,6 +1025,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
         .contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | not_started |"));
     assert!(report
         .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
+    assert!(report
+        .contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | not_started |"));
 }
 
 #[test]
@@ -1068,7 +1087,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_fail
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 15);
     assert_eq!(telemetry.analysis.timing.ended_tests, 15);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1083,6 +1102,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_fail
         .contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | not_started |"));
     assert!(report
         .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
+    assert!(report
+        .contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | not_started |"));
 }
 
 #[test]
@@ -1143,7 +1164,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 16);
     assert_eq!(telemetry.analysis.timing.ended_tests, 16);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1158,6 +1179,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure(
     );
     assert!(report
         .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
+    assert!(report
+        .contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | not_started |"));
 }
 
 #[test]
@@ -1221,7 +1244,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 17);
     assert_eq!(telemetry.analysis.timing.ended_tests, 17);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1236,6 +1259,79 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_
     assert!(
         report.contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | failed |")
     );
+    assert!(report
+        .contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | not_started |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_reset_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::JoypadStrobeReset),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported joypad strobe-reset failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("joypad_strobe_reset")
+    );
+    assert_eq!(telemetry.verdict.current_test, 18);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("joypad_strobe_reset_midstream")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x78);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include joypad strobe-reset localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 18);
+    assert_eq!(failure.test_name, Some("joypad_strobe_reset_midstream"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Joypad));
+    assert_eq!(failure.failure_code_hex, "0x78");
+    assert_eq!(failure.likely_domain, "joypad.strobe_reset");
+    assert!(failure.assertion.contains("A button bit"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Joypad)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("joypad_strobe_reset_midstream")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("joypad.strobe_reset")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 18);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("joypad.strobe_reset")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.18.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(18)
+            && probe.likely_domain == "joypad.strobe_reset"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 18);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 18);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "joypad_strobe_reset_before_reset_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | joypad_strobe_reset_midstream (18) |"));
+    assert!(report.contains("| Focus domain | joypad.strobe_reset |"));
+    assert!(report.contains("| Likely domain | joypad.strobe_reset |"));
+    assert!(report.contains("| 18 | joypad_strobe_reset_midstream | joypad | edge_case | failed |"));
 }
 
 #[test]
@@ -1417,7 +1513,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 17 |"));
+    assert!(report.contains("| Not started tests | 18 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }

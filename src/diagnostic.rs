@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 26;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 27;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v26";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v27";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -63,6 +63,7 @@ const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
+const JOYPAD_STROBE_RESET_FAULT_LABEL: &str = "joypad_strobe_reset_before_reset_read";
 const MAPPER2_BANK_SWITCH_FAULT_LABEL: &str = "mapper2_prg_bank_switch_before_read";
 const MAPPER2_PRG_RAM_FAULT_LABEL: &str = "mapper2_prg_ram_roundtrip_before_high_read";
 const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
@@ -286,6 +287,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "$2000 and $2800 stay independent horizontal nametable pairs",
         ],
     },
+    DiagnosticTestSpec {
+        id: 18,
+        name: "joypad_strobe_reset_midstream",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify a mid-stream $4016 strobe-high/strobe-low sequence resets the joypad serial index.",
+        expected_observations: &[
+            "first post-reset $4016 read returns the A button bit again",
+            "second post-reset $4016 read advances to the B button bit",
+        ],
+    },
 ];
 
 const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
@@ -441,6 +453,24 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         observed: "$4016 read bit 0 was not 1",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Right bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x78,
+        test_id: 18,
+        assertion: "Joypad strobe reset returns the A button bit again",
+        expected: "first $4016 read after a second strobe sequence returns bit 0 == 1",
+        observed: "$4016 did not restart at the A button bit after strobe reset",
+        likely_domain: "joypad.strobe_reset",
+        remediation_hint: "Inspect joypad $4016 writes; a high strobe write must reset the serial read index before returning to low strobe mode.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x79,
+        test_id: 18,
+        assertion: "Joypad strobe reset resumes serial advancement after the A bit",
+        expected: "second $4016 read after reset returns the B button bit == 0",
+        observed: "$4016 did not advance from A to B after the reset read",
+        likely_domain: "joypad.strobe_reset",
+        remediation_hint: "Inspect joypad read-index advancement after strobe is lowered; reads should resume serial shifting from the reset index.",
     },
     DiagnosticFailureSpec {
         code: 0x81,
@@ -741,8 +771,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 strobe/shift sequence for A + Right, joypad 1 overreads after the eighth latched button, and joypad 2 strobe/shift sequence for Start + Down.",
-        missing_coverage: "Multiple masks per port, rapid strobe changes, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
+        current_coverage: "Joypad 1 strobe/shift sequence for A + Right, joypad 1 mid-stream strobe reset behavior, joypad 1 overreads after the eighth latched button, and joypad 2 strobe/shift sequence for Start + Down.",
+        missing_coverage: "Multiple masks per port, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
         suggested_next_test: "Run the serial-read program across a generated mask table for both ports, including mid-stream strobe toggles.",
     },
 ];
@@ -773,6 +803,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    JoypadStrobeReset,
     Mapper2PrgBankSwitch,
     Mapper2PrgRam,
     PpuNametableMirroring,
@@ -787,6 +818,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::JoypadStrobeReset => "joypad_strobe_reset",
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
@@ -801,6 +833,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::JoypadStrobeReset => JOYPAD_STROBE_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
@@ -3562,6 +3595,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.mapper2_prg_bank_switch();
     program.mapper2_prg_ram_roundtrip();
     program.ppu_horizontal_nametable_mirroring();
+    program.joypad_strobe_reset_midstream();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -4030,6 +4064,35 @@ impl DiagnosticProgram {
         self.pass_test(17);
     }
 
+    fn joypad_strobe_reset_midstream(&mut self) {
+        self.begin_test(18);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_eq(0x01, 0x78);
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_eq(0x00, 0x79);
+
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+        self.asm
+            .label(JOYPAD_STROBE_RESET_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_eq(0x01, 0x78);
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_eq(0x00, 0x79);
+        self.pass_test(18);
+    }
+
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
         for (index, expected_bit) in expected.iter().copied().enumerate() {
             self.asm.lda_abs(addr);
@@ -4465,6 +4528,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
+        }
+        DiagnosticFaultInjection::JoypadStrobeReset => {
+            let _ = bus.cpu_read(0x4016);
         }
         DiagnosticFaultInjection::Mapper2PrgBankSwitch => {
             bus.cpu_write(MAPPER2_SWITCHABLE_ADDR, 0x00);
