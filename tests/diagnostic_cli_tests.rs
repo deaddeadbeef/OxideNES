@@ -91,7 +91,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(3));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(4));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["triage_schema_version"], Value::from(5));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
@@ -126,6 +126,9 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("cartridge.test.7.result"));
     assert!(suite_report.contains("| timeout_cycle_limit | false | false | true | timed_out | 0 | emulator.progress_or_infinite_loop |"));
     assert!(suite_report.contains("runtime.completed"));
+    assert!(suite_report.contains("## Contract Matrix"));
+    assert!(suite_report.contains("| joypad1_mismatch | true | true | true | true | true |"));
+    assert!(suite_report.contains("| timeout_cycle_limit | true | true | true | true | true |"));
     assert!(suite_report.contains("## AI Drilldown"));
     assert!(suite_report.contains("## Baseline Comparison Matrix"));
     assert!(suite_report.contains("| pass | true | 0 | 0 | 0 | 0 | - |"));
@@ -142,6 +145,23 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(pass["expectation_met"], Value::Bool(true));
     assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
     assert_eq!(pass["actual_focus_test_id"], Value::from(11));
+    assert_eq!(pass["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(pass["contract"]["passed_matches"], Value::Bool(true));
+    assert_eq!(pass["contract"]["health_matches"], Value::Bool(true));
+    assert_eq!(pass["contract"]["focus_test_matches"], Value::Bool(true));
+    assert_eq!(pass["contract"]["focus_domain_matches"], Value::Bool(true));
+    assert_eq!(pass["contract"]["expected_passed"], Value::Bool(true));
+    assert_eq!(pass["contract"]["actual_passed"], Value::Bool(true));
+    assert_eq!(
+        pass["contract"]["expected_health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(
+        pass["contract"]["actual_health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(11));
+    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(11));
     assert_eq!(pass["comparison"]["passed"], Value::Bool(true));
     assert_eq!(pass["comparison"]["difference_count"], Value::from(0));
     assert_eq!(pass["comparison"]["failure_count"], Value::from(0));
@@ -167,6 +187,22 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(joypad1["actual_focus_test_id"], Value::from(7));
     assert_eq!(
         joypad1["actual_focus_domain"],
+        Value::String("joypad.strobe_shift".to_string())
+    );
+    assert_eq!(joypad1["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(joypad1["contract"]["passed_matches"], Value::Bool(true));
+    assert_eq!(joypad1["contract"]["health_matches"], Value::Bool(true));
+    assert_eq!(joypad1["contract"]["focus_test_matches"], Value::Bool(true));
+    assert_eq!(
+        joypad1["contract"]["focus_domain_matches"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        joypad1["contract"]["expected_focus_domain"],
+        Value::String("joypad.strobe_shift".to_string())
+    );
+    assert_eq!(
+        joypad1["contract"]["actual_focus_domain"],
         Value::String("joypad.strobe_shift".to_string())
     );
     assert!(joypad1["failed_probe_ids"]
@@ -215,6 +251,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Value::String("emulator.progress_or_infinite_loop".to_string())
     );
     assert_eq!(timeout["expectation_met"], Value::Bool(true));
+    assert_eq!(timeout["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(timeout["contract"]["expected_focus_test_id"], Value::Null);
+    assert_eq!(timeout["contract"]["actual_focus_test_id"], Value::from(0));
+    assert_eq!(timeout["contract"]["focus_test_matches"], Value::Bool(true));
+    assert_eq!(
+        timeout["contract"]["expected_focus_domain"],
+        Value::String("emulator.progress_or_infinite_loop".to_string())
+    );
     assert_eq!(timeout["comparison"]["passed"], Value::Bool(false));
     assert!(
         timeout["comparison"]["difference_count"]

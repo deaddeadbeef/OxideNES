@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 3;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -82,9 +82,27 @@ struct DiagnosticScenarioSuiteEntry {
     failure_code_hex: String,
     failed_probe_ids: Vec<String>,
     comparison: DiagnosticTriageComparison,
+    contract: DiagnosticScenarioSuiteContract,
     expectation_met: bool,
     config: DiagnosticBundleConfig,
     artifacts: DiagnosticScenarioSuiteArtifacts,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteContract {
+    expected_passed: bool,
+    actual_passed: bool,
+    passed_matches: bool,
+    expected_health: String,
+    actual_health: String,
+    health_matches: bool,
+    expected_focus_test_id: Option<u8>,
+    actual_focus_test_id: u8,
+    focus_test_matches: bool,
+    expected_focus_domain: Option<&'static str>,
+    actual_focus_domain: Option<String>,
+    focus_domain_matches: bool,
+    all_matched: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -828,6 +846,29 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
     }
 
     writeln!(report).expect("write report");
+    writeln!(report, "## Contract Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Scenario | Passed | Health | Focus test | Focus domain | All |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- |").expect("write report");
+    for scenario in &manifest.scenarios {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} |",
+            scenario.id,
+            scenario.contract.passed_matches,
+            scenario.contract.health_matches,
+            scenario.contract.focus_test_matches,
+            scenario.contract.focus_domain_matches,
+            scenario.contract.all_matched
+        )
+        .expect("write report");
+    }
+
+    writeln!(report).expect("write report");
     writeln!(report, "## AI Drilldown").expect("write report");
     writeln!(report).expect("write report");
     for instruction in &manifest.ai_handoff {
@@ -961,11 +1002,26 @@ fn write_scenario_bundle(
     let focus_domain_matches = spec
         .expected_focus_domain
         .is_none_or(|domain| focus.focus_domain.as_deref() == Some(domain));
-    let expectation_met = telemetry.verdict.passed == spec.expected_passed
-        && telemetry.analysis.health == spec.expected_health
-        && focus_test_matches
-        && focus_domain_matches;
+    let passed_matches = telemetry.verdict.passed == spec.expected_passed;
+    let health_matches = telemetry.analysis.health == spec.expected_health;
+    let expectation_met =
+        passed_matches && health_matches && focus_test_matches && focus_domain_matches;
     let comparison_summary = triage_comparison(&comparison)?;
+    let contract = DiagnosticScenarioSuiteContract {
+        expected_passed: spec.expected_passed,
+        actual_passed: telemetry.verdict.passed,
+        passed_matches,
+        expected_health: expected_health.clone(),
+        actual_health: actual_health.clone(),
+        health_matches,
+        expected_focus_test_id: spec.expected_focus_test_id,
+        actual_focus_test_id: focus.focus_test_id,
+        focus_test_matches,
+        expected_focus_domain: spec.expected_focus_domain,
+        actual_focus_domain: focus.focus_domain.clone(),
+        focus_domain_matches,
+        all_matched: expectation_met,
+    };
 
     Ok(DiagnosticScenarioSuiteEntry {
         id: spec.id,
@@ -986,6 +1042,7 @@ fn write_scenario_bundle(
         failure_code_hex: focus.failure_code_hex.clone(),
         failed_probe_ids: focus.failed_probe_ids.clone(),
         comparison: comparison_summary,
+        contract,
         expectation_met,
         config,
         artifacts: DiagnosticScenarioSuiteArtifacts {
@@ -1058,6 +1115,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
 fn scenario_suite_ai_handoff() -> Vec<String> {
     vec![
         "Start with scenario-suite.json to see which expected pass/fail scenarios matched their debug-focus contracts.".to_string(),
+        "Use each scenario contract object to see whether pass state, health, focus test, or focus domain caused an expectation mismatch.".to_string(),
         "Use pass/ as the known-good baseline bundle; every scenario bundle includes comparison.json against that baseline.".to_string(),
         "For failures, open each scenario triage.json debug_focus before loading telemetry.json, report.md, or comparison.json.".to_string(),
     ]
