@@ -91,7 +91,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(5));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(6));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["triage_schema_version"], Value::from(5));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
@@ -109,6 +109,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         manifest["artifacts"]["scenario_suite_report"],
         Value::String("scenario-suite.md".to_string())
+    );
+    assert_eq!(
+        manifest["artifacts"]["scenario_suite_observer_json"],
+        Value::String("scenario-suite-observer.json".to_string())
+    );
+    assert_eq!(
+        manifest["artifacts"]["scenario_suite_observer_report"],
+        Value::String("scenario-suite-observer.md".to_string())
     );
     assert_eq!(
         manifest["analysis"]["status"],
@@ -167,7 +175,110 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .iter()
         .any(|entry| entry
             .as_str()
-            .is_some_and(|text| text.contains("attention_queue"))));
+            .is_some_and(|text| text.contains("scenario-suite-observer.json"))));
+
+    let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
+    assert_eq!(observer["observer_schema_version"], Value::from(1));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(6));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(14));
+    assert_eq!(observer["triage_schema_version"], Value::from(5));
+    assert_eq!(observer["bundle_schema_version"], Value::from(1));
+    assert_eq!(observer["status"], Value::String("passed".to_string()));
+    assert_eq!(observer["recommended_exit_code"], Value::from(0));
+    assert_eq!(observer["scenario_count"], Value::from(4));
+    assert_eq!(observer["contract_mismatch_count"], Value::from(0));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(3));
+    let observer_actions = observer["next_actions"]
+        .as_array()
+        .expect("observer next_actions should be an array");
+    assert_eq!(observer_actions.len(), 3);
+    let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
+    assert_eq!(
+        timeout_action["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        timeout_action["action_type"],
+        Value::String("inspect_known_divergence".to_string())
+    );
+    assert_eq!(
+        timeout_action["primary_artifact"],
+        Value::String("timeout_cycle_limit/comparison.json".to_string())
+    );
+    assert!(timeout_action["supporting_artifacts"]
+        .as_array()
+        .expect("timeout supporting artifacts should be an array")
+        .iter()
+        .any(|artifact| artifact == &Value::String("timeout_cycle_limit/triage.json".to_string())));
+    assert!(timeout_action["evidence"]
+        .as_array()
+        .expect("timeout action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("comparison_difference_count=82".to_string())));
+    assert!(timeout_action["evidence"]
+        .as_array()
+        .expect("timeout action evidence should be an array")
+        .iter()
+        .any(
+            |entry| entry == &Value::String("top_difference_path=dma.oam_dma_observed".to_string())
+        ));
+
+    let observations = observer["observations"]
+        .as_array()
+        .expect("observer observations should be an array");
+    assert_eq!(observations.len(), 4);
+    let pass_observation = find_observer_observation(observations, "pass");
+    assert_eq!(
+        pass_observation["role"],
+        Value::String("baseline".to_string())
+    );
+    assert_eq!(
+        pass_observation["outcome"],
+        Value::String("matches_baseline".to_string())
+    );
+    assert_eq!(
+        pass_observation["next_artifact"],
+        Value::String("pass/triage.json".to_string())
+    );
+    let timeout_observation = find_observer_observation(observations, "timeout_cycle_limit");
+    assert_eq!(
+        timeout_observation["role"],
+        Value::String("expected_failure_fixture".to_string())
+    );
+    assert_eq!(
+        timeout_observation["outcome"],
+        Value::String("expected_baseline_divergence".to_string())
+    );
+    assert_eq!(
+        timeout_observation["focus_domain"],
+        Value::String("emulator.progress_or_infinite_loop".to_string())
+    );
+    assert_eq!(
+        timeout_observation["comparison_difference_count"],
+        Value::from(82)
+    );
+    assert_eq!(
+        timeout_observation["next_artifact"],
+        Value::String("timeout_cycle_limit/comparison.json".to_string())
+    );
+    assert!(observer["artifact_hints"]
+        .as_array()
+        .expect("observer artifact hints should be an array")
+        .iter()
+        .any(|hint| hint["path"] == Value::String("scenario-suite.json".to_string())));
+
+    let observer_report = fs::read_to_string(suite_dir.join("scenario-suite-observer.md"))
+        .expect("scenario suite observer report should be readable");
+    assert!(observer_report.contains("# Diagnostic Scenario Suite Observer"));
+    assert!(observer_report.contains("## Next Actions"));
+    assert!(observer_report.contains("| known_divergence | inspect_known_divergence | timeout_cycle_limit | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("top_difference_path=dma.oam_dma_observed"));
+    assert!(observer_report.contains("## Observations"));
+    assert!(observer_report
+        .contains("| pass | baseline | matches_baseline | healthy | - | 0 | pass/triage.json |"));
+    assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 82 | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("## Artifact Hints"));
+    assert!(observer_report.contains("scenario-suite.json"));
 
     let suite_report = fs::read_to_string(suite_dir.join("scenario-suite.md"))
         .expect("scenario suite report should be readable");
@@ -598,4 +709,18 @@ fn find_attention_item<'a>(items: &'a [Value], scenario_id: &str) -> &'a Value {
         .iter()
         .find(|item| item["scenario_id"] == Value::String(scenario_id.to_string()))
         .unwrap_or_else(|| panic!("missing diagnostic attention item {scenario_id}"))
+}
+
+fn find_observer_action<'a>(items: &'a [Value], scenario_id: &str) -> &'a Value {
+    items
+        .iter()
+        .find(|item| item["scenario_id"] == Value::String(scenario_id.to_string()))
+        .unwrap_or_else(|| panic!("missing diagnostic observer action {scenario_id}"))
+}
+
+fn find_observer_observation<'a>(items: &'a [Value], scenario_id: &str) -> &'a Value {
+    items
+        .iter()
+        .find(|item| item["scenario_id"] == Value::String(scenario_id.to_string()))
+        .unwrap_or_else(|| panic!("missing diagnostic observer observation {scenario_id}"))
 }
