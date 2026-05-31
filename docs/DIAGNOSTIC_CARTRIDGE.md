@@ -10,6 +10,13 @@ cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json 
 
 The runner exits `0` only when the cartridge and host-side checks pass. It exits `1` for diagnostic failures or timeouts, and `2` for CLI/build errors.
 
+Use `--joypad1 <BYTE>` and `--joypad2 <BYTE>` to override the host-side
+controller masks used by the cartridge. The default masks match the generated
+assertions: joypad 1 expects A + Right (`0x81`) and joypad 2 expects Start +
+Down (`0x28`). Overriding either value is useful for failure-localization
+smokes because the run still emits telemetry, triage JSON, and bundles before
+exiting `1`.
+
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
 report contains the verdict, derived analysis, failure localization, coverage
@@ -77,6 +84,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery and rendered frame production
+- Player-2 `$4017` strobe and shift reads with an independent Start + Down mask
 
 ## Telemetry Protocol
 
@@ -137,3 +145,9 @@ areas, what the generated cartridge currently covers, what it does not prove,
 and the next diagnostic cartridge that should be built. Passing diagnostics
 therefore remain useful without implying full CPU, PPU, mapper, APU, DMA, or
 input compatibility.
+
+Schema version `7` adds top-level `input` telemetry and an executable joypad-2
+diagnostic test. The input record includes the actual and expected joypad masks
+for both ports, and the cartridge now reads `$4017` after a shared `$4016`
+strobe to prove player-2 serial input reaches the CPU bus independently from
+player 1.

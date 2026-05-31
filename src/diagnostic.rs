@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 6;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 7;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v6";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v7";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -39,6 +39,8 @@ const STATUS_RUNNING: u8 = 0x01;
 const STATUS_PASS: u8 = 0x80;
 const STATUS_FAIL: u8 = 0xE0;
 const RESULT_PASS: u8 = 0x01;
+const EXPECTED_JOYPAD1_MASK: u8 = 0x81;
+const EXPECTED_JOYPAD2_MASK: u8 = 0x28;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -176,6 +178,14 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "at least two NMIs",
             "rendered frame contains multiple colors",
         ],
+    },
+    DiagnosticTestSpec {
+        id: 11,
+        name: "joypad2_strobe_shift",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::Integration,
+        intent: "Verify the shared strobe latches an independent player-2 Start + Down mask through $4017.",
+        expected_observations: &["player 2 read sequence is 0,0,0,1,0,1,0,0"],
     },
 ];
 
@@ -352,6 +362,78 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect relative offset sign extension and branch target address calculation.",
     },
     DiagnosticFailureSpec {
+        code: 0xA0,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 0 returns the latched A button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 bus dispatch and shared strobe latch behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA1,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 1 returns the latched B button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 shift index advancement after the first read.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA2,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 2 returns the latched Select button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 shift order and Select bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA3,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 3 returns the latched Start button bit",
+        expected: "$4017 read bit 0 == 1",
+        observed: "$4017 read bit 0 was not 1",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 Start button mapping and $4017 reads.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA4,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 4 returns the latched Up button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 shift order and Up bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA5,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 5 returns the latched Down button bit",
+        expected: "$4017 read bit 0 == 1",
+        observed: "$4017 read bit 0 was not 1",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 Down button mapping and $4017 reads.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA6,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 6 returns the latched Left button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 shift order and Left bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA7,
+        test_id: 11,
+        assertion: "Joypad 2 serial read 7 returns the latched Right button bit",
+        expected: "$4017 read bit 0 == 0",
+        observed: "$4017 read bit 0 was not 0",
+        likely_domain: "joypad2.strobe_shift",
+        remediation_hint: "Inspect joypad 2 shift order and Right bit mapping.",
+    },
+    DiagnosticFailureSpec {
         code: 0x90,
         test_id: 9,
         assertion: "Joypad serial read 8 returns one after all buttons are shifted",
@@ -415,10 +497,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
         subsystem: "joypad",
-        risk: "The cartridge proves one controller mask and overread behavior on joypad 1 only.",
-        current_coverage: "Joypad 1 strobe/shift sequence for A + Right and reads after the eighth latched button.",
-        missing_coverage: "Joypad 2, rapid strobe changes, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
-        suggested_next_test: "Run the same serial-read program across both ports and multiple masks, including mid-stream strobe toggles.",
+        risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
+        current_coverage: "Joypad 1 strobe/shift sequence for A + Right, joypad 1 overreads after the eighth latched button, and joypad 2 strobe/shift sequence for Start + Down.",
+        missing_coverage: "Multiple masks per port, rapid strobe changes, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
+        suggested_next_test: "Run the serial-read program across a generated mask table for both ports, including mid-stream strobe toggles.",
     },
 ];
 
@@ -426,13 +508,15 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
 pub struct DiagnosticConfig {
     pub max_cpu_cycles: u64,
     pub joypad1_mask: u8,
+    pub joypad2_mask: u8,
 }
 
 impl Default for DiagnosticConfig {
     fn default() -> Self {
         Self {
             max_cpu_cycles: 500_000,
-            joypad1_mask: 0x81, // A + Right, matching the cartridge joypad test.
+            joypad1_mask: EXPECTED_JOYPAD1_MASK,
+            joypad2_mask: EXPECTED_JOYPAD2_MASK,
         }
     }
 }
@@ -443,6 +527,7 @@ pub struct DiagnosticTelemetry {
     pub provenance: &'static str,
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
+    pub input: DiagnosticInputTelemetry,
     pub verdict: VerdictTelemetry,
     pub analysis: DiagnosticAnalysisTelemetry,
     pub cycles: u64,
@@ -477,6 +562,18 @@ pub struct CartridgeTelemetry {
     pub nmi_vector: u16,
     pub irq_vector: u16,
     pub rom_hash: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticInputTelemetry {
+    pub joypad1_mask: u8,
+    pub joypad1_mask_hex: String,
+    pub joypad1_expected_mask: u8,
+    pub joypad1_expected_mask_hex: String,
+    pub joypad2_mask: u8,
+    pub joypad2_mask_hex: String,
+    pub joypad2_expected_mask: u8,
+    pub joypad2_expected_mask_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -823,6 +920,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cartridge = Cartridge::new(&rom)?;
     let mut bus = Bus::new(cartridge);
     apply_joypad_mask(&mut bus, config.joypad1_mask);
+    apply_joypad2_mask(&mut bus, config.joypad2_mask);
 
     let mut cpu = Cpu::new();
     cpu.reset(&mut bus);
@@ -1012,6 +1110,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         provenance: DIAGNOSTIC_PROVENANCE,
         suite: suite_telemetry(),
         cartridge: cartridge_info,
+        input: diagnostic_input_telemetry(&config),
         verdict,
         analysis,
         cycles,
@@ -1055,6 +1154,7 @@ pub fn compare_diagnostic_to_baseline(
     let mut differences = Vec::new();
 
     compare_schema(&baseline, &current, &mut differences);
+    compare_input(&baseline, &current, &mut differences);
     compare_verdict(&baseline, &current, &mut differences);
     compare_coverage(&baseline, &current, &mut differences);
     compare_probes(&baseline, &current, &mut differences);
@@ -1244,6 +1344,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     .expect("write report");
     writeln!(report).expect("write report");
 
+    write_input_section(&mut report, telemetry);
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_coverage_gaps_section(&mut report, telemetry);
@@ -1287,6 +1388,26 @@ fn write_failure_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         .expect("write report");
         writeln!(report).expect("write report");
     }
+}
+
+fn write_input_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Input Configuration").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Joypad 1 mask / expected | {} / {} |",
+        telemetry.input.joypad1_mask_hex, telemetry.input.joypad1_expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Joypad 2 mask / expected | {} / {} |",
+        telemetry.input.joypad2_mask_hex, telemetry.input.joypad2_expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
 }
 
 fn write_coverage_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
@@ -1914,6 +2035,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_branch_page_crossing();
     program.joypad_overread_returns_one();
     program.ppu_nmi_and_render_frame();
+    program.joypad2_strobe_shift();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -2085,11 +2207,7 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x4016);
 
         let expected = [1, 0, 0, 0, 0, 0, 0, 1];
-        for (index, expected_bit) in expected.into_iter().enumerate() {
-            self.asm.lda_abs(0x4016);
-            self.asm.and_imm(0x01);
-            self.expect_a_eq(expected_bit, 0x70 + index as u8);
-        }
+        self.expect_serial_bits(0x4016, &expected, 0x70);
         self.pass_test(7);
     }
 
@@ -2172,6 +2290,26 @@ impl DiagnosticProgram {
         self.asm.cmp_imm(0x02);
         self.asm.bne(&wait);
         self.pass_test(10);
+    }
+
+    fn joypad2_strobe_shift(&mut self) {
+        self.begin_test(11);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+
+        let expected = [0, 0, 0, 1, 0, 1, 0, 0];
+        self.expect_serial_bits(0x4017, &expected, 0xA0);
+        self.pass_test(11);
+    }
+
+    fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
+        for (index, expected_bit) in expected.iter().copied().enumerate() {
+            self.asm.lda_abs(addr);
+            self.asm.and_imm(0x01);
+            self.expect_a_eq(expected_bit, fail_base + index as u8);
+        }
     }
 }
 
@@ -2483,6 +2621,37 @@ fn apply_joypad_mask(bus: &mut Bus, mask: u8) {
     for (index, button) in BUTTONS.into_iter().enumerate() {
         bus.joypad1
             .set_button_pressed(button, mask & (1 << index) != 0);
+    }
+}
+
+fn apply_joypad2_mask(bus: &mut Bus, mask: u8) {
+    const BUTTONS: [JoypadButton; 8] = [
+        JoypadButton::A,
+        JoypadButton::B,
+        JoypadButton::Select,
+        JoypadButton::Start,
+        JoypadButton::Up,
+        JoypadButton::Down,
+        JoypadButton::Left,
+        JoypadButton::Right,
+    ];
+
+    for (index, button) in BUTTONS.into_iter().enumerate() {
+        bus.joypad2
+            .set_button_pressed(button, mask & (1 << index) != 0);
+    }
+}
+
+fn diagnostic_input_telemetry(config: &DiagnosticConfig) -> DiagnosticInputTelemetry {
+    DiagnosticInputTelemetry {
+        joypad1_mask: config.joypad1_mask,
+        joypad1_mask_hex: hex_byte(config.joypad1_mask),
+        joypad1_expected_mask: EXPECTED_JOYPAD1_MASK,
+        joypad1_expected_mask_hex: hex_byte(EXPECTED_JOYPAD1_MASK),
+        joypad2_mask: config.joypad2_mask,
+        joypad2_mask_hex: hex_byte(config.joypad2_mask),
+        joypad2_expected_mask: EXPECTED_JOYPAD2_MASK,
+        joypad2_expected_mask_hex: hex_byte(EXPECTED_JOYPAD2_MASK),
     }
 }
 
@@ -3212,6 +3381,29 @@ fn compare_schema(
         "diagnostic suite version changed from baseline",
         differences,
     );
+}
+
+fn compare_input(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    for path in [
+        &["input", "joypad1_mask_hex"][..],
+        &["input", "joypad1_expected_mask_hex"][..],
+        &["input", "joypad2_mask_hex"][..],
+        &["input", "joypad2_expected_mask_hex"][..],
+    ] {
+        compare_optional_value(
+            baseline,
+            current,
+            path,
+            "input",
+            DiagnosticComparisonSeverity::Warning,
+            "diagnostic input mask changed from baseline",
+            differences,
+        );
+    }
 }
 
 fn compare_verdict(
