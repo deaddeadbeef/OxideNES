@@ -185,9 +185,13 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(1));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(7));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(8));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(triage["coverage"]["passed_tests"], Value::from(11));
+    assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
+    assert!(triage["dma"]["oam_dma_active_cycles"]
+        .as_u64()
+        .is_some_and(|cycles| (513..=514).contains(&cycles)));
     assert!(triage["coverage_gaps"]
         .as_array()
         .expect("coverage gaps should be an array")
@@ -215,7 +219,7 @@ fn assert_bundle_artifacts_with_joypad2(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(7));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(8));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

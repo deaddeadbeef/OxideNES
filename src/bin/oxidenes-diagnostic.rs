@@ -59,6 +59,7 @@ struct DiagnosticTriageReport {
     failure: Option<DiagnosticTriageFailure>,
     coverage: DiagnosticTriageCoverage,
     coverage_gaps: Vec<DiagnosticTriageCoverageGap>,
+    dma: DiagnosticTriageDma,
     probes: DiagnosticTriageProbeSummary,
     timing: DiagnosticTriageTiming,
     comparison: Option<DiagnosticTriageComparison>,
@@ -122,6 +123,19 @@ struct DiagnosticTriageCoverageGap {
     current_coverage: &'static str,
     missing_coverage: &'static str,
     suggested_next_test: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageDma {
+    oam_dma_observed: bool,
+    oam_dma_completed: bool,
+    oam_dma_active_cycles: u64,
+    oam_dma_expected_min_cycles: u64,
+    oam_dma_expected_max_cycles: u64,
+    oam_dma_start_cycle: Option<u64>,
+    oam_dma_end_cycle: Option<u64>,
+    oam_dma_start_test_name: Option<&'static str>,
+    oam_dma_end_test_name: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -595,6 +609,17 @@ fn diagnostic_triage_report(
         failure: triage_failure(telemetry)?,
         coverage: triage_coverage(telemetry)?,
         coverage_gaps: triage_coverage_gaps(telemetry),
+        dma: DiagnosticTriageDma {
+            oam_dma_observed: telemetry.dma.oam_dma_observed,
+            oam_dma_completed: telemetry.dma.oam_dma_completed,
+            oam_dma_active_cycles: telemetry.dma.oam_dma_active_cycles,
+            oam_dma_expected_min_cycles: telemetry.dma.oam_dma_expected_min_cycles,
+            oam_dma_expected_max_cycles: telemetry.dma.oam_dma_expected_max_cycles,
+            oam_dma_start_cycle: telemetry.dma.oam_dma_start_cycle,
+            oam_dma_end_cycle: telemetry.dma.oam_dma_end_cycle,
+            oam_dma_start_test_name: telemetry.dma.oam_dma_start_test_name,
+            oam_dma_end_test_name: telemetry.dma.oam_dma_end_test_name,
+        },
         probes: triage_probe_summary(telemetry)?,
         timing: triage_timing(telemetry)?,
         comparison: comparison.map(triage_comparison).transpose()?,

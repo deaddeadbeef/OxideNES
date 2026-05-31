@@ -78,7 +78,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Stack, `JSR`, and `RTS`
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
-- OAM DMA from CPU page `$0300`
+- OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
 - APU pulse-channel status register
 - Joypad strobe and shift reads
 - Taken CPU branch crossing a page boundary
@@ -151,3 +151,10 @@ diagnostic test. The input record includes the actual and expected joypad masks
 for both ports, and the cartridge now reads `$4017` after a shared `$4016`
 strobe to prove player-2 serial input reaches the CPU bus independently from
 player 1.
+
+Schema version `8` adds top-level `dma` telemetry for the cartridge's OAM DMA
+test. The host runner records whether OAM DMA was observed, whether it
+completed, the active CPU-stall cycle count, the expected 513-514 cycle bucket,
+start/end cycles, and the associated diagnostic test. This turns DMA evidence
+from a final OAM checksum into timing-aware telemetry that automated debuggers
+can compare against baselines.
