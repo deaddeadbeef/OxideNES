@@ -92,9 +92,8 @@ plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
 `joypad2_mismatch`, `dma_oam_transfer_fault`, `apu_status_fault`,
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
-`ppu_nametable_mirroring_fault`,
-`ppu_nmi_timeout_fault`, and
-`timeout_cycle_limit`. The
+`ppu_nametable_mirroring_fault`, `joypad_strobe_reset_fault`,
+`ppu_nmi_timeout_fault`, and `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
 an automated debugger can decide which artifact to open without traversing every
@@ -118,10 +117,14 @@ cartridge reads it, proving Mapper 2 PRG RAM regressions localize to
 nametable mirror pair before the cartridge reads it, proving mapper-declared
 horizontal mirroring regressions localize to
 `ppu.nametables.horizontal_mirroring`.
+`joypad_strobe_reset_fault` consumes the reset A-button bit after a second
+`$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
+localize to `joypad.strobe_reset`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
-mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, DMA host-observation, APU status, PPU assertion, and PPU
+mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, joypad
+strobe-reset behavior, DMA host-observation, APU status, PPU assertion, and PPU
 progress-timeout failure localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -158,6 +161,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - APU pulse-channel status register
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Joypad strobe and shift reads
+- Joypad mid-stream strobe reset behavior
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery and rendered frame production
@@ -356,3 +360,10 @@ mirrors `$2000`, verifies that `$2C00` mirrors `$2800`, and verifies the two
 horizontal mirror pairs remain independent. The intentional fault fixture
 corrupts the first mirror pair and localizes mirroring regressions to
 `ppu.nametables.horizontal_mirroring`.
+
+Schema version `27` adds the `joypad_strobe_reset_midstream` edge-case cartridge
+test plus the `joypad_strobe_reset_fault` scenario-suite fixture. The cartridge
+reads `$4016`, toggles strobe high then low mid-stream, verifies the next read
+returns the A-button bit again, and verifies serial advancement resumes at the B
+button. The intentional fault fixture consumes the reset A bit and localizes
+reset-index regressions to `joypad.strobe_reset`.

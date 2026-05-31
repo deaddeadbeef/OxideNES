@@ -1683,7 +1683,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(17),
+            expected_focus_test_id: Some(18),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1817,6 +1817,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(17),
             expected_focus_domain: Some("ppu.nametables.horizontal_mirroring"),
+        },
+        DiagnosticScenarioSpec {
+            id: "joypad_strobe_reset_fault",
+            title: "Intentional joypad strobe-reset assertion failure",
+            purpose: "Failure-localization fixture for mid-stream joypad strobe reset regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::JoypadStrobeReset),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(18),
+            expected_focus_domain: Some("joypad.strobe_reset"),
         },
         DiagnosticScenarioSpec {
             id: "ppu_nmi_timeout_fault",

@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 26
+EXPECTED_TELEMETRY_SCHEMA = 27
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -26,6 +26,7 @@ EXPECTED_SCENARIOS = {
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
+    "joypad_strobe_reset_fault",
     "mapper2_bank_switch_fault",
     "mapper2_prg_ram_fault",
     "timeout_cycle_limit",
@@ -79,7 +80,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            12,
+            13,
             "analysis baseline_divergence_count",
         )
 
@@ -129,13 +130,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            12,
+            13,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 12, "observer next_actions count")
+        self.expect_equal(len(actions), 13, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -171,6 +172,7 @@ class SuiteVerifier:
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
+            "joypad_strobe_reset_fault",
             "mapper2_bank_switch_fault",
             "mapper2_prg_ram_fault",
             "timeout_cycle_limit",
@@ -199,7 +201,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=101",
+            "comparison_difference_count=104",
             evidence,
             "timeout observer evidence",
         )
@@ -268,6 +270,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.17.result",
             ppu_mirroring_evidence,
             "PPU mirroring observer evidence",
+        )
+
+        joypad_reset = by_scenario.get("joypad_strobe_reset_fault")
+        if not isinstance(joypad_reset, dict):
+            self.errors.append("missing observer action for joypad_strobe_reset_fault")
+            return
+
+        self.expect_equal(
+            joypad_reset.get("priority"),
+            "known_divergence",
+            "joypad reset observer action priority",
+        )
+        self.expect_equal(
+            joypad_reset.get("action_type"),
+            "inspect_known_divergence",
+            "joypad reset observer action type",
+        )
+        self.expect_equal(
+            joypad_reset.get("primary_artifact"),
+            "joypad_strobe_reset_fault/comparison.json",
+            "joypad reset observer primary_artifact",
+        )
+        joypad_reset_evidence = self.expect_list(
+            joypad_reset.get("evidence"), "joypad reset observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=joypad.strobe_reset",
+            joypad_reset_evidence,
+            "joypad reset observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.18.result",
+            joypad_reset_evidence,
+            "joypad reset observer evidence",
         )
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
@@ -555,7 +591,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                101,
+                104,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -680,6 +716,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_nametable_mirroring_fault")
+
+        joypad_reset = by_scenario.get("joypad_strobe_reset_fault")
+        if isinstance(joypad_reset, dict):
+            self.expect_equal(
+                joypad_reset.get("role"),
+                "expected_failure_fixture",
+                "joypad reset observer role",
+            )
+            self.expect_equal(
+                joypad_reset.get("outcome"),
+                "expected_baseline_divergence",
+                "joypad reset observer outcome",
+            )
+            self.expect_equal(
+                joypad_reset.get("health"),
+                "cartridge_assertion_failed",
+                "joypad reset observer health",
+            )
+            self.expect_equal(
+                joypad_reset.get("focus_domain"),
+                "joypad.strobe_reset",
+                "joypad reset observer focus_domain",
+            )
+            self.expect_equal(
+                joypad_reset.get("next_artifact"),
+                "joypad_strobe_reset_fault/comparison.json",
+                "joypad reset observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for joypad_strobe_reset_fault")
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
         if isinstance(mapper, dict):
