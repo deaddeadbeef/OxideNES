@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 6
+EXPECTED_SCENARIO_SUITE_SCHEMA = 7
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 29
+EXPECTED_TELEMETRY_SCHEMA = 30
 EXPECTED_TRIAGE_SCHEMA = 6
-EXPECTED_BUNDLE_SCHEMA = 2
+EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
     "pass",
+    "input_mask_matrix_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
@@ -27,6 +28,7 @@ EXPECTED_SCENARIOS = {
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
     "joypad_strobe_reset_fault",
+    "joypad_strobe_high_hold_fault",
     "ppu_vram_increment_32_fault",
     "ppu_status_latch_reset_fault",
     "mapper2_bank_switch_fault",
@@ -82,7 +84,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            15,
+            16,
             "analysis baseline_divergence_count",
         )
 
@@ -132,13 +134,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            15,
+            16,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 15, "observer next_actions count")
+        self.expect_equal(len(actions), 16, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -175,6 +177,7 @@ class SuiteVerifier:
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
             "joypad_strobe_reset_fault",
+            "joypad_strobe_high_hold_fault",
             "ppu_vram_increment_32_fault",
             "ppu_status_latch_reset_fault",
             "mapper2_bank_switch_fault",
@@ -205,7 +208,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=110",
+            "comparison_difference_count=113",
             evidence,
             "timeout observer evidence",
         )
@@ -308,6 +311,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.18.result",
             joypad_reset_evidence,
             "joypad reset observer evidence",
+        )
+
+        joypad_hold = by_scenario.get("joypad_strobe_high_hold_fault")
+        if not isinstance(joypad_hold, dict):
+            self.errors.append("missing observer action for joypad_strobe_high_hold_fault")
+            return
+
+        self.expect_equal(
+            joypad_hold.get("priority"),
+            "known_divergence",
+            "joypad strobe-high observer action priority",
+        )
+        self.expect_equal(
+            joypad_hold.get("action_type"),
+            "inspect_known_divergence",
+            "joypad strobe-high observer action type",
+        )
+        self.expect_equal(
+            joypad_hold.get("primary_artifact"),
+            "joypad_strobe_high_hold_fault/comparison.json",
+            "joypad strobe-high observer primary_artifact",
+        )
+        joypad_hold_evidence = self.expect_list(
+            joypad_hold.get("evidence"), "joypad strobe-high observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=joypad.strobe_high_hold",
+            joypad_hold_evidence,
+            "joypad strobe-high observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.21.result",
+            joypad_hold_evidence,
+            "joypad strobe-high observer evidence",
         )
 
         ppu_increment_32 = by_scenario.get("ppu_vram_increment_32_fault")
@@ -644,6 +681,31 @@ class SuiteVerifier:
         else:
             self.errors.append("missing observer observation for pass")
 
+        input_matrix = by_scenario.get("input_mask_matrix_pass")
+        if isinstance(input_matrix, dict):
+            self.expect_equal(
+                input_matrix.get("role"),
+                "expected_pass_fixture",
+                "input matrix observer role",
+            )
+            self.expect_equal(
+                input_matrix.get("outcome"),
+                "matches_baseline",
+                "input matrix observer outcome",
+            )
+            self.expect_equal(
+                input_matrix.get("health"),
+                "healthy",
+                "input matrix observer health",
+            )
+            self.expect_equal(
+                input_matrix.get("next_artifact"),
+                "input_mask_matrix_pass/triage.json",
+                "input matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_matrix_pass")
+
         timeout = by_scenario.get("timeout_cycle_limit")
         if isinstance(timeout, dict):
             self.expect_equal(
@@ -663,7 +725,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                110,
+                113,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -818,6 +880,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for joypad_strobe_reset_fault")
+
+        joypad_hold = by_scenario.get("joypad_strobe_high_hold_fault")
+        if isinstance(joypad_hold, dict):
+            self.expect_equal(
+                joypad_hold.get("role"),
+                "expected_failure_fixture",
+                "joypad strobe-high observer role",
+            )
+            self.expect_equal(
+                joypad_hold.get("outcome"),
+                "expected_baseline_divergence",
+                "joypad strobe-high observer outcome",
+            )
+            self.expect_equal(
+                joypad_hold.get("health"),
+                "cartridge_assertion_failed",
+                "joypad strobe-high observer health",
+            )
+            self.expect_equal(
+                joypad_hold.get("focus_domain"),
+                "joypad.strobe_high_hold",
+                "joypad strobe-high observer focus_domain",
+            )
+            self.expect_equal(
+                joypad_hold.get("next_artifact"),
+                "joypad_strobe_high_hold_fault/comparison.json",
+                "joypad strobe-high observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for joypad_strobe_high_hold_fault")
 
         ppu_increment_32 = by_scenario.get("ppu_vram_increment_32_fault")
         if isinstance(ppu_increment_32, dict):

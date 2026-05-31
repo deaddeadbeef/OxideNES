@@ -11,11 +11,13 @@ cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json 
 The runner exits `0` only when the cartridge and host-side checks pass. It exits `1` for diagnostic failures or timeouts, and `2` for CLI/build errors.
 
 Use `--joypad1 <BYTE>` and `--joypad2 <BYTE>` to override the host-side
-controller masks used by the cartridge. The default masks match the generated
-assertions: joypad 1 expects A + Right (`0x81`) and joypad 2 expects Start +
-Down (`0x28`). Overriding either value is useful for failure-localization
-smokes because the run still emits telemetry, triage JSON, and bundles before
-exiting `1`.
+controller masks used by the cartridge. Use `--expect-joypad1 <BYTE>` and
+`--expect-joypad2 <BYTE>` when the cartridge should validate a non-default
+expected mask instead of treating the host override as an intentional mismatch.
+The defaults match the generated assertions: joypad 1 expects A + Right
+(`0x81`) and joypad 2 expects Start + Down (`0x28`). Overriding only the host
+mask is useful for failure-localization smokes because the run still emits
+telemetry, triage JSON, and bundles before exiting `1`.
 
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
@@ -88,13 +90,13 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 
 The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
-plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
-`joypad2_mismatch`, `dma_oam_transfer_fault`, `apu_status_fault`,
-`cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
-`mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
+plus one full bundle per scenario: `pass`, `input_mask_matrix_pass`,
+`joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
+`apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
+`ppu_read_buffer_fault`, `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `joypad_strobe_reset_fault`,
-`ppu_vram_increment_32_fault`, `ppu_status_latch_reset_fault`,
-`ppu_nmi_timeout_fault`, and
+`joypad_strobe_high_hold_fault`, `ppu_vram_increment_32_fault`,
+`ppu_status_latch_reset_fault`, `ppu_nmi_timeout_fault`, and
 `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
@@ -122,6 +124,13 @@ horizontal mirroring regressions localize to
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
+`input_mask_matrix_pass` runs joypad 1 with `0xAA` and joypad 2 with `0x55`
+while setting the cartridge's expected masks to the same values, proving
+non-default controller masks can be validated as a healthy fixture without
+rebuilding the ROM.
+`joypad_strobe_high_hold_fault` clears joypad 1's A button just before the
+strobe-high hold test reads `$4016`, proving strobe-high read regressions
+localize to `joypad.strobe_high_hold`.
 `ppu_vram_increment_32_fault` corrupts the `$2020` stride target after the
 cartridge writes through `$2007` with PPUCTRL bit 2 set, proving PPUDATA
 increment-by-32 regressions localize to `ppu.registers.ppudata_increment_32`.
@@ -131,11 +140,11 @@ to `ppu.registers.status_latch_reset`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
-mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, joypad
-strobe-reset behavior, PPUDATA register increment behavior, PPUSTATUS
-write-latch reset behavior, DMA host-observation, APU status, PPU assertion, and
-PPU progress-timeout failure localization without requiring a broken emulator
-build. The Markdown reports add
+mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
+joypad masks, joypad strobe-reset behavior, joypad strobe-high hold behavior,
+PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
+host-observation, APU status, PPU assertion, and PPU progress-timeout failure
+localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
 matrix, AI drilldown order, and bundle artifact maps for humans or agents
@@ -172,8 +181,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
-- Joypad strobe and shift reads
+- Joypad strobe and shift reads with configurable expected masks
 - Joypad mid-stream strobe reset behavior
+- Joypad strobe-high hold behavior
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery and rendered frame production
@@ -394,3 +404,13 @@ leaves PPUADDR in a half-written state, reads PPUSTATUS, then verifies the next
 PPUADDR high/low pair writes PPUDATA to `$2100`. The intentional fault fixture
 re-enters the half-written latch state before the address pair and localizes
 PPUSTATUS latch-reset regressions to `ppu.registers.status_latch_reset`.
+
+Schema version `30` makes joypad expected masks explicit runtime inputs, adds
+the `joypad_strobe_high_hold` edge-case cartridge test, and adds the
+`input_mask_matrix_pass` plus `joypad_strobe_high_hold_fault` scenario-suite
+fixtures. The healthy input fixture validates non-default `0xAA`/`0x55`
+controller masks without rebuilding the ROM. The edge-case test verifies
+repeated `$4016` reads while strobe is high keep returning the configured A bit
+and that the first post-strobe-low serial read still starts at A. The intentional
+fault fixture localizes strobe-high hold regressions to
+`joypad.strobe_high_hold`.

@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 29;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 30;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v29";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v30";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -45,6 +45,8 @@ const CURRENT_TEST_ADDR: u8 = 0xF1;
 const FAILURE_CODE_ADDR: u8 = 0xF2;
 const SIGNATURE_ADDR: u8 = 0xF3;
 const NMI_COUNT_ADDR: u8 = 0xF4;
+const JOYPAD1_EXPECTED_MASK_ADDR: u8 = 0xF5;
+const JOYPAD2_EXPECTED_MASK_ADDR: u8 = 0xF6;
 
 const RESULT_BASE: u16 = 0x0200;
 const STATUS_RUNNING: u8 = 0x01;
@@ -63,6 +65,7 @@ const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
+const JOYPAD_STROBE_HIGH_HOLD_FAULT_LABEL: &str = "joypad_strobe_high_hold_before_reads";
 const JOYPAD_STROBE_RESET_FAULT_LABEL: &str = "joypad_strobe_reset_before_reset_read";
 const MAPPER2_BANK_SWITCH_FAULT_LABEL: &str = "mapper2_prg_bank_switch_before_read";
 const MAPPER2_PRG_RAM_FAULT_LABEL: &str = "mapper2_prg_ram_roundtrip_before_high_read";
@@ -181,8 +184,8 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "joypad_strobe_shift",
         subsystem: DiagnosticSubsystem::Joypad,
         tier: DiagnosticTestTier::Smoke,
-        intent: "Verify joypad strobe latches the configured A + Right button mask in read order.",
-        expected_observations: &["read sequence is 1,0,0,0,0,0,0,1"],
+        intent: "Verify joypad strobe latches the configured joypad-1 expected mask in read order.",
+        expected_observations: &["read sequence matches the configured joypad-1 expected mask"],
     },
     DiagnosticTestSpec {
         id: 8,
@@ -219,8 +222,8 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "joypad2_strobe_shift",
         subsystem: DiagnosticSubsystem::Joypad,
         tier: DiagnosticTestTier::Integration,
-        intent: "Verify the shared strobe latches an independent player-2 Start + Down mask through $4017.",
-        expected_observations: &["player 2 read sequence is 0,0,0,1,0,1,0,0"],
+        intent: "Verify the shared strobe latches the configured independent joypad-2 expected mask through $4017.",
+        expected_observations: &["player 2 read sequence matches the configured joypad-2 expected mask"],
     },
     DiagnosticTestSpec {
         id: 12,
@@ -296,8 +299,8 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         tier: DiagnosticTestTier::EdgeCase,
         intent: "Verify a mid-stream $4016 strobe-high/strobe-low sequence resets the joypad serial index.",
         expected_observations: &[
-            "first post-reset $4016 read returns the A button bit again",
-            "second post-reset $4016 read advances to the B button bit",
+            "first post-reset $4016 read returns the configured joypad-1 A bit again",
+            "second post-reset $4016 read advances to the configured joypad-1 B bit",
         ],
     },
     DiagnosticTestSpec {
@@ -320,6 +323,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "a half-written PPUADDR latch is reset by reading $2002",
             "the next $2006 high/low pair writes PPUDATA to the intended $2100 address",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 21,
+        name: "joypad_strobe_high_hold",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify reads while $4016 strobe is high repeatedly return the configured A-button bit and do not advance the serial index.",
+        expected_observations: &[
+            "two strobe-high reads both return the configured joypad-1 A bit",
+            "the first post-strobe-low read still starts at the configured joypad-1 A bit",
         ],
     },
 ];
@@ -410,8 +424,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x70,
         test_id: 7,
         assertion: "Joypad serial read 0 returns the latched A button bit",
-        expected: "$4016 read bit 0 == 1",
-        observed: "$4016 read bit 0 was not 1",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 0",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 0",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad strobe latch behavior and button-bit mapping for A.",
     },
@@ -419,8 +433,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x71,
         test_id: 7,
         assertion: "Joypad serial read 1 returns the latched B button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 1",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 1",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift index advancement after the first read.",
     },
@@ -428,8 +442,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x72,
         test_id: 7,
         assertion: "Joypad serial read 2 returns the latched Select button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 2",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 2",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Select bit mapping.",
     },
@@ -437,8 +451,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x73,
         test_id: 7,
         assertion: "Joypad serial read 3 returns the latched Start button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 3",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 3",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Start bit mapping.",
     },
@@ -446,8 +460,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x74,
         test_id: 7,
         assertion: "Joypad serial read 4 returns the latched Up button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 4",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 4",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Up bit mapping.",
     },
@@ -455,8 +469,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x75,
         test_id: 7,
         assertion: "Joypad serial read 5 returns the latched Down button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 5",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 5",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Down bit mapping.",
     },
@@ -464,8 +478,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x76,
         test_id: 7,
         assertion: "Joypad serial read 6 returns the latched Left button bit",
-        expected: "$4016 read bit 0 == 0",
-        observed: "$4016 read bit 0 was not 0",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 6",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 6",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Left bit mapping.",
     },
@@ -473,8 +487,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x77,
         test_id: 7,
         assertion: "Joypad serial read 7 returns the latched Right button bit",
-        expected: "$4016 read bit 0 == 1",
-        observed: "$4016 read bit 0 was not 1",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 7",
+        observed: "$4016 read bit 0 did not match configured joypad-1 mask bit 7",
         likely_domain: "joypad.strobe_shift",
         remediation_hint: "Inspect joypad shift order and Right bit mapping.",
     },
@@ -482,8 +496,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x78,
         test_id: 18,
         assertion: "Joypad strobe reset returns the A button bit again",
-        expected: "first $4016 read after a second strobe sequence returns bit 0 == 1",
-        observed: "$4016 did not restart at the A button bit after strobe reset",
+        expected: "first $4016 read after a second strobe sequence matches configured joypad-1 mask bit 0",
+        observed: "$4016 did not restart at the configured A button bit after strobe reset",
         likely_domain: "joypad.strobe_reset",
         remediation_hint: "Inspect joypad $4016 writes; a high strobe write must reset the serial read index before returning to low strobe mode.",
     },
@@ -491,8 +505,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0x79,
         test_id: 18,
         assertion: "Joypad strobe reset resumes serial advancement after the A bit",
-        expected: "second $4016 read after reset returns the B button bit == 0",
-        observed: "$4016 did not advance from A to B after the reset read",
+        expected: "second $4016 read after reset matches configured joypad-1 mask bit 1",
+        observed: "$4016 did not advance from A to the configured B bit after the reset read",
         likely_domain: "joypad.strobe_reset",
         remediation_hint: "Inspect joypad read-index advancement after strobe is lowered; reads should resume serial shifting from the reset index.",
     },
@@ -524,6 +538,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect PPUSTATUS reads and the shared PPUADDR/PPUSCROLL write latch; reading $2002 must reset the latch to expect the high byte.",
     },
     DiagnosticFailureSpec {
+        code: 0x7D,
+        test_id: 21,
+        assertion: "Joypad strobe-high read returns the configured A button bit",
+        expected: "first $4016 read while strobe is high matches the configured expected A bit",
+        observed: "$4016 strobe-high read did not match the configured A bit",
+        likely_domain: "joypad.strobe_high_hold",
+        remediation_hint: "Inspect joypad $4016 read behavior while strobe is high; reads should return the A button state without advancing the serial index.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x7E,
+        test_id: 21,
+        assertion: "Repeated joypad strobe-high reads keep returning the configured A button bit",
+        expected: "second $4016 read while strobe is high still matches the configured expected A bit",
+        observed: "$4016 strobe-high read advanced away from the A bit or returned the wrong value",
+        likely_domain: "joypad.strobe_high_hold",
+        remediation_hint: "Inspect joypad strobe-high handling; the serial read index must stay pinned while strobe remains high.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x7F,
+        test_id: 21,
+        assertion: "Dropping joypad strobe low starts serial reads at the configured A button bit",
+        expected: "first $4016 read after strobe falls low matches the configured expected A bit",
+        observed: "$4016 serial reads did not restart at A after the strobe-high phase",
+        likely_domain: "joypad.strobe_high_hold",
+        remediation_hint: "Inspect joypad strobe transitions; high-strobe reads must not advance the index used after strobe is lowered.",
+    },
+    DiagnosticFailureSpec {
         code: 0x81,
         test_id: 8,
         assertion: "BEQ is taken after CMP sets zero",
@@ -545,8 +586,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA0,
         test_id: 11,
         assertion: "Joypad 2 serial read 0 returns the latched A button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 0",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 0",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 bus dispatch and shared strobe latch behavior.",
     },
@@ -554,8 +595,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA1,
         test_id: 11,
         assertion: "Joypad 2 serial read 1 returns the latched B button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 1",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 1",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 shift index advancement after the first read.",
     },
@@ -563,8 +604,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA2,
         test_id: 11,
         assertion: "Joypad 2 serial read 2 returns the latched Select button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 2",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 2",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 shift order and Select bit mapping.",
     },
@@ -572,8 +613,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA3,
         test_id: 11,
         assertion: "Joypad 2 serial read 3 returns the latched Start button bit",
-        expected: "$4017 read bit 0 == 1",
-        observed: "$4017 read bit 0 was not 1",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 3",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 3",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 Start button mapping and $4017 reads.",
     },
@@ -581,8 +622,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA4,
         test_id: 11,
         assertion: "Joypad 2 serial read 4 returns the latched Up button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 4",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 4",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 shift order and Up bit mapping.",
     },
@@ -590,8 +631,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA5,
         test_id: 11,
         assertion: "Joypad 2 serial read 5 returns the latched Down button bit",
-        expected: "$4017 read bit 0 == 1",
-        observed: "$4017 read bit 0 was not 1",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 5",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 5",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 Down button mapping and $4017 reads.",
     },
@@ -599,8 +640,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA6,
         test_id: 11,
         assertion: "Joypad 2 serial read 6 returns the latched Left button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 6",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 6",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 shift order and Left bit mapping.",
     },
@@ -608,8 +649,8 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xA7,
         test_id: 11,
         assertion: "Joypad 2 serial read 7 returns the latched Right button bit",
-        expected: "$4017 read bit 0 == 0",
-        observed: "$4017 read bit 0 was not 0",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 7",
+        observed: "$4017 read bit 0 did not match configured joypad-2 mask bit 7",
         likely_domain: "joypad2.strobe_shift",
         remediation_hint: "Inspect joypad 2 shift order and Right bit mapping.",
     },
@@ -822,9 +863,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 strobe/shift sequence for A + Right, joypad 1 mid-stream strobe reset behavior, joypad 1 overreads after the eighth latched button, and joypad 2 strobe/shift sequence for Start + Down.",
-        missing_coverage: "Multiple masks per port, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
-        suggested_next_test: "Run the serial-read program across a generated mask table for both ports, including mid-stream strobe toggles.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes a non-default alternating-mask pass fixture, joypad 1 verifies strobe-high reads hold the A bit, joypad 1 verifies mid-stream strobe reset behavior, and joypad 1 verifies overreads after the eighth latched button.",
+        missing_coverage: "Full generated mask table per port, disconnected input defaults, and host input remapping.",
+        suggested_next_test: "Run the serial-read program across a generated mask table for both ports, including disconnected-controller and remapping fixtures.",
     },
 ];
 
@@ -832,7 +873,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
 pub struct DiagnosticConfig {
     pub max_cpu_cycles: u64,
     pub joypad1_mask: u8,
+    pub expected_joypad1_mask: u8,
     pub joypad2_mask: u8,
+    pub expected_joypad2_mask: u8,
     pub fault_injection: Option<DiagnosticFaultInjection>,
 }
 
@@ -841,7 +884,9 @@ impl Default for DiagnosticConfig {
         Self {
             max_cpu_cycles: 500_000,
             joypad1_mask: EXPECTED_JOYPAD1_MASK,
+            expected_joypad1_mask: EXPECTED_JOYPAD1_MASK,
             joypad2_mask: EXPECTED_JOYPAD2_MASK,
+            expected_joypad2_mask: EXPECTED_JOYPAD2_MASK,
             fault_injection: None,
         }
     }
@@ -854,6 +899,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    JoypadStrobeHighHold,
     JoypadStrobeReset,
     Mapper2PrgBankSwitch,
     Mapper2PrgRam,
@@ -871,6 +917,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::JoypadStrobeHighHold => "joypad_strobe_high_hold",
             DiagnosticFaultInjection::JoypadStrobeReset => "joypad_strobe_reset",
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
@@ -888,6 +935,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::JoypadStrobeHighHold => JOYPAD_STROBE_HIGH_HOLD_FAULT_LABEL,
             DiagnosticFaultInjection::JoypadStrobeReset => JOYPAD_STROBE_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
@@ -1472,6 +1520,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut bus = Bus::new(cartridge);
     apply_joypad_mask(&mut bus, config.joypad1_mask);
     apply_joypad2_mask(&mut bus, config.joypad2_mask);
+    bus.cpu_write(
+        JOYPAD1_EXPECTED_MASK_ADDR as u16,
+        config.expected_joypad1_mask,
+    );
+    bus.cpu_write(
+        JOYPAD2_EXPECTED_MASK_ADDR as u16,
+        config.expected_joypad2_mask,
+    );
 
     let mut cpu = Cpu::new();
     cpu.reset(&mut bus);
@@ -3655,6 +3711,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.joypad_strobe_reset_midstream();
     program.ppu_vram_increment_32();
     program.ppu_status_latch_reset();
+    program.joypad_strobe_high_hold();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3716,9 +3773,39 @@ impl DiagnosticProgram {
         let ok = self.unique_label("ok");
         self.asm.cmp_imm(expected);
         self.asm.beq(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn fail_with_code(&mut self, fail_code: u8) {
         self.asm.lda_imm(fail_code);
         self.asm.sta_zp(FAILURE_CODE_ADDR);
         self.asm.jmp_label("fail");
+    }
+
+    fn expect_a_matches_mask_bit(&mut self, expected_mask_addr: u8, bit_mask: u8, fail_code: u8) {
+        let actual_zero = self.unique_label("actual_zero");
+        let ok = self.unique_label("mask_bit_ok");
+
+        self.asm.cmp_imm(0x00);
+        self.asm.beq(&actual_zero);
+        self.asm.lda_zp(expected_mask_addr);
+        self.asm.and_imm(bit_mask);
+        self.asm.cmp_imm(0x00);
+        self.asm.bne(&ok);
+        self.fail_with_code(fail_code);
+
+        self.asm
+            .label(&actual_zero)
+            .expect("unique label should not collide");
+        self.asm.lda_zp(expected_mask_addr);
+        self.asm.and_imm(bit_mask);
+        self.asm.cmp_imm(0x00);
+        self.asm.beq(&ok);
+        self.fail_with_code(fail_code);
+
         self.asm
             .label(&ok)
             .expect("unique label should not collide");
@@ -3848,8 +3935,7 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x4016);
 
-        let expected = [1, 0, 0, 0, 0, 0, 0, 1];
-        self.expect_serial_bits(0x4016, &expected, 0x70);
+        self.expect_serial_bits_from_mask(0x4016, JOYPAD1_EXPECTED_MASK_ADDR, 0x70);
         self.pass_test(7);
     }
 
@@ -3940,8 +4026,7 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x4016);
 
-        let expected = [0, 0, 0, 1, 0, 1, 0, 0];
-        self.expect_serial_bits(0x4017, &expected, 0xA0);
+        self.expect_serial_bits_from_mask(0x4017, JOYPAD2_EXPECTED_MASK_ADDR, 0xA0);
         self.pass_test(11);
     }
 
@@ -4131,10 +4216,10 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x4016);
         self.asm.lda_abs(0x4016);
         self.asm.and_imm(0x01);
-        self.expect_a_eq(0x01, 0x78);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x78);
         self.asm.lda_abs(0x4016);
         self.asm.and_imm(0x01);
-        self.expect_a_eq(0x00, 0x79);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x02, 0x79);
 
         self.asm.lda_imm(0x01);
         self.asm.sta_abs(0x4016);
@@ -4145,10 +4230,10 @@ impl DiagnosticProgram {
             .expect("diagnostic fault-injection label should not collide");
         self.asm.lda_abs(0x4016);
         self.asm.and_imm(0x01);
-        self.expect_a_eq(0x01, 0x78);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x78);
         self.asm.lda_abs(0x4016);
         self.asm.and_imm(0x01);
-        self.expect_a_eq(0x00, 0x79);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x02, 0x79);
         self.pass_test(18);
     }
 
@@ -4235,11 +4320,32 @@ impl DiagnosticProgram {
         self.pass_test(20);
     }
 
-    fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
-        for (index, expected_bit) in expected.iter().copied().enumerate() {
+    fn joypad_strobe_high_hold(&mut self) {
+        self.begin_test(21);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+        self.asm
+            .label(JOYPAD_STROBE_HIGH_HOLD_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x7D);
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x7E);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x7F);
+        self.pass_test(21);
+    }
+
+    fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
+        for index in 0..8 {
             self.asm.lda_abs(addr);
             self.asm.and_imm(0x01);
-            self.expect_a_eq(expected_bit, fail_base + index as u8);
+            self.expect_a_matches_mask_bit(expected_mask_addr, 1 << index, fail_base + index);
         }
     }
 }
@@ -4629,12 +4735,12 @@ fn diagnostic_input_telemetry(config: &DiagnosticConfig) -> DiagnosticInputTelem
     DiagnosticInputTelemetry {
         joypad1_mask: config.joypad1_mask,
         joypad1_mask_hex: hex_byte(config.joypad1_mask),
-        joypad1_expected_mask: EXPECTED_JOYPAD1_MASK,
-        joypad1_expected_mask_hex: hex_byte(EXPECTED_JOYPAD1_MASK),
+        joypad1_expected_mask: config.expected_joypad1_mask,
+        joypad1_expected_mask_hex: hex_byte(config.expected_joypad1_mask),
         joypad2_mask: config.joypad2_mask,
         joypad2_mask_hex: hex_byte(config.joypad2_mask),
-        joypad2_expected_mask: EXPECTED_JOYPAD2_MASK,
-        joypad2_expected_mask_hex: hex_byte(EXPECTED_JOYPAD2_MASK),
+        joypad2_expected_mask: config.expected_joypad2_mask,
+        joypad2_expected_mask_hex: hex_byte(config.expected_joypad2_mask),
         fault_injection: config.fault_injection,
         fault_injection_label: config.fault_injection.map(DiagnosticFaultInjection::as_str),
     }
@@ -4670,6 +4776,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
+        }
+        DiagnosticFaultInjection::JoypadStrobeHighHold => {
+            bus.joypad1.set_button_pressed(JoypadButton::A, false);
         }
         DiagnosticFaultInjection::JoypadStrobeReset => {
             let _ = bus.cpu_read(0x4016);
