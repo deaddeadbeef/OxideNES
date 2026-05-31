@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 15;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 16;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v15";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v16";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -205,6 +205,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "LDA $FF,X with X=0x81 reads $0080",
             "STA $FF,X with X=0x81 writes $0080",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 13,
+        name: "cpu_indirect_jmp_page_wrap",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify JMP ($xxFF) uses the original 6502 page-wrap high-byte read behavior.",
+        expected_observations: &[
+            "JMP ($04FF) reads target low byte at $04FF",
+            "JMP ($04FF) reads target high byte from $0400 instead of $0500",
         ],
     },
 ];
@@ -489,6 +500,24 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         likely_domain: "cpu.addressing.zero_page_x_wrap",
         remediation_hint: "Inspect zero-page indexed address calculation; the base plus index must wrap to 8 bits before the CPU RAM write.",
     },
+    DiagnosticFailureSpec {
+        code: 0xC0,
+        test_id: 13,
+        assertion: "Indirect JMP pointer at $04FF wraps the high-byte read to $0400",
+        expected: "JMP ($04FF) reaches the page-wrap target",
+        observed: "JMP ($04FF) read the non-wrapped high byte and reached the wrong target",
+        likely_domain: "cpu.control_flow.indirect_jmp_page_wrap",
+        remediation_hint: "Inspect JMP indirect addressing; when the pointer low byte is 0xFF, the high byte must be read from the same page at xx00.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC1,
+        test_id: 13,
+        assertion: "Indirect JMP page-wrap target executes normally",
+        expected: "A == 0x7B after reaching the wrapped target",
+        observed: "A differed from the wrapped-target sentinel",
+        likely_domain: "cpu.control_flow.indirect_jmp",
+        remediation_hint: "Inspect JMP indirect target calculation and program-counter update after resolving the target address.",
+    },
 ];
 
 const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
@@ -496,7 +525,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, and zero-page indexed wraparound.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, and indirect JMP page-wrap behavior.",
         missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, broader addressing-mode combinations, and cycle-accurate addressing penalties.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case.",
     },
@@ -2402,6 +2431,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x40 => OpcodeDecode::implied("RTI"),
         0x48 => OpcodeDecode::implied("PHA"),
         0x4C => OpcodeDecode::absolute("JMP"),
+        0x6C => OpcodeDecode::indirect("JMP"),
         0x60 => OpcodeDecode::implied("RTS"),
         0x68 => OpcodeDecode::implied("PLA"),
         0x69 => OpcodeDecode::immediate("ADC"),
@@ -2479,6 +2509,14 @@ impl OpcodeDecode {
         }
     }
 
+    fn indirect(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "indirect",
+            byte_len: 3,
+        }
+    }
+
     fn relative(mnemonic: &'static str) -> Self {
         Self {
             mnemonic,
@@ -2500,6 +2538,11 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
         ),
         "absolute_x" => format!(
             "{} {},X",
+            decode.mnemonic,
+            format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
+        ),
+        "indirect" => format!(
+            "{} ({})",
             decode.mnemonic,
             format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
         ),
@@ -3253,6 +3296,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_nmi_and_render_frame();
     program.joypad2_strobe_shift();
     program.cpu_zero_page_index_wrap();
+    program.cpu_indirect_jmp_page_wrap();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3552,6 +3596,35 @@ impl DiagnosticProgram {
         self.pass_test(12);
     }
 
+    fn cpu_indirect_jmp_page_wrap(&mut self) {
+        self.begin_test(13);
+        let wrong_target = self.unique_label("indirect_jmp_wrong_target");
+        let correct_target = self.unique_label("indirect_jmp_correct_target");
+        self.asm.lda_label_low(&correct_target);
+        self.asm.sta_abs(0x04FF);
+        self.asm.lda_label_high(&correct_target);
+        self.asm.sta_abs(0x0400);
+        self.asm.lda_label_high(&wrong_target);
+        self.asm.sta_abs(0x0500);
+        self.asm.jmp_indirect(0x04FF);
+
+        self.asm.pad_until_low_byte(0x00);
+        self.asm
+            .label(&wrong_target)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0xC0);
+        self.asm.sta_zp(FAILURE_CODE_ADDR);
+        self.asm.jmp_label("fail");
+
+        self.asm.pad_until_low_byte(0x00);
+        self.asm
+            .label(&correct_target)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0x7B);
+        self.expect_a_eq(0x7B, 0xC1);
+        self.pass_test(13);
+    }
+
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
         for (index, expected_bit) in expected.iter().copied().enumerate() {
             self.asm.lda_abs(addr);
@@ -3580,6 +3653,8 @@ struct Patch {
 enum PatchKind {
     Absolute,
     Relative,
+    LabelLowByte,
+    LabelHighByte,
 }
 
 impl Assembler {
@@ -3628,6 +3703,12 @@ impl Assembler {
                     }
                     self.bytes[patch.at] = offset as i8 as u8;
                 }
+                PatchKind::LabelLowByte => {
+                    self.bytes[patch.at] = target as u8;
+                }
+                PatchKind::LabelHighByte => {
+                    self.bytes[patch.at] = (target >> 8) as u8;
+                }
             }
         }
         Ok(self.bytes)
@@ -3655,6 +3736,17 @@ impl Assembler {
     fn op_imm(&mut self, op: u8, value: u8) {
         self.emit(op);
         self.emit(value);
+    }
+
+    fn op_imm_label_byte(&mut self, op: u8, label: &str, kind: PatchKind) {
+        self.emit(op);
+        let at = self.bytes.len();
+        self.emit(0);
+        self.patches.push(Patch {
+            at,
+            label: label.to_string(),
+            kind,
+        });
     }
 
     fn op_zp(&mut self, op: u8, addr: u8) {
@@ -3691,6 +3783,14 @@ impl Assembler {
 
     fn lda_imm(&mut self, value: u8) {
         self.op_imm(0xA9, value);
+    }
+
+    fn lda_label_low(&mut self, label: &str) {
+        self.op_imm_label_byte(0xA9, label, PatchKind::LabelLowByte);
+    }
+
+    fn lda_label_high(&mut self, label: &str) {
+        self.op_imm_label_byte(0xA9, label, PatchKind::LabelHighByte);
     }
 
     fn lda_zp(&mut self, addr: u8) {
@@ -3751,6 +3851,10 @@ impl Assembler {
 
     fn jmp_label(&mut self, label: &str) {
         self.op_abs_label(0x4C, label);
+    }
+
+    fn jmp_indirect(&mut self, addr: u16) {
+        self.op_abs(0x6C, addr);
     }
 
     fn jsr_label(&mut self, label: &str) {

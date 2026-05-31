@@ -123,6 +123,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - CPU arithmetic and flags
 - Stack, `JSR`, and `RTS`
 - Zero-page indexed read/write wraparound
+- Indirect `JMP ($xxFF)` page-wrap behavior
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
@@ -258,3 +259,8 @@ Schema version `15` adds the `cpu_zero_page_index_wrap` edge-case cartridge
 test. It verifies that `LDA $FF,X` and `STA $FF,X` with `X=0x81` wrap to `$0080`
 inside page zero, and adds failure-catalog domains for zero-page indexed CPU
 addressing regressions.
+
+Schema version `16` adds the `cpu_indirect_jmp_page_wrap` edge-case cartridge
+test. It verifies that `JMP ($04FF)` reads the high byte from `$0400`, matching
+the original 6502 indirect-jump page-wrap behavior, and gives AI triage a
+specific `cpu.control_flow.indirect_jmp_page_wrap` failure domain.
