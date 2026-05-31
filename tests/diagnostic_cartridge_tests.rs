@@ -1,7 +1,7 @@
 use oxidenes::diagnostic::{
     build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DiagnosticFailureKind,
-    DiagnosticSubsystem, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
-    DIAGNOSTIC_TESTS,
+    DiagnosticHealth, DiagnosticSubsystem, DIAGNOSTIC_PROVENANCE,
+    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -18,6 +18,26 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
     );
     assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
+    assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
+    assert_eq!(
+        telemetry.analysis.coverage.total_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(
+        telemetry.analysis.coverage.passed_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(telemetry.analysis.coverage.failed_tests, 0);
+    assert_eq!(telemetry.analysis.failing_subsystem, None);
+    assert_eq!(telemetry.analysis.failing_test, None);
+    assert_eq!(telemetry.analysis.first_failure_domain, None);
+    assert!(telemetry.analysis.summary.contains("diagnostic passed"));
+    assert!(telemetry
+        .analysis
+        .coverage
+        .subsystem_summary
+        .iter()
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 3));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0x70
             && failure.test_name == Some("joypad_strobe_shift")
@@ -73,6 +93,29 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
     assert_eq!(failure.likely_domain, "joypad.strobe_shift");
     assert!(failure.assertion.contains("A button"));
     assert!(failure.remediation_hint.contains("joypad strobe"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::CartridgeAssertionFailed
+    );
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Joypad)
+    );
+    assert_eq!(telemetry.analysis.failing_test, Some("joypad_strobe_shift"));
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("joypad.strobe_shift")
+    );
+    assert!(telemetry
+        .analysis
+        .summary
+        .contains("diagnostic failed at joypad_strobe_shift"));
+    assert!(telemetry
+        .analysis
+        .next_actions
+        .iter()
+        .any(|action| action.contains("joypad strobe")));
 }
 
 #[test]
@@ -99,6 +142,18 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     assert_eq!(failure.kind, DiagnosticFailureKind::Timeout);
     assert_eq!(failure.likely_domain, "emulator.progress_or_infinite_loop");
     assert!(failure.observed.contains("status was"));
+
+    assert_eq!(telemetry.analysis.health, DiagnosticHealth::TimedOut);
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("emulator.progress_or_infinite_loop")
+    );
+    assert!(telemetry.analysis.summary.contains("diagnostic timed out"));
+    assert!(telemetry
+        .analysis
+        .next_actions
+        .iter()
+        .any(|action| action.contains("CPU PC")));
 }
 
 #[test]
