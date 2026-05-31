@@ -2,8 +2,8 @@ use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
     DiagnosticComparisonSeverity, DiagnosticConfig, DiagnosticFailureKind, DiagnosticHealth,
-    DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome, DIAGNOSTIC_PROVENANCE,
-    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    DiagnosticProbeStatus, DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome,
+    DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -71,6 +71,31 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     );
     assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
     assert_eq!(telemetry.analysis.timing.timed_out_tests, 0);
+    assert_eq!(
+        telemetry.analysis.probe_summary.total_probes,
+        telemetry.probes.len()
+    );
+    assert!(telemetry.analysis.probe_summary.total_probes > DIAGNOSTIC_TESTS.len());
+    assert_eq!(
+        telemetry.analysis.probe_summary.passed_probes,
+        telemetry.analysis.probe_summary.total_probes
+    );
+    assert_eq!(telemetry.analysis.probe_summary.failed_probes, 0);
+    assert_eq!(telemetry.analysis.probe_summary.skipped_probes, 0);
+    assert!(telemetry
+        .probes
+        .iter()
+        .all(|probe| probe.status == DiagnosticProbeStatus::Passed));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ram.signature"
+            && probe.expected.contains("0xA5")
+            && probe.observed.contains("0xA5")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.10.result"
+            && probe.test_name == Some("ppu_nmi_and_render_frame")
+            && probe.status == DiagnosticProbeStatus::Passed
+    }));
     assert!(telemetry
         .analysis
         .timing
@@ -93,6 +118,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Health | healthy |"));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Timing"));
+    assert!(report.contains("## Observation Probes"));
+    assert!(report.contains("| Passed probes |"));
+    assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
     assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("## Event Tail"));
@@ -154,6 +182,25 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
         .next_actions
         .iter()
         .any(|action| action.contains("joypad strobe")));
+    assert_eq!(
+        telemetry
+            .analysis
+            .probe_summary
+            .first_failed_probe
+            .as_deref(),
+        Some("cartridge.status.pass")
+    );
+    assert_eq!(telemetry.analysis.probe_summary.failed_probes, 2);
+    assert!(telemetry.analysis.probe_summary.skipped_probes > 0);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.7.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(7)
+            && probe.likely_domain == "joypad.strobe_shift"
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.8.result" && probe.status == DiagnosticProbeStatus::Skipped
+    }));
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
@@ -186,6 +233,12 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
     assert!(report.contains("| Remediation hint | Inspect joypad strobe"));
     assert!(report.contains("| 7 | joypad_strobe_shift | joypad | smoke | failed |"));
     assert!(report.contains("| 8 | cpu_branch_page_crossing | cpu | edge_case | not_started |"));
+    assert!(report.contains(
+        "| failed | cartridge.test.7.result | cartridge_result | joypad | joypad_strobe_shift |"
+    ));
+    assert!(report.contains(
+        "| skipped | cartridge.test.8.result | cartridge_result | cpu | cpu_branch_page_crossing |"
+    ));
     assert!(report.contains("## Host Failures"));
 }
 
@@ -225,6 +278,16 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
         .next_actions
         .iter()
         .any(|action| action.contains("CPU PC")));
+    assert!(telemetry.analysis.probe_summary.failed_probes >= 2);
+    assert!(telemetry.analysis.probe_summary.skipped_probes >= DIAGNOSTIC_TESTS.len());
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "runtime.completed"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.observed.contains("timeout=true")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.1.result" && probe.status == DiagnosticProbeStatus::Skipped
+    }));
     assert_eq!(telemetry.analysis.timing.started_tests, 0);
     assert_eq!(telemetry.analysis.timing.ended_tests, 0);
     assert_eq!(
@@ -241,6 +304,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
     assert!(report.contains("| Not started tests | 10 |"));
     assert!(report.contains("| Slowest test | none |"));
+    assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }
 
 #[test]
@@ -292,6 +356,15 @@ fn generated_diagnostic_cartridge_comparison_fails_on_assertion_regression() {
     assert!(comparison.differences.iter().any(|difference| {
         difference.severity == DiagnosticComparisonSeverity::Failure
             && difference.path == "timeline[7].outcome"
+            && difference.current.as_deref() == Some("failed")
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Failure
+            && difference.path == "analysis.probe_summary.failed_probes"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Failure
+            && difference.path == "probes[cartridge.test.7.result].status"
             && difference.current.as_deref() == Some("failed")
     }));
     let report = format_diagnostic_comparison_report(&comparison);
