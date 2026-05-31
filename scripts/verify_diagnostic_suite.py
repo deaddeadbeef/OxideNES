@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 25
+EXPECTED_TELEMETRY_SCHEMA = 26
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -25,6 +25,7 @@ EXPECTED_SCENARIOS = {
     "cpu_indirect_jmp_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
+    "ppu_nametable_mirroring_fault",
     "mapper2_bank_switch_fault",
     "mapper2_prg_ram_fault",
     "timeout_cycle_limit",
@@ -78,7 +79,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            11,
+            12,
             "analysis baseline_divergence_count",
         )
 
@@ -128,13 +129,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            11,
+            12,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 11, "observer next_actions count")
+        self.expect_equal(len(actions), 12, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -169,6 +170,7 @@ class SuiteVerifier:
             "cpu_indirect_jmp_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
+            "ppu_nametable_mirroring_fault",
             "mapper2_bank_switch_fault",
             "mapper2_prg_ram_fault",
             "timeout_cycle_limit",
@@ -197,7 +199,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=98",
+            "comparison_difference_count=101",
             evidence,
             "timeout observer evidence",
         )
@@ -232,6 +234,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result",
             ppu_evidence,
             "PPU observer evidence",
+        )
+
+        ppu_mirroring = by_scenario.get("ppu_nametable_mirroring_fault")
+        if not isinstance(ppu_mirroring, dict):
+            self.errors.append("missing observer action for ppu_nametable_mirroring_fault")
+            return
+
+        self.expect_equal(
+            ppu_mirroring.get("priority"),
+            "known_divergence",
+            "PPU mirroring observer action priority",
+        )
+        self.expect_equal(
+            ppu_mirroring.get("action_type"),
+            "inspect_known_divergence",
+            "PPU mirroring observer action type",
+        )
+        self.expect_equal(
+            ppu_mirroring.get("primary_artifact"),
+            "ppu_nametable_mirroring_fault/comparison.json",
+            "PPU mirroring observer primary_artifact",
+        )
+        ppu_mirroring_evidence = self.expect_list(
+            ppu_mirroring.get("evidence"), "PPU mirroring observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=ppu.nametables.horizontal_mirroring",
+            ppu_mirroring_evidence,
+            "PPU mirroring observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.17.result",
+            ppu_mirroring_evidence,
+            "PPU mirroring observer evidence",
         )
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
@@ -519,7 +555,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                98,
+                101,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -614,6 +650,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_read_buffer_fault")
+
+        ppu_mirroring = by_scenario.get("ppu_nametable_mirroring_fault")
+        if isinstance(ppu_mirroring, dict):
+            self.expect_equal(
+                ppu_mirroring.get("role"),
+                "expected_failure_fixture",
+                "PPU mirroring observer role",
+            )
+            self.expect_equal(
+                ppu_mirroring.get("outcome"),
+                "expected_baseline_divergence",
+                "PPU mirroring observer outcome",
+            )
+            self.expect_equal(
+                ppu_mirroring.get("health"),
+                "cartridge_assertion_failed",
+                "PPU mirroring observer health",
+            )
+            self.expect_equal(
+                ppu_mirroring.get("focus_domain"),
+                "ppu.nametables.horizontal_mirroring",
+                "PPU mirroring observer focus_domain",
+            )
+            self.expect_equal(
+                ppu_mirroring.get("next_artifact"),
+                "ppu_nametable_mirroring_fault/comparison.json",
+                "PPU mirroring observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for ppu_nametable_mirroring_fault")
 
         mapper = by_scenario.get("mapper2_bank_switch_fault")
         if isinstance(mapper, dict):

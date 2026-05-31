@@ -92,6 +92,7 @@ plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
 `joypad2_mismatch`, `dma_oam_transfer_fault`, `apu_status_fault`,
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
+`ppu_nametable_mirroring_fault`,
 `ppu_nmi_timeout_fault`, and
 `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
@@ -113,10 +114,14 @@ localize to `mapper.uxrom.prg_bank_switch`.
 `mapper2_prg_ram_fault` corrupts the `$7FFF` PRG RAM sentinel just before the
 cartridge reads it, proving Mapper 2 PRG RAM regressions localize to
 `mapper.uxrom.prg_ram`.
+`ppu_nametable_mirroring_fault` corrupts the `$2000/$2400` horizontal
+nametable mirror pair before the cartridge reads it, proving mapper-declared
+horizontal mirroring regressions localize to
+`ppu.nametables.horizontal_mirroring`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
-mapper PRG switching, mapper PRG RAM, DMA host-observation, APU status, PPU assertion, and PPU
+mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, DMA host-observation, APU status, PPU assertion, and PPU
 progress-timeout failure localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -147,6 +152,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Indirect `JMP ($xxFF)` page-wrap behavior
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
+- PPU horizontal nametable mirroring through CPU-driven PPUDATA reads
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
@@ -342,3 +348,11 @@ cartridge RAM window, changes Mapper 2 bank select through `$8000`, and verifies
 the lower sentinel still persists. The intentional fault fixture corrupts the
 upper sentinel before the read and localizes PRG RAM regressions to
 `mapper.uxrom.prg_ram`.
+
+Schema version `26` adds the `ppu_horizontal_nametable_mirroring` integration
+test plus the `ppu_nametable_mirroring_fault` scenario-suite fixture. The
+cartridge writes nametable sentinels through PPUDATA, verifies that `$2400`
+mirrors `$2000`, verifies that `$2C00` mirrors `$2800`, and verifies the two
+horizontal mirror pairs remain independent. The intentional fault fixture
+corrupts the first mirror pair and localizes mirroring regressions to
+`ppu.nametables.horizontal_mirroring`.

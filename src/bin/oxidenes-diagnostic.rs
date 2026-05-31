@@ -1683,7 +1683,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(16),
+            expected_focus_test_id: Some(17),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1804,6 +1804,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(16),
             expected_focus_domain: Some("mapper.uxrom.prg_ram"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_nametable_mirroring_fault",
+            title: "Intentional PPU nametable mirroring assertion failure",
+            purpose: "Failure-localization fixture for horizontal nametable mirroring regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuNametableMirroring),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(17),
+            expected_focus_domain: Some("ppu.nametables.horizontal_mirroring"),
         },
         DiagnosticScenarioSpec {
             id: "ppu_nmi_timeout_fault",

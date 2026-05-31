@@ -43,10 +43,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 16);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 17);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("mapper2_prg_ram_roundtrip")
+        Some("ppu_horizontal_nametable_mirroring")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -66,7 +66,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("mapper2_prg_ram_roundtrip")
+        Some("ppu_horizontal_nametable_mirroring")
     );
     assert_eq!(
         telemetry
@@ -89,7 +89,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 3));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 4));
     assert!(telemetry
         .analysis
         .coverage
@@ -126,6 +126,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && failure.test_name == Some("mapper2_prg_ram_roundtrip")
             && failure.likely_domain == "mapper.uxrom.prg_ram"
     }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0xE0
+            && failure.test_name == Some("ppu_horizontal_nametable_mirroring")
+            && failure.likely_domain == "ppu.nametables.horizontal_mirroring"
+    }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "cpu_branch_page_crossing"
@@ -156,6 +161,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     }));
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "mapper2_prg_ram_roundtrip" && test.intent.contains("PRG RAM") && test.passed
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "ppu_horizontal_nametable_mirroring"
+            && test.intent.contains("horizontal nametable")
+            && test.passed
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
@@ -353,7 +363,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | mapper2_prg_ram_roundtrip (16) |"));
+    assert!(report.contains("| Focus test | ppu_horizontal_nametable_mirroring (17) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -378,6 +388,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 15 | mapper2_prg_bank_switch | cartridge | integration | passed |"));
     assert!(
         report.contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | passed |")
+    );
+    assert!(
+        report.contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | passed |")
     );
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
@@ -517,7 +530,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 9);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 10);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -629,7 +642,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 16);
+    assert_eq!(telemetry.verdict.current_test, 17);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -761,7 +774,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 6);
     assert_eq!(telemetry.analysis.timing.ended_tests, 6);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 10);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 11);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -832,7 +845,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failu
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 12);
     assert_eq!(telemetry.analysis.timing.ended_tests, 12);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -906,7 +919,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 13);
     assert_eq!(telemetry.analysis.timing.ended_tests, 13);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -977,7 +990,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 14);
     assert_eq!(telemetry.analysis.timing.ended_tests, 14);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -993,6 +1006,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     );
     assert!(report
         .contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | not_started |"));
+    assert!(report
+        .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
 }
 
 #[test]
@@ -1053,7 +1068,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_fail
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 15);
     assert_eq!(telemetry.analysis.timing.ended_tests, 15);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1066,6 +1081,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_fail
     assert!(report.contains("| 15 | mapper2_prg_bank_switch | cartridge | integration | failed |"));
     assert!(report
         .contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | not_started |"));
+    assert!(report
+        .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
 }
 
 #[test]
@@ -1126,7 +1143,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 16);
     assert_eq!(telemetry.analysis.timing.ended_tests, 16);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1138,6 +1155,86 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure(
     assert!(report.contains("| Likely domain | mapper.uxrom.prg_ram |"));
     assert!(
         report.contains("| 16 | mapper2_prg_ram_roundtrip | cartridge | integration | failed |")
+    );
+    assert!(report
+        .contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | not_started |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuNametableMirroring),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU nametable mirroring failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_nametable_mirroring")
+    );
+    assert_eq!(telemetry.verdict.current_test, 17);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("ppu_horizontal_nametable_mirroring")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xE0);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU nametable mirroring localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 17);
+    assert_eq!(
+        failure.test_name,
+        Some("ppu_horizontal_nametable_mirroring")
+    );
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0xE0");
+    assert_eq!(failure.likely_domain, "ppu.nametables.horizontal_mirroring");
+    assert!(failure.assertion.contains("$2000"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_horizontal_nametable_mirroring")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.nametables.horizontal_mirroring")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 17);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.nametables.horizontal_mirroring")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.17.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(17)
+            && probe.likely_domain == "ppu.nametables.horizontal_mirroring"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 17);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 17);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(
+            |symbol| symbol.name == "ppu_horizontal_nametable_mirroring_before_first_mirror_read"
+        )));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_horizontal_nametable_mirroring (17) |"));
+    assert!(report.contains("| Focus domain | ppu.nametables.horizontal_mirroring |"));
+    assert!(report.contains("| Likely domain | ppu.nametables.horizontal_mirroring |"));
+    assert!(
+        report.contains("| 17 | ppu_horizontal_nametable_mirroring | ppu | integration | failed |")
     );
 }
 
@@ -1320,7 +1417,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 16 |"));
+    assert!(report.contains("| Not started tests | 17 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }
