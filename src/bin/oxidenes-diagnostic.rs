@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -13,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 1;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -50,8 +51,15 @@ struct DiagnosticScenarioSuiteManifest {
     scenario_count: usize,
     passed: bool,
     recommended_exit_code: u8,
+    artifacts: DiagnosticScenarioSuiteRootArtifacts,
     scenarios: Vec<DiagnosticScenarioSuiteEntry>,
     ai_handoff: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteRootArtifacts {
+    scenario_suite_json: &'static str,
+    scenario_suite_report: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -730,14 +738,136 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
         scenario_count: scenarios.len(),
         passed,
         recommended_exit_code: if passed { 0 } else { 1 },
+        artifacts: DiagnosticScenarioSuiteRootArtifacts {
+            scenario_suite_json: "scenario-suite.json",
+            scenario_suite_report: "scenario-suite.md",
+        },
         scenarios,
         ai_handoff: scenario_suite_ai_handoff(),
     };
+    let report = format_scenario_suite_report(&manifest);
+    write_file(&path.join("scenario-suite.md"), report.as_bytes())?;
     let json = serde_json::to_string_pretty(&manifest)
         .map_err(|err| format!("failed to serialize diagnostic scenario suite: {err}"))?;
     write_file(&path.join("scenario-suite.json"), json.as_bytes())?;
 
     Ok(DiagnosticScenarioSuiteWriteResult { passed, json })
+}
+
+fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> String {
+    let mut report = String::new();
+    writeln!(report, "# Diagnostic Scenario Suite").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(report, "| Suite | {} |", manifest.suite_name).expect("write report");
+    writeln!(report, "| Version | {} |", manifest.suite_version).expect("write report");
+    writeln!(
+        report,
+        "| Scenario suite schema | {} |",
+        manifest.scenario_suite_schema_version
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Telemetry schema | {} |",
+        manifest.telemetry_schema_version
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Triage schema | {} |",
+        manifest.triage_schema_version
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Baseline scenario | {} |",
+        manifest.baseline_scenario_id
+    )
+    .expect("write report");
+    writeln!(report, "| Scenario count | {} |", manifest.scenario_count).expect("write report");
+    writeln!(report, "| Passed | {} |", manifest.passed).expect("write report");
+    writeln!(
+        report,
+        "| Recommended exit code | {} |",
+        manifest.recommended_exit_code
+    )
+    .expect("write report");
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## Scenario Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Scenario | Expected pass | Actual pass | Expectation met | Health | Focus test | Focus domain | Failed probes | Bundle |"
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .expect("write report");
+    for scenario in &manifest.scenarios {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            scenario.id,
+            scenario.expected_passed,
+            scenario.actual_passed,
+            scenario.expectation_met,
+            scenario.actual_health,
+            scenario.actual_focus_test_id,
+            scenario.actual_focus_domain.as_deref().unwrap_or("-"),
+            format_failed_probe_ids(&scenario.failed_probe_ids),
+            scenario.directory
+        )
+        .expect("write report");
+    }
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## AI Drilldown").expect("write report");
+    writeln!(report).expect("write report");
+    for instruction in &manifest.ai_handoff {
+        writeln!(report, "- {instruction}").expect("write report");
+    }
+    writeln!(
+        report,
+        "- For each scenario, inspect `<scenario>/triage.json`, then `<scenario>/comparison.json`, then `<scenario>/telemetry.json` when raw events are needed."
+    )
+    .expect("write report");
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## Artifact Map").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Scenario | Manifest | Triage | Telemetry | Report | Comparison |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- |").expect("write report");
+    for scenario in &manifest.scenarios {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} |",
+            scenario.id,
+            scenario.artifacts.bundle_manifest,
+            scenario.artifacts.triage_json,
+            scenario.artifacts.telemetry_json,
+            scenario.artifacts.report_md,
+            scenario.artifacts.comparison_json
+        )
+        .expect("write report");
+    }
+    report
+}
+
+fn format_failed_probe_ids(ids: &[String]) -> String {
+    if ids.is_empty() {
+        "-".to_string()
+    } else {
+        ids.join("<br>")
+    }
 }
 
 fn write_scenario_bundle(
