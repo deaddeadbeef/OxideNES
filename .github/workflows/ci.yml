@@ -30,6 +30,27 @@ jobs:
       - run: cargo install cargo-audit --locked --version 0.22.1
       - run: cargo audit
 
+  diagnostic-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
+      - name: Run diagnostic cartridge bundle
+        run: |
+          mkdir -p target/diagnostics
+          cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/ci-baseline.json --no-stdout
+          cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/ci-bundle --baseline-json target/diagnostics/ci-baseline.json --no-stdout
+      - name: Upload diagnostic bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-bundle
+          path: target/diagnostics/ci-bundle
+          if-no-files-found: warn
+          retention-days: 14
+
   build:
     strategy:
       fail-fast: false

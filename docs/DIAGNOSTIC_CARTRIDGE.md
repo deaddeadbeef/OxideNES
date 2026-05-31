@@ -49,6 +49,10 @@ and `comparison.md`. The runner still exits `1` for diagnostic or comparison
 failures after writing the bundle, so CI can upload the artifact directory for
 post-failure analysis.
 
+GitHub Actions runs this bundle path in both CI and release workflows. The
+uploaded artifact is named `oxidenes-diagnostic-bundle` and is the preferred
+handoff package for automated debugging, release evidence, and failure triage.
+
 ## Coverage
 
 The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU, APU, DMA, and joypad paths:
