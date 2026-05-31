@@ -4,12 +4,14 @@ use std::path::{Path, PathBuf};
 use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
-    DiagnosticConfig, DIAGNOSTIC_PROVENANCE,
+    DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticProbeStatus, DiagnosticTelemetry,
+    DIAGNOSTIC_PROVENANCE,
 };
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -40,6 +42,148 @@ struct DiagnosticBundleArtifact {
     sha256: String,
 }
 
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageReport {
+    triage_schema_version: u16,
+    telemetry_schema_version: u16,
+    suite_name: String,
+    suite_version: String,
+    passed: bool,
+    recommended_exit_code: u8,
+    health: String,
+    summary: String,
+    current_test: DiagnosticTriageCurrentTest,
+    failure: Option<DiagnosticTriageFailure>,
+    coverage: DiagnosticTriageCoverage,
+    probes: DiagnosticTriageProbeSummary,
+    timing: DiagnosticTriageTiming,
+    comparison: Option<DiagnosticTriageComparison>,
+    next_actions: Vec<String>,
+    artifact_hints: Vec<DiagnosticTriageArtifactHint>,
+    event_tail: Vec<DiagnosticTriageEvent>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageCurrentTest {
+    id: u8,
+    name: Option<&'static str>,
+    status_hex: String,
+    failure_code_hex: String,
+    timed_out: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageFailure {
+    kind: String,
+    test_id: u8,
+    test_name: Option<&'static str>,
+    subsystem: Option<String>,
+    tier: Option<String>,
+    failure_code_hex: String,
+    assertion: String,
+    expected: String,
+    observed: String,
+    likely_domain: String,
+    remediation_hint: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageCoverage {
+    total_tests: usize,
+    passed_tests: usize,
+    failed_tests: usize,
+    subsystems: Vec<DiagnosticTriageSubsystemCoverage>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageSubsystemCoverage {
+    subsystem: String,
+    passed: usize,
+    total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageProbeSummary {
+    total_probes: usize,
+    passed_probes: usize,
+    failed_probes: usize,
+    skipped_probes: usize,
+    first_failed_probe: Option<String>,
+    failed: Vec<DiagnosticTriageProbe>,
+    skipped: Vec<DiagnosticTriageProbe>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageProbe {
+    id: String,
+    source: String,
+    subsystem: Option<String>,
+    test_id: Option<u8>,
+    test_name: Option<&'static str>,
+    expected: String,
+    observed: String,
+    likely_domain: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageTiming {
+    started_tests: usize,
+    ended_tests: usize,
+    not_started_tests: usize,
+    timed_out_tests: usize,
+    slowest_test: Option<DiagnosticTriageSlowestTest>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageSlowestTest {
+    test_id: u8,
+    test_name: &'static str,
+    subsystem: String,
+    tier: String,
+    duration_cycles: u64,
+    duration_frames: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageComparison {
+    passed: bool,
+    summary: String,
+    difference_count: usize,
+    failure_count: usize,
+    warning_count: usize,
+    info_count: usize,
+    top_differences: Vec<DiagnosticTriageDifference>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageDifference {
+    severity: String,
+    category: &'static str,
+    path: String,
+    baseline: Option<String>,
+    current: Option<String>,
+    note: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageArtifactHint {
+    path: &'static str,
+    kind: &'static str,
+    purpose: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageEvent {
+    kind: String,
+    cycle: u64,
+    frame: u64,
+    status_hex: String,
+    current_test: u8,
+    current_test_name: Option<&'static str>,
+    pc_hex: String,
+    note: String,
+}
+
 fn main() {
     match run() {
         Ok(passed) => {
@@ -61,6 +205,7 @@ fn run() -> Result<bool, String> {
     let mut baseline_json_path: Option<PathBuf> = None;
     let mut comparison_json_path: Option<PathBuf> = None;
     let mut comparison_report_path: Option<PathBuf> = None;
+    let mut triage_json_path: Option<PathBuf> = None;
     let mut dump_rom_path: Option<PathBuf> = None;
     let mut bundle_dir: Option<PathBuf> = None;
     let mut print_stdout = true;
@@ -101,6 +246,12 @@ fn run() -> Result<bool, String> {
                     .next()
                     .ok_or_else(|| "--comparison-report requires a file path".to_string())?;
                 comparison_report_path = Some(PathBuf::from(path));
+            }
+            "--triage-json" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--triage-json requires a file path".to_string())?;
+                triage_json_path = Some(PathBuf::from(path));
             }
             "--dump-rom" => {
                 let path = args
@@ -193,6 +344,11 @@ fn run() -> Result<bool, String> {
         }
     }
 
+    if let Some(path) = triage_json_path {
+        let triage_json = diagnostic_triage_json(&telemetry, comparison.as_ref())?;
+        write_file(&path, triage_json.as_bytes())?;
+    }
+
     let passed = telemetry.verdict.passed
         && comparison
             .as_ref()
@@ -240,6 +396,7 @@ fn print_help() {
     println!(
         "    --comparison-report <FILE>   Write a Markdown baseline comparison report to a file"
     );
+    println!("    --triage-json <FILE>         Write compact AI triage JSON to a file");
     println!("    --dump-rom <FILE>    Generate the diagnostic .nes cartridge at runtime");
     println!("    --bundle-dir <DIR>   Write an AI-ready diagnostic artifact bundle");
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
@@ -262,10 +419,10 @@ fn parse_byte(value: &str) -> Result<u8, String> {
 }
 
 struct DiagnosticBundleInput<'a> {
-    telemetry: &'a oxidenes::diagnostic::DiagnosticTelemetry,
+    telemetry: &'a DiagnosticTelemetry,
     telemetry_json: &'a str,
     diagnostic_rom: &'a [u8],
-    comparison: Option<&'a oxidenes::diagnostic::DiagnosticComparisonTelemetry>,
+    comparison: Option<&'a DiagnosticComparisonTelemetry>,
     passed: bool,
     config: DiagnosticBundleConfig,
 }
@@ -275,6 +432,14 @@ fn write_bundle(path: &Path, input: DiagnosticBundleInput<'_>) -> Result<(), Str
         .map_err(|err| format!("failed to create {}: {err}", path.display()))?;
 
     let mut artifacts = Vec::new();
+    let triage_json = diagnostic_triage_json(input.telemetry, input.comparison)?;
+    artifacts.push(write_bundle_artifact(
+        path,
+        "triage.json",
+        "ai_triage_json",
+        triage_json.as_bytes(),
+    )?);
+
     artifacts.push(write_bundle_artifact(
         path,
         "telemetry.json",
@@ -335,10 +500,11 @@ fn write_bundle(path: &Path, input: DiagnosticBundleInput<'_>) -> Result<(), Str
 
 fn bundle_ai_handoff(
     telemetry_passed: bool,
-    comparison: Option<&oxidenes::diagnostic::DiagnosticComparisonTelemetry>,
+    comparison: Option<&DiagnosticComparisonTelemetry>,
 ) -> Vec<String> {
     let mut handoff = vec![
         "Start with manifest.json to verify artifact hashes and bundle result.".to_string(),
+        "Read triage.json for a compact machine-readable failure focus before loading full telemetry.".to_string(),
         "Read report.md for human triage and telemetry.json for exact probe, timeline, and event data.".to_string(),
     ];
     if comparison.is_some() {
@@ -353,6 +519,272 @@ fn bundle_ai_handoff(
         );
     }
     handoff
+}
+
+fn diagnostic_triage_json(
+    telemetry: &DiagnosticTelemetry,
+    comparison: Option<&DiagnosticComparisonTelemetry>,
+) -> Result<String, String> {
+    let triage = diagnostic_triage_report(telemetry, comparison)?;
+    serde_json::to_string_pretty(&triage)
+        .map_err(|err| format!("failed to serialize diagnostic triage JSON: {err}"))
+}
+
+fn diagnostic_triage_report(
+    telemetry: &DiagnosticTelemetry,
+    comparison: Option<&DiagnosticComparisonTelemetry>,
+) -> Result<DiagnosticTriageReport, String> {
+    let passed = telemetry.verdict.passed
+        && comparison
+            .as_ref()
+            .is_none_or(|comparison| comparison.passed);
+
+    Ok(DiagnosticTriageReport {
+        triage_schema_version: DIAGNOSTIC_TRIAGE_SCHEMA_VERSION,
+        telemetry_schema_version: telemetry.schema_version,
+        suite_name: telemetry.suite.name.to_string(),
+        suite_version: telemetry.suite.version.to_string(),
+        passed,
+        recommended_exit_code: if passed { 0 } else { 1 },
+        health: json_label(&telemetry.analysis.health)?,
+        summary: telemetry.analysis.summary.clone(),
+        current_test: DiagnosticTriageCurrentTest {
+            id: telemetry.verdict.current_test,
+            name: telemetry.verdict.current_test_name,
+            status_hex: hex_byte(telemetry.verdict.status),
+            failure_code_hex: hex_byte(telemetry.verdict.failure_code),
+            timed_out: telemetry.verdict.timeout,
+        },
+        failure: triage_failure(telemetry)?,
+        coverage: triage_coverage(telemetry)?,
+        probes: triage_probe_summary(telemetry)?,
+        timing: triage_timing(telemetry)?,
+        comparison: comparison.map(triage_comparison).transpose()?,
+        next_actions: telemetry.analysis.next_actions.clone(),
+        artifact_hints: triage_artifact_hints(comparison.is_some()),
+        event_tail: triage_event_tail(telemetry)?,
+    })
+}
+
+fn triage_failure(
+    telemetry: &DiagnosticTelemetry,
+) -> Result<Option<DiagnosticTriageFailure>, String> {
+    telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .map(|failure| {
+            Ok(DiagnosticTriageFailure {
+                kind: json_label(&failure.kind)?,
+                test_id: failure.test_id,
+                test_name: failure.test_name,
+                subsystem: failure
+                    .subsystem
+                    .map(|subsystem| json_label(&subsystem))
+                    .transpose()?,
+                tier: failure.tier.map(|tier| json_label(&tier)).transpose()?,
+                failure_code_hex: failure.failure_code_hex.clone(),
+                assertion: failure.assertion.clone(),
+                expected: failure.expected.clone(),
+                observed: failure.observed.clone(),
+                likely_domain: failure.likely_domain.clone(),
+                remediation_hint: failure.remediation_hint.clone(),
+            })
+        })
+        .transpose()
+}
+
+fn triage_coverage(telemetry: &DiagnosticTelemetry) -> Result<DiagnosticTriageCoverage, String> {
+    let coverage = &telemetry.analysis.coverage;
+    Ok(DiagnosticTriageCoverage {
+        total_tests: coverage.total_tests,
+        passed_tests: coverage.passed_tests,
+        failed_tests: coverage.failed_tests,
+        subsystems: coverage
+            .subsystem_summary
+            .iter()
+            .map(|entry| {
+                Ok(DiagnosticTriageSubsystemCoverage {
+                    subsystem: json_label(&entry.subsystem)?,
+                    passed: entry.passed,
+                    total: entry.total,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+    })
+}
+
+fn triage_probe_summary(
+    telemetry: &DiagnosticTelemetry,
+) -> Result<DiagnosticTriageProbeSummary, String> {
+    let summary = &telemetry.analysis.probe_summary;
+    Ok(DiagnosticTriageProbeSummary {
+        total_probes: summary.total_probes,
+        passed_probes: summary.passed_probes,
+        failed_probes: summary.failed_probes,
+        skipped_probes: summary.skipped_probes,
+        first_failed_probe: summary.first_failed_probe.clone(),
+        failed: telemetry
+            .probes
+            .iter()
+            .filter(|probe| probe.status == DiagnosticProbeStatus::Failed)
+            .take(8)
+            .map(triage_probe)
+            .collect::<Result<Vec<_>, String>>()?,
+        skipped: telemetry
+            .probes
+            .iter()
+            .filter(|probe| probe.status == DiagnosticProbeStatus::Skipped)
+            .take(8)
+            .map(triage_probe)
+            .collect::<Result<Vec<_>, String>>()?,
+    })
+}
+
+fn triage_probe(
+    probe: &oxidenes::diagnostic::DiagnosticProbeTelemetry,
+) -> Result<DiagnosticTriageProbe, String> {
+    Ok(DiagnosticTriageProbe {
+        id: probe.id.clone(),
+        source: json_label(&probe.source)?,
+        subsystem: probe
+            .subsystem
+            .map(|subsystem| json_label(&subsystem))
+            .transpose()?,
+        test_id: probe.test_id,
+        test_name: probe.test_name,
+        expected: probe.expected.clone(),
+        observed: probe.observed.clone(),
+        likely_domain: probe.likely_domain.clone(),
+    })
+}
+
+fn triage_timing(telemetry: &DiagnosticTelemetry) -> Result<DiagnosticTriageTiming, String> {
+    let timing = &telemetry.analysis.timing;
+    Ok(DiagnosticTriageTiming {
+        started_tests: timing.started_tests,
+        ended_tests: timing.ended_tests,
+        not_started_tests: timing.not_started_tests,
+        timed_out_tests: timing.timed_out_tests,
+        slowest_test: timing
+            .slowest_test
+            .as_ref()
+            .map(|test| {
+                Ok::<DiagnosticTriageSlowestTest, String>(DiagnosticTriageSlowestTest {
+                    test_id: test.test_id,
+                    test_name: test.test_name,
+                    subsystem: json_label(&test.subsystem)?,
+                    tier: json_label(&test.tier)?,
+                    duration_cycles: test.duration_cycles,
+                    duration_frames: test.duration_frames,
+                })
+            })
+            .transpose()?,
+    })
+}
+
+fn triage_comparison(
+    comparison: &DiagnosticComparisonTelemetry,
+) -> Result<DiagnosticTriageComparison, String> {
+    Ok(DiagnosticTriageComparison {
+        passed: comparison.passed,
+        summary: comparison.summary.clone(),
+        difference_count: comparison.difference_count,
+        failure_count: comparison.failure_count,
+        warning_count: comparison.warning_count,
+        info_count: comparison.info_count,
+        top_differences: comparison
+            .differences
+            .iter()
+            .take(8)
+            .map(|difference| {
+                Ok(DiagnosticTriageDifference {
+                    severity: json_label(&difference.severity)?,
+                    category: difference.category,
+                    path: difference.path.clone(),
+                    baseline: difference.baseline.clone(),
+                    current: difference.current.clone(),
+                    note: difference.note.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+    })
+}
+
+fn triage_artifact_hints(comparison_included: bool) -> Vec<DiagnosticTriageArtifactHint> {
+    let mut hints = vec![
+        DiagnosticTriageArtifactHint {
+            path: "manifest.json",
+            kind: "bundle_manifest",
+            purpose: "Verify bundle result, artifact hashes, and handoff guidance.",
+        },
+        DiagnosticTriageArtifactHint {
+            path: "triage.json",
+            kind: "ai_triage_json",
+            purpose: "Compact machine-readable failure focus and next actions.",
+        },
+        DiagnosticTriageArtifactHint {
+            path: "report.md",
+            kind: "diagnostic_report",
+            purpose: "Human-readable triage report.",
+        },
+        DiagnosticTriageArtifactHint {
+            path: "telemetry.json",
+            kind: "telemetry_json",
+            purpose:
+                "Full-fidelity telemetry for exact probe, timeline, event, and host state analysis.",
+        },
+        DiagnosticTriageArtifactHint {
+            path: "diagnostic.nes",
+            kind: "diagnostic_cartridge",
+            purpose: "Generated IP-safe cartridge used for the run.",
+        },
+    ];
+
+    if comparison_included {
+        hints.push(DiagnosticTriageArtifactHint {
+            path: "comparison.json",
+            kind: "comparison_json",
+            purpose: "Machine-readable baseline comparison result.",
+        });
+        hints.push(DiagnosticTriageArtifactHint {
+            path: "comparison.md",
+            kind: "comparison_report",
+            purpose: "Human-readable baseline comparison report.",
+        });
+    }
+
+    hints
+}
+
+fn triage_event_tail(
+    telemetry: &DiagnosticTelemetry,
+) -> Result<Vec<DiagnosticTriageEvent>, String> {
+    let start = telemetry.events.len().saturating_sub(8);
+    telemetry.events[start..]
+        .iter()
+        .map(|event| {
+            Ok(DiagnosticTriageEvent {
+                kind: json_label(&event.kind)?,
+                cycle: event.cycle,
+                frame: event.frame,
+                status_hex: hex_byte(event.status),
+                current_test: event.current_test,
+                current_test_name: event.current_test_name,
+                pc_hex: format!("0x{:04X}", event.pc),
+                note: event.note.clone(),
+            })
+        })
+        .collect()
+}
+
+fn json_label<T: Serialize>(value: &T) -> Result<String, String> {
+    let value =
+        serde_json::to_value(value).map_err(|err| format!("failed to serialize label: {err}"))?;
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("expected serialized label to be a string, got {value}"))
 }
 
 fn write_bundle_artifact(
