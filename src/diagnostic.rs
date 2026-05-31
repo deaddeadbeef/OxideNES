@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 21;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 22;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v21";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v22";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -47,6 +47,7 @@ const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
+const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
@@ -626,6 +627,7 @@ impl Default for DiagnosticConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticFaultInjection {
+    ApuStatusRegister,
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
@@ -635,6 +637,7 @@ pub enum DiagnosticFaultInjection {
 impl DiagnosticFaultInjection {
     pub fn as_str(self) -> &'static str {
         match self {
+            DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
@@ -644,6 +647,7 @@ impl DiagnosticFaultInjection {
 
     fn injection_label(self) -> &'static str {
         match self {
+            DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
@@ -3561,6 +3565,9 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x4002);
         self.asm.lda_imm(0x08);
         self.asm.sta_abs(0x4003);
+        self.asm
+            .label(APU_STATUS_FAULT_LABEL)
+            .expect("fault injection label should not collide");
         self.asm.lda_abs(0x4015);
         self.asm.and_imm(0x01);
         self.expect_a_eq(0x01, 0x61);
@@ -4163,6 +4170,9 @@ fn maybe_apply_diagnostic_fault_injection(
 
 fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjection) {
     match fault {
+        DiagnosticFaultInjection::ApuStatusRegister => {
+            bus.cpu_write(0x4015, 0x00);
+        }
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
             let wrong_target_high = bus.cpu_read(0x0500);
             bus.cpu_write(0x0400, wrong_target_high);

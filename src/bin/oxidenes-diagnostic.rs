@@ -1727,6 +1727,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("dma.oam_transfer"),
         },
         DiagnosticScenarioSpec {
+            id: "apu_status_fault",
+            title: "Intentional APU status assertion failure",
+            purpose: "Failure-localization fixture for $4015 APU status regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::ApuStatusRegister),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(6),
+            expected_focus_domain: Some("apu.status"),
+        },
+        DiagnosticScenarioSpec {
             id: "cpu_zero_page_wrap_fault",
             title: "Intentional zero-page indexed-wrap assertion failure",
             purpose: "Failure-localization fixture for zero-page indexed addressing wrap regressions.",

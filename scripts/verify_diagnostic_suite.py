@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 21
+EXPECTED_TELEMETRY_SCHEMA = 22
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -20,6 +20,7 @@ EXPECTED_SCENARIOS = {
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
+    "apu_status_fault",
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
     "ppu_read_buffer_fault",
@@ -74,7 +75,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            7,
+            8,
             "analysis baseline_divergence_count",
         )
 
@@ -124,13 +125,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            7,
+            8,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 7, "observer next_actions count")
+        self.expect_equal(len(actions), 8, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -160,6 +161,7 @@ class SuiteVerifier:
             "joypad1_mismatch",
             "joypad2_mismatch",
             "dma_oam_transfer_fault",
+            "apu_status_fault",
             "cpu_zero_page_wrap_fault",
             "cpu_indirect_jmp_fault",
             "ppu_read_buffer_fault",
@@ -256,6 +258,38 @@ class SuiteVerifier:
             "failed_probe_ids=oam.dma_checksum",
             dma_evidence,
             "DMA observer evidence",
+        )
+
+        apu = by_scenario.get("apu_status_fault")
+        if not isinstance(apu, dict):
+            self.errors.append("missing observer action for apu_status_fault")
+            return
+
+        self.expect_equal(
+            apu.get("priority"),
+            "known_divergence",
+            "APU observer action priority",
+        )
+        self.expect_equal(
+            apu.get("action_type"),
+            "inspect_known_divergence",
+            "APU observer action type",
+        )
+        self.expect_equal(
+            apu.get("primary_artifact"),
+            "apu_status_fault/comparison.json",
+            "APU observer primary_artifact",
+        )
+        apu_evidence = self.expect_list(apu.get("evidence"), "APU observer evidence")
+        self.expect_in(
+            "focus_domain=apu.status",
+            apu_evidence,
+            "APU observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.6.result",
+            apu_evidence,
+            "APU observer evidence",
         )
 
         cpu = by_scenario.get("cpu_zero_page_wrap_fault")
@@ -412,6 +446,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for dma_oam_transfer_fault")
+
+        apu = by_scenario.get("apu_status_fault")
+        if isinstance(apu, dict):
+            self.expect_equal(
+                apu.get("role"),
+                "expected_failure_fixture",
+                "APU observer role",
+            )
+            self.expect_equal(
+                apu.get("outcome"),
+                "expected_baseline_divergence",
+                "APU observer outcome",
+            )
+            self.expect_equal(
+                apu.get("health"),
+                "cartridge_assertion_failed",
+                "APU observer health",
+            )
+            self.expect_equal(
+                apu.get("focus_domain"),
+                "apu.status",
+                "APU observer focus_domain",
+            )
+            self.expect_equal(
+                apu.get("next_artifact"),
+                "apu_status_fault/comparison.json",
+                "APU observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for apu_status_fault")
 
         ppu = by_scenario.get("ppu_read_buffer_fault")
         if isinstance(ppu, dict):
