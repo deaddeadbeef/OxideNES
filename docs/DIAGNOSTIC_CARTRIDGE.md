@@ -21,9 +21,17 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - OAM DMA from CPU page `$0300`
 - APU pulse-channel status register
 - Joypad strobe and shift reads
+- Taken CPU branch crossing a page boundary
+- Joypad reads after the eighth latched button
 - PPU NMI delivery and rendered frame production
 
 ## Telemetry Protocol
+
+The top-level JSON includes a `schema_version` and `suite` envelope for
+automated consumers. Each test result includes its subsystem, tier, intent,
+expected observations, result byte address, raw result byte, and pass/fail
+state. Event records include a normalized event kind plus the active test name
+when the current test id is known.
 
 The cartridge writes status bytes into CPU RAM:
 
@@ -34,4 +42,4 @@ The cartridge writes status bytes into CPU RAM:
 - `$00F4`: NMI count
 - `$0200..`: per-test result slots, `0x01` means pass
 
-The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, and status/frame events.
+The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, and current-test transition events.
