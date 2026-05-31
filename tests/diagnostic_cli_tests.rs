@@ -105,6 +105,20 @@ fn diagnostic_cli_writes_bundle_before_failure_exit() {
     );
     let triage = read_json(&bundle_dir.join("triage.json"));
     assert_eq!(triage["passed"], Value::Bool(false));
+    assert_eq!(triage["debug_focus"]["focus_test_id"], Value::from(7));
+    assert_eq!(
+        triage["debug_focus"]["focus_domain"],
+        Value::String("joypad.strobe_shift".to_string())
+    );
+    assert!(triage["debug_focus"]["failed_probe_ids"]
+        .as_array()
+        .expect("debug focus failed probe ids should be an array")
+        .iter()
+        .any(|id| id == &Value::String("cartridge.test.7.result".to_string())));
+    assert_eq!(
+        triage["debug_focus"]["last_test_instruction"]["current_test_name"],
+        Value::String("joypad_strobe_shift".to_string())
+    );
     assert_eq!(
         triage["failure"]["likely_domain"],
         Value::String("joypad.strobe_shift".to_string())
@@ -160,6 +174,11 @@ fn diagnostic_cli_can_localize_joypad2_override_failures() {
         triage["failure"]["likely_domain"],
         Value::String("joypad2.strobe_shift".to_string())
     );
+    assert_eq!(triage["debug_focus"]["focus_test_id"], Value::from(11));
+    assert_eq!(
+        triage["debug_focus"]["focus_domain"],
+        Value::String("joypad2.strobe_shift".to_string())
+    );
     assert!(triage["probes"]["failed"]
         .as_array()
         .expect("triage failed probes should be an array")
@@ -184,9 +203,24 @@ fn diagnostic_cli_writes_standalone_triage_json() {
 
     assert!(status.success());
     let triage = read_json(&triage_path);
-    assert_eq!(triage["triage_schema_version"], Value::from(4));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(13));
+    assert_eq!(triage["triage_schema_version"], Value::from(5));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(14));
     assert_eq!(triage["passed"], Value::Bool(true));
+    assert_eq!(
+        triage["debug_focus"]["health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(
+        triage["debug_focus"]["focus_test_name"],
+        Value::String("joypad2_strobe_shift".to_string())
+    );
+    assert_eq!(
+        triage["debug_focus"]["terminal_instruction"]["symbol"],
+        Value::String("hang".to_string())
+    );
+    assert!(triage["debug_focus"]["terminal_instruction"]["instruction"]
+        .as_str()
+        .is_some_and(|instruction| instruction.starts_with("JMP 0x")));
     assert_eq!(triage["coverage"]["passed_tests"], Value::from(11));
     assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
     assert!(triage["dma"]["oam_dma_active_cycles"]
@@ -249,7 +283,7 @@ fn assert_bundle_artifacts_with_joypad2(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(13));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

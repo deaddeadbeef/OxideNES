@@ -20,16 +20,17 @@ exiting `1`.
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
 report contains the verdict, derived analysis, failure localization, coverage
-summary, timing/timeline table, bounded instruction trace tail, observation
-probe table, next actions, host failures, and final event tail. This gives CI
+summary, debug focus, timing/timeline table, bounded instruction trace tail,
+observation probe table, next actions, host failures, and final event tail. This gives CI
 logs, issue attachments, and AI debugging sessions a stable human-readable
 entry point while preserving the raw JSON for exact tooling.
 
 Use `--triage-json <FILE>` for a compact machine-readable handoff artifact. It
-summarizes verdict, health, current test, first failure, failed/skipped probes,
-timing, optional baseline comparison, next actions, artifact hints, the bounded
-instruction trace tail, and the final event tail without requiring tools to
-scrape `report.md` or load the full telemetry envelope first.
+summarizes verdict, health, current test, derived `debug_focus`, first failure,
+failed/skipped probes, timing, optional baseline comparison, next actions,
+artifact hints, the bounded instruction trace tail, and the final event tail
+without requiring tools to scrape `report.md` or load the full telemetry
+envelope first.
 
 To compare a run against a known-good telemetry baseline:
 
@@ -53,8 +54,8 @@ The bundle always includes:
 
 - `manifest.json`: bundle schema, pass/fail state, runner config, artifact list,
   SHA-256 digests, and AI handoff hints
-- `triage.json`: compact AI-readable failure focus, next actions, and artifact
-  pointers
+- `triage.json`: compact AI-readable debug focus, failure summary, next actions,
+  trace anchors, and artifact pointers
 - `telemetry.json`: full machine-readable diagnostic telemetry
 - `report.md`: Markdown triage report for human and AI review
 - `diagnostic.nes`: the generated IP-safe test cartridge used for the run
@@ -198,3 +199,11 @@ bytes, and nearest diagnostic cartridge symbol plus offset. The generated
 cartridge labels each test start and control-flow helper, so a failing run can
 point automated debuggers at locations such as `test_07_joypad_strobe_shift`
 or `hang` without requiring separate disassembly of `diagnostic.nes`.
+
+Schema version `14` adds `analysis.debug_focus`, a derived first-stop triage
+object for AI debuggers and CI reports. It records the focus test/subsystem,
+likely domain, failure kind, failed probe ids, skipped probe count, final event,
+terminal instruction, and last instruction associated with the focus test.
+`triage.json` exposes the same object at top level as `debug_focus` so tools can
+choose the first drilldown target before reading the full event stream or trace
+tail.
