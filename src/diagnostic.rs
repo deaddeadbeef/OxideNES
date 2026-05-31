@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 22;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 23;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v22";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v23";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -51,6 +51,7 @@ const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
+const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -631,6 +632,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    PpuNmiTimeout,
     PpuVramReadBuffer,
 }
 
@@ -641,6 +643,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
     }
@@ -651,6 +654,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
     }
@@ -3073,6 +3077,8 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     }
 
     let passed_suite = input.status == STATUS_PASS;
+    let active_ppu_render_test = input.timeout && input.current_test == 10;
+    let should_validate_ppu_render_observations = passed_suite || active_ppu_render_test;
     push_probe(
         &mut probes,
         ProbeTelemetryRecord {
@@ -3081,7 +3087,10 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             subsystem: Some(DiagnosticSubsystem::Ppu),
             test_id: Some(10),
             test_name: test_name(10),
-            status: gated_probe_status(passed_suite, input.ram[NMI_COUNT_ADDR as usize] >= 2),
+            status: gated_probe_status(
+                should_validate_ppu_render_observations,
+                input.ram[NMI_COUNT_ADDR as usize] >= 2,
+            ),
             description: "PPU generated repeated NMIs during the render-frame test".to_string(),
             expected: "NMI count >= 2".to_string(),
             observed: format!("NMI count {}", input.ram[NMI_COUNT_ADDR as usize]),
@@ -3220,7 +3229,7 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             subsystem: Some(DiagnosticSubsystem::Ppu),
             test_id: Some(10),
             test_name: test_name(10),
-            status: gated_probe_status(passed_suite, input.frames >= 2),
+            status: gated_probe_status(should_validate_ppu_render_observations, input.frames >= 2),
             description: "Host observed completed frames during the diagnostic run".to_string(),
             expected: "completed frames >= 2".to_string(),
             observed: format!("completed frames {}", input.frames),
@@ -3235,7 +3244,10 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             subsystem: Some(DiagnosticSubsystem::Ppu),
             test_id: Some(10),
             test_name: test_name(10),
-            status: gated_probe_status(passed_suite, input.frame.unique_colors >= 2),
+            status: gated_probe_status(
+                should_validate_ppu_render_observations,
+                input.frame.unique_colors >= 2,
+            ),
             description: "Rendered diagnostic frame contains multiple colors".to_string(),
             expected: "unique rendered colors >= 2".to_string(),
             observed: format!("unique rendered colors {}", input.frame.unique_colors),
@@ -3657,13 +3669,12 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x80);
         self.asm.sta_abs(0x2000);
 
-        let wait = self.unique_label("wait_nmi");
         self.asm
-            .label(&wait)
-            .expect("unique label should not collide");
+            .label(PPU_NMI_TIMEOUT_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
         self.asm.lda_zp(NMI_COUNT_ADDR);
         self.asm.cmp_imm(0x02);
-        self.asm.bne(&wait);
+        self.asm.bne(PPU_NMI_TIMEOUT_FAULT_LABEL);
         self.pass_test(10);
     }
 
@@ -4183,6 +4194,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
         }
+        DiagnosticFaultInjection::PpuNmiTimeout => {
+            bus.cpu_write(0x2000, 0x00);
+        }
         DiagnosticFaultInjection::PpuVramReadBuffer => {
             bus.cpu_write(0x2006, 0x20);
             bus.cpu_write(0x2006, 0x00);
@@ -4282,6 +4296,7 @@ fn failure_telemetry(
 
     let current_spec = test_spec(current_test);
     if timeout {
+        let likely_domain = timeout_likely_domain(current_test);
         return Some(DiagnosticFailureTelemetry {
             kind: DiagnosticFailureKind::Timeout,
             test_id: current_test,
@@ -4297,7 +4312,7 @@ fn failure_telemetry(
                 hex_byte(status),
                 current_test
             ),
-            likely_domain: "emulator.progress_or_infinite_loop".to_string(),
+            likely_domain: likely_domain.to_string(),
             remediation_hint:
                 "Inspect the current test transition events, CPU PC, and the subsystem under the active test."
                     .to_string(),
@@ -4396,6 +4411,13 @@ fn failure_telemetry(
             },
         ),
     })
+}
+
+fn timeout_likely_domain(current_test: u8) -> &'static str {
+    match current_test {
+        10 => "ppu.nmi",
+        _ => "emulator.progress_or_infinite_loop",
+    }
 }
 
 struct AnalysisTelemetryInput<'a> {

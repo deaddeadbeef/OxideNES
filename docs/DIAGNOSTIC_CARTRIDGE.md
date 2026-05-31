@@ -90,8 +90,8 @@ The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
 `joypad2_mismatch`, `dma_oam_transfer_fault`, `apu_status_fault`,
-`cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`, and
-`timeout_cycle_limit`. The
+`cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, `ppu_read_buffer_fault`,
+`ppu_nmi_timeout_fault`, and `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
 an automated debugger can decide which artifact to open without traversing every
@@ -104,8 +104,11 @@ breakdowns, a suite-level attention queue, and artifact paths. The
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
 assertion reads them, while `dma_oam_transfer_fault` corrupts the host-observed
 OAM DMA source byte before `$4014` and `apu_status_fault` disables `$4015`
-just before the cartridge reads the APU status register. The suite can prove CPU
-addressing, CPU control-flow, DMA host-observation, APU status, and PPU failure
+just before the cartridge reads the APU status register.
+`ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
+enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
+active cartridge test. The suite can prove CPU addressing, CPU control-flow, DMA
+host-observation, APU status, PPU assertion, and PPU progress-timeout failure
 localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -307,3 +310,10 @@ Schema version `22` adds the `apu_status_fault` scenario-suite fixture. The
 fixture disables `$4015` just before the `apu_status_register` cartridge test
 reads the APU status register, proving that AI handoff artifacts localize the
 assertion to `apu.status` and failure code `0x61`.
+
+Schema version `23` adds the `ppu_nmi_timeout_fault` scenario-suite fixture and
+active-test timeout localization. The fixture disables PPUCTRL NMI delivery
+after `ppu_nmi_and_render_frame` enables rendering, causing the cartridge to
+stall in its NMI wait loop. Telemetry now keeps that timeout focused on
+`ppu.nmi`, marks `ppu.nmi_count` failed, and preserves the stalled loop symbol
+in the instruction trace tail.

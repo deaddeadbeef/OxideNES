@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 22
+EXPECTED_TELEMETRY_SCHEMA = 23
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -23,6 +23,7 @@ EXPECTED_SCENARIOS = {
     "apu_status_fault",
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
+    "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "timeout_cycle_limit",
 }
@@ -75,7 +76,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            8,
+            9,
             "analysis baseline_divergence_count",
         )
 
@@ -125,13 +126,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            8,
+            9,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 8, "observer next_actions count")
+        self.expect_equal(len(actions), 9, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -164,6 +165,7 @@ class SuiteVerifier:
             "apu_status_fault",
             "cpu_zero_page_wrap_fault",
             "cpu_indirect_jmp_fault",
+            "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
             "timeout_cycle_limit",
         }
@@ -226,6 +228,45 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result",
             ppu_evidence,
             "PPU observer evidence",
+        )
+
+        ppu_nmi = by_scenario.get("ppu_nmi_timeout_fault")
+        if not isinstance(ppu_nmi, dict):
+            self.errors.append("missing observer action for ppu_nmi_timeout_fault")
+            return
+
+        self.expect_equal(
+            ppu_nmi.get("priority"),
+            "known_divergence",
+            "PPU NMI observer action priority",
+        )
+        self.expect_equal(
+            ppu_nmi.get("action_type"),
+            "inspect_known_divergence",
+            "PPU NMI observer action type",
+        )
+        self.expect_equal(
+            ppu_nmi.get("primary_artifact"),
+            "ppu_nmi_timeout_fault/comparison.json",
+            "PPU NMI observer primary_artifact",
+        )
+        ppu_nmi_evidence = self.expect_list(
+            ppu_nmi.get("evidence"), "PPU NMI observer evidence"
+        )
+        self.expect_in(
+            "health=timed_out",
+            ppu_nmi_evidence,
+            "PPU NMI observer evidence",
+        )
+        self.expect_in(
+            "focus_domain=ppu.nmi",
+            ppu_nmi_evidence,
+            "PPU NMI observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=runtime.completed,cartridge.status.pass,cartridge.test.10.result,ppu.nmi_count",
+            ppu_nmi_evidence,
+            "PPU NMI observer evidence",
         )
 
         dma = by_scenario.get("dma_oam_transfer_fault")
@@ -501,6 +542,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_read_buffer_fault")
+
+        ppu_nmi = by_scenario.get("ppu_nmi_timeout_fault")
+        if isinstance(ppu_nmi, dict):
+            self.expect_equal(
+                ppu_nmi.get("role"),
+                "expected_failure_fixture",
+                "PPU NMI observer role",
+            )
+            self.expect_equal(
+                ppu_nmi.get("outcome"),
+                "expected_baseline_divergence",
+                "PPU NMI observer outcome",
+            )
+            self.expect_equal(
+                ppu_nmi.get("health"),
+                "timed_out",
+                "PPU NMI observer health",
+            )
+            self.expect_equal(
+                ppu_nmi.get("focus_domain"),
+                "ppu.nmi",
+                "PPU NMI observer focus_domain",
+            )
+            self.expect_equal(
+                ppu_nmi.get("next_artifact"),
+                "ppu_nmi_timeout_fault/comparison.json",
+                "PPU NMI observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for ppu_nmi_timeout_fault")
 
         cpu = by_scenario.get("cpu_zero_page_wrap_fault")
         if isinstance(cpu, dict):
