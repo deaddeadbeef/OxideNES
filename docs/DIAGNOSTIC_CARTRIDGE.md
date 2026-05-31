@@ -78,6 +78,14 @@ outcomes, write a diagnostic scenario suite:
 cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/scenario-suite --no-stdout
 ```
 
+For the full local observability loop, use the wrapper that generates the
+scenario suite, runs the verifier, and writes `observability-run.json` plus
+`observability-run.md` into the suite directory:
+
+```powershell
+python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
+```
+
 The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
@@ -106,7 +114,7 @@ python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenari
 The verifier checks the root schema versions, observer next actions,
 observations, Markdown sections, and every artifact path referenced by the
 manifest or observer report. CI and release workflows run this verifier before
-uploading the scenario-suite artifact.
+uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 ## Coverage
 
