@@ -131,6 +131,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(last_instruction.sequence <= telemetry.instruction_trace.captured_instruction_count);
     assert!(last_instruction.pc >= 0x8000);
     assert!(last_instruction.opcode_hex.is_some());
+    assert!(last_instruction
+        .instruction
+        .as_ref()
+        .is_some_and(|instruction| instruction.mnemonic == "JMP"
+            && instruction.addressing_mode == "absolute"
+            && instruction.text.starts_with("JMP ")));
+    assert!(last_instruction.symbol.as_ref().is_some_and(|symbol| {
+        symbol.name == "hang" && symbol.offset == 0 && symbol.address_hex == last_instruction.pc_hex
+    }));
     assert!(telemetry
         .events
         .iter()
@@ -266,9 +275,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
-    assert!(
-        report.contains("| Seq | Cycle | Frame | Test | PC | Opcode | CPU A/X/Y | SP/P | Result |")
-    );
+    assert!(report.contains(
+        "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
+    ));
+    assert!(report.contains("| JMP 0x"));
+    assert!(report.contains("| hang |"));
     assert!(report.contains("## Event Tail"));
     assert!(report.contains("| CPU A/X/Y | SP/P | Result | Failure |"));
     assert!(telemetry.cycles > 0);
@@ -347,6 +358,12 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "cartridge.test.8.result" && probe.status == DiagnosticProbeStatus::Skipped
+    }));
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| {
+        entry
+            .symbol
+            .as_ref()
+            .is_some_and(|symbol| symbol.name.starts_with("test_07_joypad_strobe_shift"))
     }));
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
