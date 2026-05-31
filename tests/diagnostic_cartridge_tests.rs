@@ -61,10 +61,20 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && test.intent.contains("eighth latched button")
             && test.passed
     }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "joypad2_strobe_shift" && test.intent.contains("player-2") && test.passed
+    }));
+    assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
+    assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
+    assert_eq!(telemetry.input.joypad2_expected_mask_hex, "0x28");
     assert!(telemetry
         .events
         .iter()
         .any(|event| event.current_test_name == Some("joypad_overread_returns_one")));
+    assert!(telemetry
+        .events
+        .iter()
+        .any(|event| event.current_test_name == Some("joypad2_strobe_shift")));
     assert_eq!(telemetry.timeline.len(), DIAGNOSTIC_TESTS.len());
     assert_eq!(
         telemetry.analysis.timing.started_tests,
@@ -121,6 +131,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("# OxideNES Diagnostic Report"));
     assert!(report.contains("| Result | pass |"));
     assert!(report.contains("| Health | healthy |"));
+    assert!(report.contains("## Input Configuration"));
+    assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
     assert!(report.contains("| mapper_banking_runtime | cartridge |"));
@@ -130,6 +142,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
     assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
+    assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
     assert!(report.contains("## Event Tail"));
     assert!(telemetry.cycles > 0);
     assert!(telemetry.frames >= 2);
@@ -211,7 +224,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -247,6 +260,57 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
         "| skipped | cartridge.test.8.result | cartridge_result | cpu | cpu_branch_page_crossing |"
     ));
     assert!(report.contains("## Host Failures"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        joypad2_mask: 0x00,
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported player-2 failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(telemetry.verdict.current_test, 11);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("joypad2_strobe_shift")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xA3);
+    assert_eq!(telemetry.input.joypad2_mask_hex, "0x00");
+    assert_eq!(telemetry.input.joypad2_expected_mask_hex, "0x28");
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include player-2 failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 11);
+    assert_eq!(failure.test_name, Some("joypad2_strobe_shift"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Joypad));
+    assert_eq!(failure.failure_code_hex, "0xA3");
+    assert_eq!(failure.likely_domain, "joypad2.strobe_shift");
+    assert!(failure.assertion.contains("Start button"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Joypad)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("joypad2_strobe_shift")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("joypad2.strobe_shift")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.11.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(11)
+            && probe.likely_domain == "joypad2.strobe_shift"
+    }));
 }
 
 #[test]
@@ -309,7 +373,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 10 |"));
+    assert!(report.contains("| Not started tests | 11 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }

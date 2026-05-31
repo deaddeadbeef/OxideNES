@@ -32,6 +32,8 @@ struct DiagnosticBundleConfig {
     max_cpu_cycles: u64,
     joypad1_mask: u8,
     joypad1_mask_hex: String,
+    joypad2_mask: u8,
+    joypad2_mask_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +55,7 @@ struct DiagnosticTriageReport {
     health: String,
     summary: String,
     current_test: DiagnosticTriageCurrentTest,
+    input: DiagnosticTriageInput,
     failure: Option<DiagnosticTriageFailure>,
     coverage: DiagnosticTriageCoverage,
     coverage_gaps: Vec<DiagnosticTriageCoverageGap>,
@@ -71,6 +74,14 @@ struct DiagnosticTriageCurrentTest {
     status_hex: String,
     failure_code_hex: String,
     timed_out: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageInput {
+    joypad1_mask_hex: String,
+    joypad1_expected_mask_hex: String,
+    joypad2_mask_hex: String,
+    joypad2_expected_mask_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -290,6 +301,12 @@ fn run() -> Result<bool, String> {
                     .ok_or_else(|| "--joypad1 requires a byte mask".to_string())?;
                 config.joypad1_mask = parse_byte(&value)?;
             }
+            "--joypad2" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--joypad2 requires a byte mask".to_string())?;
+                config.joypad2_mask = parse_byte(&value)?;
+            }
             "--no-stdout" => {
                 print_stdout = false;
             }
@@ -314,6 +331,8 @@ fn run() -> Result<bool, String> {
         max_cpu_cycles: config.max_cpu_cycles,
         joypad1_mask: config.joypad1_mask,
         joypad1_mask_hex: hex_byte(config.joypad1_mask),
+        joypad2_mask: config.joypad2_mask,
+        joypad2_mask_hex: hex_byte(config.joypad2_mask),
     };
     let telemetry = run_diagnostic(config)?;
     let json = serde_json::to_string_pretty(&telemetry)
@@ -412,6 +431,7 @@ fn print_help() {
     println!("    --bundle-dir <DIR>   Write an AI-ready diagnostic artifact bundle");
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");
+    println!("    --joypad2 <BYTE>     Override joypad-2 mask, decimal or 0x-prefixed hex");
     println!("    --no-stdout          Do not print telemetry JSON to stdout");
     println!("    -h, --help           Show this help");
 }
@@ -565,6 +585,12 @@ fn diagnostic_triage_report(
             status_hex: hex_byte(telemetry.verdict.status),
             failure_code_hex: hex_byte(telemetry.verdict.failure_code),
             timed_out: telemetry.verdict.timeout,
+        },
+        input: DiagnosticTriageInput {
+            joypad1_mask_hex: telemetry.input.joypad1_mask_hex.clone(),
+            joypad1_expected_mask_hex: telemetry.input.joypad1_expected_mask_hex.clone(),
+            joypad2_mask_hex: telemetry.input.joypad2_mask_hex.clone(),
+            joypad2_expected_mask_hex: telemetry.input.joypad2_expected_mask_hex.clone(),
         },
         failure: triage_failure(telemetry)?,
         coverage: triage_coverage(telemetry)?,

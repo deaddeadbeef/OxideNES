@@ -96,6 +96,10 @@ fn diagnostic_cli_writes_bundle_before_failure_exit() {
     let telemetry = read_json(&bundle_dir.join("telemetry.json"));
     assert_eq!(telemetry["verdict"]["passed"], Value::Bool(false));
     assert_eq!(
+        telemetry["input"]["joypad1_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
         telemetry["analysis"]["probe_summary"]["first_failed_probe"],
         Value::String("cartridge.status.pass".to_string())
     );
@@ -119,6 +123,53 @@ fn diagnostic_cli_writes_bundle_before_failure_exit() {
 }
 
 #[test]
+fn diagnostic_cli_can_localize_joypad2_override_failures() {
+    let bundle_dir = temp_dir("bundle-fail-joypad2");
+
+    let status = Command::new(diagnostic_bin())
+        .arg("--bundle-dir")
+        .arg(&bundle_dir)
+        .arg("--joypad2")
+        .arg("0x00")
+        .arg("--no-stdout")
+        .status()
+        .expect("failing joypad2 diagnostic command should run");
+
+    assert_eq!(status.code(), Some(1));
+    assert_bundle_artifacts_with_joypad2(&bundle_dir, false, false, "0x00");
+    let telemetry = read_json(&bundle_dir.join("telemetry.json"));
+    assert_eq!(telemetry["verdict"]["current_test"], Value::from(11));
+    assert_eq!(
+        telemetry["input"]["joypad2_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        telemetry["input"]["joypad2_expected_mask_hex"],
+        Value::String("0x28".to_string())
+    );
+    let triage = read_json(&bundle_dir.join("triage.json"));
+    assert_eq!(
+        triage["input"]["joypad2_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        triage["input"]["joypad2_expected_mask_hex"],
+        Value::String("0x28".to_string())
+    );
+    assert_eq!(
+        triage["failure"]["likely_domain"],
+        Value::String("joypad2.strobe_shift".to_string())
+    );
+    assert!(triage["probes"]["failed"]
+        .as_array()
+        .expect("triage failed probes should be an array")
+        .iter()
+        .any(|probe| probe["id"] == Value::String("cartridge.test.11.result".to_string())));
+
+    fs::remove_dir_all(&bundle_dir).expect("bundle temp dir should be removable");
+}
+
+#[test]
 fn diagnostic_cli_writes_standalone_triage_json() {
     let root = temp_dir("triage-standalone");
     let triage_path = root.join("triage.json");
@@ -134,9 +185,9 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(1));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(6));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(7));
     assert_eq!(triage["passed"], Value::Bool(true));
-    assert_eq!(triage["coverage"]["passed_tests"], Value::from(10));
+    assert_eq!(triage["coverage"]["passed_tests"], Value::from(11));
     assert!(triage["coverage_gaps"]
         .as_array()
         .expect("coverage gaps should be an array")
@@ -153,10 +204,23 @@ fn diagnostic_cli_writes_standalone_triage_json() {
 }
 
 fn assert_bundle_artifacts(bundle_dir: &Path, includes_comparison: bool, passed: bool) {
+    assert_bundle_artifacts_with_joypad2(bundle_dir, includes_comparison, passed, "0x28");
+}
+
+fn assert_bundle_artifacts_with_joypad2(
+    bundle_dir: &Path,
+    includes_comparison: bool,
+    passed: bool,
+    expected_joypad2_mask_hex: &str,
+) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(6));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(7));
     assert_eq!(manifest["passed"], Value::Bool(passed));
+    assert_eq!(
+        manifest["config"]["joypad2_mask_hex"],
+        Value::String(expected_joypad2_mask_hex.to_string())
+    );
     assert_eq!(
         manifest["comparison_included"],
         Value::Bool(includes_comparison)
