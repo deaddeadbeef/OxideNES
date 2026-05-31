@@ -5,14 +5,15 @@ use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
     DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticDebugEventFocusTelemetry,
-    DiagnosticDebugInstructionFocusTelemetry, DiagnosticProbeStatus, DiagnosticTelemetry,
-    DIAGNOSTIC_PROVENANCE,
+    DiagnosticDebugInstructionFocusTelemetry, DiagnosticHealth, DiagnosticProbeStatus,
+    DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE,
 };
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -28,13 +29,80 @@ struct DiagnosticBundleManifest {
     ai_handoff: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct DiagnosticBundleConfig {
     max_cpu_cycles: u64,
     joypad1_mask: u8,
     joypad1_mask_hex: String,
     joypad2_mask: u8,
     joypad2_mask_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteManifest {
+    scenario_suite_schema_version: u16,
+    telemetry_schema_version: u16,
+    triage_schema_version: u16,
+    bundle_schema_version: u16,
+    suite_name: String,
+    suite_version: String,
+    baseline_scenario_id: &'static str,
+    scenario_count: usize,
+    passed: bool,
+    recommended_exit_code: u8,
+    scenarios: Vec<DiagnosticScenarioSuiteEntry>,
+    ai_handoff: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteEntry {
+    id: &'static str,
+    title: &'static str,
+    purpose: &'static str,
+    directory: String,
+    expected_runner_exit_code: u8,
+    expected_passed: bool,
+    actual_passed: bool,
+    expected_health: String,
+    actual_health: String,
+    expected_focus_test_id: Option<u8>,
+    actual_focus_test_id: u8,
+    actual_focus_test_name: Option<&'static str>,
+    expected_focus_domain: Option<&'static str>,
+    actual_focus_domain: Option<String>,
+    failure_kind: Option<String>,
+    failure_code_hex: String,
+    failed_probe_ids: Vec<String>,
+    expectation_met: bool,
+    config: DiagnosticBundleConfig,
+    artifacts: DiagnosticScenarioSuiteArtifacts,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteArtifacts {
+    bundle_manifest: String,
+    triage_json: String,
+    telemetry_json: String,
+    report_md: String,
+    comparison_json: String,
+    comparison_report: String,
+    diagnostic_rom: String,
+}
+
+struct DiagnosticScenarioSpec {
+    id: &'static str,
+    title: &'static str,
+    purpose: &'static str,
+    config: DiagnosticConfig,
+    expected_passed: bool,
+    expected_health: DiagnosticHealth,
+    expected_focus_test_id: Option<u8>,
+    expected_focus_domain: Option<&'static str>,
+}
+
+struct DiagnosticScenarioSuiteWriteResult {
+    passed: bool,
+    json: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -355,6 +423,8 @@ fn run() -> Result<bool, String> {
     let mut triage_json_path: Option<PathBuf> = None;
     let mut dump_rom_path: Option<PathBuf> = None;
     let mut bundle_dir: Option<PathBuf> = None;
+    let mut scenario_suite_dir: Option<PathBuf> = None;
+    let mut config_overridden = false;
     let mut print_stdout = true;
 
     let mut args = std::env::args().skip(1);
@@ -412,6 +482,12 @@ fn run() -> Result<bool, String> {
                     .ok_or_else(|| "--bundle-dir requires a directory path".to_string())?;
                 bundle_dir = Some(PathBuf::from(path));
             }
+            "--scenario-suite-dir" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--scenario-suite-dir requires a directory path".to_string())?;
+                scenario_suite_dir = Some(PathBuf::from(path));
+            }
             "--max-cycles" => {
                 let value = args
                     .next()
@@ -419,24 +495,50 @@ fn run() -> Result<bool, String> {
                 config.max_cpu_cycles = value
                     .parse()
                     .map_err(|_| format!("invalid --max-cycles value: {value}"))?;
+                config_overridden = true;
             }
             "--joypad1" => {
                 let value = args
                     .next()
                     .ok_or_else(|| "--joypad1 requires a byte mask".to_string())?;
                 config.joypad1_mask = parse_byte(&value)?;
+                config_overridden = true;
             }
             "--joypad2" => {
                 let value = args
                     .next()
                     .ok_or_else(|| "--joypad2 requires a byte mask".to_string())?;
                 config.joypad2_mask = parse_byte(&value)?;
+                config_overridden = true;
             }
             "--no-stdout" => {
                 print_stdout = false;
             }
             _ => return Err(format!("unknown argument: {arg}")),
         }
+    }
+
+    if let Some(path) = scenario_suite_dir {
+        let single_run_outputs_requested = json_path.is_some()
+            || report_path.is_some()
+            || baseline_json_path.is_some()
+            || comparison_json_path.is_some()
+            || comparison_report_path.is_some()
+            || triage_json_path.is_some()
+            || dump_rom_path.is_some()
+            || bundle_dir.is_some();
+        if single_run_outputs_requested || config_overridden {
+            return Err(
+                "--scenario-suite-dir uses fixed scenario configs and cannot be combined with single-run output or config override options"
+                    .to_string(),
+            );
+        }
+
+        let result = write_scenario_suite(&path)?;
+        if print_stdout {
+            println!("{}", result.json);
+        }
+        return Ok(result.passed);
     }
 
     let rom = if dump_rom_path.is_some() || bundle_dir.is_some() {
@@ -452,13 +554,7 @@ fn run() -> Result<bool, String> {
         write_file(&path, rom)?;
     }
 
-    let config_manifest = DiagnosticBundleConfig {
-        max_cpu_cycles: config.max_cpu_cycles,
-        joypad1_mask: config.joypad1_mask,
-        joypad1_mask_hex: hex_byte(config.joypad1_mask),
-        joypad2_mask: config.joypad2_mask,
-        joypad2_mask_hex: hex_byte(config.joypad2_mask),
-    };
+    let config_manifest = diagnostic_bundle_config(&config);
     let telemetry = run_diagnostic(config)?;
     let json = serde_json::to_string_pretty(&telemetry)
         .map_err(|err| format!("failed to serialize telemetry: {err}"))?;
@@ -554,6 +650,9 @@ fn print_help() {
     println!("    --triage-json <FILE>         Write compact AI triage JSON to a file");
     println!("    --dump-rom <FILE>    Generate the diagnostic .nes cartridge at runtime");
     println!("    --bundle-dir <DIR>   Write an AI-ready diagnostic artifact bundle");
+    println!(
+        "    --scenario-suite-dir <DIR>   Write an AI-ready pass/fail diagnostic bundle corpus"
+    );
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");
     println!("    --joypad2 <BYTE>     Override joypad-2 mask, decimal or 0x-prefixed hex");
@@ -581,6 +680,213 @@ struct DiagnosticBundleInput<'a> {
     comparison: Option<&'a DiagnosticComparisonTelemetry>,
     passed: bool,
     config: DiagnosticBundleConfig,
+}
+
+fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResult, String> {
+    fs::create_dir_all(path)
+        .map_err(|err| format!("failed to create {}: {err}", path.display()))?;
+
+    let specs = diagnostic_scenario_specs();
+    let baseline_spec = specs
+        .first()
+        .ok_or_else(|| "diagnostic scenario suite has no baseline scenario".to_string())?;
+    let diagnostic_rom = build_diagnostic_cartridge()?;
+    let baseline_telemetry = run_diagnostic(baseline_spec.config.clone())?;
+    let telemetry_schema_version = baseline_telemetry.schema_version;
+    let suite_name = baseline_telemetry.suite.name.to_string();
+    let suite_version = baseline_telemetry.suite.version.to_string();
+    let baseline_json = serde_json::to_string_pretty(&baseline_telemetry)
+        .map_err(|err| format!("failed to serialize baseline scenario telemetry: {err}"))?;
+
+    let mut scenarios = Vec::new();
+    scenarios.push(write_scenario_bundle(
+        path,
+        baseline_spec,
+        baseline_telemetry,
+        &baseline_json,
+        &diagnostic_rom,
+    )?);
+
+    for spec in specs.iter().skip(1) {
+        let telemetry = run_diagnostic(spec.config.clone())?;
+        scenarios.push(write_scenario_bundle(
+            path,
+            spec,
+            telemetry,
+            &baseline_json,
+            &diagnostic_rom,
+        )?);
+    }
+
+    let passed = scenarios.iter().all(|scenario| scenario.expectation_met);
+    let manifest = DiagnosticScenarioSuiteManifest {
+        scenario_suite_schema_version: DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION,
+        telemetry_schema_version,
+        triage_schema_version: DIAGNOSTIC_TRIAGE_SCHEMA_VERSION,
+        bundle_schema_version: DIAGNOSTIC_BUNDLE_SCHEMA_VERSION,
+        suite_name,
+        suite_version,
+        baseline_scenario_id: baseline_spec.id,
+        scenario_count: scenarios.len(),
+        passed,
+        recommended_exit_code: if passed { 0 } else { 1 },
+        scenarios,
+        ai_handoff: scenario_suite_ai_handoff(),
+    };
+    let json = serde_json::to_string_pretty(&manifest)
+        .map_err(|err| format!("failed to serialize diagnostic scenario suite: {err}"))?;
+    write_file(&path.join("scenario-suite.json"), json.as_bytes())?;
+
+    Ok(DiagnosticScenarioSuiteWriteResult { passed, json })
+}
+
+fn write_scenario_bundle(
+    suite_dir: &Path,
+    spec: &DiagnosticScenarioSpec,
+    telemetry: DiagnosticTelemetry,
+    baseline_json: &str,
+    diagnostic_rom: &[u8],
+) -> Result<DiagnosticScenarioSuiteEntry, String> {
+    let telemetry_json = serde_json::to_string_pretty(&telemetry)
+        .map_err(|err| format!("failed to serialize {} scenario telemetry: {err}", spec.id))?;
+    let comparison = compare_diagnostic_to_baseline(&telemetry, baseline_json)?;
+    let scenario_passed = telemetry.verdict.passed && comparison.passed;
+    let bundle_dir = suite_dir.join(spec.id);
+    let config = diagnostic_bundle_config(&spec.config);
+
+    write_bundle(
+        &bundle_dir,
+        DiagnosticBundleInput {
+            telemetry: &telemetry,
+            telemetry_json: &telemetry_json,
+            diagnostic_rom,
+            comparison: Some(&comparison),
+            passed: scenario_passed,
+            config: config.clone(),
+        },
+    )?;
+
+    let focus = &telemetry.analysis.debug_focus;
+    let actual_health = json_label(&telemetry.analysis.health)?;
+    let expected_health = json_label(&spec.expected_health)?;
+    let failure_kind = focus
+        .failure_kind
+        .map(|kind| json_label(&kind))
+        .transpose()?;
+    let focus_test_matches = spec
+        .expected_focus_test_id
+        .is_none_or(|test_id| focus.focus_test_id == test_id);
+    let focus_domain_matches = spec
+        .expected_focus_domain
+        .is_none_or(|domain| focus.focus_domain.as_deref() == Some(domain));
+    let expectation_met = telemetry.verdict.passed == spec.expected_passed
+        && telemetry.analysis.health == spec.expected_health
+        && focus_test_matches
+        && focus_domain_matches;
+
+    Ok(DiagnosticScenarioSuiteEntry {
+        id: spec.id,
+        title: spec.title,
+        purpose: spec.purpose,
+        directory: spec.id.to_string(),
+        expected_runner_exit_code: if spec.expected_passed { 0 } else { 1 },
+        expected_passed: spec.expected_passed,
+        actual_passed: telemetry.verdict.passed,
+        expected_health,
+        actual_health,
+        expected_focus_test_id: spec.expected_focus_test_id,
+        actual_focus_test_id: focus.focus_test_id,
+        actual_focus_test_name: focus.focus_test_name,
+        expected_focus_domain: spec.expected_focus_domain,
+        actual_focus_domain: focus.focus_domain.clone(),
+        failure_kind,
+        failure_code_hex: focus.failure_code_hex.clone(),
+        failed_probe_ids: focus.failed_probe_ids.clone(),
+        expectation_met,
+        config,
+        artifacts: DiagnosticScenarioSuiteArtifacts {
+            bundle_manifest: format!("{}/manifest.json", spec.id),
+            triage_json: format!("{}/triage.json", spec.id),
+            telemetry_json: format!("{}/telemetry.json", spec.id),
+            report_md: format!("{}/report.md", spec.id),
+            comparison_json: format!("{}/comparison.json", spec.id),
+            comparison_report: format!("{}/comparison.md", spec.id),
+            diagnostic_rom: format!("{}/diagnostic.nes", spec.id),
+        },
+    })
+}
+
+fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
+    let default = DiagnosticConfig::default();
+    vec![
+        DiagnosticScenarioSpec {
+            id: "pass",
+            title: "Known-good generated cartridge pass",
+            purpose: "Baseline diagnostic bundle for comparison and healthy debug-focus shape.",
+            config: default.clone(),
+            expected_passed: true,
+            expected_health: DiagnosticHealth::Healthy,
+            expected_focus_test_id: Some(11),
+            expected_focus_domain: None,
+        },
+        DiagnosticScenarioSpec {
+            id: "joypad1_mismatch",
+            title: "Intentional joypad-1 assertion failure",
+            purpose: "Failure-localization fixture for $4016 strobe/shift regressions.",
+            config: DiagnosticConfig {
+                joypad1_mask: 0x00,
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(7),
+            expected_focus_domain: Some("joypad.strobe_shift"),
+        },
+        DiagnosticScenarioSpec {
+            id: "joypad2_mismatch",
+            title: "Intentional joypad-2 assertion failure",
+            purpose: "Failure-localization fixture for $4017 player-2 strobe/shift regressions.",
+            config: DiagnosticConfig {
+                joypad2_mask: 0x00,
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(11),
+            expected_focus_domain: Some("joypad2.strobe_shift"),
+        },
+        DiagnosticScenarioSpec {
+            id: "timeout_cycle_limit",
+            title: "Intentional one-cycle timeout",
+            purpose: "Progress watchdog fixture for runs that fail before the cartridge can start a test.",
+            config: DiagnosticConfig {
+                max_cpu_cycles: 1,
+                ..default
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::TimedOut,
+            expected_focus_test_id: None,
+            expected_focus_domain: Some("emulator.progress_or_infinite_loop"),
+        },
+    ]
+}
+
+fn scenario_suite_ai_handoff() -> Vec<String> {
+    vec![
+        "Start with scenario-suite.json to see which expected pass/fail scenarios matched their debug-focus contracts.".to_string(),
+        "Use pass/ as the known-good baseline bundle; every scenario bundle includes comparison.json against that baseline.".to_string(),
+        "For failures, open each scenario triage.json debug_focus before loading telemetry.json, report.md, or comparison.json.".to_string(),
+    ]
+}
+
+fn diagnostic_bundle_config(config: &DiagnosticConfig) -> DiagnosticBundleConfig {
+    DiagnosticBundleConfig {
+        max_cpu_cycles: config.max_cpu_cycles,
+        joypad1_mask: config.joypad1_mask,
+        joypad1_mask_hex: hex_byte(config.joypad1_mask),
+        joypad2_mask: config.joypad2_mask,
+        joypad2_mask_hex: hex_byte(config.joypad2_mask),
+    }
 }
 
 fn write_bundle(path: &Path, input: DiagnosticBundleInput<'_>) -> Result<(), String> {

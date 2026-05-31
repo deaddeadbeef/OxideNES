@@ -79,6 +79,97 @@ fn diagnostic_cli_bundle_includes_baseline_comparison() {
 }
 
 #[test]
+fn diagnostic_cli_writes_ai_ready_scenario_suite() {
+    let suite_dir = temp_dir("scenario-suite");
+
+    let status = Command::new(diagnostic_bin())
+        .arg("--scenario-suite-dir")
+        .arg(&suite_dir)
+        .arg("--no-stdout")
+        .status()
+        .expect("scenario suite diagnostic command should run");
+
+    assert!(status.success());
+    let manifest = read_json(&suite_dir.join("scenario-suite.json"));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(1));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
+    assert_eq!(manifest["triage_schema_version"], Value::from(5));
+    assert_eq!(manifest["bundle_schema_version"], Value::from(1));
+    assert_eq!(manifest["passed"], Value::Bool(true));
+    assert_eq!(manifest["recommended_exit_code"], Value::from(0));
+    assert_eq!(
+        manifest["baseline_scenario_id"],
+        Value::String("pass".to_string())
+    );
+    assert_eq!(manifest["scenario_count"], Value::from(4));
+    assert!(manifest["ai_handoff"]
+        .as_array()
+        .expect("scenario ai_handoff should be an array")
+        .iter()
+        .any(|entry| entry
+            .as_str()
+            .is_some_and(|text| text.contains("debug_focus"))));
+
+    let scenarios = manifest["scenarios"]
+        .as_array()
+        .expect("scenario manifest should list scenarios");
+    let pass = find_scenario(scenarios, "pass");
+    assert_eq!(pass["expected_passed"], Value::Bool(true));
+    assert_eq!(pass["actual_passed"], Value::Bool(true));
+    assert_eq!(pass["expectation_met"], Value::Bool(true));
+    assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
+    assert_eq!(pass["actual_focus_test_id"], Value::from(11));
+    assert_eq!(
+        pass["artifacts"]["triage_json"],
+        Value::String("pass/triage.json".to_string())
+    );
+    assert_bundle_artifacts(&suite_dir.join("pass"), true, true);
+
+    let joypad1 = find_scenario(scenarios, "joypad1_mismatch");
+    assert_eq!(joypad1["expected_runner_exit_code"], Value::from(1));
+    assert_eq!(joypad1["expected_passed"], Value::Bool(false));
+    assert_eq!(joypad1["actual_passed"], Value::Bool(false));
+    assert_eq!(joypad1["expectation_met"], Value::Bool(true));
+    assert_eq!(
+        joypad1["actual_health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(joypad1["actual_focus_test_id"], Value::from(7));
+    assert_eq!(
+        joypad1["actual_focus_domain"],
+        Value::String("joypad.strobe_shift".to_string())
+    );
+    assert!(joypad1["failed_probe_ids"]
+        .as_array()
+        .expect("joypad1 failed probes should be an array")
+        .iter()
+        .any(|probe| probe == &Value::String("cartridge.test.7.result".to_string())));
+    assert_bundle_artifacts(&suite_dir.join("joypad1_mismatch"), true, false);
+
+    let joypad2 = find_scenario(scenarios, "joypad2_mismatch");
+    assert_eq!(joypad2["actual_focus_test_id"], Value::from(11));
+    assert_eq!(
+        joypad2["actual_focus_domain"],
+        Value::String("joypad2.strobe_shift".to_string())
+    );
+    assert_bundle_artifacts_with_joypad2(&suite_dir.join("joypad2_mismatch"), true, false, "0x00");
+
+    let timeout = find_scenario(scenarios, "timeout_cycle_limit");
+    assert_eq!(
+        timeout["actual_health"],
+        Value::String("timed_out".to_string())
+    );
+    assert_eq!(
+        timeout["actual_focus_domain"],
+        Value::String("emulator.progress_or_infinite_loop".to_string())
+    );
+    assert_eq!(timeout["expectation_met"], Value::Bool(true));
+    assert_bundle_artifacts(&suite_dir.join("timeout_cycle_limit"), true, false);
+
+    fs::remove_dir_all(&suite_dir).expect("scenario suite temp dir should be removable");
+}
+
+#[test]
 fn diagnostic_cli_writes_bundle_before_failure_exit() {
     let bundle_dir = temp_dir("bundle-fail");
 
@@ -335,4 +426,11 @@ fn assert_manifest_artifact(bundle_dir: &Path, artifacts: &[Value], path: &str, 
         .expect("sha256 should be a string");
     assert_eq!(digest.len(), 64);
     assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+}
+
+fn find_scenario<'a>(scenarios: &'a [Value], id: &str) -> &'a Value {
+    scenarios
+        .iter()
+        .find(|scenario| scenario["id"] == Value::String(id.to_string()))
+        .unwrap_or_else(|| panic!("missing diagnostic scenario {id}"))
 }

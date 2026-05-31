@@ -54,9 +54,11 @@ body:
           required: true
         - label: Diagnostic baseline and bundle commands pass, including `--json target/diagnostics/release-baseline.json` and `--bundle-dir target/diagnostics/latest-bundle --baseline-json target/diagnostics/release-baseline.json`.
           required: true
+        - label: Diagnostic scenario suite command passes, including `--scenario-suite-dir target/diagnostics/scenario-suite`.
+          required: true
         - label: GitHub Actions are green on Windows, macOS, Linux, clippy, fmt, security audit, IP compliance, and diagnostic bundle jobs.
           required: true
-        - label: The `oxidenes-diagnostic-bundle` workflow artifact is attached or linked as release evidence.
+        - label: The `oxidenes-diagnostic-bundle` and `oxidenes-diagnostic-scenario-suite` workflow artifacts are attached or linked as release evidence.
           required: true
   - type: checkboxes
     id: packaging
