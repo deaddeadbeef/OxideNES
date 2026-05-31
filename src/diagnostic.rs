@@ -4,16 +4,16 @@ use std::fmt::Write as _;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::bus::Bus;
+use crate::bus::{Bus, DmcDmaService};
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 9;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 10;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v9";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v10";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -44,6 +44,8 @@ const EXPECTED_JOYPAD2_MASK: u8 = 0x28;
 const OAM_DMA_EXPECTED_MIN_CYCLES: u64 = 513;
 const OAM_DMA_EXPECTED_MAX_CYCLES: u64 = 514;
 const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
+const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
+const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -496,9 +498,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "dma_cycle_timing",
         subsystem: "dma",
         risk: "The cartridge validates OAM contents and host-observed OAM DMA stall length, but not all DMA interactions.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, stalls CPU execution for a 513-514 cycle bucket, records first active-cycle parity, and observes DMC sample DMA queued during the OAM stall window.",
-        missing_coverage: "Alternate odd/even start-phase fixtures, exact 3-vs-4-cycle DMC parity behavior, and deeper CPU/APU interleaving across repeated DMA bursts.",
-        suggested_next_test: "Add paired OAM DMA fixtures that force both CPU start parities and compare DMC 3/4-cycle stall windows against expected phase-specific buckets.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, stalls CPU execution for a 513-514 cycle bucket, records first active-cycle parity, observes DMC sample DMA during the OAM stall window, and validates the phase-specific 3-4 cycle DMC stall bucket.",
+        missing_coverage: "Alternate odd/even OAM start-phase fixtures, multiple DMC overlap positions inside one transfer, and deeper CPU/APU interleaving across repeated DMA bursts.",
+        suggested_next_test: "Add paired OAM DMA fixtures that force both CPU start parities and compare DMC overlap placement near the beginning, middle, and end of the OAM transfer.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -788,9 +790,17 @@ pub struct DmaTelemetry {
     pub dmc_dma_oam_overlap_observed: bool,
     pub dmc_dma_first_fetch_cycle: Option<u64>,
     pub dmc_dma_first_fetch_address: Option<u16>,
+    pub dmc_dma_first_fetch_cpu_cycle_parity: Option<&'static str>,
+    pub dmc_dma_first_fetch_stall_cycles: Option<u8>,
     pub dmc_dma_first_oam_overlap_cycle: Option<u64>,
     pub dmc_dma_first_oam_overlap_test: Option<u8>,
     pub dmc_dma_first_oam_overlap_test_name: Option<&'static str>,
+    pub dmc_dma_first_oam_overlap_cpu_cycle_parity: Option<&'static str>,
+    pub dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    pub dmc_dma_three_cycle_fetches: u64,
+    pub dmc_dma_four_cycle_fetches: u64,
+    pub dmc_dma_expected_min_stall_cycles: u8,
+    pub dmc_dma_expected_max_stall_cycles: u8,
     pub dmc_dma_stall_cycles: u64,
     pub dmc_dma_stall_cycles_after_oam_dma: u64,
     pub dmc_dma_queued_during_oam_dma_cycles: u64,
@@ -991,15 +1001,12 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu.clock(&mut bus);
         bus.tick(1);
         bus.tick_apu();
-        let dmc_dma_request_before_service = bus.apu.dmc.dma_request;
-        let dmc_dma_address_before_service = bus.apu.dmc.dma_address;
-        bus.service_dmc_dma();
+        let dmc_dma_service = bus.service_dmc_dma(cpu.is_odd_cycle());
         cycles += 1;
 
         let status = read_ram_byte(&mut bus, STATUS_ADDR);
         let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
         let dma_active_after = bus.dma_active();
-        let dmc_dma_request_after_service = bus.apu.dmc.dma_request;
         dma_observation.observe_tick(DmaTickObservation {
             cycle: cycles,
             frame: frames,
@@ -1010,8 +1017,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             active_after: dma_active_after,
             dmc_stall_before,
             dmc_stall_after: bus.dmc_stall_active(),
-            dmc_dma_serviced: dmc_dma_request_before_service && !dmc_dma_request_after_service,
-            dmc_dma_address: dmc_dma_address_before_service,
+            dmc_dma_service,
             events: &mut events,
         });
 
@@ -1074,15 +1080,12 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             cpu.clock(&mut bus);
             bus.tick(1);
             bus.tick_apu();
-            let dmc_dma_request_before_service = bus.apu.dmc.dma_request;
-            let dmc_dma_address_before_service = bus.apu.dmc.dma_address;
-            bus.service_dmc_dma();
+            let dmc_dma_service = bus.service_dmc_dma(cpu.is_odd_cycle());
             cycles += 1;
 
             let status = read_ram_byte(&mut bus, STATUS_ADDR);
             let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
             let dma_active_after = bus.dma_active();
-            let dmc_dma_request_after_service = bus.apu.dmc.dma_request;
             dma_observation.observe_tick(DmaTickObservation {
                 cycle: cycles,
                 frame: frames,
@@ -1093,8 +1096,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 active_after: dma_active_after,
                 dmc_stall_before,
                 dmc_stall_after: bus.dmc_stall_active(),
-                dmc_dma_serviced: dmc_dma_request_before_service && !dmc_dma_request_after_service,
-                dmc_dma_address: dmc_dma_address_before_service,
+                dmc_dma_service,
                 events: &mut events,
             });
 
@@ -1644,11 +1646,37 @@ fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
+        "| DMC first fetch parity / stall bucket | {} / {} |",
+        telemetry
+            .dma
+            .dmc_dma_first_fetch_cpu_cycle_parity
+            .unwrap_or("none"),
+        optional_u8(telemetry.dma.dmc_dma_first_fetch_stall_cycles)
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "| DMC overlap test | {} |",
         telemetry
             .dma
             .dmc_dma_first_oam_overlap_test_name
             .unwrap_or("unknown_test")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| DMC overlap parity / stall bucket | {} / {} |",
+        telemetry
+            .dma
+            .dmc_dma_first_oam_overlap_cpu_cycle_parity
+            .unwrap_or("none"),
+        optional_u8(telemetry.dma.dmc_dma_first_oam_overlap_stall_cycles)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| DMC 3-cycle / 4-cycle fetches | {} / {} |",
+        telemetry.dma.dmc_dma_three_cycle_fetches, telemetry.dma.dmc_dma_four_cycle_fetches
     )
     .expect("write report");
     writeln!(
@@ -1857,8 +1885,14 @@ struct DmaObservation {
     dmc_dma_fetches_during_oam_dma: u64,
     dmc_dma_first_fetch_cycle: Option<u64>,
     dmc_dma_first_fetch_address: Option<u16>,
+    dmc_dma_first_fetch_cpu_cycle_odd: Option<bool>,
+    dmc_dma_first_fetch_stall_cycles: Option<u8>,
     dmc_dma_first_oam_overlap_cycle: Option<u64>,
     dmc_dma_first_oam_overlap_test: Option<u8>,
+    dmc_dma_first_oam_overlap_cpu_cycle_odd: Option<bool>,
+    dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    dmc_dma_three_cycle_fetches: u64,
+    dmc_dma_four_cycle_fetches: u64,
     dmc_dma_stall_cycles: u64,
     dmc_dma_stall_cycles_after_oam_dma: u64,
     dmc_dma_queued_during_oam_dma_cycles: u64,
@@ -1874,8 +1908,7 @@ struct DmaTickObservation<'a> {
     active_after: bool,
     dmc_stall_before: bool,
     dmc_stall_after: bool,
-    dmc_dma_serviced: bool,
-    dmc_dma_address: u16,
+    dmc_dma_service: Option<DmcDmaService>,
     events: &'a mut Vec<EventTelemetry>,
 }
 
@@ -1927,11 +1960,21 @@ impl DmaObservation {
             ));
         }
 
-        if tick.dmc_dma_serviced {
+        if let Some(service) = tick.dmc_dma_service {
             self.dmc_dma_fetches_observed += 1;
+            if service.stall_cycles == 3 {
+                self.dmc_dma_three_cycle_fetches += 1;
+            }
+            if service.stall_cycles == 4 {
+                self.dmc_dma_four_cycle_fetches += 1;
+            }
             self.dmc_dma_first_fetch_cycle.get_or_insert(tick.cycle);
             self.dmc_dma_first_fetch_address
-                .get_or_insert(tick.dmc_dma_address);
+                .get_or_insert(service.address);
+            self.dmc_dma_first_fetch_cpu_cycle_odd
+                .get_or_insert(service.odd_cpu_cycle);
+            self.dmc_dma_first_fetch_stall_cycles
+                .get_or_insert(service.stall_cycles);
             tick.events.push(event_telemetry(
                 tick.cycle,
                 tick.frame,
@@ -1949,6 +1992,10 @@ impl DmaObservation {
                 if self.dmc_dma_first_oam_overlap_test.is_none() {
                     self.dmc_dma_first_oam_overlap_test = known_test_id(tick.current_test);
                 }
+                self.dmc_dma_first_oam_overlap_cpu_cycle_odd
+                    .get_or_insert(service.odd_cpu_cycle);
+                self.dmc_dma_first_oam_overlap_stall_cycles
+                    .get_or_insert(service.stall_cycles);
                 tick.events.push(event_telemetry(
                     tick.cycle,
                     tick.frame,
@@ -1991,11 +2038,23 @@ impl DmaObservation {
                 >= DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES,
             dmc_dma_first_fetch_cycle: self.dmc_dma_first_fetch_cycle,
             dmc_dma_first_fetch_address: self.dmc_dma_first_fetch_address,
+            dmc_dma_first_fetch_cpu_cycle_parity: self
+                .dmc_dma_first_fetch_cpu_cycle_odd
+                .map(|odd| cycle_parity_label(!odd)),
+            dmc_dma_first_fetch_stall_cycles: self.dmc_dma_first_fetch_stall_cycles,
             dmc_dma_first_oam_overlap_cycle: self.dmc_dma_first_oam_overlap_cycle,
             dmc_dma_first_oam_overlap_test: self.dmc_dma_first_oam_overlap_test,
             dmc_dma_first_oam_overlap_test_name: self
                 .dmc_dma_first_oam_overlap_test
                 .and_then(test_name),
+            dmc_dma_first_oam_overlap_cpu_cycle_parity: self
+                .dmc_dma_first_oam_overlap_cpu_cycle_odd
+                .map(|odd| cycle_parity_label(!odd)),
+            dmc_dma_first_oam_overlap_stall_cycles: self.dmc_dma_first_oam_overlap_stall_cycles,
+            dmc_dma_three_cycle_fetches: self.dmc_dma_three_cycle_fetches,
+            dmc_dma_four_cycle_fetches: self.dmc_dma_four_cycle_fetches,
+            dmc_dma_expected_min_stall_cycles: DMC_DMA_EXPECTED_MIN_STALL_CYCLES,
+            dmc_dma_expected_max_stall_cycles: DMC_DMA_EXPECTED_MAX_STALL_CYCLES,
             dmc_dma_stall_cycles: self.dmc_dma_stall_cycles,
             dmc_dma_stall_cycles_after_oam_dma: self.dmc_dma_stall_cycles_after_oam_dma,
             dmc_dma_queued_during_oam_dma_cycles: self.dmc_dma_queued_during_oam_dma_cycles,
@@ -2101,6 +2160,36 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             "expected at least {} DMC DMA fetch during OAM DMA, observed {}",
             input.dma.dmc_dma_expected_min_oam_overlap_fetches,
             input.dma.dmc_dma_fetches_during_oam_dma
+        ));
+    }
+    if let Some(stall_cycles) = input.dma.dmc_dma_first_oam_overlap_stall_cycles {
+        if stall_cycles < input.dma.dmc_dma_expected_min_stall_cycles
+            || stall_cycles > input.dma.dmc_dma_expected_max_stall_cycles
+        {
+            failures.push(format!(
+                "DMC DMA overlap stall count {} outside expected {}..={}",
+                stall_cycles,
+                input.dma.dmc_dma_expected_min_stall_cycles,
+                input.dma.dmc_dma_expected_max_stall_cycles
+            ));
+        }
+        if input.dma.dmc_dma_stall_cycles_after_oam_dma != u64::from(stall_cycles) {
+            failures.push(format!(
+                "post-OAM DMC stall count {} differed from overlap service bucket {}",
+                input.dma.dmc_dma_stall_cycles_after_oam_dma, stall_cycles
+            ));
+        }
+    } else {
+        failures.push("DMC DMA overlap stall bucket was not observed".to_string());
+    }
+    if input.dma.dmc_dma_three_cycle_fetches + input.dma.dmc_dma_four_cycle_fetches
+        != input.dma.dmc_dma_fetches_observed
+    {
+        failures.push(format!(
+            "DMC DMA phase bucket count {}+{} did not match observed fetches {}",
+            input.dma.dmc_dma_three_cycle_fetches,
+            input.dma.dmc_dma_four_cycle_fetches,
+            input.dma.dmc_dma_fetches_observed
         ));
     }
     if input.frames < 2 {
@@ -2285,13 +2374,60 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.dma.dmc_dma_expected_min_oam_overlap_fetches
             ),
             observed: format!(
-                "DMC fetches {}, overlapping fetches {}, queued-during-OAM cycles {}, post-OAM DMC stall cycles {}",
+                "DMC fetches {}, overlapping fetches {}, overlap stall bucket {}, queued-during-OAM cycles {}, post-OAM DMC stall cycles {}",
                 input.dma.dmc_dma_fetches_observed,
                 input.dma.dmc_dma_fetches_during_oam_dma,
+                optional_u8(input.dma.dmc_dma_first_oam_overlap_stall_cycles),
                 input.dma.dmc_dma_queued_during_oam_dma_cycles,
                 input.dma.dmc_dma_stall_cycles_after_oam_dma
             ),
             likely_domain: "dma.dmc_oam_interleaving".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "dma.dmc_stall_phase".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(5),
+            test_name: test_name(5),
+            status: gated_probe_status(
+                passed_suite,
+                input
+                    .dma
+                    .dmc_dma_first_oam_overlap_stall_cycles
+                    .is_some_and(|cycles| {
+                        cycles >= input.dma.dmc_dma_expected_min_stall_cycles
+                            && cycles <= input.dma.dmc_dma_expected_max_stall_cycles
+                            && input.dma.dmc_dma_stall_cycles_after_oam_dma == u64::from(cycles)
+                    })
+                    && input.dma.dmc_dma_three_cycle_fetches
+                        + input.dma.dmc_dma_four_cycle_fetches
+                        == input.dma.dmc_dma_fetches_observed,
+            ),
+            description: "DMC DMA service records phase-specific CPU stall bucket".to_string(),
+            expected: format!(
+                "DMC DMA stall bucket {}..={} cycles and phase buckets sum to observed fetches",
+                input.dma.dmc_dma_expected_min_stall_cycles,
+                input.dma.dmc_dma_expected_max_stall_cycles
+            ),
+            observed: format!(
+                "first fetch parity {}, first fetch bucket {}, first overlap parity {}, first overlap bucket {}, three-cycle fetches {}, four-cycle fetches {}",
+                input
+                    .dma
+                    .dmc_dma_first_fetch_cpu_cycle_parity
+                    .unwrap_or("none"),
+                optional_u8(input.dma.dmc_dma_first_fetch_stall_cycles),
+                input
+                    .dma
+                    .dmc_dma_first_oam_overlap_cpu_cycle_parity
+                    .unwrap_or("none"),
+                optional_u8(input.dma.dmc_dma_first_oam_overlap_stall_cycles),
+                input.dma.dmc_dma_three_cycle_fetches,
+                input.dma.dmc_dma_four_cycle_fetches
+            ),
+            likely_domain: "dma.dmc_stall_phase".to_string(),
         },
     );
     push_probe(
@@ -3864,6 +4000,12 @@ fn compare_dma(
         &["dma", "dmc_dma_fetches_during_oam_dma"][..],
         &["dma", "dmc_dma_oam_overlap_observed"][..],
         &["dma", "dmc_dma_first_oam_overlap_test_name"][..],
+        &["dma", "dmc_dma_first_fetch_cpu_cycle_parity"][..],
+        &["dma", "dmc_dma_first_fetch_stall_cycles"][..],
+        &["dma", "dmc_dma_first_oam_overlap_cpu_cycle_parity"][..],
+        &["dma", "dmc_dma_first_oam_overlap_stall_cycles"][..],
+        &["dma", "dmc_dma_three_cycle_fetches"][..],
+        &["dma", "dmc_dma_four_cycle_fetches"][..],
         &["dma", "dmc_dma_stall_cycles_after_oam_dma"][..],
     ] {
         compare_optional_value(
@@ -4481,6 +4623,12 @@ fn diagnostic_comparison_severity_label(severity: DiagnosticComparisonSeverity) 
 }
 
 fn optional_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn optional_u8(value: Option<u8>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "none".to_string())

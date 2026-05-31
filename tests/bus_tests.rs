@@ -66,6 +66,43 @@ fn bus_oam_dma_trigger() {
 }
 
 #[test]
+fn bus_dmc_dma_stall_length_depends_on_cpu_phase() {
+    let mut even_bus = make_test_bus();
+    even_bus.apu.write(0x4012, 0x00);
+    even_bus.apu.write(0x4013, 0x00);
+    even_bus.apu.write(0x4015, 0x10);
+
+    let even_service = even_bus
+        .service_dmc_dma(false)
+        .expect("DMC should request an initial sample fetch");
+    assert_eq!(even_service.address, 0xC000);
+    assert!(!even_service.odd_cpu_cycle);
+    assert_eq!(even_service.stall_cycles, 4);
+    for _ in 0..4 {
+        assert!(even_bus.dmc_stall_active());
+        even_bus.dmc_stall_tick();
+    }
+    assert!(!even_bus.dmc_stall_active());
+
+    let mut odd_bus = make_test_bus();
+    odd_bus.apu.write(0x4012, 0x00);
+    odd_bus.apu.write(0x4013, 0x00);
+    odd_bus.apu.write(0x4015, 0x10);
+
+    let odd_service = odd_bus
+        .service_dmc_dma(true)
+        .expect("DMC should request an initial sample fetch");
+    assert_eq!(odd_service.address, 0xC000);
+    assert!(odd_service.odd_cpu_cycle);
+    assert_eq!(odd_service.stall_cycles, 3);
+    for _ in 0..3 {
+        assert!(odd_bus.dmc_stall_active());
+        odd_bus.dmc_stall_tick();
+    }
+    assert!(!odd_bus.dmc_stall_active());
+}
+
+#[test]
 fn bus_joypad_write_read() {
     let mut bus = make_test_bus();
     // Write strobe to joypad port

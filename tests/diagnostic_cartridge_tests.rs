@@ -82,12 +82,30 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.dma.dmc_dma_fetches_observed >= 2);
     assert!(telemetry.dma.dmc_dma_fetches_during_oam_dma >= 1);
     assert!(telemetry.dma.dmc_dma_oam_overlap_observed);
+    assert_eq!(
+        telemetry.dma.dmc_dma_three_cycle_fetches + telemetry.dma.dmc_dma_four_cycle_fetches,
+        telemetry.dma.dmc_dma_fetches_observed
+    );
+    assert!(telemetry
+        .dma
+        .dmc_dma_first_fetch_stall_cycles
+        .is_some_and(|cycles| (3..=4).contains(&cycles)));
+    assert!(telemetry
+        .dma
+        .dmc_dma_first_oam_overlap_stall_cycles
+        .is_some_and(|cycles| (3..=4).contains(&cycles)));
     assert_eq!(telemetry.dma.dmc_dma_first_oam_overlap_test, Some(5));
     assert_eq!(
         telemetry.dma.dmc_dma_first_oam_overlap_test_name,
         Some("oam_dma_transfer")
     );
-    assert!(telemetry.dma.dmc_dma_stall_cycles_after_oam_dma >= 4);
+    assert_eq!(
+        telemetry.dma.dmc_dma_stall_cycles_after_oam_dma,
+        telemetry
+            .dma
+            .dmc_dma_first_oam_overlap_stall_cycles
+            .expect("overlap stall bucket should be observed") as u64
+    );
     assert!(telemetry
         .events
         .iter()
@@ -159,6 +177,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.observed.contains("overlapping fetches")
     }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "dma.dmc_stall_phase"
+            && probe.test_name == Some("oam_dma_transfer")
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.observed.contains("first overlap bucket")
+    }));
     assert!(telemetry
         .analysis
         .timing
@@ -189,6 +213,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Active cycles / expected |"));
     assert!(report.contains("| DMC fetches / overlapping fetches |"));
     assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
+    assert!(report.contains("| DMC overlap parity / stall bucket |"));
+    assert!(report.contains("| DMC 3-cycle / 4-cycle fetches |"));
     assert!(report.contains("## Timing"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
@@ -530,6 +556,7 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
     let mut baseline = serde_json::to_value(&telemetry).expect("telemetry should serialize");
     baseline["dma"]["oam_dma_active_cycles"] = serde_json::Value::from(1);
     baseline["dma"]["dmc_dma_fetches_during_oam_dma"] = serde_json::Value::from(0);
+    baseline["dma"]["dmc_dma_first_oam_overlap_stall_cycles"] = serde_json::Value::from(9);
     let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
 
     let comparison =
@@ -545,6 +572,11 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
         difference.severity == DiagnosticComparisonSeverity::Warning
             && difference.category == "dma"
             && difference.path == "dma.dmc_dma_fetches_during_oam_dma"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "dma"
+            && difference.path == "dma.dmc_dma_first_oam_overlap_stall_cycles"
     }));
 }
 
