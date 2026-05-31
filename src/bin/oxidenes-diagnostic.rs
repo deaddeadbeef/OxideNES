@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 2;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -81,6 +81,7 @@ struct DiagnosticScenarioSuiteEntry {
     failure_kind: Option<String>,
     failure_code_hex: String,
     failed_probe_ids: Vec<String>,
+    comparison: DiagnosticTriageComparison,
     expectation_met: bool,
     config: DiagnosticBundleConfig,
     artifacts: DiagnosticScenarioSuiteArtifacts,
@@ -800,18 +801,18 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
     writeln!(report).expect("write report");
     writeln!(
         report,
-        "| Scenario | Expected pass | Actual pass | Expectation met | Health | Focus test | Focus domain | Failed probes | Bundle |"
+        "| Scenario | Expected pass | Actual pass | Expectation met | Health | Focus test | Focus domain | Comparison | Failed probes | Bundle |"
     )
     .expect("write report");
     writeln!(
         report,
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
     )
     .expect("write report");
     for scenario in &manifest.scenarios {
         writeln!(
             report,
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             scenario.id,
             scenario.expected_passed,
             scenario.actual_passed,
@@ -819,6 +820,7 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
             scenario.actual_health,
             scenario.actual_focus_test_id,
             scenario.actual_focus_domain.as_deref().unwrap_or("-"),
+            format_comparison_cell(&scenario.comparison),
             format_failed_probe_ids(&scenario.failed_probe_ids),
             scenario.directory
         )
@@ -833,9 +835,38 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
     }
     writeln!(
         report,
+        "- Use each root scenario `comparison` summary to decide whether to inspect `<scenario>/comparison.json` before raw telemetry."
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "- For each scenario, inspect `<scenario>/triage.json`, then `<scenario>/comparison.json`, then `<scenario>/telemetry.json` when raw events are needed."
     )
     .expect("write report");
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## Baseline Comparison Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Scenario | Passed | Differences | Failures | Warnings | Info | Top difference |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- | --- |").expect("write report");
+    for scenario in &manifest.scenarios {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            scenario.id,
+            scenario.comparison.passed,
+            scenario.comparison.difference_count,
+            scenario.comparison.failure_count,
+            scenario.comparison.warning_count,
+            scenario.comparison.info_count,
+            markdown_cell(&format_top_difference(&scenario.comparison.top_differences))
+        )
+        .expect("write report");
+    }
 
     writeln!(report).expect("write report");
     writeln!(report, "## Artifact Map").expect("write report");
@@ -866,8 +897,29 @@ fn format_failed_probe_ids(ids: &[String]) -> String {
     if ids.is_empty() {
         "-".to_string()
     } else {
-        ids.join("<br>")
+        markdown_cell(&ids.join("<br>"))
     }
+}
+
+fn format_comparison_cell(comparison: &DiagnosticTriageComparison) -> String {
+    let status = if comparison.passed { "pass" } else { "fail" };
+    format!("{}; {} differences", status, comparison.difference_count)
+}
+
+fn format_top_difference(differences: &[DiagnosticTriageDifference]) -> String {
+    differences
+        .first()
+        .map(|difference| {
+            format!(
+                "{} {} {}",
+                difference.severity, difference.category, difference.path
+            )
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn markdown_cell(value: &str) -> String {
+    value.replace('|', r"\|").replace(['\r', '\n'], " ")
 }
 
 fn write_scenario_bundle(
@@ -913,6 +965,7 @@ fn write_scenario_bundle(
         && telemetry.analysis.health == spec.expected_health
         && focus_test_matches
         && focus_domain_matches;
+    let comparison_summary = triage_comparison(&comparison)?;
 
     Ok(DiagnosticScenarioSuiteEntry {
         id: spec.id,
@@ -932,6 +985,7 @@ fn write_scenario_bundle(
         failure_kind,
         failure_code_hex: focus.failure_code_hex.clone(),
         failed_probe_ids: focus.failed_probe_ids.clone(),
+        comparison: comparison_summary,
         expectation_met,
         config,
         artifacts: DiagnosticScenarioSuiteArtifacts {
