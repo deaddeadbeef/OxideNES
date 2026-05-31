@@ -122,6 +122,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 
 - CPU arithmetic and flags
 - Stack, `JSR`, and `RTS`
+- Zero-page indexed read/write wraparound
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
@@ -252,3 +253,8 @@ terminal instruction, and last instruction associated with the focus test.
 `triage.json` exposes the same object at top level as `debug_focus` so tools can
 choose the first drilldown target before reading the full event stream or trace
 tail.
+
+Schema version `15` adds the `cpu_zero_page_index_wrap` edge-case cartridge
+test. It verifies that `LDA $FF,X` and `STA $FF,X` with `X=0x81` wrap to `$0080`
+inside page zero, and adds failure-catalog domains for zero-page indexed CPU
+addressing regressions.

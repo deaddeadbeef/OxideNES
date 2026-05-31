@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 14;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 15;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v14";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v15";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -195,6 +195,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         tier: DiagnosticTestTier::Integration,
         intent: "Verify the shared strobe latches an independent player-2 Start + Down mask through $4017.",
         expected_observations: &["player 2 read sequence is 0,0,0,1,0,1,0,0"],
+    },
+    DiagnosticTestSpec {
+        id: 12,
+        name: "cpu_zero_page_index_wrap",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify zero-page indexed addressing wraps inside page zero for reads and writes.",
+        expected_observations: &[
+            "LDA $FF,X with X=0x81 reads $0080",
+            "STA $FF,X with X=0x81 writes $0080",
+        ],
     },
 ];
 
@@ -460,6 +471,24 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         likely_domain: "joypad.overread",
         remediation_hint: "Inspect joypad overread behavior and make sure the shift index saturates or returns 1 after button 7.",
     },
+    DiagnosticFailureSpec {
+        code: 0xB0,
+        test_id: 12,
+        assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
+        expected: "LDA $FF,X with X=0x81 reads the byte stored at $0080",
+        observed: "A differed from the $0080 sentinel",
+        likely_domain: "cpu.addressing.zero_page_x_wrap",
+        remediation_hint: "Inspect zero-page indexed address calculation; the base plus index must wrap to 8 bits before the CPU RAM read.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB1,
+        test_id: 12,
+        assertion: "Zero-page indexed STA wraps from $FF + X to $80",
+        expected: "STA $FF,X with X=0x81 writes the byte at $0080",
+        observed: "$0080 did not contain the store sentinel",
+        likely_domain: "cpu.addressing.zero_page_x_wrap",
+        remediation_hint: "Inspect zero-page indexed address calculation; the base plus index must wrap to 8 bits before the CPU RAM write.",
+    },
 ];
 
 const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
@@ -467,8 +496,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, and a taken page-crossing branch.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, and cycle-accurate addressing penalties.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, and zero-page indexed wraparound.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, broader addressing-mode combinations, and cycle-accurate addressing penalties.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case.",
     },
     DiagnosticCoverageGapSpec {
@@ -2378,6 +2407,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x69 => OpcodeDecode::immediate("ADC"),
         0x78 => OpcodeDecode::implied("SEI"),
         0x85 => OpcodeDecode::zero_page("STA"),
+        0x95 => OpcodeDecode::zero_page_x("STA"),
         0x8A => OpcodeDecode::implied("TXA"),
         0x8D => OpcodeDecode::absolute("STA"),
         0x9A => OpcodeDecode::implied("TXS"),
@@ -2386,6 +2416,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xA5 => OpcodeDecode::zero_page("LDA"),
         0xA9 => OpcodeDecode::immediate("LDA"),
         0xAD => OpcodeDecode::absolute("LDA"),
+        0xB5 => OpcodeDecode::zero_page_x("LDA"),
         0xC9 => OpcodeDecode::immediate("CMP"),
         0xD0 => OpcodeDecode::relative("BNE"),
         0xD8 => OpcodeDecode::implied("CLD"),
@@ -2424,6 +2455,14 @@ impl OpcodeDecode {
         }
     }
 
+    fn zero_page_x(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "zero_page_x",
+            byte_len: 2,
+        }
+    }
+
     fn absolute(mnemonic: &'static str) -> Self {
         Self {
             mnemonic,
@@ -2453,6 +2492,7 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
     match decode.addressing_mode {
         "immediate" => format!("{} #${:02X}", decode.mnemonic, operand_bytes[0]),
         "zero_page" => format!("{} ${:02X}", decode.mnemonic, operand_bytes[0]),
+        "zero_page_x" => format!("{} ${:02X},X", decode.mnemonic, operand_bytes[0]),
         "absolute" => format!(
             "{} {}",
             decode.mnemonic,
@@ -3212,6 +3252,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.joypad_overread_returns_one();
     program.ppu_nmi_and_render_frame();
     program.joypad2_strobe_shift();
+    program.cpu_zero_page_index_wrap();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3497,6 +3538,20 @@ impl DiagnosticProgram {
         self.pass_test(11);
     }
 
+    fn cpu_zero_page_index_wrap(&mut self) {
+        self.begin_test(12);
+        self.asm.lda_imm(0x3C);
+        self.asm.sta_zp(0x80);
+        self.asm.ldx_imm(0x81);
+        self.asm.lda_zp_x(0xFF);
+        self.expect_a_eq(0x3C, 0xB0);
+        self.asm.lda_imm(0x6D);
+        self.asm.sta_zp_x(0xFF);
+        self.asm.lda_zp(0x80);
+        self.expect_a_eq(0x6D, 0xB1);
+        self.pass_test(12);
+    }
+
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
         for (index, expected_bit) in expected.iter().copied().enumerate() {
             self.asm.lda_abs(addr);
@@ -3642,6 +3697,10 @@ impl Assembler {
         self.op_zp(0xA5, addr);
     }
 
+    fn lda_zp_x(&mut self, addr: u8) {
+        self.op_zp(0xB5, addr);
+    }
+
     fn lda_abs(&mut self, addr: u16) {
         self.op_abs(0xAD, addr);
     }
@@ -3652,6 +3711,10 @@ impl Assembler {
 
     fn sta_zp(&mut self, addr: u8) {
         self.op_zp(0x85, addr);
+    }
+
+    fn sta_zp_x(&mut self, addr: u8) {
+        self.op_zp(0x95, addr);
     }
 
     fn sta_abs(&mut self, addr: u16) {
