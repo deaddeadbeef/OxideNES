@@ -1683,7 +1683,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(18),
+            expected_focus_test_id: Some(19),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1830,6 +1830,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(18),
             expected_focus_domain: Some("joypad.strobe_reset"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_vram_increment_32_fault",
+            title: "Intentional PPUDATA increment-32 assertion failure",
+            purpose:
+                "Failure-localization fixture for PPUCTRL PPUDATA increment-by-32 regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuVramIncrement32),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(19),
+            expected_focus_domain: Some("ppu.registers.ppudata_increment_32"),
         },
         DiagnosticScenarioSpec {
             id: "ppu_nmi_timeout_fault",
