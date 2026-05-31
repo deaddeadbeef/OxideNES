@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 19
+EXPECTED_TELEMETRY_SCHEMA = 20
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -20,6 +20,7 @@ EXPECTED_SCENARIOS = {
     "joypad1_mismatch",
     "joypad2_mismatch",
     "cpu_zero_page_wrap_fault",
+    "cpu_indirect_jmp_fault",
     "ppu_read_buffer_fault",
     "timeout_cycle_limit",
 }
@@ -72,7 +73,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            5,
+            6,
             "analysis baseline_divergence_count",
         )
 
@@ -122,13 +123,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            5,
+            6,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 5, "observer next_actions count")
+        self.expect_equal(len(actions), 6, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -158,6 +159,7 @@ class SuiteVerifier:
             "joypad1_mismatch",
             "joypad2_mismatch",
             "cpu_zero_page_wrap_fault",
+            "cpu_indirect_jmp_fault",
             "ppu_read_buffer_fault",
             "timeout_cycle_limit",
         }
@@ -252,6 +254,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.12.result",
             cpu_evidence,
             "CPU observer evidence",
+        )
+
+        jmp = by_scenario.get("cpu_indirect_jmp_fault")
+        if not isinstance(jmp, dict):
+            self.errors.append("missing observer action for cpu_indirect_jmp_fault")
+            return
+
+        self.expect_equal(
+            jmp.get("priority"),
+            "known_divergence",
+            "indirect JMP observer action priority",
+        )
+        self.expect_equal(
+            jmp.get("action_type"),
+            "inspect_known_divergence",
+            "indirect JMP observer action type",
+        )
+        self.expect_equal(
+            jmp.get("primary_artifact"),
+            "cpu_indirect_jmp_fault/comparison.json",
+            "indirect JMP observer primary_artifact",
+        )
+        jmp_evidence = self.expect_list(
+            jmp.get("evidence"), "indirect JMP observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.control_flow.indirect_jmp_page_wrap",
+            jmp_evidence,
+            "indirect JMP observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.13.result",
+            jmp_evidence,
+            "indirect JMP observer evidence",
         )
         self.expect_in(
             "top_difference_path=dma.oam_dma_observed",
@@ -362,6 +398,31 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_zero_page_wrap_fault")
+
+        jmp = by_scenario.get("cpu_indirect_jmp_fault")
+        if isinstance(jmp, dict):
+            self.expect_equal(
+                jmp.get("role"),
+                "expected_failure_fixture",
+                "indirect JMP observer role",
+            )
+            self.expect_equal(
+                jmp.get("outcome"),
+                "expected_baseline_divergence",
+                "indirect JMP observer outcome",
+            )
+            self.expect_equal(
+                jmp.get("focus_domain"),
+                "cpu.control_flow.indirect_jmp_page_wrap",
+                "indirect JMP observer focus_domain",
+            )
+            self.expect_equal(
+                jmp.get("next_artifact"),
+                "cpu_indirect_jmp_fault/comparison.json",
+                "indirect JMP observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_indirect_jmp_fault")
 
     def verify_artifact_paths(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
         root_artifacts = self.expect_dict(manifest.get("artifacts"), "scenario-suite artifacts")
