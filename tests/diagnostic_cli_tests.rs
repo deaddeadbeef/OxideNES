@@ -184,8 +184,8 @@ fn diagnostic_cli_writes_standalone_triage_json() {
 
     assert!(status.success());
     let triage = read_json(&triage_path);
-    assert_eq!(triage["triage_schema_version"], Value::from(1));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(10));
+    assert_eq!(triage["triage_schema_version"], Value::from(2));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(11));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(triage["coverage"]["passed_tests"], Value::from(11));
     assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
@@ -213,6 +213,12 @@ fn diagnostic_cli_writes_standalone_triage_json() {
         .expect("artifact hints should be an array")
         .iter()
         .any(|hint| hint["path"] == Value::String("telemetry.json".to_string())));
+    assert!(triage["event_tail"]
+        .as_array()
+        .expect("event tail should be an array")
+        .iter()
+        .any(|event| event["cpu_status_hex"].as_str().is_some()
+            && event["signature_hex"] == Value::String("0xA5".to_string())));
 
     fs::remove_dir_all(&root).expect("triage temp dir should be removable");
 }
@@ -229,7 +235,7 @@ fn assert_bundle_artifacts_with_joypad2(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(10));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(11));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

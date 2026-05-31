@@ -129,6 +129,24 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .events
         .iter()
         .any(|event| event.current_test_name == Some("joypad2_strobe_shift")));
+    assert!(telemetry
+        .events
+        .iter()
+        .all(|event| event.cpu.pc == event.pc));
+    assert!(telemetry.events.iter().any(|event| {
+        event.current_test_name == Some("oam_dma_transfer")
+            && event.diagnostic_ram.signature == 0xA5
+            && event.diagnostic_ram.current_result_addr == Some(0x0204)
+    }));
+    let final_event = telemetry
+        .events
+        .last()
+        .expect("diagnostic should emit at least one event");
+    assert_eq!(final_event.diagnostic_ram.failure_code_hex, "0x00");
+    assert_eq!(
+        final_event.diagnostic_ram.current_result_hex.as_deref(),
+        Some("0x01")
+    );
     assert_eq!(telemetry.timeline.len(), DIAGNOSTIC_TESTS.len());
     assert_eq!(
         telemetry.analysis.timing.started_tests,
@@ -223,6 +241,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
     assert!(report.contains("## Event Tail"));
+    assert!(report.contains("| CPU A/X/Y | SP/P | Result | Failure |"));
     assert!(telemetry.cycles > 0);
     assert!(telemetry.frames >= 2);
 }
@@ -482,6 +501,30 @@ fn generated_diagnostic_cartridge_compares_against_matching_baseline() {
     assert!(report.contains("# OxideNES Diagnostic Baseline Comparison"));
     assert!(report.contains("| Result | pass |"));
     assert!(report.contains("No baseline differences detected."));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_comparison_warns_on_execution_state_drift() {
+    let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic should run");
+    let mut baseline = serde_json::to_value(&telemetry).expect("telemetry should serialize");
+    baseline["cpu"]["pc"] = serde_json::Value::from(0);
+    baseline["ram"]["checksum"] = serde_json::Value::from(0);
+    let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
+
+    let comparison =
+        compare_diagnostic_to_baseline(&telemetry, &baseline_json).expect("comparison should run");
+
+    assert!(comparison.passed);
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "state"
+            && difference.path == "cpu.pc"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "state"
+            && difference.path == "ram.checksum"
+    }));
 }
 
 #[test]

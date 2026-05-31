@@ -175,3 +175,11 @@ expected 3-cycle or 4-cycle CPU stall bucket from that phase. The diagnostic
 bundle reports the first DMC fetch parity/bucket, the first DMC/OAM overlap
 parity/bucket, 3-cycle versus 4-cycle fetch counts, and verifies that the
 post-OAM DMC stall window matches the overlap service bucket.
+
+Schema version `11` adds execution snapshots to each diagnostic event. Event
+records now include CPU registers, pending CPU cycles, and diagnostic RAM
+watchpoints such as failure code, signature, NMI count, and the active test
+result byte. The compact triage JSON event tail exposes the same snapshot data
+so automated debuggers can start from the final transitions without loading the
+full event stream, and baseline comparison warns when final CPU or diagnostic
+RAM state drifts from a known-good run.

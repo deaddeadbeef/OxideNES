@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 10;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 11;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v10";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v11";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -750,7 +750,7 @@ pub struct DiagnosticProbeSummaryTelemetry {
     pub first_failed_probe: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct CpuTelemetry {
     pub pc: u16,
     pub a: u8,
@@ -759,6 +759,23 @@ pub struct CpuTelemetry {
     pub sp: u8,
     pub status: u8,
     pub pending_cycles: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticRamWatchTelemetry {
+    pub status: u8,
+    pub status_hex: String,
+    pub current_test: u8,
+    pub current_test_name: Option<&'static str>,
+    pub failure_code: u8,
+    pub failure_code_hex: String,
+    pub signature: u8,
+    pub signature_hex: String,
+    pub nmi_count: u8,
+    pub current_result_addr: Option<u16>,
+    pub current_result_addr_hex: Option<String>,
+    pub current_result: Option<u8>,
+    pub current_result_hex: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -902,6 +919,8 @@ pub struct EventTelemetry {
     pub current_test: u8,
     pub current_test_name: Option<&'static str>,
     pub pc: u16,
+    pub cpu: CpuTelemetry,
+    pub diagnostic_ram: DiagnosticRamWatchTelemetry,
     pub note: String,
 }
 
@@ -985,15 +1004,19 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut timeout = true;
     let mut dma_observation = DmaObservation::default();
 
-    events.push(event_telemetry(
-        0,
-        0,
-        last_status,
-        last_current_test,
-        cpu.pc,
-        DiagnosticEventKind::Reset,
-        "reset",
-    ));
+    let reset_cpu = cpu_telemetry(&cpu);
+    let reset_ram = diagnostic_ram_watch_telemetry(&mut bus, last_status, last_current_test);
+    events.push(event_telemetry(EventTelemetryInput {
+        cycle: 0,
+        frame: 0,
+        status: last_status,
+        current_test: last_current_test,
+        pc: cpu.pc,
+        cpu: reset_cpu,
+        diagnostic_ram: reset_ram,
+        kind: DiagnosticEventKind::Reset,
+        note: "reset",
+    }));
 
     while cycles < config.max_cpu_cycles {
         let dma_active_before = bus.dma_active();
@@ -1006,6 +1029,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
 
         let status = read_ram_byte(&mut bus, STATUS_ADDR);
         let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+        let cpu_snapshot = cpu_telemetry(&cpu);
+        let diagnostic_ram = diagnostic_ram_watch_telemetry(&mut bus, status, current_test);
         let dma_active_after = bus.dma_active();
         dma_observation.observe_tick(DmaTickObservation {
             cycle: cycles,
@@ -1013,6 +1038,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             status,
             current_test,
             pc: cpu.pc,
+            cpu: cpu_snapshot,
+            diagnostic_ram: diagnostic_ram.clone(),
             active_before: dma_active_before,
             active_after: dma_active_after,
             dmc_stall_before,
@@ -1029,40 +1056,46 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             for sample in samples {
                 audio_peak_abs = audio_peak_abs.max(sample.abs());
             }
-            events.push(event_telemetry(
-                cycles,
-                frames,
+            events.push(event_telemetry(EventTelemetryInput {
+                cycle: cycles,
+                frame: frames,
                 status,
                 current_test,
-                cpu.pc,
-                DiagnosticEventKind::FrameComplete,
-                "frame_complete",
-            ));
+                pc: cpu.pc,
+                cpu: cpu_snapshot,
+                diagnostic_ram: diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::FrameComplete,
+                note: "frame_complete",
+            }));
         }
 
         if current_test != last_current_test {
             last_current_test = current_test;
-            events.push(event_telemetry(
-                cycles,
-                frames,
+            events.push(event_telemetry(EventTelemetryInput {
+                cycle: cycles,
+                frame: frames,
                 status,
                 current_test,
-                cpu.pc,
-                DiagnosticEventKind::TestChanged,
-                "test_changed",
-            ));
+                pc: cpu.pc,
+                cpu: cpu_snapshot,
+                diagnostic_ram: diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::TestChanged,
+                note: "test_changed",
+            }));
         }
         if status != last_status {
             last_status = status;
-            events.push(event_telemetry(
-                cycles,
-                frames,
+            events.push(event_telemetry(EventTelemetryInput {
+                cycle: cycles,
+                frame: frames,
                 status,
                 current_test,
-                cpu.pc,
-                DiagnosticEventKind::StatusChanged,
-                "status_changed",
-            ));
+                pc: cpu.pc,
+                cpu: cpu_snapshot,
+                diagnostic_ram: diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::StatusChanged,
+                note: "status_changed",
+            }));
         }
 
         if status == STATUS_PASS || status == STATUS_FAIL {
@@ -1085,6 +1118,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
 
             let status = read_ram_byte(&mut bus, STATUS_ADDR);
             let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+            let cpu_snapshot = cpu_telemetry(&cpu);
+            let diagnostic_ram = diagnostic_ram_watch_telemetry(&mut bus, status, current_test);
             let dma_active_after = bus.dma_active();
             dma_observation.observe_tick(DmaTickObservation {
                 cycle: cycles,
@@ -1092,6 +1127,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 status,
                 current_test,
                 pc: cpu.pc,
+                cpu: cpu_snapshot,
+                diagnostic_ram: diagnostic_ram.clone(),
                 active_before: dma_active_before,
                 active_after: dma_active_after,
                 dmc_stall_before,
@@ -1108,15 +1145,17 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 for sample in samples {
                     audio_peak_abs = audio_peak_abs.max(sample.abs());
                 }
-                events.push(event_telemetry(
-                    cycles,
-                    frames,
+                events.push(event_telemetry(EventTelemetryInput {
+                    cycle: cycles,
+                    frame: frames,
                     status,
                     current_test,
-                    cpu.pc,
-                    DiagnosticEventKind::PostPassFrameComplete,
-                    "post_pass_frame_complete",
-                ));
+                    pc: cpu.pc,
+                    cpu: cpu_snapshot,
+                    diagnostic_ram: diagnostic_ram.clone(),
+                    kind: DiagnosticEventKind::PostPassFrameComplete,
+                    note: "post_pass_frame_complete",
+                }));
             }
         }
     }
@@ -1201,15 +1240,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         analysis,
         cycles,
         frames,
-        cpu: CpuTelemetry {
-            pc: cpu.pc,
-            a: cpu.a,
-            x: cpu.x,
-            y: cpu.y,
-            sp: cpu.sp,
-            status: cpu.status,
-            pending_cycles: cpu.cycles,
-        },
+        cpu: cpu_telemetry(&cpu),
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
             nmi_count: ram[NMI_COUNT_ADDR as usize],
@@ -1853,19 +1884,38 @@ fn write_host_failures_section(report: &mut String, telemetry: &DiagnosticTeleme
 fn write_event_tail_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Event Tail").expect("write report");
     writeln!(report).expect("write report");
-    writeln!(report, "| Kind | Cycle | Frame | Status | Test | PC |").expect("write report");
-    writeln!(report, "| --- | ---: | ---: | --- | --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Kind | Cycle | Frame | Status | Test | PC | CPU A/X/Y | SP/P | Result | Failure |"
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    .expect("write report");
     let start = telemetry.events.len().saturating_sub(8);
     for event in &telemetry.events[start..] {
         writeln!(
             report,
-            "| {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {}/{}/{} | {}/{} | {} | {} |",
             diagnostic_event_kind_label(event.kind),
             event.cycle,
             event.frame,
             hex_byte(event.status),
             event.current_test_name.unwrap_or("unknown_test"),
-            format_pc(event.pc)
+            format_pc(event.pc),
+            hex_byte(event.cpu.a),
+            hex_byte(event.cpu.x),
+            hex_byte(event.cpu.y),
+            hex_byte(event.cpu.sp),
+            hex_byte(event.cpu.status),
+            event
+                .diagnostic_ram
+                .current_result_hex
+                .as_deref()
+                .unwrap_or("none"),
+            event.diagnostic_ram.failure_code_hex
         )
         .expect("write report");
     }
@@ -1904,6 +1954,8 @@ struct DmaTickObservation<'a> {
     status: u8,
     current_test: u8,
     pc: u16,
+    cpu: CpuTelemetry,
+    diagnostic_ram: DiagnosticRamWatchTelemetry,
     active_before: bool,
     active_after: bool,
     dmc_stall_before: bool,
@@ -1935,29 +1987,33 @@ impl DmaObservation {
         if !tick.active_before && tick.active_after && self.oam_dma_start_cycle.is_none() {
             self.oam_dma_start_cycle = Some(tick.cycle);
             self.oam_dma_start_test = known_test_id(tick.current_test);
-            tick.events.push(event_telemetry(
-                tick.cycle,
-                tick.frame,
-                tick.status,
-                tick.current_test,
-                tick.pc,
-                DiagnosticEventKind::OamDmaStarted,
-                "oam_dma_started",
-            ));
+            tick.events.push(event_telemetry(EventTelemetryInput {
+                cycle: tick.cycle,
+                frame: tick.frame,
+                status: tick.status,
+                current_test: tick.current_test,
+                pc: tick.pc,
+                cpu: tick.cpu,
+                diagnostic_ram: tick.diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::OamDmaStarted,
+                note: "oam_dma_started",
+            }));
         }
 
         if tick.active_before && !tick.active_after && self.oam_dma_end_cycle.is_none() {
             self.oam_dma_end_cycle = Some(tick.cycle);
             self.oam_dma_end_test = known_test_id(tick.current_test);
-            tick.events.push(event_telemetry(
-                tick.cycle,
-                tick.frame,
-                tick.status,
-                tick.current_test,
-                tick.pc,
-                DiagnosticEventKind::OamDmaCompleted,
-                "oam_dma_completed",
-            ));
+            tick.events.push(event_telemetry(EventTelemetryInput {
+                cycle: tick.cycle,
+                frame: tick.frame,
+                status: tick.status,
+                current_test: tick.current_test,
+                pc: tick.pc,
+                cpu: tick.cpu,
+                diagnostic_ram: tick.diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::OamDmaCompleted,
+                note: "oam_dma_completed",
+            }));
         }
 
         if let Some(service) = tick.dmc_dma_service {
@@ -1975,15 +2031,17 @@ impl DmaObservation {
                 .get_or_insert(service.odd_cpu_cycle);
             self.dmc_dma_first_fetch_stall_cycles
                 .get_or_insert(service.stall_cycles);
-            tick.events.push(event_telemetry(
-                tick.cycle,
-                tick.frame,
-                tick.status,
-                tick.current_test,
-                tick.pc,
-                DiagnosticEventKind::DmcDmaFetched,
-                "dmc_dma_fetched",
-            ));
+            tick.events.push(event_telemetry(EventTelemetryInput {
+                cycle: tick.cycle,
+                frame: tick.frame,
+                status: tick.status,
+                current_test: tick.current_test,
+                pc: tick.pc,
+                cpu: tick.cpu,
+                diagnostic_ram: tick.diagnostic_ram.clone(),
+                kind: DiagnosticEventKind::DmcDmaFetched,
+                note: "dmc_dma_fetched",
+            }));
 
             if tick.active_before || tick.active_after {
                 self.dmc_dma_fetches_during_oam_dma += 1;
@@ -1996,15 +2054,17 @@ impl DmaObservation {
                     .get_or_insert(service.odd_cpu_cycle);
                 self.dmc_dma_first_oam_overlap_stall_cycles
                     .get_or_insert(service.stall_cycles);
-                tick.events.push(event_telemetry(
-                    tick.cycle,
-                    tick.frame,
-                    tick.status,
-                    tick.current_test,
-                    tick.pc,
-                    DiagnosticEventKind::DmcDmaOamOverlap,
-                    "dmc_dma_oam_overlap",
-                ));
+                tick.events.push(event_telemetry(EventTelemetryInput {
+                    cycle: tick.cycle,
+                    frame: tick.frame,
+                    status: tick.status,
+                    current_test: tick.current_test,
+                    pc: tick.pc,
+                    cpu: tick.cpu,
+                    diagnostic_ram: tick.diagnostic_ram.clone(),
+                    kind: DiagnosticEventKind::DmcDmaOamOverlap,
+                    note: "dmc_dma_oam_overlap",
+                }));
             }
         }
 
@@ -3238,6 +3298,46 @@ fn read_ram_byte(bus: &mut Bus, addr: u8) -> u8 {
     bus.cpu_read(addr as u16)
 }
 
+fn cpu_telemetry(cpu: &Cpu) -> CpuTelemetry {
+    CpuTelemetry {
+        pc: cpu.pc,
+        a: cpu.a,
+        x: cpu.x,
+        y: cpu.y,
+        sp: cpu.sp,
+        status: cpu.status,
+        pending_cycles: cpu.cycles,
+    }
+}
+
+fn diagnostic_ram_watch_telemetry(
+    bus: &mut Bus,
+    status: u8,
+    current_test: u8,
+) -> DiagnosticRamWatchTelemetry {
+    let failure_code = read_ram_byte(bus, FAILURE_CODE_ADDR);
+    let signature = read_ram_byte(bus, SIGNATURE_ADDR);
+    let nmi_count = read_ram_byte(bus, NMI_COUNT_ADDR);
+    let current_result_addr = known_test_id(current_test).map(result_addr);
+    let current_result = current_result_addr.map(|addr| bus.cpu_read(addr));
+
+    DiagnosticRamWatchTelemetry {
+        status,
+        status_hex: hex_byte(status),
+        current_test,
+        current_test_name: test_name(current_test),
+        failure_code,
+        failure_code_hex: hex_byte(failure_code),
+        signature,
+        signature_hex: hex_byte(signature),
+        nmi_count,
+        current_result_addr,
+        current_result_addr_hex: current_result_addr.map(format_pc),
+        current_result,
+        current_result_hex: current_result.map(hex_byte),
+    }
+}
+
 fn suite_telemetry() -> DiagnosticSuiteTelemetry {
     DiagnosticSuiteTelemetry {
         name: DIAGNOSTIC_SUITE_NAME,
@@ -3620,24 +3720,30 @@ fn analysis_next_actions(health: DiagnosticHealth, verdict: &VerdictTelemetry) -
     }
 }
 
-fn event_telemetry(
+struct EventTelemetryInput<'a> {
     cycle: u64,
     frame: u64,
     status: u8,
     current_test: u8,
     pc: u16,
+    cpu: CpuTelemetry,
+    diagnostic_ram: DiagnosticRamWatchTelemetry,
     kind: DiagnosticEventKind,
-    note: &str,
-) -> EventTelemetry {
+    note: &'a str,
+}
+
+fn event_telemetry(input: EventTelemetryInput<'_>) -> EventTelemetry {
     EventTelemetry {
-        kind,
-        cycle,
-        frame,
-        status,
-        current_test,
-        current_test_name: test_name(current_test),
-        pc,
-        note: note.to_string(),
+        kind: input.kind,
+        cycle: input.cycle,
+        frame: input.frame,
+        status: input.status,
+        current_test: input.current_test,
+        current_test_name: test_name(input.current_test),
+        pc: input.pc,
+        cpu: input.cpu,
+        diagnostic_ram: input.diagnostic_ram,
+        note: input.note.to_string(),
     }
 }
 
@@ -4245,6 +4351,27 @@ fn compare_observation_checksums(
         "diagnostic RAM signature changed",
         differences,
     );
+    for path in [
+        &["cpu", "pc"][..],
+        &["cpu", "a"][..],
+        &["cpu", "x"][..],
+        &["cpu", "y"][..],
+        &["cpu", "sp"][..],
+        &["cpu", "status"][..],
+        &["cpu", "pending_cycles"][..],
+        &["ram", "nmi_count"][..],
+        &["ram", "checksum"][..],
+    ] {
+        compare_optional_value(
+            baseline,
+            current,
+            path,
+            "state",
+            DiagnosticComparisonSeverity::Warning,
+            "final diagnostic execution state changed from baseline",
+            differences,
+        );
+    }
     for path in [
         &["cartridge", "rom_hash"][..],
         &["oam", "checksum"][..],

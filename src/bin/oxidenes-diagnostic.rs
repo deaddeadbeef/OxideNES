@@ -11,7 +11,7 @@ use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 1;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -238,6 +238,17 @@ struct DiagnosticTriageEvent {
     current_test: u8,
     current_test_name: Option<&'static str>,
     pc_hex: String,
+    cpu_a_hex: String,
+    cpu_x_hex: String,
+    cpu_y_hex: String,
+    cpu_sp_hex: String,
+    cpu_status_hex: String,
+    cpu_pending_cycles: u8,
+    current_result_addr_hex: Option<String>,
+    current_result_hex: Option<String>,
+    failure_code_hex: String,
+    signature_hex: String,
+    nmi_count: u8,
     note: String,
 }
 
@@ -571,7 +582,7 @@ fn bundle_ai_handoff(
     let mut handoff = vec![
         "Start with manifest.json to verify artifact hashes and bundle result.".to_string(),
         "Read triage.json for a compact machine-readable failure focus before loading full telemetry.".to_string(),
-        "Read report.md for human triage and telemetry.json for exact probe, timeline, and event data.".to_string(),
+        "Read report.md for human triage and telemetry.json for exact probe, timeline, event, and execution-snapshot data.".to_string(),
     ];
     if comparison.is_some() {
         handoff.push(
@@ -903,6 +914,17 @@ fn triage_event_tail(
                 current_test: event.current_test,
                 current_test_name: event.current_test_name,
                 pc_hex: format!("0x{:04X}", event.pc),
+                cpu_a_hex: hex_byte(event.cpu.a),
+                cpu_x_hex: hex_byte(event.cpu.x),
+                cpu_y_hex: hex_byte(event.cpu.y),
+                cpu_sp_hex: hex_byte(event.cpu.sp),
+                cpu_status_hex: hex_byte(event.cpu.status),
+                cpu_pending_cycles: event.cpu.pending_cycles,
+                current_result_addr_hex: event.diagnostic_ram.current_result_addr_hex.clone(),
+                current_result_hex: event.diagnostic_ram.current_result_hex.clone(),
+                failure_code_hex: event.diagnostic_ram.failure_code_hex.clone(),
+                signature_hex: event.diagnostic_ram.signature_hex.clone(),
+                nmi_count: event.diagnostic_ram.nmi_count,
                 note: event.note.clone(),
             })
         })
