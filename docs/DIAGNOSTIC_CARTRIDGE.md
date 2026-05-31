@@ -33,13 +33,19 @@ expected observations, result byte address, raw result byte, and pass/fail
 state. Event records include a normalized event kind plus the active test name
 when the current test id is known.
 
-Schema version `2` also includes a failure catalog and structured
+Schema version `2` added a failure catalog and structured
 `verdict.failure` object. When the cartridge reports a failing assertion, the
 failure object maps the raw failure code to the failing test, subsystem,
 assertion, expected observation, observed mismatch, likely emulator domain, and
 remediation hint. This keeps intentional or real failures focused on the first
 localized cartridge assertion instead of mixing in downstream host checks that
 could not run after the early stop.
+
+Schema version `3` adds an `analysis` object for automated consumers. It
+summarizes health, test/subsystem/tier coverage, first-failure domain, failing
+test/subsystem, event transition count, and next debugging actions. This is
+derived from the raw telemetry so an AI or CI report can start with a compact
+diagnostic summary and drill into raw events only when needed.
 
 The cartridge writes status bytes into CPU RAM:
 
@@ -50,4 +56,4 @@ The cartridge writes status bytes into CPU RAM:
 - `$00F4`: NMI count
 - `$0200..`: per-test result slots, `0x01` means pass
 
-The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, and failure-localization metadata.
+The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, failure-localization metadata, and a derived analysis summary.

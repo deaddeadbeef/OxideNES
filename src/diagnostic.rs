@@ -9,9 +9,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 2;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 3;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v2";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v3";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -380,6 +380,7 @@ pub struct DiagnosticTelemetry {
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
     pub verdict: VerdictTelemetry,
+    pub analysis: DiagnosticAnalysisTelemetry,
     pub cycles: u64,
     pub frames: u64,
     pub cpu: CpuTelemetry,
@@ -461,6 +462,52 @@ pub struct FailureCatalogTelemetry {
     pub remediation_hint: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticHealth {
+    Healthy,
+    CartridgeAssertionFailed,
+    TimedOut,
+    HostValidationFailed,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticAnalysisTelemetry {
+    pub health: DiagnosticHealth,
+    pub summary: String,
+    pub coverage: DiagnosticCoverageTelemetry,
+    pub failing_subsystem: Option<DiagnosticSubsystem>,
+    pub failing_test: Option<&'static str>,
+    pub first_failure_domain: Option<String>,
+    pub next_actions: Vec<String>,
+    pub test_transition_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticCoverageTelemetry {
+    pub total_tests: usize,
+    pub passed_tests: usize,
+    pub failed_tests: usize,
+    pub subsystem_summary: Vec<SubsystemCoverageTelemetry>,
+    pub tier_summary: Vec<TierCoverageTelemetry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubsystemCoverageTelemetry {
+    pub subsystem: DiagnosticSubsystem,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TierCoverageTelemetry {
+    pub tier: DiagnosticTestTier,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CpuTelemetry {
     pub pc: u16,
@@ -513,7 +560,7 @@ pub struct AudioTelemetry {
     pub peak_abs: f32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticEventKind {
     Reset,
@@ -720,22 +767,25 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         failure_code,
         &host_failures,
     );
+    let verdict = VerdictTelemetry {
+        passed,
+        status,
+        timeout,
+        current_test,
+        current_test_name: test_name(current_test),
+        failure_code,
+        failure,
+        host_failures,
+    };
+    let analysis = analysis_telemetry(&verdict, &test_results, &events, cycles, frames);
 
     Ok(DiagnosticTelemetry {
         schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
         provenance: DIAGNOSTIC_PROVENANCE,
         suite: suite_telemetry(),
         cartridge: cartridge_info,
-        verdict: VerdictTelemetry {
-            passed,
-            status,
-            timeout,
-            current_test,
-            current_test_name: test_name(current_test),
-            failure_code,
-            failure,
-            host_failures,
-        },
+        verdict,
+        analysis,
         cycles,
         frames,
         cpu: CpuTelemetry {
@@ -1565,6 +1615,215 @@ fn failure_telemetry(
     })
 }
 
+fn analysis_telemetry(
+    verdict: &VerdictTelemetry,
+    tests: &[TestTelemetry],
+    events: &[EventTelemetry],
+    cycles: u64,
+    frames: u64,
+) -> DiagnosticAnalysisTelemetry {
+    let coverage = coverage_telemetry(tests);
+    let health = diagnostic_health(verdict);
+    let test_transition_count = events
+        .iter()
+        .filter(|event| event.kind == DiagnosticEventKind::TestChanged)
+        .count();
+
+    let failing_subsystem = verdict
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.subsystem)
+        .or_else(|| first_failed_test(tests).map(|test| test.subsystem));
+    let failing_test = verdict
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.test_name)
+        .or_else(|| first_failed_test(tests).map(|test| test.name));
+    let first_failure_domain = verdict
+        .failure
+        .as_ref()
+        .map(|failure| failure.likely_domain.clone());
+
+    let summary = analysis_summary(
+        health,
+        &coverage,
+        verdict,
+        failing_test,
+        first_failure_domain.as_deref(),
+        cycles,
+        frames,
+    );
+    let next_actions = analysis_next_actions(health, verdict);
+
+    DiagnosticAnalysisTelemetry {
+        health,
+        summary,
+        coverage,
+        failing_subsystem,
+        failing_test,
+        first_failure_domain,
+        next_actions,
+        test_transition_count,
+    }
+}
+
+fn coverage_telemetry(tests: &[TestTelemetry]) -> DiagnosticCoverageTelemetry {
+    let passed_tests = tests.iter().filter(|test| test.passed).count();
+    let failed_tests = tests.len().saturating_sub(passed_tests);
+
+    DiagnosticCoverageTelemetry {
+        total_tests: tests.len(),
+        passed_tests,
+        failed_tests,
+        subsystem_summary: subsystem_coverage(tests),
+        tier_summary: tier_coverage(tests),
+    }
+}
+
+fn subsystem_coverage(tests: &[TestTelemetry]) -> Vec<SubsystemCoverageTelemetry> {
+    let mut summary = Vec::new();
+    for spec in DIAGNOSTIC_TESTS {
+        if summary
+            .iter()
+            .any(|entry: &SubsystemCoverageTelemetry| entry.subsystem == spec.subsystem)
+        {
+            continue;
+        }
+        let mut entry = SubsystemCoverageTelemetry {
+            subsystem: spec.subsystem,
+            total: 0,
+            passed: 0,
+            failed: 0,
+        };
+        for test in tests.iter().filter(|test| test.subsystem == spec.subsystem) {
+            entry.total += 1;
+            if test.passed {
+                entry.passed += 1;
+            } else {
+                entry.failed += 1;
+            }
+        }
+        summary.push(entry);
+    }
+    summary
+}
+
+fn tier_coverage(tests: &[TestTelemetry]) -> Vec<TierCoverageTelemetry> {
+    let mut summary = Vec::new();
+    for spec in DIAGNOSTIC_TESTS {
+        if summary
+            .iter()
+            .any(|entry: &TierCoverageTelemetry| entry.tier == spec.tier)
+        {
+            continue;
+        }
+        let mut entry = TierCoverageTelemetry {
+            tier: spec.tier,
+            total: 0,
+            passed: 0,
+            failed: 0,
+        };
+        for test in tests.iter().filter(|test| test.tier == spec.tier) {
+            entry.total += 1;
+            if test.passed {
+                entry.passed += 1;
+            } else {
+                entry.failed += 1;
+            }
+        }
+        summary.push(entry);
+    }
+    summary
+}
+
+fn diagnostic_health(verdict: &VerdictTelemetry) -> DiagnosticHealth {
+    if verdict.passed {
+        return DiagnosticHealth::Healthy;
+    }
+
+    match verdict.failure.as_ref().map(|failure| failure.kind) {
+        Some(DiagnosticFailureKind::Timeout) => DiagnosticHealth::TimedOut,
+        Some(DiagnosticFailureKind::CartridgeAssertion) => {
+            DiagnosticHealth::CartridgeAssertionFailed
+        }
+        _ => DiagnosticHealth::HostValidationFailed,
+    }
+}
+
+fn analysis_summary(
+    health: DiagnosticHealth,
+    coverage: &DiagnosticCoverageTelemetry,
+    verdict: &VerdictTelemetry,
+    failing_test: Option<&str>,
+    first_failure_domain: Option<&str>,
+    cycles: u64,
+    frames: u64,
+) -> String {
+    match health {
+        DiagnosticHealth::Healthy => format!(
+            "diagnostic passed: {}/{} tests across {} subsystems in {} cycles and {} frames",
+            coverage.passed_tests,
+            coverage.total_tests,
+            coverage.subsystem_summary.len(),
+            cycles,
+            frames
+        ),
+        DiagnosticHealth::CartridgeAssertionFailed => format!(
+            "diagnostic failed at {} with failure {} in {}",
+            failing_test.unwrap_or("unknown_test"),
+            hex_byte(verdict.failure_code),
+            first_failure_domain.unwrap_or("unknown_domain")
+        ),
+        DiagnosticHealth::TimedOut => format!(
+            "diagnostic timed out while current_test={} ({}) after {} cycles",
+            verdict.current_test,
+            verdict.current_test_name.unwrap_or("unknown_test"),
+            cycles
+        ),
+        DiagnosticHealth::HostValidationFailed => format!(
+            "diagnostic reached cartridge status {} but host validation reported {} issue(s)",
+            hex_byte(verdict.status),
+            verdict.host_failures.len()
+        ),
+    }
+}
+
+fn analysis_next_actions(health: DiagnosticHealth, verdict: &VerdictTelemetry) -> Vec<String> {
+    match health {
+        DiagnosticHealth::Healthy => vec![
+            "Use this telemetry as the current generated-cartridge baseline.".to_string(),
+            "Diff future failing runs against the coverage summary, event transitions, and frame/audio checks.".to_string(),
+        ],
+        DiagnosticHealth::CartridgeAssertionFailed => {
+            if let Some(failure) = &verdict.failure {
+                vec![
+                    failure.remediation_hint.clone(),
+                    format!(
+                        "Start with test {} ({}) and failure {} before investigating later unrun tests.",
+                        failure.test_id,
+                        failure.test_name.unwrap_or("unknown_test"),
+                        failure.failure_code_hex
+                    ),
+                    "Use test_changed events to inspect the last transition before failure.".to_string(),
+                ]
+            } else {
+                vec![
+                    "Inspect verdict.current_test and verdict.failure_code; no catalog entry was available.".to_string(),
+                    "Use the cartridge failure catalog to add or correct the missing assertion mapping.".to_string(),
+                ]
+            }
+        }
+        DiagnosticHealth::TimedOut => vec![
+            "Inspect the current test, CPU PC, and final test_changed event to locate the likely loop.".to_string(),
+            "Rerun with a higher --max-cycles only after confirming progress is still being made.".to_string(),
+        ],
+        DiagnosticHealth::HostValidationFailed => vec![
+            "Inspect host_failures first; they validate emulator-side state the cartridge cannot read.".to_string(),
+            "Compare OAM, frame, audio, RAM signature, and per-test result telemetry against expected values.".to_string(),
+        ],
+    }
+}
+
 fn event_telemetry(
     cycle: u64,
     frame: u64,
@@ -1636,6 +1895,10 @@ fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
 
 fn test_name(id: u8) -> Option<&'static str> {
     test_spec(id).map(|spec| spec.name)
+}
+
+fn first_failed_test(tests: &[TestTelemetry]) -> Option<&TestTelemetry> {
+    tests.iter().find(|test| !test.passed)
 }
 
 fn test_spec(id: u8) -> Option<&'static DiagnosticTestSpec> {
@@ -1734,6 +1997,18 @@ mod tests {
         );
         assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
         assert!(!telemetry.suite.failure_catalog.is_empty());
+        assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
+        assert_eq!(
+            telemetry.analysis.coverage.total_tests,
+            DIAGNOSTIC_TESTS.len()
+        );
+        assert_eq!(
+            telemetry.analysis.coverage.passed_tests,
+            DIAGNOSTIC_TESTS.len()
+        );
+        assert_eq!(telemetry.analysis.coverage.failed_tests, 0);
+        assert!(telemetry.analysis.summary.contains("diagnostic passed"));
+        assert!(!telemetry.analysis.next_actions.is_empty());
         assert!(
             telemetry.verdict.passed,
             "diagnostic should pass: {:?}",
