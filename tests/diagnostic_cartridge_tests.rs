@@ -965,6 +965,121 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuNmiTimeout),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a PPU NMI timeout");
+
+    assert!(!telemetry.verdict.passed);
+    assert!(telemetry.verdict.timeout);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_nmi_timeout")
+    );
+    assert_eq!(telemetry.verdict.current_test, 10);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("ppu_nmi_and_render_frame")
+    );
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("PPU NMI timeout should include failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::Timeout);
+    assert_eq!(failure.test_id, 10);
+    assert_eq!(failure.test_name, Some("ppu_nmi_and_render_frame"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.likely_domain, "ppu.nmi");
+
+    assert_eq!(telemetry.analysis.health, DiagnosticHealth::TimedOut);
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_nmi_and_render_frame")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.nmi")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 10);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_test_name,
+        Some("ppu_nmi_and_render_frame")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.nmi")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.failure_kind,
+        Some(DiagnosticFailureKind::Timeout)
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"runtime.completed".to_string()));
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"cartridge.test.10.result".to_string()));
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.nmi_count".to_string()));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.nmi_count"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(10)
+            && probe.likely_domain == "ppu.nmi"
+            && probe.observed.contains("NMI count 0")
+    }));
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "ppu_nmi_render_frame_after_enable")));
+
+    let nmi_timeline = telemetry
+        .timeline
+        .iter()
+        .find(|test| test.test_id == 10)
+        .expect("PPU NMI test should have timeline telemetry");
+    assert_eq!(nmi_timeline.outcome, TestTimelineOutcome::TimedOut);
+    assert_eq!(
+        nmi_timeline.end_reason,
+        Some(TestTimelineEndReason::Timeout)
+    );
+    assert!(nmi_timeline
+        .duration_cycles
+        .is_some_and(|duration| duration > 0));
+    assert!(telemetry
+        .timeline
+        .iter()
+        .filter(|test| test.test_id > 10)
+        .all(|test| test.outcome == TestTimelineOutcome::NotStarted));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_nmi_and_render_frame (10) |"));
+    assert!(report.contains("| Focus domain | ppu.nmi |"));
+    assert!(report.contains("| Likely domain | ppu.nmi |"));
+    assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | timed_out |"));
+    assert!(report.contains("ppu.nmi_count"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_timeout() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         max_cpu_cycles: 1,

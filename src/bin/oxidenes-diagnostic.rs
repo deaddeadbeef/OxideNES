@@ -1780,6 +1780,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("ppu.registers.ppudata_buffer"),
         },
         DiagnosticScenarioSpec {
+            id: "ppu_nmi_timeout_fault",
+            title: "Intentional PPU NMI progress timeout",
+            purpose:
+                "Failure-localization fixture for render-frame loops that stop receiving vblank NMIs.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuNmiTimeout),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::TimedOut,
+            expected_focus_test_id: Some(10),
+            expected_focus_domain: Some("ppu.nmi"),
+        },
+        DiagnosticScenarioSpec {
             id: "timeout_cycle_limit",
             title: "Intentional one-cycle timeout",
             purpose: "Progress watchdog fixture for runs that fail before the cartridge can start a test.",
