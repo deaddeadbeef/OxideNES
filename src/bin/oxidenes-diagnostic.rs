@@ -55,6 +55,7 @@ struct DiagnosticTriageReport {
     current_test: DiagnosticTriageCurrentTest,
     failure: Option<DiagnosticTriageFailure>,
     coverage: DiagnosticTriageCoverage,
+    coverage_gaps: Vec<DiagnosticTriageCoverageGap>,
     probes: DiagnosticTriageProbeSummary,
     timing: DiagnosticTriageTiming,
     comparison: Option<DiagnosticTriageComparison>,
@@ -100,6 +101,16 @@ struct DiagnosticTriageSubsystemCoverage {
     subsystem: String,
     passed: usize,
     total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageCoverageGap {
+    id: &'static str,
+    subsystem: &'static str,
+    risk: &'static str,
+    current_coverage: &'static str,
+    missing_coverage: &'static str,
+    suggested_next_test: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -557,6 +568,7 @@ fn diagnostic_triage_report(
         },
         failure: triage_failure(telemetry)?,
         coverage: triage_coverage(telemetry)?,
+        coverage_gaps: triage_coverage_gaps(telemetry),
         probes: triage_probe_summary(telemetry)?,
         timing: triage_timing(telemetry)?,
         comparison: comparison.map(triage_comparison).transpose()?,
@@ -612,6 +624,22 @@ fn triage_coverage(telemetry: &DiagnosticTelemetry) -> Result<DiagnosticTriageCo
             })
             .collect::<Result<Vec<_>, String>>()?,
     })
+}
+
+fn triage_coverage_gaps(telemetry: &DiagnosticTelemetry) -> Vec<DiagnosticTriageCoverageGap> {
+    telemetry
+        .analysis
+        .coverage_gaps
+        .iter()
+        .map(|gap| DiagnosticTriageCoverageGap {
+            id: gap.id,
+            subsystem: gap.subsystem,
+            risk: gap.risk,
+            current_coverage: gap.current_coverage,
+            missing_coverage: gap.missing_coverage,
+            suggested_next_test: gap.suggested_next_test,
+        })
+        .collect()
 }
 
 fn triage_probe_summary(

@@ -130,3 +130,10 @@ rendered-frame checksum/color count, audio sample count/peak, status/frame
 events, current-test transition events, failure-localization metadata, per-test
 timeline/duration telemetry, structured observation probes, and a derived
 analysis summary.
+
+Schema version `6` adds `analysis.coverage_gaps` and includes the same
+high-level limits in `triage.json`. These records name known untested risk
+areas, what the generated cartridge currently covers, what it does not prove,
+and the next diagnostic cartridge that should be built. Passing diagnostics
+therefore remain useful without implying full CPU, PPU, mapper, APU, DMA, or
+input compatibility.

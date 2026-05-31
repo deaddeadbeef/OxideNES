@@ -134,9 +134,14 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(1));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(5));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(6));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(triage["coverage"]["passed_tests"], Value::from(10));
+    assert!(triage["coverage_gaps"]
+        .as_array()
+        .expect("coverage gaps should be an array")
+        .iter()
+        .any(|gap| gap["id"] == Value::String("ppu_pixel_pipeline".to_string())));
     assert_eq!(triage["probes"]["failed_probes"], Value::from(0));
     assert!(triage["artifact_hints"]
         .as_array()
@@ -150,7 +155,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
 fn assert_bundle_artifacts(bundle_dir: &Path, includes_comparison: bool, passed: bool) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(5));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(6));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["comparison_included"],

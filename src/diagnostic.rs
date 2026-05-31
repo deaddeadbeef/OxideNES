@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 5;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 6;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v5";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v6";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -78,6 +78,16 @@ struct DiagnosticFailureSpec {
     observed: &'static str,
     likely_domain: &'static str,
     remediation_hint: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiagnosticCoverageGapSpec {
+    id: &'static str,
+    subsystem: &'static str,
+    risk: &'static str,
+    current_coverage: &'static str,
+    missing_coverage: &'static str,
+    suggested_next_test: &'static str,
 }
 
 pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
@@ -361,6 +371,57 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
     },
 ];
 
+const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
+    DiagnosticCoverageGapSpec {
+        id: "cpu_opcode_matrix",
+        subsystem: "cpu",
+        risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, and a taken page-crossing branch.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, and cycle-accurate addressing penalties.",
+        suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case.",
+    },
+    DiagnosticCoverageGapSpec {
+        id: "ppu_pixel_pipeline",
+        subsystem: "ppu",
+        risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
+        current_coverage: "Palette register round-trip, NMI delivery, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Sprite evaluation, sprite/background priority, scrolling seams, vblank timing, and per-dot rendering behavior.",
+        suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
+    },
+    DiagnosticCoverageGapSpec {
+        id: "mapper_banking_runtime",
+        subsystem: "cartridge",
+        risk: "The diagnostic cartridge is NROM-only, so mapper bank switching is not exercised end to end through the headless runner.",
+        current_coverage: "The generated cartridge validates mapper-0 loading and normal CPU/PPU cartridge reads.",
+        missing_coverage: "Runtime PRG/CHR bank switching, IRQ-generating mappers, mirroring changes, and battery-backed RAM behavior.",
+        suggested_next_test: "Generate mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
+    },
+    DiagnosticCoverageGapSpec {
+        id: "apu_audio_depth",
+        subsystem: "apu",
+        risk: "The cartridge proves APU status and sample production, not channel accuracy or mixer behavior.",
+        current_coverage: "$4015 pulse enable status and nonzero drained audio samples at frame boundaries.",
+        missing_coverage: "Envelope, sweep, triangle/noise/DMC behavior, frame counter timing, mixer levels, and IRQ edge cases.",
+        suggested_next_test: "Add per-channel register programs with host-side waveform windows, sample-count ranges, and peak/RMS expectations.",
+    },
+    DiagnosticCoverageGapSpec {
+        id: "dma_cycle_timing",
+        subsystem: "dma",
+        risk: "The cartridge validates OAM contents after DMA but does not prove CPU stall timing.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum.",
+        missing_coverage: "DMA stall cycle counts, odd/even CPU-cycle alignment, DMC DMA interaction, and CPU/APU interleaving during transfer.",
+        suggested_next_test: "Add cycle-bucket telemetry around OAM DMA and paired DMC activity to detect stall-length regressions.",
+    },
+    DiagnosticCoverageGapSpec {
+        id: "input_port_matrix",
+        subsystem: "joypad",
+        risk: "The cartridge proves one controller mask and overread behavior on joypad 1 only.",
+        current_coverage: "Joypad 1 strobe/shift sequence for A + Right and reads after the eighth latched button.",
+        missing_coverage: "Joypad 2, rapid strobe changes, simultaneous opposite directions, disconnected input defaults, and host input remapping.",
+        suggested_next_test: "Run the same serial-read program across both ports and multiple masks, including mid-stream strobe toggles.",
+    },
+];
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticConfig {
     pub max_cpu_cycles: u64,
@@ -481,6 +542,7 @@ pub struct DiagnosticAnalysisTelemetry {
     pub health: DiagnosticHealth,
     pub summary: String,
     pub coverage: DiagnosticCoverageTelemetry,
+    pub coverage_gaps: Vec<DiagnosticCoverageGapTelemetry>,
     pub timing: DiagnosticTimingSummaryTelemetry,
     pub probe_summary: DiagnosticProbeSummaryTelemetry,
     pub failing_subsystem: Option<DiagnosticSubsystem>,
@@ -488,6 +550,16 @@ pub struct DiagnosticAnalysisTelemetry {
     pub first_failure_domain: Option<String>,
     pub next_actions: Vec<String>,
     pub test_transition_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticCoverageGapTelemetry {
+    pub id: &'static str,
+    pub subsystem: &'static str,
+    pub risk: &'static str,
+    pub current_coverage: &'static str,
+    pub missing_coverage: &'static str,
+    pub suggested_next_test: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -1174,6 +1246,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
 
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
+    write_coverage_gaps_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
     write_next_actions_section(&mut report, telemetry);
@@ -1250,6 +1323,37 @@ fn write_coverage_section(report: &mut String, telemetry: &DiagnosticTelemetry) 
             diagnostic_test_tier_label(entry.tier),
             entry.passed,
             entry.total
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
+fn write_coverage_gaps_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Known Coverage Gaps").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "These are explicit limits of the generated cartridge. Passing diagnostics should not be read as coverage for these areas."
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Gap | Subsystem | Risk | Current coverage | Missing coverage | Suggested next test |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- | --- |").expect("write report");
+    for gap in &telemetry.analysis.coverage_gaps {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} |",
+            gap.id,
+            gap.subsystem,
+            gap.risk,
+            gap.current_coverage,
+            gap.missing_coverage,
+            gap.suggested_next_test
         )
         .expect("write report");
     }
@@ -2559,6 +2663,7 @@ fn analysis_telemetry(
         health,
         summary,
         coverage,
+        coverage_gaps: coverage_gap_telemetry(),
         timing,
         probe_summary,
         failing_subsystem,
@@ -2567,6 +2672,20 @@ fn analysis_telemetry(
         next_actions,
         test_transition_count,
     }
+}
+
+fn coverage_gap_telemetry() -> Vec<DiagnosticCoverageGapTelemetry> {
+    DIAGNOSTIC_COVERAGE_GAPS
+        .iter()
+        .map(|gap| DiagnosticCoverageGapTelemetry {
+            id: gap.id,
+            subsystem: gap.subsystem,
+            risk: gap.risk,
+            current_coverage: gap.current_coverage,
+            missing_coverage: gap.missing_coverage,
+            suggested_next_test: gap.suggested_next_test,
+        })
+        .collect()
 }
 
 fn probe_summary(probes: &[DiagnosticProbeTelemetry]) -> DiagnosticProbeSummaryTelemetry {
@@ -3784,6 +3903,25 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_coverage_gaps_are_unique_and_actionable() {
+        let mut ids = BTreeSet::new();
+
+        for gap in DIAGNOSTIC_COVERAGE_GAPS {
+            assert!(ids.insert(gap.id), "duplicate coverage gap {}", gap.id);
+            assert!(!gap.subsystem.is_empty());
+            assert!(!gap.risk.is_empty());
+            assert!(!gap.current_coverage.is_empty());
+            assert!(!gap.missing_coverage.is_empty());
+            assert!(!gap.suggested_next_test.is_empty());
+        }
+
+        assert!(
+            DIAGNOSTIC_COVERAGE_GAPS.len() >= 5,
+            "diagnostic suite should declare major known coverage gaps"
+        );
+    }
+
+    #[test]
     fn headless_diagnostic_passes_and_collects_telemetry() {
         let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic runs");
 
@@ -3803,6 +3941,15 @@ mod tests {
             DIAGNOSTIC_TESTS.len()
         );
         assert_eq!(telemetry.analysis.coverage.failed_tests, 0);
+        assert_eq!(
+            telemetry.analysis.coverage_gaps.len(),
+            DIAGNOSTIC_COVERAGE_GAPS.len()
+        );
+        assert!(telemetry
+            .analysis
+            .coverage_gaps
+            .iter()
+            .any(|gap| gap.id == "ppu_pixel_pipeline" && gap.missing_coverage.contains("Sprite")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(
