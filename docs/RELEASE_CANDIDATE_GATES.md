@@ -18,6 +18,8 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
   `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/latest-bundle --baseline-json target/diagnostics/release-baseline.json --no-stdout`
 - The diagnostic scenario suite command passes and writes an AI-ready corpus:
   `cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/scenario-suite --no-stdout`
+- The diagnostic scenario suite verifier passes:
+  `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite`
 - GitHub Actions CI is green on Windows, Linux, macOS, rustfmt, clippy, security audit, IP compliance, and diagnostic bundle jobs.
 
 ### Compatibility And Safety
@@ -29,6 +31,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - Diagnostic event tails include CPU register snapshots and diagnostic RAM watchpoints so failed headless runs preserve immediate execution-state context for automated triage.
 - Diagnostic bundles include a bounded decoded instruction trace tail with diagnostic cartridge symbols so failed headless runs preserve the final opcode-boundary CPU/RAM context for automated triage.
 - Diagnostic scenario suites include pass, joypad-1 mismatch, joypad-2 mismatch, and timeout bundles with expected-vs-actual debug-focus contracts, per-clause contract-match breakdowns, root baseline-comparison summaries, a suite-level attention queue, plus `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and `scenario-suite-observer.md` indexes for automated regression triage.
+- `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite` validates the uploaded scenario-suite artifact contract before release evidence is accepted.
 - `telemetry.json` includes actual and expected joypad masks for both controller ports, and the diagnostic cartridge exercises `$4016` and `$4017` serial reads.
 - `telemetry.json` includes OAM DMA start/end, active-cycle, first active-cycle parity, and DMC-overlap telemetry proving the transfer completed within the expected 513-514 CPU-cycle bucket while a phase-specific 3-cycle or 4-cycle DMC sample-DMA stall bucket was serviced during the OAM stall window.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.

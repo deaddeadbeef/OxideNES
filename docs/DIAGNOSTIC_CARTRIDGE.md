@@ -96,6 +96,18 @@ exits `0` when all known-good and intentionally failing scenarios match their
 expected debug-focus contracts. CI and release workflows upload this corpus as
 `oxidenes-diagnostic-scenario-suite`.
 
+To validate a generated suite artifact before handing it to an automated
+debugger or attaching it to a release, run:
+
+```powershell
+python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite
+```
+
+The verifier checks the root schema versions, observer next actions,
+observations, Markdown sections, and every artifact path referenced by the
+manifest or observer report. CI and release workflows run this verifier before
+uploading the scenario-suite artifact.
+
 ## Coverage
 
 The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU, APU, DMA, and joypad paths:
