@@ -30,6 +30,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         DIAGNOSTIC_TESTS.len()
     );
     assert_eq!(telemetry.analysis.coverage.failed_tests, 0);
+    assert!(telemetry
+        .analysis
+        .coverage_gaps
+        .iter()
+        .any(|gap| { gap.id == "mapper_banking_runtime" && gap.subsystem == "cartridge" }));
     assert_eq!(telemetry.analysis.failing_subsystem, None);
     assert_eq!(telemetry.analysis.failing_test, None);
     assert_eq!(telemetry.analysis.first_failure_domain, None);
@@ -117,6 +122,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Result | pass |"));
     assert!(report.contains("| Health | healthy |"));
     assert!(report.contains("## Coverage"));
+    assert!(report.contains("## Known Coverage Gaps"));
+    assert!(report.contains("| mapper_banking_runtime | cartridge |"));
     assert!(report.contains("## Timing"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
