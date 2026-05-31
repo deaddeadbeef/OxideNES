@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 15
+EXPECTED_TELEMETRY_SCHEMA = 16
 EXPECTED_TRIAGE_SCHEMA = 5
 EXPECTED_BUNDLE_SCHEMA = 1
 EXPECTED_SCENARIOS = {
@@ -181,7 +181,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=86",
+            "comparison_difference_count=89",
             evidence,
             "timeout observer evidence",
         )
@@ -234,7 +234,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                86,
+                89,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
