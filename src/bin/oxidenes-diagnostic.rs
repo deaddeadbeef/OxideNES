@@ -1681,7 +1681,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(13),
+            expected_focus_test_id: Some(14),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {

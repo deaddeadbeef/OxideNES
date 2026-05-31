@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 16;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 17;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v16";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v17";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -216,6 +216,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "JMP ($04FF) reads target low byte at $04FF",
             "JMP ($04FF) reads target high byte from $0400 instead of $0500",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 14,
+        name: "ppu_vram_read_buffer",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify non-palette PPUDATA reads are delayed through the PPU read buffer.",
+        expected_observations: &[
+            "first $2007 read from $2000 loads the internal read buffer",
+            "second and third reads return the $2000 and $2001 VRAM sentinels",
         ],
     },
 ];
@@ -518,6 +529,24 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         likely_domain: "cpu.control_flow.indirect_jmp",
         remediation_hint: "Inspect JMP indirect target calculation and program-counter update after resolving the target address.",
     },
+    DiagnosticFailureSpec {
+        code: 0xD0,
+        test_id: 14,
+        assertion: "PPUDATA read from $2000 returns the buffered VRAM byte on the second read",
+        expected: "second $2007 read after setting PPUADDR to $2000 returns the $2000 sentinel",
+        observed: "$2007 readback differed from the $2000 sentinel",
+        likely_domain: "ppu.registers.ppudata_buffer",
+        remediation_hint: "Inspect PPUDATA non-palette read buffering; the first read should return the old buffer and load the addressed VRAM byte.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD1,
+        test_id: 14,
+        assertion: "PPUDATA read auto-increments to $2001 after the buffered $2000 read",
+        expected: "third $2007 read returns the $2001 sentinel",
+        observed: "$2007 readback differed from the $2001 sentinel",
+        likely_domain: "ppu.registers.ppudata_increment",
+        remediation_hint: "Inspect PPUDATA read-side VRAM increment and buffer reload behavior after non-palette reads.",
+    },
 ];
 
 const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
@@ -533,7 +562,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, NMI delivery, completed frames, and host-visible multi-color background output.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, NMI delivery, completed frames, and host-visible multi-color background output.",
         missing_coverage: "Sprite evaluation, sprite/background priority, scrolling seams, vblank timing, and per-dot rendering behavior.",
         suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
     },
@@ -3297,6 +3326,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.joypad2_strobe_shift();
     program.cpu_zero_page_index_wrap();
     program.cpu_indirect_jmp_page_wrap();
+    program.ppu_vram_read_buffer();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3623,6 +3653,35 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x7B);
         self.expect_a_eq(0x7B, 0xC1);
         self.pass_test(13);
+    }
+
+    fn ppu_vram_read_buffer(&mut self) {
+        self.begin_test(14);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x2A);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x6B);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x2A, 0xD0);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x6B, 0xD1);
+        self.pass_test(14);
     }
 
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {

@@ -264,3 +264,9 @@ Schema version `16` adds the `cpu_indirect_jmp_page_wrap` edge-case cartridge
 test. It verifies that `JMP ($04FF)` reads the high byte from `$0400`, matching
 the original 6502 indirect-jump page-wrap behavior, and gives AI triage a
 specific `cpu.control_flow.indirect_jmp_page_wrap` failure domain.
+
+Schema version `17` adds the `ppu_vram_read_buffer` edge-case cartridge test. It
+verifies that non-palette `$2007` reads are delayed through the PPU read buffer
+and auto-increment across `$2000`/`$2001`, giving AI triage specific
+`ppu.registers.ppudata_buffer` and `ppu.registers.ppudata_increment` failure
+domains.
