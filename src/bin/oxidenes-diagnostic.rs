@@ -2,8 +2,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, format_diagnostic_report, run_diagnostic, DiagnosticConfig,
-    DIAGNOSTIC_PROVENANCE,
+    build_diagnostic_cartridge, compare_diagnostic_to_baseline,
+    format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
+    DiagnosticConfig, DIAGNOSTIC_PROVENANCE,
 };
 
 fn main() {
@@ -24,6 +25,9 @@ fn run() -> Result<bool, String> {
     let mut config = DiagnosticConfig::default();
     let mut json_path: Option<PathBuf> = None;
     let mut report_path: Option<PathBuf> = None;
+    let mut baseline_json_path: Option<PathBuf> = None;
+    let mut comparison_json_path: Option<PathBuf> = None;
+    let mut comparison_report_path: Option<PathBuf> = None;
     let mut dump_rom_path: Option<PathBuf> = None;
     let mut print_stdout = true;
 
@@ -45,6 +49,24 @@ fn run() -> Result<bool, String> {
                     .next()
                     .ok_or_else(|| "--report requires a file path".to_string())?;
                 report_path = Some(PathBuf::from(path));
+            }
+            "--baseline-json" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--baseline-json requires a file path".to_string())?;
+                baseline_json_path = Some(PathBuf::from(path));
+            }
+            "--comparison-json" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--comparison-json requires a file path".to_string())?;
+                comparison_json_path = Some(PathBuf::from(path));
+            }
+            "--comparison-report" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--comparison-report requires a file path".to_string())?;
+                comparison_report_path = Some(PathBuf::from(path));
             }
             "--dump-rom" => {
                 let path = args
@@ -91,11 +113,41 @@ fn run() -> Result<bool, String> {
         write_file(&path, report.as_bytes())?;
     }
 
+    let comparison = if let Some(path) = baseline_json_path {
+        let baseline_json = fs::read_to_string(&path)
+            .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        Some(compare_diagnostic_to_baseline(&telemetry, &baseline_json)?)
+    } else {
+        None
+    };
+
+    if comparison.is_none() && (comparison_json_path.is_some() || comparison_report_path.is_some())
+    {
+        return Err(
+            "--comparison-json and --comparison-report require --baseline-json".to_string(),
+        );
+    }
+
+    if let Some(comparison) = &comparison {
+        if let Some(path) = comparison_json_path {
+            let json = serde_json::to_string_pretty(comparison)
+                .map_err(|err| format!("failed to serialize comparison telemetry: {err}"))?;
+            write_file(&path, json.as_bytes())?;
+        }
+        if let Some(path) = comparison_report_path {
+            let report = format_diagnostic_comparison_report(comparison);
+            write_file(&path, report.as_bytes())?;
+        }
+    }
+
     if print_stdout {
         println!("{json}");
     }
 
-    Ok(telemetry.verdict.passed)
+    Ok(telemetry.verdict.passed
+        && comparison
+            .as_ref()
+            .is_none_or(|comparison| comparison.passed))
 }
 
 fn print_help() {
@@ -109,6 +161,13 @@ fn print_help() {
     println!("OPTIONS:");
     println!("    --json <FILE>        Write telemetry JSON to a file");
     println!("    --report <FILE>      Write a Markdown diagnostic report to a file");
+    println!(
+        "    --baseline-json <FILE>       Compare current telemetry with a prior JSON baseline"
+    );
+    println!("    --comparison-json <FILE>     Write baseline comparison JSON to a file");
+    println!(
+        "    --comparison-report <FILE>   Write a Markdown baseline comparison report to a file"
+    );
     println!("    --dump-rom <FILE>    Generate the diagnostic .nes cartridge at runtime");
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");

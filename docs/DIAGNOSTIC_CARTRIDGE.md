@@ -17,6 +17,17 @@ summary, timing/timeline table, next actions, host failures, and final event
 tail. This gives CI logs, issue attachments, and AI debugging sessions a stable
 human-readable entry point while preserving the raw JSON for exact tooling.
 
+To compare a run against a known-good telemetry baseline:
+
+```powershell
+cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/current.json --report target/diagnostics/current.md --baseline-json target/diagnostics/baseline.json --comparison-json target/diagnostics/comparison.json --comparison-report target/diagnostics/comparison.md --no-stdout
+```
+
+Baseline comparison hard-fails on result, health, coverage, or per-test outcome
+regressions and exits `1`. It records warning-level differences for timing and
+observable artifact drift such as frame/OAM checksums, allowing CI and AI agents
+to separate real correctness regressions from values that need review.
+
 ## Coverage
 
 The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU, APU, DMA, and joypad paths:
