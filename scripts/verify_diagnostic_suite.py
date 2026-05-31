@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 23
+EXPECTED_TELEMETRY_SCHEMA = 24
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
@@ -25,6 +25,7 @@ EXPECTED_SCENARIOS = {
     "cpu_indirect_jmp_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
+    "mapper2_bank_switch_fault",
     "timeout_cycle_limit",
 }
 
@@ -76,7 +77,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            9,
+            10,
             "analysis baseline_divergence_count",
         )
 
@@ -126,13 +127,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            9,
+            10,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 9, "observer next_actions count")
+        self.expect_equal(len(actions), 10, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -167,6 +168,7 @@ class SuiteVerifier:
             "cpu_indirect_jmp_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
+            "mapper2_bank_switch_fault",
             "timeout_cycle_limit",
         }
         self.expect_equal(set(by_scenario), expected_action_ids, "observer action scenario ids")
@@ -193,7 +195,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=92",
+            "comparison_difference_count=95",
             evidence,
             "timeout observer evidence",
         )
@@ -228,6 +230,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result",
             ppu_evidence,
             "PPU observer evidence",
+        )
+
+        mapper = by_scenario.get("mapper2_bank_switch_fault")
+        if not isinstance(mapper, dict):
+            self.errors.append("missing observer action for mapper2_bank_switch_fault")
+            return
+
+        self.expect_equal(
+            mapper.get("priority"),
+            "known_divergence",
+            "mapper observer action priority",
+        )
+        self.expect_equal(
+            mapper.get("action_type"),
+            "inspect_known_divergence",
+            "mapper observer action type",
+        )
+        self.expect_equal(
+            mapper.get("primary_artifact"),
+            "mapper2_bank_switch_fault/comparison.json",
+            "mapper observer primary_artifact",
+        )
+        mapper_evidence = self.expect_list(
+            mapper.get("evidence"), "mapper observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=mapper.uxrom.prg_bank_switch",
+            mapper_evidence,
+            "mapper observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.15.result",
+            mapper_evidence,
+            "mapper observer evidence",
         )
 
         ppu_nmi = by_scenario.get("ppu_nmi_timeout_fault")
@@ -447,7 +483,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                92,
+                95,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -542,6 +578,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_read_buffer_fault")
+
+        mapper = by_scenario.get("mapper2_bank_switch_fault")
+        if isinstance(mapper, dict):
+            self.expect_equal(
+                mapper.get("role"),
+                "expected_failure_fixture",
+                "mapper observer role",
+            )
+            self.expect_equal(
+                mapper.get("outcome"),
+                "expected_baseline_divergence",
+                "mapper observer outcome",
+            )
+            self.expect_equal(
+                mapper.get("health"),
+                "cartridge_assertion_failed",
+                "mapper observer health",
+            )
+            self.expect_equal(
+                mapper.get("focus_domain"),
+                "mapper.uxrom.prg_bank_switch",
+                "mapper observer focus_domain",
+            )
+            self.expect_equal(
+                mapper.get("next_artifact"),
+                "mapper2_bank_switch_fault/comparison.json",
+                "mapper observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for mapper2_bank_switch_fault")
 
         ppu_nmi = by_scenario.get("ppu_nmi_timeout_fault")
         if isinstance(ppu_nmi, dict):
