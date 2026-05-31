@@ -590,6 +590,77 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuZeroPageIndexWrap),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_zero_page_index_wrap")
+    );
+    assert_eq!(telemetry.verdict.current_test, 12);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_zero_page_index_wrap")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xB0);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 12);
+    assert_eq!(failure.test_name, Some("cpu_zero_page_index_wrap"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0xB0");
+    assert_eq!(failure.likely_domain, "cpu.addressing.zero_page_x_wrap");
+    assert!(failure.assertion.contains("Zero-page indexed LDA"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_zero_page_index_wrap")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.addressing.zero_page_x_wrap")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 12);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.addressing.zero_page_x_wrap")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.12.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(12)
+            && probe.likely_domain == "cpu.addressing.zero_page_x_wrap"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 12);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 12);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_zero_page_index_wrap_before_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_zero_page_index_wrap (12) |"));
+    assert!(report.contains("| Focus domain | cpu.addressing.zero_page_x_wrap |"));
+    assert!(report.contains("| Likely domain | cpu.addressing.zero_page_x_wrap |"));
+    assert!(report.contains("| 12 | cpu_zero_page_index_wrap | cpu | edge_case | failed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::PpuVramReadBuffer),

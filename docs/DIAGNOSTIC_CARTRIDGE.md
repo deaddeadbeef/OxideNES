@@ -89,7 +89,8 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
 `scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
 plus one full bundle per scenario: `pass`, `joypad1_mismatch`,
-`joypad2_mismatch`, `ppu_read_buffer_fault`, and `timeout_cycle_limit`. The
+`joypad2_mismatch`, `cpu_zero_page_wrap_fault`, `ppu_read_buffer_fault`, and
+`timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
 an automated debugger can decide which artifact to open without traversing every
@@ -97,10 +98,11 @@ bundle first. The root manifest records each scenario's expected runner exit
 code, expected health, expected focus test/domain, actual `debug_focus`, failed
 probe ids, per-scenario baseline comparison summaries, explicit contract-match
 breakdowns, a suite-level attention queue, and artifact paths. The
-`ppu_read_buffer_fault` scenario uses telemetry-visible fault injection to
-corrupt the `$2000` VRAM sentinel just before the cartridge reads `$2007`, so the
-suite can prove PPU failure localization without requiring a broken emulator
-build. The Markdown reports add suite analysis, observer next actions, an
+`cpu_zero_page_wrap_fault` and `ppu_read_buffer_fault` scenarios use
+telemetry-visible fault injection to corrupt deterministic CPU RAM and VRAM
+sentinels just before the cartridge assertion reads them, so the suite can prove
+CPU and PPU failure localization without requiring a broken emulator build. The
+Markdown reports add suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
 matrix, AI drilldown order, and bundle artifact maps for humans or agents
 inspecting CI artifacts. The command exits `0` when all known-good and
@@ -278,3 +280,8 @@ Schema version `18` adds telemetry-visible diagnostic fault injection and the
 `ppu_read_buffer_fault` scenario-suite fixture. The fixture keeps the generated
 cartridge IP-safe and deterministic while proving that AI handoff artifacts can
 localize a PPUDATA read-buffer assertion to `ppu.registers.ppudata_buffer`.
+
+Schema version `19` adds the `cpu_zero_page_wrap_fault` scenario-suite fixture.
+The fixture injects a zero-page sentinel mismatch just before `LDA $FF,X` in the
+generated cartridge, proving that AI handoff artifacts can localize CPU
+zero-page indexed wrap failures to `cpu.addressing.zero_page_x_wrap`.
