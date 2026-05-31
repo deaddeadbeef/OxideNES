@@ -91,7 +91,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(2));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(3));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["triage_schema_version"], Value::from(5));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
@@ -127,6 +127,9 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| timeout_cycle_limit | false | false | true | timed_out | 0 | emulator.progress_or_infinite_loop |"));
     assert!(suite_report.contains("runtime.completed"));
     assert!(suite_report.contains("## AI Drilldown"));
+    assert!(suite_report.contains("## Baseline Comparison Matrix"));
+    assert!(suite_report.contains("| pass | true | 0 | 0 | 0 | 0 | - |"));
+    assert!(suite_report.contains("| joypad1_mismatch | false |"));
     assert!(suite_report.contains("pass/triage.json"));
     assert!(suite_report.contains("joypad2_mismatch/comparison.json"));
 
@@ -139,6 +142,13 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(pass["expectation_met"], Value::Bool(true));
     assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
     assert_eq!(pass["actual_focus_test_id"], Value::from(11));
+    assert_eq!(pass["comparison"]["passed"], Value::Bool(true));
+    assert_eq!(pass["comparison"]["difference_count"], Value::from(0));
+    assert_eq!(pass["comparison"]["failure_count"], Value::from(0));
+    assert_eq!(
+        pass["comparison"]["top_differences"],
+        Value::Array(Vec::new())
+    );
     assert_eq!(
         pass["artifacts"]["triage_json"],
         Value::String("pass/triage.json".to_string())
@@ -164,6 +174,20 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .expect("joypad1 failed probes should be an array")
         .iter()
         .any(|probe| probe == &Value::String("cartridge.test.7.result".to_string())));
+    assert_eq!(joypad1["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        joypad1["comparison"]["difference_count"]
+            .as_u64()
+            .expect("joypad1 comparison difference_count should be numeric")
+            > 0
+    );
+    assert!(joypad1["comparison"]["top_differences"]
+        .as_array()
+        .expect("joypad1 top differences should be an array")
+        .iter()
+        .any(|difference| difference["path"]
+            .as_str()
+            .is_some_and(|path| path.contains("joypad1") || path.contains("verdict"))));
     assert_bundle_artifacts(&suite_dir.join("joypad1_mismatch"), true, false);
 
     let joypad2 = find_scenario(scenarios, "joypad2_mismatch");
@@ -171,6 +195,13 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         joypad2["actual_focus_domain"],
         Value::String("joypad2.strobe_shift".to_string())
+    );
+    assert_eq!(joypad2["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        joypad2["comparison"]["difference_count"]
+            .as_u64()
+            .expect("joypad2 comparison difference_count should be numeric")
+            > 0
     );
     assert_bundle_artifacts_with_joypad2(&suite_dir.join("joypad2_mismatch"), true, false, "0x00");
 
@@ -184,6 +215,13 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Value::String("emulator.progress_or_infinite_loop".to_string())
     );
     assert_eq!(timeout["expectation_met"], Value::Bool(true));
+    assert_eq!(timeout["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        timeout["comparison"]["difference_count"]
+            .as_u64()
+            .expect("timeout comparison difference_count should be numeric")
+            > 0
+    );
     assert_bundle_artifacts(&suite_dir.join("timeout_cycle_limit"), true, false);
 
     fs::remove_dir_all(&suite_dir).expect("scenario suite temp dir should be removable");
