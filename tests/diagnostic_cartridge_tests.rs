@@ -1,7 +1,8 @@
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DiagnosticFailureKind,
-    DiagnosticHealth, DiagnosticSubsystem, TestTimelineEndReason, TestTimelineOutcome,
-    DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    build_diagnostic_cartridge, format_diagnostic_report, run_diagnostic, DiagnosticConfig,
+    DiagnosticFailureKind, DiagnosticHealth, DiagnosticSubsystem, TestTimelineEndReason,
+    TestTimelineOutcome, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
+    DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -85,6 +86,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.timeline.last().map(|test| test.end_reason),
         Some(Some(TestTimelineEndReason::CartridgePassed))
     );
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("# OxideNES Diagnostic Report"));
+    assert!(report.contains("| Result | pass |"));
+    assert!(report.contains("| Health | healthy |"));
+    assert!(report.contains("## Coverage"));
+    assert!(report.contains("## Timing"));
+    assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
+    assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
+    assert!(report.contains("## Event Tail"));
     assert!(telemetry.cycles > 0);
     assert!(telemetry.frames >= 2);
 }
@@ -167,6 +177,15 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
         .iter()
         .filter(|test| test.test_id > 7)
         .all(|test| test.outcome == TestTimelineOutcome::NotStarted));
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Result | fail |"));
+    assert!(report.contains("| Health | cartridge_assertion_failed |"));
+    assert!(report.contains("## Failure Localization"));
+    assert!(report.contains("| Likely domain | joypad.strobe_shift |"));
+    assert!(report.contains("| Remediation hint | Inspect joypad strobe"));
+    assert!(report.contains("| 7 | joypad_strobe_shift | joypad | smoke | failed |"));
+    assert!(report.contains("| 8 | cpu_branch_page_crossing | cpu | edge_case | not_started |"));
+    assert!(report.contains("## Host Failures"));
 }
 
 #[test]
@@ -216,6 +235,11 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
         .timeline
         .iter()
         .all(|test| test.outcome == TestTimelineOutcome::NotStarted));
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Health | timed_out |"));
+    assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
+    assert!(report.contains("| Not started tests | 10 |"));
+    assert!(report.contains("| Slowest test | none |"));
 }
 
 #[test]

@@ -5,10 +5,17 @@ OxideNES includes a generated, IP-safe diagnostic cartridge for headless emulato
 Run it with:
 
 ```powershell
-cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json --dump-rom target/diagnostics/oxidenes-diagnostic.nes
+cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json --report target/diagnostics/report.md --dump-rom target/diagnostics/oxidenes-diagnostic.nes
 ```
 
 The runner exits `0` only when the cartridge and host-side checks pass. It exits `1` for diagnostic failures or timeouts, and `2` for CLI/build errors.
+
+Use `--json <FILE>` for the full machine-readable telemetry envelope and
+`--report <FILE>` for a Markdown triage artifact built from the same run. The
+report contains the verdict, derived analysis, failure localization, coverage
+summary, timing/timeline table, next actions, host failures, and final event
+tail. This gives CI logs, issue attachments, and AI debugging sessions a stable
+human-readable entry point while preserving the raw JSON for exact tooling.
 
 ## Coverage
 

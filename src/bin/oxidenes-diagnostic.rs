@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DIAGNOSTIC_PROVENANCE,
+    build_diagnostic_cartridge, format_diagnostic_report, run_diagnostic, DiagnosticConfig,
+    DIAGNOSTIC_PROVENANCE,
 };
 
 fn main() {
@@ -22,6 +23,7 @@ fn main() {
 fn run() -> Result<bool, String> {
     let mut config = DiagnosticConfig::default();
     let mut json_path: Option<PathBuf> = None;
+    let mut report_path: Option<PathBuf> = None;
     let mut dump_rom_path: Option<PathBuf> = None;
     let mut print_stdout = true;
 
@@ -37,6 +39,12 @@ fn run() -> Result<bool, String> {
                     .next()
                     .ok_or_else(|| "--json requires a file path".to_string())?;
                 json_path = Some(PathBuf::from(path));
+            }
+            "--report" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--report requires a file path".to_string())?;
+                report_path = Some(PathBuf::from(path));
             }
             "--dump-rom" => {
                 let path = args
@@ -78,6 +86,11 @@ fn run() -> Result<bool, String> {
         write_file(&path, json.as_bytes())?;
     }
 
+    if let Some(path) = report_path {
+        let report = format_diagnostic_report(&telemetry);
+        write_file(&path, report.as_bytes())?;
+    }
+
     if print_stdout {
         println!("{json}");
     }
@@ -95,6 +108,7 @@ fn print_help() {
     println!();
     println!("OPTIONS:");
     println!("    --json <FILE>        Write telemetry JSON to a file");
+    println!("    --report <FILE>      Write a Markdown diagnostic report to a file");
     println!("    --dump-rom <FILE>    Generate the diagnostic .nes cartridge at runtime");
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");

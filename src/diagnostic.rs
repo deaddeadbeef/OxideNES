@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
 
 use serde::Serialize;
 
@@ -875,6 +876,293 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         },
         events,
     })
+}
+
+pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
+    let mut report = String::new();
+
+    writeln!(report, "# OxideNES Diagnostic Report").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "## Verdict").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Result | {} |",
+        if telemetry.verdict.passed {
+            "pass"
+        } else {
+            "fail"
+        }
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Health | {} |",
+        diagnostic_health_label(telemetry.analysis.health)
+    )
+    .expect("write report");
+    writeln!(report, "| Schema version | {} |", telemetry.schema_version).expect("write report");
+    writeln!(report, "| Suite | {} |", telemetry.suite.version).expect("write report");
+    writeln!(
+        report,
+        "| Cycles / frames | {} / {} |",
+        telemetry.cycles, telemetry.frames
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Current test | {} |",
+        telemetry
+            .verdict
+            .current_test_name
+            .unwrap_or("unknown_test")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status | {} |",
+        hex_byte(telemetry.verdict.status)
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+
+    writeln!(report, "## Analysis").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "{}", telemetry.analysis.summary).expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Failing subsystem | {} |",
+        telemetry
+            .analysis
+            .failing_subsystem
+            .map(diagnostic_subsystem_label)
+            .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Failing test | {} |",
+        telemetry.analysis.failing_test.unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| First failure domain | {} |",
+        telemetry
+            .analysis
+            .first_failure_domain
+            .as_deref()
+            .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Test transitions | {} |",
+        telemetry.analysis.test_transition_count
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+
+    write_failure_section(&mut report, telemetry);
+    write_coverage_section(&mut report, telemetry);
+    write_timing_section(&mut report, telemetry);
+    write_next_actions_section(&mut report, telemetry);
+    write_host_failures_section(&mut report, telemetry);
+    write_event_tail_section(&mut report, telemetry);
+
+    report
+}
+
+fn write_failure_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    if let Some(failure) = &telemetry.verdict.failure {
+        writeln!(report, "## Failure Localization").expect("write report");
+        writeln!(report).expect("write report");
+        writeln!(report, "| Field | Value |").expect("write report");
+        writeln!(report, "| --- | --- |").expect("write report");
+        writeln!(
+            report,
+            "| Kind | {} |",
+            diagnostic_failure_kind_label(failure.kind)
+        )
+        .expect("write report");
+        writeln!(
+            report,
+            "| Test | {} |",
+            failure.test_name.unwrap_or("unknown_test")
+        )
+        .expect("write report");
+        writeln!(report, "| Failure code | {} |", failure.failure_code_hex).expect("write report");
+        writeln!(report, "| Assertion | {} |", failure.assertion).expect("write report");
+        writeln!(report, "| Expected | {} |", failure.expected).expect("write report");
+        writeln!(report, "| Observed | {} |", failure.observed).expect("write report");
+        writeln!(report, "| Likely domain | {} |", failure.likely_domain).expect("write report");
+        writeln!(
+            report,
+            "| Remediation hint | {} |",
+            failure.remediation_hint
+        )
+        .expect("write report");
+        writeln!(report).expect("write report");
+    }
+}
+
+fn write_coverage_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Coverage").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "{} / {} tests passed; {} failed.",
+        telemetry.analysis.coverage.passed_tests,
+        telemetry.analysis.coverage.total_tests,
+        telemetry.analysis.coverage.failed_tests
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Subsystem | Passed | Total |").expect("write report");
+    writeln!(report, "| --- | ---: | ---: |").expect("write report");
+    for entry in &telemetry.analysis.coverage.subsystem_summary {
+        writeln!(
+            report,
+            "| {} | {} | {} |",
+            diagnostic_subsystem_label(entry.subsystem),
+            entry.passed,
+            entry.total
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+    writeln!(report, "| Tier | Passed | Total |").expect("write report");
+    writeln!(report, "| --- | ---: | ---: |").expect("write report");
+    for entry in &telemetry.analysis.coverage.tier_summary {
+        writeln!(
+            report,
+            "| {} | {} | {} |",
+            diagnostic_test_tier_label(entry.tier),
+            entry.passed,
+            entry.total
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
+fn write_timing_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Timing").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | ---: |").expect("write report");
+    writeln!(
+        report,
+        "| Started tests | {} |",
+        telemetry.analysis.timing.started_tests
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Ended tests | {} |",
+        telemetry.analysis.timing.ended_tests
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Not started tests | {} |",
+        telemetry.analysis.timing.not_started_tests
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Timed out tests | {} |",
+        telemetry.analysis.timing.timed_out_tests
+    )
+    .expect("write report");
+    if let Some(slowest) = &telemetry.analysis.timing.slowest_test {
+        writeln!(
+            report,
+            "| Slowest test | {} ({} cycles, {} frames) |",
+            slowest.test_name, slowest.duration_cycles, slowest.duration_frames
+        )
+        .expect("write report");
+    } else {
+        writeln!(report, "| Slowest test | none |").expect("write report");
+    }
+    writeln!(report).expect("write report");
+
+    writeln!(report, "| ID | Test | Subsystem | Tier | Outcome | Start | End | Duration | End reason | Terminal status | Terminal PC |").expect("write report");
+    writeln!(
+        report,
+        "| ---: | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |"
+    )
+    .expect("write report");
+    for test in &telemetry.timeline {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            test.test_id,
+            test.test_name,
+            diagnostic_subsystem_label(test.subsystem),
+            diagnostic_test_tier_label(test.tier),
+            test_timeline_outcome_label(test.outcome),
+            optional_u64(test.start_cycle),
+            optional_u64(test.end_cycle),
+            optional_u64(test.duration_cycles),
+            test.end_reason
+                .map(test_timeline_end_reason_label)
+                .unwrap_or("none"),
+            test.terminal_status_hex.as_deref().unwrap_or("none"),
+            optional_pc(test.terminal_pc)
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
+fn write_next_actions_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Next Actions").expect("write report");
+    writeln!(report).expect("write report");
+    for action in &telemetry.analysis.next_actions {
+        writeln!(report, "- {action}").expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
+fn write_host_failures_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    if telemetry.verdict.host_failures.is_empty() {
+        return;
+    }
+
+    writeln!(report, "## Host Failures").expect("write report");
+    writeln!(report).expect("write report");
+    for failure in &telemetry.verdict.host_failures {
+        writeln!(report, "- {failure}").expect("write report");
+    }
+    writeln!(report).expect("write report");
+}
+
+fn write_event_tail_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Event Tail").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Kind | Cycle | Frame | Status | Test | PC |").expect("write report");
+    writeln!(report, "| --- | ---: | ---: | --- | --- | --- |").expect("write report");
+    let start = telemetry.events.len().saturating_sub(8);
+    for event in &telemetry.events[start..] {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} | {} |",
+            diagnostic_event_kind_label(event.kind),
+            event.cycle,
+            event.frame,
+            hex_byte(event.status),
+            event.current_test_name.unwrap_or("unknown_test"),
+            format_pc(event.pc)
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
 }
 
 struct HostValidationInput<'a> {
@@ -2201,6 +2489,85 @@ fn failure_spec(code: u8) -> Option<&'static DiagnosticFailureSpec> {
     DIAGNOSTIC_FAILURES
         .iter()
         .find(|failure| failure.code == code)
+}
+
+fn diagnostic_subsystem_label(subsystem: DiagnosticSubsystem) -> &'static str {
+    match subsystem {
+        DiagnosticSubsystem::Cpu => "cpu",
+        DiagnosticSubsystem::Bus => "bus",
+        DiagnosticSubsystem::Ppu => "ppu",
+        DiagnosticSubsystem::Apu => "apu",
+        DiagnosticSubsystem::Dma => "dma",
+        DiagnosticSubsystem::Joypad => "joypad",
+    }
+}
+
+fn diagnostic_test_tier_label(tier: DiagnosticTestTier) -> &'static str {
+    match tier {
+        DiagnosticTestTier::Smoke => "smoke",
+        DiagnosticTestTier::EdgeCase => "edge_case",
+        DiagnosticTestTier::Integration => "integration",
+    }
+}
+
+fn diagnostic_health_label(health: DiagnosticHealth) -> &'static str {
+    match health {
+        DiagnosticHealth::Healthy => "healthy",
+        DiagnosticHealth::CartridgeAssertionFailed => "cartridge_assertion_failed",
+        DiagnosticHealth::TimedOut => "timed_out",
+        DiagnosticHealth::HostValidationFailed => "host_validation_failed",
+    }
+}
+
+fn diagnostic_failure_kind_label(kind: DiagnosticFailureKind) -> &'static str {
+    match kind {
+        DiagnosticFailureKind::CartridgeAssertion => "cartridge_assertion",
+        DiagnosticFailureKind::Timeout => "timeout",
+        DiagnosticFailureKind::HostValidation => "host_validation",
+    }
+}
+
+fn test_timeline_outcome_label(outcome: TestTimelineOutcome) -> &'static str {
+    match outcome {
+        TestTimelineOutcome::NotStarted => "not_started",
+        TestTimelineOutcome::Passed => "passed",
+        TestTimelineOutcome::Failed => "failed",
+        TestTimelineOutcome::TimedOut => "timed_out",
+        TestTimelineOutcome::Incomplete => "incomplete",
+    }
+}
+
+fn test_timeline_end_reason_label(reason: TestTimelineEndReason) -> &'static str {
+    match reason {
+        TestTimelineEndReason::NextTestStarted => "next_test_started",
+        TestTimelineEndReason::CartridgePassed => "cartridge_passed",
+        TestTimelineEndReason::CartridgeFailed => "cartridge_failed",
+        TestTimelineEndReason::Timeout => "timeout",
+    }
+}
+
+fn diagnostic_event_kind_label(kind: DiagnosticEventKind) -> &'static str {
+    match kind {
+        DiagnosticEventKind::Reset => "reset",
+        DiagnosticEventKind::TestChanged => "test_changed",
+        DiagnosticEventKind::StatusChanged => "status_changed",
+        DiagnosticEventKind::FrameComplete => "frame_complete",
+        DiagnosticEventKind::PostPassFrameComplete => "post_pass_frame_complete",
+    }
+}
+
+fn optional_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn optional_pc(value: Option<u16>) -> String {
+    value.map(format_pc).unwrap_or_else(|| "none".to_string())
+}
+
+fn format_pc(value: u16) -> String {
+    format!("0x{value:04X}")
 }
 
 fn hex_byte(value: u8) -> String {
