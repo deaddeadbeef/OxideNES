@@ -675,6 +675,80 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::ApuStatusRegister),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported APU failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("apu_status_register")
+    );
+    assert_eq!(telemetry.verdict.current_test, 6);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("apu_status_register")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x61);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include APU failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 6);
+    assert_eq!(failure.test_name, Some("apu_status_register"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Apu));
+    assert_eq!(failure.likely_domain, "apu.status");
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::CartridgeAssertionFailed
+    );
+    assert_eq!(telemetry.analysis.failing_test, Some("apu_status_register"));
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("apu.status")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 6);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("apu.status")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.failure_kind,
+        Some(DiagnosticFailureKind::CartridgeAssertion)
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"cartridge.test.6.result".to_string()));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.6.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(6)
+            && probe.likely_domain == "apu.status"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 6);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 6);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 8);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "apu_status_register_before_status_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | apu_status_register (6) |"));
+    assert!(report.contains("| Focus domain | apu.status |"));
+    assert!(report.contains("| Likely domain | apu.status |"));
+    assert!(report.contains("| 6 | apu_status_register | apu | smoke | failed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::CpuZeroPageIndexWrap),
