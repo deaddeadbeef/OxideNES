@@ -1713,6 +1713,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_domain: Some("joypad2.strobe_shift"),
         },
         DiagnosticScenarioSpec {
+            id: "cpu_zero_page_wrap_fault",
+            title: "Intentional zero-page indexed-wrap assertion failure",
+            purpose: "Failure-localization fixture for zero-page indexed addressing wrap regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuZeroPageIndexWrap),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(12),
+            expected_focus_domain: Some("cpu.addressing.zero_page_x_wrap"),
+        },
+        DiagnosticScenarioSpec {
             id: "ppu_read_buffer_fault",
             title: "Intentional PPUDATA read-buffer assertion failure",
             purpose:

@@ -12,13 +12,14 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 6
 EXPECTED_OBSERVER_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 18
+EXPECTED_TELEMETRY_SCHEMA = 19
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 2
 EXPECTED_SCENARIOS = {
     "pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
+    "cpu_zero_page_wrap_fault",
     "ppu_read_buffer_fault",
     "timeout_cycle_limit",
 }
@@ -71,7 +72,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            4,
+            5,
             "analysis baseline_divergence_count",
         )
 
@@ -121,13 +122,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            4,
+            5,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 4, "observer next_actions count")
+        self.expect_equal(len(actions), 5, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -156,6 +157,7 @@ class SuiteVerifier:
         expected_action_ids = {
             "joypad1_mismatch",
             "joypad2_mismatch",
+            "cpu_zero_page_wrap_fault",
             "ppu_read_buffer_fault",
             "timeout_cycle_limit",
         }
@@ -218,6 +220,38 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.14.result",
             ppu_evidence,
             "PPU observer evidence",
+        )
+
+        cpu = by_scenario.get("cpu_zero_page_wrap_fault")
+        if not isinstance(cpu, dict):
+            self.errors.append("missing observer action for cpu_zero_page_wrap_fault")
+            return
+
+        self.expect_equal(
+            cpu.get("priority"),
+            "known_divergence",
+            "CPU observer action priority",
+        )
+        self.expect_equal(
+            cpu.get("action_type"),
+            "inspect_known_divergence",
+            "CPU observer action type",
+        )
+        self.expect_equal(
+            cpu.get("primary_artifact"),
+            "cpu_zero_page_wrap_fault/comparison.json",
+            "CPU observer primary_artifact",
+        )
+        cpu_evidence = self.expect_list(cpu.get("evidence"), "CPU observer evidence")
+        self.expect_in(
+            "focus_domain=cpu.addressing.zero_page_x_wrap",
+            cpu_evidence,
+            "CPU observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.12.result",
+            cpu_evidence,
+            "CPU observer evidence",
         )
         self.expect_in(
             "top_difference_path=dma.oam_dma_observed",
@@ -303,6 +337,31 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for ppu_read_buffer_fault")
+
+        cpu = by_scenario.get("cpu_zero_page_wrap_fault")
+        if isinstance(cpu, dict):
+            self.expect_equal(
+                cpu.get("role"),
+                "expected_failure_fixture",
+                "CPU observer role",
+            )
+            self.expect_equal(
+                cpu.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU observer outcome",
+            )
+            self.expect_equal(
+                cpu.get("focus_domain"),
+                "cpu.addressing.zero_page_x_wrap",
+                "CPU observer focus_domain",
+            )
+            self.expect_equal(
+                cpu.get("next_artifact"),
+                "cpu_zero_page_wrap_fault/comparison.json",
+                "CPU observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_zero_page_wrap_fault")
 
     def verify_artifact_paths(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
         root_artifacts = self.expect_dict(manifest.get("artifacts"), "scenario-suite artifacts")
