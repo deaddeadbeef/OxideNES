@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 4;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -51,9 +51,40 @@ struct DiagnosticScenarioSuiteManifest {
     scenario_count: usize,
     passed: bool,
     recommended_exit_code: u8,
+    analysis: DiagnosticScenarioSuiteAnalysis,
     artifacts: DiagnosticScenarioSuiteRootArtifacts,
     scenarios: Vec<DiagnosticScenarioSuiteEntry>,
     ai_handoff: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteAnalysis {
+    status: &'static str,
+    summary: String,
+    scenario_count: usize,
+    expectation_met_count: usize,
+    expectation_mismatch_count: usize,
+    contract_mismatch_count: usize,
+    baseline_divergence_count: usize,
+    critical_scenario_ids: Vec<String>,
+    known_divergence_scenario_ids: Vec<String>,
+    attention_queue: Vec<DiagnosticScenarioSuiteAttentionItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticScenarioSuiteAttentionItem {
+    scenario_id: String,
+    priority: &'static str,
+    reason: &'static str,
+    next_artifact: String,
+    expectation_met: bool,
+    contract_all_matched: bool,
+    comparison_passed: bool,
+    actual_health: String,
+    focus_domain: Option<String>,
+    failed_probe_ids: Vec<String>,
+    comparison_difference_count: usize,
+    top_difference_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -746,6 +777,7 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
     }
 
     let passed = scenarios.iter().all(|scenario| scenario.expectation_met);
+    let analysis = scenario_suite_analysis(&scenarios);
     let manifest = DiagnosticScenarioSuiteManifest {
         scenario_suite_schema_version: DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION,
         telemetry_schema_version,
@@ -757,6 +789,7 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
         scenario_count: scenarios.len(),
         passed,
         recommended_exit_code: if passed { 0 } else { 1 },
+        analysis,
         artifacts: DiagnosticScenarioSuiteRootArtifacts {
             scenario_suite_json: "scenario-suite.json",
             scenario_suite_report: "scenario-suite.md",
@@ -771,6 +804,118 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
     write_file(&path.join("scenario-suite.json"), json.as_bytes())?;
 
     Ok(DiagnosticScenarioSuiteWriteResult { passed, json })
+}
+
+fn scenario_suite_analysis(
+    scenarios: &[DiagnosticScenarioSuiteEntry],
+) -> DiagnosticScenarioSuiteAnalysis {
+    let scenario_count = scenarios.len();
+    let expectation_met_count = scenarios
+        .iter()
+        .filter(|scenario| scenario.expectation_met)
+        .count();
+    let expectation_mismatch_count = scenario_count.saturating_sub(expectation_met_count);
+    let contract_mismatch_count = scenarios
+        .iter()
+        .filter(|scenario| !scenario.contract.all_matched)
+        .count();
+    let baseline_divergence_count = scenarios
+        .iter()
+        .filter(|scenario| !scenario.comparison.passed)
+        .count();
+    let critical_scenario_ids = scenarios
+        .iter()
+        .filter(|scenario| !scenario.contract.all_matched)
+        .map(|scenario| scenario.id.to_string())
+        .collect();
+    let known_divergence_scenario_ids = scenarios
+        .iter()
+        .filter(|scenario| scenario.contract.all_matched && !scenario.comparison.passed)
+        .map(|scenario| scenario.id.to_string())
+        .collect();
+    let mut attention_queue = scenarios
+        .iter()
+        .filter_map(scenario_attention_item)
+        .collect::<Vec<_>>();
+    attention_queue.sort_by(|left, right| {
+        attention_priority_rank(left.priority)
+            .cmp(&attention_priority_rank(right.priority))
+            .then_with(|| {
+                right
+                    .comparison_difference_count
+                    .cmp(&left.comparison_difference_count)
+            })
+            .then_with(|| left.scenario_id.cmp(&right.scenario_id))
+    });
+
+    let status = if contract_mismatch_count == 0 {
+        "passed"
+    } else {
+        "attention_required"
+    };
+    let summary = format!(
+        "{expectation_met_count}/{scenario_count} scenario contracts matched; {contract_mismatch_count} contract mismatches; {baseline_divergence_count} baseline divergences indexed for drilldown."
+    );
+
+    DiagnosticScenarioSuiteAnalysis {
+        status,
+        summary,
+        scenario_count,
+        expectation_met_count,
+        expectation_mismatch_count,
+        contract_mismatch_count,
+        baseline_divergence_count,
+        critical_scenario_ids,
+        known_divergence_scenario_ids,
+        attention_queue,
+    }
+}
+
+fn scenario_attention_item(
+    scenario: &DiagnosticScenarioSuiteEntry,
+) -> Option<DiagnosticScenarioSuiteAttentionItem> {
+    let (priority, reason, next_artifact) = if !scenario.contract.all_matched {
+        (
+            "critical",
+            "scenario_contract_mismatch",
+            format!("{}/triage.json", scenario.id),
+        )
+    } else if !scenario.comparison.passed {
+        (
+            "known_divergence",
+            "scenario_diverges_from_pass_baseline",
+            format!("{}/comparison.json", scenario.id),
+        )
+    } else {
+        return None;
+    };
+
+    Some(DiagnosticScenarioSuiteAttentionItem {
+        scenario_id: scenario.id.to_string(),
+        priority,
+        reason,
+        next_artifact,
+        expectation_met: scenario.expectation_met,
+        contract_all_matched: scenario.contract.all_matched,
+        comparison_passed: scenario.comparison.passed,
+        actual_health: scenario.actual_health.clone(),
+        focus_domain: scenario.actual_focus_domain.clone(),
+        failed_probe_ids: scenario.failed_probe_ids.clone(),
+        comparison_difference_count: scenario.comparison.difference_count,
+        top_difference_path: scenario
+            .comparison
+            .top_differences
+            .first()
+            .map(|difference| difference.path.clone()),
+    })
+}
+
+fn attention_priority_rank(priority: &str) -> u8 {
+    match priority {
+        "critical" => 0,
+        "known_divergence" => 1,
+        _ => 2,
+    }
 }
 
 fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> String {
@@ -813,6 +958,59 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
         manifest.recommended_exit_code
     )
     .expect("write report");
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## Suite Analysis").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(report, "| Status | {} |", manifest.analysis.status).expect("write report");
+    writeln!(
+        report,
+        "| Summary | {} |",
+        markdown_cell(&manifest.analysis.summary)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Contract mismatches | {} |",
+        manifest.analysis.contract_mismatch_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Baseline divergences | {} |",
+        manifest.analysis.baseline_divergence_count
+    )
+    .expect("write report");
+
+    writeln!(report).expect("write report");
+    writeln!(report, "## Attention Queue").expect("write report");
+    writeln!(report).expect("write report");
+    if manifest.analysis.attention_queue.is_empty() {
+        writeln!(report, "No attention items.").expect("write report");
+    } else {
+        writeln!(
+            report,
+            "| Priority | Scenario | Reason | Health | Focus domain | Differences | Next artifact |"
+        )
+        .expect("write report");
+        writeln!(report, "| --- | --- | --- | --- | --- | --- | --- |").expect("write report");
+        for item in &manifest.analysis.attention_queue {
+            writeln!(
+                report,
+                "| {} | {} | {} | {} | {} | {} | {} |",
+                item.priority,
+                item.scenario_id,
+                item.reason,
+                item.actual_health,
+                item.focus_domain.as_deref().unwrap_or("-"),
+                item.comparison_difference_count,
+                item.next_artifact
+            )
+            .expect("write report");
+        }
+    }
 
     writeln!(report).expect("write report");
     writeln!(report, "## Scenario Matrix").expect("write report");
@@ -1114,7 +1312,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
 
 fn scenario_suite_ai_handoff() -> Vec<String> {
     vec![
-        "Start with scenario-suite.json to see which expected pass/fail scenarios matched their debug-focus contracts.".to_string(),
+        "Start with scenario-suite.json analysis.attention_queue to decide which scenario artifacts need immediate drilldown.".to_string(),
         "Use each scenario contract object to see whether pass state, health, focus test, or focus domain caused an expectation mismatch.".to_string(),
         "Use pass/ as the known-good baseline bundle; every scenario bundle includes comparison.json against that baseline.".to_string(),
         "For failures, open each scenario triage.json debug_focus before loading telemetry.json, report.md, or comparison.json.".to_string(),

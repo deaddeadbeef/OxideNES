@@ -91,7 +91,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(4));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(5));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(14));
     assert_eq!(manifest["triage_schema_version"], Value::from(5));
     assert_eq!(manifest["bundle_schema_version"], Value::from(1));
@@ -110,17 +110,73 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["artifacts"]["scenario_suite_report"],
         Value::String("scenario-suite.md".to_string())
     );
+    assert_eq!(
+        manifest["analysis"]["status"],
+        Value::String("passed".to_string())
+    );
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(4));
+    assert_eq!(
+        manifest["analysis"]["expectation_met_count"],
+        Value::from(4)
+    );
+    assert_eq!(
+        manifest["analysis"]["expectation_mismatch_count"],
+        Value::from(0)
+    );
+    assert_eq!(
+        manifest["analysis"]["contract_mismatch_count"],
+        Value::from(0)
+    );
+    assert_eq!(
+        manifest["analysis"]["baseline_divergence_count"],
+        Value::from(3)
+    );
+    assert_eq!(
+        manifest["analysis"]["critical_scenario_ids"],
+        Value::Array(Vec::new())
+    );
+    assert!(manifest["analysis"]["known_divergence_scenario_ids"]
+        .as_array()
+        .expect("known divergence scenario ids should be an array")
+        .iter()
+        .any(|id| id == &Value::String("timeout_cycle_limit".to_string())));
+    let attention_queue = manifest["analysis"]["attention_queue"]
+        .as_array()
+        .expect("attention queue should be an array");
+    assert_eq!(attention_queue.len(), 3);
+    let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
+    assert_eq!(
+        timeout_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        timeout_attention["reason"],
+        Value::String("scenario_diverges_from_pass_baseline".to_string())
+    );
+    assert_eq!(
+        timeout_attention["next_artifact"],
+        Value::String("timeout_cycle_limit/comparison.json".to_string())
+    );
+    assert_eq!(
+        timeout_attention["comparison_difference_count"],
+        Value::from(82)
+    );
     assert!(manifest["ai_handoff"]
         .as_array()
         .expect("scenario ai_handoff should be an array")
         .iter()
         .any(|entry| entry
             .as_str()
-            .is_some_and(|text| text.contains("debug_focus"))));
+            .is_some_and(|text| text.contains("attention_queue"))));
 
     let suite_report = fs::read_to_string(suite_dir.join("scenario-suite.md"))
         .expect("scenario suite report should be readable");
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
+    assert!(suite_report.contains("## Suite Analysis"));
+    assert!(suite_report.contains("| Status | passed |"));
+    assert!(suite_report.contains("| Baseline divergences | 3 |"));
+    assert!(suite_report.contains("## Attention Queue"));
+    assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 82 | timeout_cycle_limit/comparison.json |"));
     assert!(suite_report.contains("| Scenario | Expected pass | Actual pass |"));
     assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
     assert!(suite_report.contains("cartridge.test.7.result"));
@@ -535,4 +591,11 @@ fn find_scenario<'a>(scenarios: &'a [Value], id: &str) -> &'a Value {
         .iter()
         .find(|scenario| scenario["id"] == Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("missing diagnostic scenario {id}"))
+}
+
+fn find_attention_item<'a>(items: &'a [Value], scenario_id: &str) -> &'a Value {
+    items
+        .iter()
+        .find(|item| item["scenario_id"] == Value::String(scenario_id.to_string()))
+        .unwrap_or_else(|| panic!("missing diagnostic attention item {scenario_id}"))
 }
