@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 7;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 8;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v7";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v8";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -41,6 +41,8 @@ const STATUS_FAIL: u8 = 0xE0;
 const RESULT_PASS: u8 = 0x01;
 const EXPECTED_JOYPAD1_MASK: u8 = 0x81;
 const EXPECTED_JOYPAD2_MASK: u8 = 0x28;
+const OAM_DMA_EXPECTED_MIN_CYCLES: u64 = 513;
+const OAM_DMA_EXPECTED_MAX_CYCLES: u64 = 514;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -489,10 +491,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "dma_cycle_timing",
         subsystem: "dma",
-        risk: "The cartridge validates OAM contents after DMA but does not prove CPU stall timing.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum.",
-        missing_coverage: "DMA stall cycle counts, odd/even CPU-cycle alignment, DMC DMA interaction, and CPU/APU interleaving during transfer.",
-        suggested_next_test: "Add cycle-bucket telemetry around OAM DMA and paired DMC activity to detect stall-length regressions.",
+        risk: "The cartridge validates OAM contents and host-observed OAM DMA stall length, but not all DMA interactions.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum and stalls CPU execution for a 513-514 cycle bucket.",
+        missing_coverage: "Odd/even start-phase classification, DMC DMA interaction, and CPU/APU interleaving during transfer.",
+        suggested_next_test: "Add paired DMC activity during OAM DMA and record start parity plus DMC stall overlap telemetry.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -537,6 +539,7 @@ pub struct DiagnosticTelemetry {
     pub tests: Vec<TestTelemetry>,
     pub timeline: Vec<TestTimelineTelemetry>,
     pub probes: Vec<DiagnosticProbeTelemetry>,
+    pub dma: DmaTelemetry,
     pub oam: OamTelemetry,
     pub frame: FrameTelemetry,
     pub audio: AudioTelemetry,
@@ -761,6 +764,21 @@ pub struct RamTelemetry {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DmaTelemetry {
+    pub oam_dma_observed: bool,
+    pub oam_dma_completed: bool,
+    pub oam_dma_active_cycles: u64,
+    pub oam_dma_expected_min_cycles: u64,
+    pub oam_dma_expected_max_cycles: u64,
+    pub oam_dma_start_cycle: Option<u64>,
+    pub oam_dma_end_cycle: Option<u64>,
+    pub oam_dma_start_test: Option<u8>,
+    pub oam_dma_start_test_name: Option<&'static str>,
+    pub oam_dma_end_test: Option<u8>,
+    pub oam_dma_end_test_name: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct TestTelemetry {
     pub id: u8,
     pub name: &'static str,
@@ -839,6 +857,8 @@ pub enum DiagnosticEventKind {
     Reset,
     TestChanged,
     StatusChanged,
+    OamDmaStarted,
+    OamDmaCompleted,
     FrameComplete,
     PostPassFrameComplete,
 }
@@ -933,6 +953,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut last_status = read_ram_byte(&mut bus, STATUS_ADDR);
     let mut last_current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
     let mut timeout = true;
+    let mut dma_observation = DmaObservation::default();
 
     events.push(event_telemetry(
         0,
@@ -945,11 +966,25 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     ));
 
     while cycles < config.max_cpu_cycles {
+        let dma_active_before = bus.dma_active();
         cpu.clock(&mut bus);
         bus.tick(1);
         bus.tick_apu();
         bus.service_dmc_dma();
         cycles += 1;
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+        dma_observation.observe_tick(DmaTickObservation {
+            cycle: cycles,
+            frame: frames,
+            status,
+            current_test,
+            pc: cpu.pc,
+            active_before: dma_active_before,
+            active_after: bus.dma_active(),
+            events: &mut events,
+        });
 
         if bus.ppu.frame_complete() {
             frames += 1;
@@ -959,8 +994,6 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             for sample in samples {
                 audio_peak_abs = audio_peak_abs.max(sample.abs());
             }
-            let status = read_ram_byte(&mut bus, STATUS_ADDR);
-            let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
             events.push(event_telemetry(
                 cycles,
                 frames,
@@ -972,8 +1005,6 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             ));
         }
 
-        let status = read_ram_byte(&mut bus, STATUS_ADDR);
-        let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
         if current_test != last_current_test {
             last_current_test = current_test;
             events.push(event_telemetry(
@@ -1009,11 +1040,25 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let target_frames = frames + 1;
         let cycle_limit = cycles.saturating_add(40_000);
         while cycles < cycle_limit && frames < target_frames {
+            let dma_active_before = bus.dma_active();
             cpu.clock(&mut bus);
             bus.tick(1);
             bus.tick_apu();
             bus.service_dmc_dma();
             cycles += 1;
+
+            let status = read_ram_byte(&mut bus, STATUS_ADDR);
+            let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+            dma_observation.observe_tick(DmaTickObservation {
+                cycle: cycles,
+                frame: frames,
+                status,
+                current_test,
+                pc: cpu.pc,
+                active_before: dma_active_before,
+                active_after: bus.dma_active(),
+                events: &mut events,
+            });
 
             if bus.ppu.frame_complete() {
                 frames += 1;
@@ -1023,8 +1068,6 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 for sample in samples {
                     audio_peak_abs = audio_peak_abs.max(sample.abs());
                 }
-                let status = read_ram_byte(&mut bus, STATUS_ADDR);
-                let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
                 events.push(event_telemetry(
                     cycles,
                     frames,
@@ -1043,6 +1086,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let current_test = ram[CURRENT_TEST_ADDR as usize];
     let failure_code = ram[FAILURE_CODE_ADDR as usize];
     let test_results = test_telemetry(&ram);
+    let dma = dma_observation.telemetry();
     let oam = oam_telemetry(&bus.ppu.oam_data);
     let frame = frame_telemetry(&bus.ppu.frame_data);
     let mut host_failures = host_validate(HostValidationInput {
@@ -1050,6 +1094,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         timeout,
         tests: &test_results,
         ram: &ram,
+        dma: &dma,
         oam: &oam,
         frame: &frame,
         audio_sample_count,
@@ -1090,6 +1135,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         failure_code,
         tests: &test_results,
         ram: &ram,
+        dma: &dma,
         oam: &oam,
         frame: &frame,
         audio_sample_count,
@@ -1133,6 +1179,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         tests: test_results,
         timeline,
         probes,
+        dma,
         oam,
         frame,
         audio: AudioTelemetry {
@@ -1155,6 +1202,7 @@ pub fn compare_diagnostic_to_baseline(
 
     compare_schema(&baseline, &current, &mut differences);
     compare_input(&baseline, &current, &mut differences);
+    compare_dma(&baseline, &current, &mut differences);
     compare_verdict(&baseline, &current, &mut differences);
     compare_coverage(&baseline, &current, &mut differences);
     compare_probes(&baseline, &current, &mut differences);
@@ -1348,6 +1396,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_coverage_gaps_section(&mut report, telemetry);
+    write_dma_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
     write_next_actions_section(&mut report, telemetry);
@@ -1478,6 +1527,54 @@ fn write_coverage_gaps_section(report: &mut String, telemetry: &DiagnosticTeleme
         )
         .expect("write report");
     }
+    writeln!(report).expect("write report");
+}
+
+fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## DMA Timing").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| OAM DMA observed | {} |",
+        telemetry.dma.oam_dma_observed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| OAM DMA completed | {} |",
+        telemetry.dma.oam_dma_completed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Active cycles / expected | {} / {}..={} |",
+        telemetry.dma.oam_dma_active_cycles,
+        telemetry.dma.oam_dma_expected_min_cycles,
+        telemetry.dma.oam_dma_expected_max_cycles
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Start cycle / end cycle | {} / {} |",
+        optional_u64(telemetry.dma.oam_dma_start_cycle),
+        optional_u64(telemetry.dma.oam_dma_end_cycle)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Start test / end test | {} / {} |",
+        telemetry
+            .dma
+            .oam_dma_start_test_name
+            .unwrap_or("unknown_test"),
+        telemetry
+            .dma
+            .oam_dma_end_test_name
+            .unwrap_or("unknown_test")
+    )
+    .expect("write report");
     writeln!(report).expect("write report");
 }
 
@@ -1664,11 +1761,85 @@ fn write_event_tail_section(report: &mut String, telemetry: &DiagnosticTelemetry
     writeln!(report).expect("write report");
 }
 
+#[derive(Debug, Default)]
+struct DmaObservation {
+    oam_dma_start_cycle: Option<u64>,
+    oam_dma_end_cycle: Option<u64>,
+    oam_dma_active_cycles: u64,
+    oam_dma_start_test: Option<u8>,
+    oam_dma_end_test: Option<u8>,
+}
+
+struct DmaTickObservation<'a> {
+    cycle: u64,
+    frame: u64,
+    status: u8,
+    current_test: u8,
+    pc: u16,
+    active_before: bool,
+    active_after: bool,
+    events: &'a mut Vec<EventTelemetry>,
+}
+
+impl DmaObservation {
+    fn observe_tick(&mut self, tick: DmaTickObservation<'_>) {
+        if tick.active_before {
+            self.oam_dma_active_cycles += 1;
+        }
+
+        if !tick.active_before && tick.active_after && self.oam_dma_start_cycle.is_none() {
+            self.oam_dma_start_cycle = Some(tick.cycle);
+            self.oam_dma_start_test = known_test_id(tick.current_test);
+            tick.events.push(event_telemetry(
+                tick.cycle,
+                tick.frame,
+                tick.status,
+                tick.current_test,
+                tick.pc,
+                DiagnosticEventKind::OamDmaStarted,
+                "oam_dma_started",
+            ));
+        }
+
+        if tick.active_before && !tick.active_after && self.oam_dma_end_cycle.is_none() {
+            self.oam_dma_end_cycle = Some(tick.cycle);
+            self.oam_dma_end_test = known_test_id(tick.current_test);
+            tick.events.push(event_telemetry(
+                tick.cycle,
+                tick.frame,
+                tick.status,
+                tick.current_test,
+                tick.pc,
+                DiagnosticEventKind::OamDmaCompleted,
+                "oam_dma_completed",
+            ));
+        }
+    }
+
+    fn telemetry(&self) -> DmaTelemetry {
+        DmaTelemetry {
+            oam_dma_observed: self.oam_dma_start_cycle.is_some(),
+            oam_dma_completed: self.oam_dma_start_cycle.is_some()
+                && self.oam_dma_end_cycle.is_some(),
+            oam_dma_active_cycles: self.oam_dma_active_cycles,
+            oam_dma_expected_min_cycles: OAM_DMA_EXPECTED_MIN_CYCLES,
+            oam_dma_expected_max_cycles: OAM_DMA_EXPECTED_MAX_CYCLES,
+            oam_dma_start_cycle: self.oam_dma_start_cycle,
+            oam_dma_end_cycle: self.oam_dma_end_cycle,
+            oam_dma_start_test: self.oam_dma_start_test,
+            oam_dma_start_test_name: self.oam_dma_start_test.and_then(test_name),
+            oam_dma_end_test: self.oam_dma_end_test,
+            oam_dma_end_test_name: self.oam_dma_end_test.and_then(test_name),
+        }
+    }
+}
+
 struct HostValidationInput<'a> {
     status: u8,
     timeout: bool,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
     audio_sample_count: usize,
@@ -1682,6 +1853,7 @@ struct ProbeTelemetryInput<'a> {
     failure_code: u8,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
     audio_sample_count: usize,
@@ -1728,6 +1900,22 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
         failures.push(format!(
             "OAM DMA checksum mismatch: got 0x{:016X}, expected 0x{:016X}",
             input.oam.checksum, input.oam.expected_checksum
+        ));
+    }
+    if !input.dma.oam_dma_observed {
+        failures.push("OAM DMA transfer was not observed by the host runner".to_string());
+    }
+    if !input.dma.oam_dma_completed {
+        failures.push("OAM DMA transfer did not complete before diagnostic pass".to_string());
+    }
+    if input.dma.oam_dma_active_cycles < input.dma.oam_dma_expected_min_cycles
+        || input.dma.oam_dma_active_cycles > input.dma.oam_dma_expected_max_cycles
+    {
+        failures.push(format!(
+            "OAM DMA active cycle count {} outside expected {}..={}",
+            input.dma.oam_dma_active_cycles,
+            input.dma.oam_dma_expected_min_cycles,
+            input.dma.oam_dma_expected_max_cycles
         ));
     }
     if input.frames < 2 {
@@ -1861,6 +2049,35 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             expected: format!("OAM checksum 0x{:016X}", input.oam.expected_checksum),
             observed: format!("OAM checksum 0x{:016X}", input.oam.checksum),
             likely_domain: "dma.oam_transfer".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "dma.oam_active_cycles".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(5),
+            test_name: test_name(5),
+            status: gated_probe_status(
+                passed_suite,
+                input.dma.oam_dma_completed
+                    && input.dma.oam_dma_active_cycles >= input.dma.oam_dma_expected_min_cycles
+                    && input.dma.oam_dma_active_cycles <= input.dma.oam_dma_expected_max_cycles,
+            ),
+            description: "Host-observed OAM DMA stalls CPU execution for the expected cycle bucket"
+                .to_string(),
+            expected: format!(
+                "OAM DMA active cycles {}..={}",
+                input.dma.oam_dma_expected_min_cycles, input.dma.oam_dma_expected_max_cycles
+            ),
+            observed: format!(
+                "OAM DMA observed={}, completed={}, active cycles {}",
+                input.dma.oam_dma_observed,
+                input.dma.oam_dma_completed,
+                input.dma.oam_dma_active_cycles
+            ),
+            likely_domain: "dma.oam_stall_timing".to_string(),
         },
     );
     push_probe(
@@ -3406,6 +3623,30 @@ fn compare_input(
     }
 }
 
+fn compare_dma(
+    baseline: &Value,
+    current: &Value,
+    differences: &mut Vec<DiagnosticComparisonDifferenceTelemetry>,
+) {
+    for path in [
+        &["dma", "oam_dma_observed"][..],
+        &["dma", "oam_dma_completed"][..],
+        &["dma", "oam_dma_active_cycles"][..],
+        &["dma", "oam_dma_start_test_name"][..],
+        &["dma", "oam_dma_end_test_name"][..],
+    ] {
+        compare_optional_value(
+            baseline,
+            current,
+            path,
+            "dma",
+            DiagnosticComparisonSeverity::Warning,
+            "OAM DMA timing telemetry changed from baseline",
+            differences,
+        );
+    }
+}
+
 fn compare_verdict(
     baseline: &Value,
     current: &Value,
@@ -3991,6 +4232,8 @@ fn diagnostic_event_kind_label(kind: DiagnosticEventKind) -> &'static str {
         DiagnosticEventKind::Reset => "reset",
         DiagnosticEventKind::TestChanged => "test_changed",
         DiagnosticEventKind::StatusChanged => "status_changed",
+        DiagnosticEventKind::OamDmaStarted => "oam_dma_started",
+        DiagnosticEventKind::OamDmaCompleted => "oam_dma_completed",
         DiagnosticEventKind::FrameComplete => "frame_complete",
         DiagnosticEventKind::PostPassFrameComplete => "post_pass_frame_complete",
     }
