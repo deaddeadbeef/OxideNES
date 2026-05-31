@@ -9,9 +9,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 3;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 4;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v3";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v4";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -386,6 +386,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
+    pub timeline: Vec<TestTimelineTelemetry>,
     pub oam: OamTelemetry,
     pub frame: FrameTelemetry,
     pub audio: AudioTelemetry,
@@ -476,6 +477,7 @@ pub struct DiagnosticAnalysisTelemetry {
     pub health: DiagnosticHealth,
     pub summary: String,
     pub coverage: DiagnosticCoverageTelemetry,
+    pub timing: DiagnosticTimingSummaryTelemetry,
     pub failing_subsystem: Option<DiagnosticSubsystem>,
     pub failing_test: Option<&'static str>,
     pub first_failure_domain: Option<String>,
@@ -509,6 +511,25 @@ pub struct TierCoverageTelemetry {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DiagnosticTimingSummaryTelemetry {
+    pub started_tests: usize,
+    pub ended_tests: usize,
+    pub not_started_tests: usize,
+    pub timed_out_tests: usize,
+    pub slowest_test: Option<TestDurationTelemetry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestDurationTelemetry {
+    pub test_id: u8,
+    pub test_name: &'static str,
+    pub subsystem: DiagnosticSubsystem,
+    pub tier: DiagnosticTestTier,
+    pub duration_cycles: u64,
+    pub duration_frames: u64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct CpuTelemetry {
     pub pc: u16,
     pub a: u8,
@@ -538,6 +559,46 @@ pub struct TestTelemetry {
     pub result_addr: u16,
     pub result: u8,
     pub passed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestTimelineOutcome {
+    NotStarted,
+    Passed,
+    Failed,
+    TimedOut,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestTimelineEndReason {
+    NextTestStarted,
+    CartridgePassed,
+    CartridgeFailed,
+    Timeout,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TestTimelineTelemetry {
+    pub test_id: u8,
+    pub test_name: &'static str,
+    pub subsystem: DiagnosticSubsystem,
+    pub tier: DiagnosticTestTier,
+    pub outcome: TestTimelineOutcome,
+    pub started: bool,
+    pub ended: bool,
+    pub start_cycle: Option<u64>,
+    pub end_cycle: Option<u64>,
+    pub duration_cycles: Option<u64>,
+    pub start_frame: Option<u64>,
+    pub end_frame: Option<u64>,
+    pub duration_frames: Option<u64>,
+    pub end_reason: Option<TestTimelineEndReason>,
+    pub terminal_status: Option<u8>,
+    pub terminal_status_hex: Option<String>,
+    pub terminal_pc: Option<u16>,
 }
 
 #[derive(Debug, Serialize)]
@@ -777,7 +838,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         failure,
         host_failures,
     };
-    let analysis = analysis_telemetry(&verdict, &test_results, &events, cycles, frames);
+    let timeline = test_timeline(&test_results, &events, &verdict, cycles, frames, cpu.pc);
+    let analysis = analysis_telemetry(&verdict, &test_results, &timeline, &events, cycles, frames);
 
     Ok(DiagnosticTelemetry {
         schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
@@ -804,6 +866,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             result_base: RESULT_BASE,
         },
         tests: test_results,
+        timeline,
         oam,
         frame,
         audio: AudioTelemetry {
@@ -1618,11 +1681,13 @@ fn failure_telemetry(
 fn analysis_telemetry(
     verdict: &VerdictTelemetry,
     tests: &[TestTelemetry],
+    timeline: &[TestTimelineTelemetry],
     events: &[EventTelemetry],
     cycles: u64,
     frames: u64,
 ) -> DiagnosticAnalysisTelemetry {
     let coverage = coverage_telemetry(tests);
+    let timing = timing_summary(timeline);
     let health = diagnostic_health(verdict);
     let test_transition_count = events
         .iter()
@@ -1659,6 +1724,7 @@ fn analysis_telemetry(
         health,
         summary,
         coverage,
+        timing,
         failing_subsystem,
         failing_test,
         first_failure_domain,
@@ -1845,6 +1911,232 @@ fn event_telemetry(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TimelineMark {
+    cycle: u64,
+    frame: u64,
+    status: u8,
+    pc: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TimelineSlot {
+    start: Option<TimelineMark>,
+    end: Option<TimelineMark>,
+    end_reason: Option<TestTimelineEndReason>,
+}
+
+fn test_timeline(
+    tests: &[TestTelemetry],
+    events: &[EventTelemetry],
+    verdict: &VerdictTelemetry,
+    final_cycles: u64,
+    final_frames: u64,
+    final_pc: u16,
+) -> Vec<TestTimelineTelemetry> {
+    let mut slots = HashMap::<u8, TimelineSlot>::new();
+    let mut active_test = None;
+
+    for event in events {
+        match event.kind {
+            DiagnosticEventKind::Reset => {
+                if test_spec(event.current_test).is_some() {
+                    start_timeline_slot(&mut slots, event.current_test, mark_from_event(event));
+                    active_test = Some(event.current_test);
+                }
+            }
+            DiagnosticEventKind::TestChanged => {
+                if let Some(previous_test) = active_test {
+                    if previous_test != event.current_test {
+                        end_timeline_slot(
+                            &mut slots,
+                            previous_test,
+                            mark_from_event(event),
+                            TestTimelineEndReason::NextTestStarted,
+                        );
+                    }
+                }
+
+                active_test = if test_spec(event.current_test).is_some() {
+                    start_timeline_slot(&mut slots, event.current_test, mark_from_event(event));
+                    Some(event.current_test)
+                } else {
+                    None
+                };
+            }
+            DiagnosticEventKind::StatusChanged if event.status == STATUS_PASS => {
+                if let Some(current_test) = active_test {
+                    end_timeline_slot(
+                        &mut slots,
+                        current_test,
+                        mark_from_event(event),
+                        TestTimelineEndReason::CartridgePassed,
+                    );
+                }
+            }
+            DiagnosticEventKind::StatusChanged if event.status == STATUS_FAIL => {
+                if let Some(current_test) = active_test {
+                    end_timeline_slot(
+                        &mut slots,
+                        current_test,
+                        mark_from_event(event),
+                        TestTimelineEndReason::CartridgeFailed,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if verdict.timeout {
+        if let Some(current_test) =
+            active_test.or_else(|| test_spec(verdict.current_test).map(|_| verdict.current_test))
+        {
+            if slots
+                .get(&current_test)
+                .and_then(|slot| slot.start)
+                .is_some()
+            {
+                end_timeline_slot(
+                    &mut slots,
+                    current_test,
+                    TimelineMark {
+                        cycle: final_cycles,
+                        frame: final_frames,
+                        status: verdict.status,
+                        pc: final_pc,
+                    },
+                    TestTimelineEndReason::Timeout,
+                );
+            }
+        }
+    }
+
+    tests
+        .iter()
+        .map(|test| {
+            let slot = slots.get(&test.id).copied().unwrap_or_default();
+            timeline_telemetry(test, slot, verdict)
+        })
+        .collect()
+}
+
+fn start_timeline_slot(slots: &mut HashMap<u8, TimelineSlot>, test_id: u8, mark: TimelineMark) {
+    let slot = slots.entry(test_id).or_default();
+    if slot.start.is_none() {
+        slot.start = Some(mark);
+    }
+}
+
+fn end_timeline_slot(
+    slots: &mut HashMap<u8, TimelineSlot>,
+    test_id: u8,
+    mark: TimelineMark,
+    reason: TestTimelineEndReason,
+) {
+    let slot = slots.entry(test_id).or_default();
+    if slot.end.is_none() {
+        slot.end = Some(mark);
+        slot.end_reason = Some(reason);
+    }
+}
+
+fn mark_from_event(event: &EventTelemetry) -> TimelineMark {
+    TimelineMark {
+        cycle: event.cycle,
+        frame: event.frame,
+        status: event.status,
+        pc: event.pc,
+    }
+}
+
+fn timeline_telemetry(
+    test: &TestTelemetry,
+    slot: TimelineSlot,
+    verdict: &VerdictTelemetry,
+) -> TestTimelineTelemetry {
+    let duration_cycles = slot
+        .start
+        .zip(slot.end)
+        .map(|(start, end)| end.cycle.saturating_sub(start.cycle));
+    let duration_frames = slot
+        .start
+        .zip(slot.end)
+        .map(|(start, end)| end.frame.saturating_sub(start.frame));
+    let outcome = timeline_outcome(test, slot, verdict);
+
+    TestTimelineTelemetry {
+        test_id: test.id,
+        test_name: test.name,
+        subsystem: test.subsystem,
+        tier: test.tier,
+        outcome,
+        started: slot.start.is_some(),
+        ended: slot.end.is_some(),
+        start_cycle: slot.start.map(|mark| mark.cycle),
+        end_cycle: slot.end.map(|mark| mark.cycle),
+        duration_cycles,
+        start_frame: slot.start.map(|mark| mark.frame),
+        end_frame: slot.end.map(|mark| mark.frame),
+        duration_frames,
+        end_reason: slot.end_reason,
+        terminal_status: slot.end.map(|mark| mark.status),
+        terminal_status_hex: slot.end.map(|mark| hex_byte(mark.status)),
+        terminal_pc: slot.end.map(|mark| mark.pc),
+    }
+}
+
+fn timeline_outcome(
+    test: &TestTelemetry,
+    slot: TimelineSlot,
+    verdict: &VerdictTelemetry,
+) -> TestTimelineOutcome {
+    if slot.start.is_none() {
+        return TestTimelineOutcome::NotStarted;
+    }
+    if slot.end_reason == Some(TestTimelineEndReason::Timeout) {
+        return TestTimelineOutcome::TimedOut;
+    }
+    if test.passed {
+        return TestTimelineOutcome::Passed;
+    }
+    if verdict.status == STATUS_FAIL && verdict.current_test == test.id {
+        return TestTimelineOutcome::Failed;
+    }
+    TestTimelineOutcome::Incomplete
+}
+
+fn timing_summary(timeline: &[TestTimelineTelemetry]) -> DiagnosticTimingSummaryTelemetry {
+    let started_tests = timeline.iter().filter(|test| test.started).count();
+    let ended_tests = timeline.iter().filter(|test| test.ended).count();
+    let timed_out_tests = timeline
+        .iter()
+        .filter(|test| test.outcome == TestTimelineOutcome::TimedOut)
+        .count();
+    let slowest_test = timeline
+        .iter()
+        .filter_map(|test| {
+            test.duration_cycles
+                .map(|duration_cycles| TestDurationTelemetry {
+                    test_id: test.test_id,
+                    test_name: test.test_name,
+                    subsystem: test.subsystem,
+                    tier: test.tier,
+                    duration_cycles,
+                    duration_frames: test.duration_frames.unwrap_or_default(),
+                })
+        })
+        .max_by_key(|test| test.duration_cycles);
+
+    DiagnosticTimingSummaryTelemetry {
+        started_tests,
+        ended_tests,
+        not_started_tests: timeline.len().saturating_sub(started_tests),
+        timed_out_tests,
+        slowest_test,
+    }
+}
+
 fn test_telemetry(ram: &[u8]) -> Vec<TestTelemetry> {
     DIAGNOSTIC_TESTS
         .iter()
@@ -2009,6 +2301,12 @@ mod tests {
         assert_eq!(telemetry.analysis.coverage.failed_tests, 0);
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
+        assert_eq!(
+            telemetry.analysis.timing.started_tests,
+            DIAGNOSTIC_TESTS.len()
+        );
+        assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+        assert!(telemetry.analysis.timing.slowest_test.is_some());
         assert!(
             telemetry.verdict.passed,
             "diagnostic should pass: {:?}",
@@ -2020,6 +2318,10 @@ mod tests {
         assert!(telemetry.audio.sample_count > 0);
         assert!(telemetry.frame.unique_colors >= 2);
         assert!(telemetry.tests.iter().all(|test| test.passed));
+        assert!(telemetry
+            .timeline
+            .iter()
+            .all(|test| test.outcome == TestTimelineOutcome::Passed));
         assert!(telemetry.events.iter().any(|event| {
             matches!(event.kind, DiagnosticEventKind::TestChanged)
                 && event.current_test_name == Some("cpu_branch_page_crossing")
