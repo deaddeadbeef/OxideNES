@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 25;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 26;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v25";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v26";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -65,6 +65,8 @@ const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_ju
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
 const MAPPER2_BANK_SWITCH_FAULT_LABEL: &str = "mapper2_prg_bank_switch_before_read";
 const MAPPER2_PRG_RAM_FAULT_LABEL: &str = "mapper2_prg_ram_roundtrip_before_high_read";
+const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
+    "ppu_horizontal_nametable_mirroring_before_first_mirror_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
@@ -270,6 +272,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "$6000 and $7FFF retain CPU-written PRG RAM sentinels",
             "PRG RAM remains visible after Mapper 2 switchable PRG bank writes",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 17,
+        name: "ppu_horizontal_nametable_mirroring",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::Integration,
+        intent: "Verify the Mapper 2 cartridge's horizontal nametable mirroring reaches CPU-driven PPU VRAM access.",
+        expected_observations: &[
+            "$2400 mirrors the sentinel written through $2000",
+            "$2C00 mirrors the sentinel written through $2800",
+            "$2000 and $2800 stay independent horizontal nametable pairs",
         ],
     },
 ];
@@ -591,6 +605,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect PPUDATA read-side VRAM increment and buffer reload behavior after non-palette reads.",
     },
     DiagnosticFailureSpec {
+        code: 0xE0,
+        test_id: 17,
+        assertion: "Horizontal nametable mirroring maps $2000 reads through $2400",
+        expected: "$2400 reads the sentinel written to $2000",
+        observed: "$2400 did not expose the $2000 horizontal-mirror sentinel",
+        likely_domain: "ppu.nametables.horizontal_mirroring",
+        remediation_hint: "Inspect cartridge mirroring metadata and PPU nametable VRAM index calculation for the $2000/$2400 horizontal mirror pair.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xE1,
+        test_id: 17,
+        assertion: "Horizontal nametable mirroring maps $2800 reads through $2C00",
+        expected: "$2C00 reads the sentinel written to $2800",
+        observed: "$2C00 did not expose the $2800 horizontal-mirror sentinel",
+        likely_domain: "ppu.nametables.horizontal_mirroring",
+        remediation_hint: "Inspect cartridge mirroring metadata and PPU nametable VRAM index calculation for the $2800/$2C00 horizontal mirror pair.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xE2,
+        test_id: 17,
+        assertion: "Horizontal nametable mirror pairs remain independent",
+        expected: "$2000 still reads its sentinel after writing the $2800 mirror pair",
+        observed: "$2000 changed after writing the $2800/$2C00 horizontal mirror pair",
+        likely_domain: "ppu.nametables.horizontal_mirroring",
+        remediation_hint: "Inspect horizontal mirroring pair isolation; $2000/$2400 should not alias $2800/$2C00.",
+    },
+    DiagnosticFailureSpec {
         code: 0xF0,
         test_id: 15,
         assertion: "Mapper 2 switchable PRG window starts on bank 0",
@@ -668,7 +709,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, NMI delivery, completed frames, and host-visible multi-color background output.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, horizontal nametable mirroring, NMI delivery, completed frames, and host-visible multi-color background output.",
         missing_coverage: "Sprite evaluation, sprite/background priority, scrolling seams, vblank timing, and per-dot rendering behavior.",
         suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
     },
@@ -676,8 +717,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
         risk: "The diagnostic cartridge now exercises one PRG bank-switching mapper, but broader mapper behavior can still regress outside this fixture.",
-        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, and PRG RAM round-trips end to end.",
-        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, mirroring changes, MMC register edge cases, and battery-backed RAM persistence.",
+        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end.",
+        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, other mirroring modes, MMC register edge cases, and battery-backed RAM persistence.",
         suggested_next_test: "Generate additional mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
     },
     DiagnosticCoverageGapSpec {
@@ -734,6 +775,7 @@ pub enum DiagnosticFaultInjection {
     DmaOamTransfer,
     Mapper2PrgBankSwitch,
     Mapper2PrgRam,
+    PpuNametableMirroring,
     PpuNmiTimeout,
     PpuVramReadBuffer,
 }
@@ -747,6 +789,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
+            DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
@@ -760,6 +803,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
@@ -3517,6 +3561,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_vram_read_buffer();
     program.mapper2_prg_bank_switch();
     program.mapper2_prg_ram_roundtrip();
+    program.ppu_horizontal_nametable_mirroring();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3929,6 +3974,60 @@ impl DiagnosticProgram {
         self.asm.lda_abs(MAPPER2_PRG_RAM_LOW_ADDR);
         self.expect_a_eq(MAPPER2_PRG_RAM_LOW_SENTINEL, 0xF6);
         self.pass_test(16);
+    }
+
+    fn ppu_horizontal_nametable_mirroring(&mut self) {
+        self.begin_test(17);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x43);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm
+            .label(PPU_NAMETABLE_MIRRORING_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(0x24);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x43, 0xE0);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x28);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x76);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x2C);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x76, 0xE1);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
+        self.expect_a_eq(0x43, 0xE2);
+        self.pass_test(17);
     }
 
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
@@ -4372,6 +4471,12 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::Mapper2PrgRam => {
             bus.cpu_write(MAPPER2_PRG_RAM_HIGH_ADDR, 0x00);
+        }
+        DiagnosticFaultInjection::PpuNametableMirroring => {
+            bus.cpu_write(0x2006, 0x24);
+            bus.cpu_write(0x2006, 0x00);
+            bus.cpu_write(0x2007, 0x00);
+            let _ = bus.cpu_read(0x2002);
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
