@@ -9,9 +9,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 1;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 2;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v1";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v2";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -64,6 +64,17 @@ pub struct DiagnosticTestSpec {
     pub tier: DiagnosticTestTier,
     pub intent: &'static str,
     pub expected_observations: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiagnosticFailureSpec {
+    code: u8,
+    test_id: u8,
+    assertion: &'static str,
+    expected: &'static str,
+    observed: &'static str,
+    likely_domain: &'static str,
+    remediation_hint: &'static str,
 }
 
 pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
@@ -155,6 +166,198 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
     },
 ];
 
+const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
+    DiagnosticFailureSpec {
+        code: 0x11,
+        test_id: 1,
+        assertion: "ADC without carry produces the expected accumulator value",
+        expected: "A == 0x32 after 0x10 + 0x22",
+        observed: "A differed from 0x32",
+        likely_domain: "cpu.alu.adc",
+        remediation_hint: "Inspect ADC immediate execution, carry input handling, and zero/negative flag side effects.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x12,
+        test_id: 1,
+        assertion: "SBC with carry set subtracts without borrow",
+        expected: "A == 0x20 after 0x32 - 0x12",
+        observed: "A differed from 0x20",
+        likely_domain: "cpu.alu.sbc",
+        remediation_hint: "Inspect SBC carry-as-not-borrow semantics and accumulator writeback.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x13,
+        test_id: 1,
+        assertion: "ADC crosses signed overflow into the negative range",
+        expected: "A == 0x80 after 0x7F + 0x01",
+        observed: "A differed from 0x80",
+        likely_domain: "cpu.alu.adc_flags",
+        remediation_hint: "Inspect ADC overflow/negative flag calculation and accumulator wrapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x21,
+        test_id: 2,
+        assertion: "PLA restores the byte pushed by PHA",
+        expected: "A == 0x42 after PHA/PLA",
+        observed: "A differed from 0x42",
+        likely_domain: "cpu.stack",
+        remediation_hint: "Inspect stack pointer pre/post increment behavior and stack page addressing.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x22,
+        test_id: 2,
+        assertion: "JSR/RTS returns from a subroutine with accumulator state intact",
+        expected: "A == 0x77 after subroutine return",
+        observed: "A differed from 0x77",
+        likely_domain: "cpu.control_flow.stack",
+        remediation_hint: "Inspect JSR return-address push order and RTS pull/increment behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x31,
+        test_id: 3,
+        assertion: "CPU RAM mirror at $0802 reflects $0002",
+        expected: "$0802 reads 0x5A after writing $0002",
+        observed: "$0802 did not read 0x5A",
+        likely_domain: "bus.cpu_ram_mirroring",
+        remediation_hint: "Inspect CPU RAM address masking for the $0000-$1FFF range.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x32,
+        test_id: 3,
+        assertion: "CPU RAM mirror at $1FFF reflects $07FF",
+        expected: "$1FFF reads 0xA5 after writing $07FF",
+        observed: "$1FFF did not read 0xA5",
+        likely_domain: "bus.cpu_ram_mirroring",
+        remediation_hint: "Inspect high-end CPU RAM mirror masking and bus dispatch ordering.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x41,
+        test_id: 4,
+        assertion: "PPU palette byte round-trips through PPUADDR/PPUDATA",
+        expected: "$3F00 reads back 0x25 masked to six bits",
+        observed: "$2007 readback differed from 0x25",
+        likely_domain: "ppu.registers.palette",
+        remediation_hint: "Inspect PPU address latch handling, palette mirroring, and PPUDATA read/write paths.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x61,
+        test_id: 6,
+        assertion: "APU status reports pulse channel 1 enabled",
+        expected: "$4015 bit 0 is set",
+        observed: "$4015 bit 0 was clear",
+        likely_domain: "apu.status",
+        remediation_hint: "Inspect APU $4015 channel enable state and pulse channel length counter setup.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x70,
+        test_id: 7,
+        assertion: "Joypad serial read 0 returns the latched A button bit",
+        expected: "$4016 read bit 0 == 1",
+        observed: "$4016 read bit 0 was not 1",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad strobe latch behavior and button-bit mapping for A.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x71,
+        test_id: 7,
+        assertion: "Joypad serial read 1 returns the latched B button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift index advancement after the first read.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x72,
+        test_id: 7,
+        assertion: "Joypad serial read 2 returns the latched Select button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Select bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x73,
+        test_id: 7,
+        assertion: "Joypad serial read 3 returns the latched Start button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Start bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x74,
+        test_id: 7,
+        assertion: "Joypad serial read 4 returns the latched Up button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Up bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x75,
+        test_id: 7,
+        assertion: "Joypad serial read 5 returns the latched Down button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Down bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x76,
+        test_id: 7,
+        assertion: "Joypad serial read 6 returns the latched Left button bit",
+        expected: "$4016 read bit 0 == 0",
+        observed: "$4016 read bit 0 was not 0",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Left bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x77,
+        test_id: 7,
+        assertion: "Joypad serial read 7 returns the latched Right button bit",
+        expected: "$4016 read bit 0 == 1",
+        observed: "$4016 read bit 0 was not 1",
+        likely_domain: "joypad.strobe_shift",
+        remediation_hint: "Inspect joypad shift order and Right bit mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x81,
+        test_id: 8,
+        assertion: "BEQ is taken after CMP sets zero",
+        expected: "branch target is reached",
+        observed: "fallthrough path executed after BEQ",
+        likely_domain: "cpu.branch",
+        remediation_hint: "Inspect relative branch condition evaluation and program counter updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x82,
+        test_id: 8,
+        assertion: "Page-crossing branch target executes normally",
+        expected: "A == 0x5C after reaching the branch target",
+        observed: "A differed from 0x5C",
+        likely_domain: "cpu.branch.page_cross",
+        remediation_hint: "Inspect relative offset sign extension and branch target address calculation.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x90,
+        test_id: 9,
+        assertion: "Joypad serial read 8 returns one after all buttons are shifted",
+        expected: "$4016 read bit 0 == 1",
+        observed: "$4016 read bit 0 was not 1",
+        likely_domain: "joypad.overread",
+        remediation_hint: "Inspect joypad reads after index 7; NES-compatible overreads should return 1.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x91,
+        test_id: 9,
+        assertion: "Joypad serial read 9 keeps returning one after all buttons are shifted",
+        expected: "$4016 read bit 0 == 1",
+        observed: "$4016 read bit 0 was not 1",
+        likely_domain: "joypad.overread",
+        remediation_hint: "Inspect joypad overread behavior and make sure the shift index saturates or returns 1 after button 7.",
+    },
+];
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticConfig {
     pub max_cpu_cycles: u64,
@@ -194,6 +397,7 @@ pub struct DiagnosticSuiteTelemetry {
     pub version: &'static str,
     pub test_count: usize,
     pub goals: &'static [&'static str],
+    pub failure_catalog: Vec<FailureCatalogTelemetry>,
 }
 
 #[derive(Debug, Serialize)]
@@ -216,7 +420,45 @@ pub struct VerdictTelemetry {
     pub current_test: u8,
     pub current_test_name: Option<&'static str>,
     pub failure_code: u8,
+    pub failure: Option<DiagnosticFailureTelemetry>,
     pub host_failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticFailureKind {
+    CartridgeAssertion,
+    Timeout,
+    HostValidation,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticFailureTelemetry {
+    pub kind: DiagnosticFailureKind,
+    pub test_id: u8,
+    pub test_name: Option<&'static str>,
+    pub subsystem: Option<DiagnosticSubsystem>,
+    pub tier: Option<DiagnosticTestTier>,
+    pub failure_code: u8,
+    pub failure_code_hex: String,
+    pub assertion: String,
+    pub expected: String,
+    pub observed: String,
+    pub likely_domain: String,
+    pub remediation_hint: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FailureCatalogTelemetry {
+    pub code: u8,
+    pub code_hex: String,
+    pub test_id: u8,
+    pub test_name: Option<&'static str>,
+    pub subsystem: Option<DiagnosticSubsystem>,
+    pub assertion: &'static str,
+    pub expected: &'static str,
+    pub likely_domain: &'static str,
+    pub remediation_hint: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -470,6 +712,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     }
 
     let passed = status == STATUS_PASS && !timeout && host_failures.is_empty();
+    let failure = failure_telemetry(
+        passed,
+        status,
+        timeout,
+        current_test,
+        failure_code,
+        &host_failures,
+    );
 
     Ok(DiagnosticTelemetry {
         schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
@@ -483,6 +733,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             current_test,
             current_test_name: test_name(current_test),
             failure_code,
+            failure,
             host_failures,
         },
         cycles,
@@ -530,17 +781,21 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     if input.timeout {
         failures.push("diagnostic timed out before cartridge completion".to_string());
     }
-    if input.status != STATUS_PASS {
-        failures.push(format!(
-            "cartridge status 0x{:02X} did not reach PASS",
-            input.status
-        ));
-    }
     if input.ram[SIGNATURE_ADDR as usize] != 0xA5 {
         failures.push(format!(
             "signature byte mismatch: got 0x{:02X}",
             input.ram[SIGNATURE_ADDR as usize]
         ));
+    }
+    if input.status == STATUS_FAIL {
+        return failures;
+    }
+    if input.status != STATUS_PASS {
+        failures.push(format!(
+            "cartridge status 0x{:02X} did not reach PASS",
+            input.status
+        ));
+        return failures;
     }
     if input.ram[NMI_COUNT_ADDR as usize] < 2 {
         failures.push(format!(
@@ -1191,7 +1446,123 @@ fn suite_telemetry() -> DiagnosticSuiteTelemetry {
         version: DIAGNOSTIC_SUITE_VERSION,
         test_count: DIAGNOSTIC_TESTS.len(),
         goals: DIAGNOSTIC_AI_GOALS,
+        failure_catalog: failure_catalog_telemetry(),
     }
+}
+
+fn failure_catalog_telemetry() -> Vec<FailureCatalogTelemetry> {
+    DIAGNOSTIC_FAILURES
+        .iter()
+        .map(|failure| {
+            let spec = test_spec(failure.test_id);
+            FailureCatalogTelemetry {
+                code: failure.code,
+                code_hex: hex_byte(failure.code),
+                test_id: failure.test_id,
+                test_name: spec.map(|spec| spec.name),
+                subsystem: spec.map(|spec| spec.subsystem),
+                assertion: failure.assertion,
+                expected: failure.expected,
+                likely_domain: failure.likely_domain,
+                remediation_hint: failure.remediation_hint,
+            }
+        })
+        .collect()
+}
+
+fn failure_telemetry(
+    passed: bool,
+    status: u8,
+    timeout: bool,
+    current_test: u8,
+    failure_code: u8,
+    host_failures: &[String],
+) -> Option<DiagnosticFailureTelemetry> {
+    if passed {
+        return None;
+    }
+
+    let current_spec = test_spec(current_test);
+    if timeout {
+        return Some(DiagnosticFailureTelemetry {
+            kind: DiagnosticFailureKind::Timeout,
+            test_id: current_test,
+            test_name: current_spec.map(|spec| spec.name),
+            subsystem: current_spec.map(|spec| spec.subsystem),
+            tier: current_spec.map(|spec| spec.tier),
+            failure_code,
+            failure_code_hex: hex_byte(failure_code),
+            assertion: "diagnostic cartridge completed before the cycle limit".to_string(),
+            expected: "STATUS_PASS or STATUS_FAIL before max_cpu_cycles".to_string(),
+            observed: format!(
+                "status was {} while current_test was {}",
+                hex_byte(status),
+                current_test
+            ),
+            likely_domain: "emulator.progress_or_infinite_loop".to_string(),
+            remediation_hint:
+                "Inspect the current test transition events, CPU PC, and the subsystem under the active test."
+                    .to_string(),
+        });
+    }
+
+    if status == STATUS_FAIL {
+        if let Some(failure) = failure_spec(failure_code) {
+            let spec = test_spec(failure.test_id);
+            return Some(DiagnosticFailureTelemetry {
+                kind: DiagnosticFailureKind::CartridgeAssertion,
+                test_id: failure.test_id,
+                test_name: spec.map(|spec| spec.name),
+                subsystem: spec.map(|spec| spec.subsystem),
+                tier: spec.map(|spec| spec.tier),
+                failure_code,
+                failure_code_hex: hex_byte(failure_code),
+                assertion: failure.assertion.to_string(),
+                expected: failure.expected.to_string(),
+                observed: failure.observed.to_string(),
+                likely_domain: failure.likely_domain.to_string(),
+                remediation_hint: failure.remediation_hint.to_string(),
+            });
+        }
+
+        return Some(DiagnosticFailureTelemetry {
+            kind: DiagnosticFailureKind::CartridgeAssertion,
+            test_id: current_test,
+            test_name: current_spec.map(|spec| spec.name),
+            subsystem: current_spec.map(|spec| spec.subsystem),
+            tier: current_spec.map(|spec| spec.tier),
+            failure_code,
+            failure_code_hex: hex_byte(failure_code),
+            assertion: "diagnostic cartridge reported an unknown assertion failure".to_string(),
+            expected: "failure code is present in the diagnostic failure catalog".to_string(),
+            observed: format!("unknown failure code {}", hex_byte(failure_code)),
+            likely_domain: "diagnostic.cartridge.failure_catalog".to_string(),
+            remediation_hint:
+                "Add this cartridge failure code to DIAGNOSTIC_FAILURES or inspect the failing test assembly."
+                    .to_string(),
+        });
+    }
+
+    Some(DiagnosticFailureTelemetry {
+        kind: DiagnosticFailureKind::HostValidation,
+        test_id: current_test,
+        test_name: current_spec.map(|spec| spec.name),
+        subsystem: current_spec.map(|spec| spec.subsystem),
+        tier: current_spec.map(|spec| spec.tier),
+        failure_code,
+        failure_code_hex: hex_byte(failure_code),
+        assertion: "host-side diagnostic validation completed without failures".to_string(),
+        expected: "host_failures is empty after cartridge completion".to_string(),
+        observed: if host_failures.is_empty() {
+            "host validation failed without a detailed message".to_string()
+        } else {
+            host_failures.join("; ")
+        },
+        likely_domain: "host.validation".to_string(),
+        remediation_hint:
+            "Inspect host telemetry checks for OAM, frame, audio, RAM signature, and per-test result bytes."
+                .to_string(),
+    })
 }
 
 fn event_telemetry(
@@ -1264,10 +1635,21 @@ fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
 }
 
 fn test_name(id: u8) -> Option<&'static str> {
-    DIAGNOSTIC_TESTS
+    test_spec(id).map(|spec| spec.name)
+}
+
+fn test_spec(id: u8) -> Option<&'static DiagnosticTestSpec> {
+    DIAGNOSTIC_TESTS.iter().find(|spec| spec.id == id)
+}
+
+fn failure_spec(code: u8) -> Option<&'static DiagnosticFailureSpec> {
+    DIAGNOSTIC_FAILURES
         .iter()
-        .find(|spec| spec.id == id)
-        .map(|spec| spec.name)
+        .find(|failure| failure.code == code)
+}
+
+fn hex_byte(value: u8) -> String {
+    format!("0x{value:02X}")
 }
 
 fn hash_bytes(bytes: &[u8]) -> u64 {
@@ -1319,6 +1701,30 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_failure_catalog_is_unique_and_test_scoped() {
+        let mut codes = BTreeSet::new();
+
+        for failure in DIAGNOSTIC_FAILURES {
+            assert!(
+                codes.insert(failure.code),
+                "duplicate failure code 0x{:02X}",
+                failure.code
+            );
+            assert!(
+                test_spec(failure.test_id).is_some(),
+                "failure code 0x{:02X} references unknown test {}",
+                failure.code,
+                failure.test_id
+            );
+            assert!(!failure.assertion.is_empty());
+            assert!(!failure.expected.is_empty());
+            assert!(!failure.observed.is_empty());
+            assert!(!failure.likely_domain.is_empty());
+            assert!(!failure.remediation_hint.is_empty());
+        }
+    }
+
+    #[test]
     fn headless_diagnostic_passes_and_collects_telemetry() {
         let telemetry = run_diagnostic(DiagnosticConfig::default()).expect("diagnostic runs");
 
@@ -1327,11 +1733,13 @@ mod tests {
             DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
         );
         assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
+        assert!(!telemetry.suite.failure_catalog.is_empty());
         assert!(
             telemetry.verdict.passed,
             "diagnostic should pass: {:?}",
             telemetry.verdict.host_failures
         );
+        assert!(telemetry.verdict.failure.is_none());
         assert_eq!(telemetry.ram.signature, 0xA5);
         assert!(telemetry.frames >= 2);
         assert!(telemetry.audio.sample_count > 0);

@@ -33,6 +33,14 @@ expected observations, result byte address, raw result byte, and pass/fail
 state. Event records include a normalized event kind plus the active test name
 when the current test id is known.
 
+Schema version `2` also includes a failure catalog and structured
+`verdict.failure` object. When the cartridge reports a failing assertion, the
+failure object maps the raw failure code to the failing test, subsystem,
+assertion, expected observation, observed mismatch, likely emulator domain, and
+remediation hint. This keeps intentional or real failures focused on the first
+localized cartridge assertion instead of mixing in downstream host checks that
+could not run after the early stop.
+
 The cartridge writes status bytes into CPU RAM:
 
 - `$00F0`: status, `0x01` running, `0x80` pass, `0xE0` fail
@@ -42,4 +50,4 @@ The cartridge writes status bytes into CPU RAM:
 - `$00F4`: NMI count
 - `$0200..`: per-test result slots, `0x01` means pass
 
-The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, and current-test transition events.
+The host runner adds emulator-side telemetry that the cartridge cannot inspect directly: CPU registers, frame count, RAM checksum, OAM checksum, rendered-frame checksum/color count, audio sample count/peak, status/frame events, current-test transition events, and failure-localization metadata.

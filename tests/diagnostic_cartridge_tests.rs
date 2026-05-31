@@ -1,6 +1,7 @@
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DIAGNOSTIC_PROVENANCE,
-    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    build_diagnostic_cartridge, run_diagnostic, DiagnosticConfig, DiagnosticFailureKind,
+    DiagnosticSubsystem, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
+    DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -17,6 +18,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
     );
     assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0x70
+            && failure.test_name == Some("joypad_strobe_shift")
+            && failure.likely_domain == "joypad.strobe_shift"
+    }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "cpu_branch_page_crossing"
@@ -34,6 +40,65 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .any(|event| event.current_test_name == Some("joypad_overread_returns_one")));
     assert!(telemetry.cycles > 0);
     assert!(telemetry.frames >= 2);
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        joypad1_mask: 0x00,
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(telemetry.verdict.current_test, 7);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("joypad_strobe_shift")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x70);
+    assert_eq!(telemetry.verdict.host_failures.len(), 1);
+    assert!(telemetry.verdict.host_failures[0].contains("test 7"));
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include structured failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 7);
+    assert_eq!(failure.test_name, Some("joypad_strobe_shift"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Joypad));
+    assert_eq!(failure.failure_code_hex, "0x70");
+    assert_eq!(failure.likely_domain, "joypad.strobe_shift");
+    assert!(failure.assertion.contains("A button"));
+    assert!(failure.remediation_hint.contains("joypad strobe"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_timeout() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        max_cpu_cycles: 1,
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should return timeout telemetry");
+
+    assert!(!telemetry.verdict.passed);
+    assert!(telemetry.verdict.timeout);
+    assert!(telemetry
+        .verdict
+        .host_failures
+        .iter()
+        .any(|failure| failure.contains("timed out")));
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("timeout should include structured failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::Timeout);
+    assert_eq!(failure.likely_domain, "emulator.progress_or_infinite_loop");
+    assert!(failure.observed.contains("status was"));
 }
 
 #[test]
