@@ -92,7 +92,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
     assert_eq!(manifest["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(24));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(25));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(2));
     assert_eq!(manifest["passed"], Value::Bool(true));
@@ -101,7 +101,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(11));
+    assert_eq!(manifest["scenario_count"], Value::from(12));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -122,10 +122,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(11));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(12));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(11)
+        Value::from(12)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -137,7 +137,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         manifest["analysis"]["baseline_divergence_count"],
-        Value::from(10)
+        Value::from(11)
     );
     assert_eq!(
         manifest["analysis"]["critical_scenario_ids"],
@@ -158,10 +158,15 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .expect("known divergence scenario ids should be an array")
         .iter()
         .any(|id| id == &Value::String("mapper2_bank_switch_fault".to_string())));
+    assert!(manifest["analysis"]["known_divergence_scenario_ids"]
+        .as_array()
+        .expect("known divergence scenario ids should be an array")
+        .iter()
+        .any(|id| id == &Value::String("mapper2_prg_ram_fault".to_string())));
     let attention_queue = manifest["analysis"]["attention_queue"]
         .as_array()
         .expect("attention queue should be an array");
-    assert_eq!(attention_queue.len(), 10);
+    assert_eq!(attention_queue.len(), 11);
     let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
     assert_eq!(
         timeout_attention["priority"],
@@ -177,7 +182,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         timeout_attention["comparison_difference_count"],
-        Value::from(95)
+        Value::from(98)
     );
     let ppu_attention = find_attention_item(attention_queue, "ppu_read_buffer_fault");
     assert_eq!(
@@ -204,6 +209,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         mapper_attention["next_artifact"],
         Value::String("mapper2_bank_switch_fault/comparison.json".to_string())
+    );
+    let mapper_ram_attention = find_attention_item(attention_queue, "mapper2_prg_ram_fault");
+    assert_eq!(
+        mapper_ram_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        mapper_ram_attention["focus_domain"],
+        Value::String("mapper.uxrom.prg_ram".to_string())
+    );
+    assert_eq!(
+        mapper_ram_attention["next_artifact"],
+        Value::String("mapper2_prg_ram_fault/comparison.json".to_string())
     );
     let ppu_nmi_attention = find_attention_item(attention_queue, "ppu_nmi_timeout_fault");
     assert_eq!(
@@ -285,18 +303,18 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(1));
     assert_eq!(observer["scenario_suite_schema_version"], Value::from(6));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(24));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(25));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(2));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(11));
+    assert_eq!(observer["scenario_count"], Value::from(12));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
-    assert_eq!(observer["baseline_divergence_count"], Value::from(10));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(11));
     let observer_actions = observer["next_actions"]
         .as_array()
         .expect("observer next_actions should be an array");
-    assert_eq!(observer_actions.len(), 10);
+    assert_eq!(observer_actions.len(), 11);
     let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
     assert_eq!(
         timeout_action["priority"],
@@ -319,7 +337,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .as_array()
         .expect("timeout action evidence should be an array")
         .iter()
-        .any(|entry| entry == &Value::String("comparison_difference_count=95".to_string())));
+        .any(|entry| entry == &Value::String("comparison_difference_count=98".to_string())));
     assert!(timeout_action["evidence"]
         .as_array()
         .expect("timeout action evidence should be an array")
@@ -364,6 +382,24 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .any(|entry| entry
             == &Value::String(
                 "failed_probe_ids=cartridge.status.pass,cartridge.test.15.result".to_string()
+            )));
+    let mapper_ram_action = find_observer_action(observer_actions, "mapper2_prg_ram_fault");
+    assert_eq!(
+        mapper_ram_action["primary_artifact"],
+        Value::String("mapper2_prg_ram_fault/comparison.json".to_string())
+    );
+    assert!(mapper_ram_action["evidence"]
+        .as_array()
+        .expect("mapper PRG RAM action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("focus_domain=mapper.uxrom.prg_ram".to_string())));
+    assert!(mapper_ram_action["evidence"]
+        .as_array()
+        .expect("mapper PRG RAM action evidence should be an array")
+        .iter()
+        .any(|entry| entry
+            == &Value::String(
+                "failed_probe_ids=cartridge.status.pass,cartridge.test.16.result".to_string()
             )));
     let ppu_nmi_action = find_observer_action(observer_actions, "ppu_nmi_timeout_fault");
     assert_eq!(
@@ -464,7 +500,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 11);
+    assert_eq!(observations.len(), 12);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -493,7 +529,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         timeout_observation["comparison_difference_count"],
-        Value::from(95)
+        Value::from(98)
     );
     assert_eq!(
         timeout_observation["next_artifact"],
@@ -579,6 +615,27 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         mapper_observation["next_artifact"],
         Value::String("mapper2_bank_switch_fault/comparison.json".to_string())
     );
+    let mapper_ram_observation = find_observer_observation(observations, "mapper2_prg_ram_fault");
+    assert_eq!(
+        mapper_ram_observation["role"],
+        Value::String("expected_failure_fixture".to_string())
+    );
+    assert_eq!(
+        mapper_ram_observation["outcome"],
+        Value::String("expected_baseline_divergence".to_string())
+    );
+    assert_eq!(
+        mapper_ram_observation["health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(
+        mapper_ram_observation["focus_domain"],
+        Value::String("mapper.uxrom.prg_ram".to_string())
+    );
+    assert_eq!(
+        mapper_ram_observation["next_artifact"],
+        Value::String("mapper2_prg_ram_fault/comparison.json".to_string())
+    );
     let ppu_nmi_observation = find_observer_observation(observations, "ppu_nmi_timeout_fault");
     assert_eq!(
         ppu_nmi_observation["role"],
@@ -649,17 +706,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | apu_status_fault | apu_status_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_read_buffer_fault | ppu_read_buffer_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | mapper2_bank_switch_fault | mapper2_bank_switch_fault/comparison.json |"));
+    assert!(observer_report.contains("| known_divergence | inspect_known_divergence | mapper2_prg_ram_fault | mapper2_prg_ram_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | ppu_nmi_timeout_fault | ppu_nmi_timeout_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_indirect_jmp_fault | cpu_indirect_jmp_fault/comparison.json |"));
     assert!(observer_report.contains("top_difference_path=dma.oam_dma_observed"));
     assert!(observer_report.contains("## Observations"));
     assert!(observer_report
         .contains("| pass | baseline | matches_baseline | healthy | - | 0 | pass/triage.json |"));
-    assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 95 | timeout_cycle_limit/comparison.json |"));
+    assert!(observer_report.contains("| timeout_cycle_limit | expected_failure_fixture | expected_baseline_divergence | timed_out | emulator.progress_or_infinite_loop | 98 | timeout_cycle_limit/comparison.json |"));
     assert!(observer_report.contains("| dma_oam_transfer_fault | expected_failure_fixture | expected_baseline_divergence | host_validation_failed | dma.oam_transfer |"));
     assert!(observer_report.contains("| apu_status_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | apu.status |"));
     assert!(observer_report.contains("| ppu_read_buffer_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(observer_report.contains("| mapper2_bank_switch_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_bank_switch |"));
+    assert!(observer_report.contains("| mapper2_prg_ram_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_ram |"));
     assert!(observer_report.contains("| ppu_nmi_timeout_fault | expected_failure_fixture | expected_baseline_divergence | timed_out | ppu.nmi |"));
     assert!(observer_report.contains("| cpu_indirect_jmp_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(observer_report.contains("## Artifact Hints"));
@@ -670,13 +729,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
     assert!(suite_report.contains("## Suite Analysis"));
     assert!(suite_report.contains("| Status | passed |"));
-    assert!(suite_report.contains("| Baseline divergences | 10 |"));
+    assert!(suite_report.contains("| Baseline divergences | 11 |"));
     assert!(suite_report.contains("## Attention Queue"));
-    assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 95 | timeout_cycle_limit/comparison.json |"));
+    assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop | 98 | timeout_cycle_limit/comparison.json |"));
     assert!(suite_report.contains("| known_divergence | dma_oam_transfer_fault | scenario_diverges_from_pass_baseline | host_validation_failed | dma.oam_transfer |"));
     assert!(suite_report.contains("| known_divergence | apu_status_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | apu.status |"));
     assert!(suite_report.contains("| known_divergence | ppu_read_buffer_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| known_divergence | mapper2_bank_switch_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | mapper.uxrom.prg_bank_switch |"));
+    assert!(suite_report.contains("| known_divergence | mapper2_prg_ram_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | mapper.uxrom.prg_ram |"));
     assert!(suite_report.contains("| known_divergence | ppu_nmi_timeout_fault | scenario_diverges_from_pass_baseline | timed_out | ppu.nmi |"));
     assert!(suite_report.contains("| known_divergence | cpu_zero_page_wrap_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.addressing.zero_page_x_wrap |"));
     assert!(suite_report.contains("| known_divergence | cpu_indirect_jmp_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
@@ -690,6 +750,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| cpu_indirect_jmp_fault | false | false | true | cartridge_assertion_failed | 13 | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(suite_report.contains("| ppu_read_buffer_fault | false | false | true | cartridge_assertion_failed | 14 | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| mapper2_bank_switch_fault | false | false | true | cartridge_assertion_failed | 15 | mapper.uxrom.prg_bank_switch |"));
+    assert!(suite_report.contains("| mapper2_prg_ram_fault | false | false | true | cartridge_assertion_failed | 16 | mapper.uxrom.prg_ram |"));
     assert!(suite_report
         .contains("| ppu_nmi_timeout_fault | false | false | true | timed_out | 10 | ppu.nmi |"));
     assert!(suite_report.contains("cartridge.test.7.result"));
@@ -707,6 +768,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(
         suite_report.contains("| mapper2_bank_switch_fault | true | true | true | true | true |")
     );
+    assert!(suite_report.contains("| mapper2_prg_ram_fault | true | true | true | true | true |"));
     assert!(suite_report.contains("| ppu_nmi_timeout_fault | true | true | true | true | true |"));
     assert!(suite_report.contains("| timeout_cycle_limit | true | true | true | true | true |"));
     assert!(suite_report.contains("## AI Drilldown"));
@@ -724,7 +786,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(pass["actual_passed"], Value::Bool(true));
     assert_eq!(pass["expectation_met"], Value::Bool(true));
     assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
-    assert_eq!(pass["actual_focus_test_id"], Value::from(15));
+    assert_eq!(pass["actual_focus_test_id"], Value::from(16));
     assert_eq!(pass["contract"]["all_matched"], Value::Bool(true));
     assert_eq!(pass["contract"]["passed_matches"], Value::Bool(true));
     assert_eq!(pass["contract"]["health_matches"], Value::Bool(true));
@@ -740,8 +802,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         pass["contract"]["actual_health"],
         Value::String("healthy".to_string())
     );
-    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(15));
-    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(15));
+    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(16));
+    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(16));
     assert_eq!(pass["comparison"]["passed"], Value::Bool(true));
     assert_eq!(pass["comparison"]["difference_count"], Value::from(0));
     assert_eq!(pass["comparison"]["failure_count"], Value::from(0));
@@ -1106,6 +1168,56 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Some("mapper2_prg_bank_switch"),
     );
 
+    let mapper_ram = find_scenario(scenarios, "mapper2_prg_ram_fault");
+    assert_eq!(
+        mapper_ram["actual_health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(mapper_ram["actual_focus_test_id"], Value::from(16));
+    assert_eq!(
+        mapper_ram["actual_focus_domain"],
+        Value::String("mapper.uxrom.prg_ram".to_string())
+    );
+    assert_eq!(mapper_ram["expectation_met"], Value::Bool(true));
+    assert_eq!(mapper_ram["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(
+        mapper_ram["contract"]["expected_focus_domain"],
+        Value::String("mapper.uxrom.prg_ram".to_string())
+    );
+    assert!(mapper_ram["failed_probe_ids"]
+        .as_array()
+        .expect("mapper PRG RAM failed probes should be an array")
+        .iter()
+        .any(|probe| probe == &Value::String("cartridge.test.16.result".to_string())));
+    assert_eq!(mapper_ram["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        mapper_ram["comparison"]["difference_count"]
+            .as_u64()
+            .expect("mapper PRG RAM comparison difference_count should be numeric")
+            > 0
+    );
+    let mapper_ram_triage = read_json(&suite_dir.join("mapper2_prg_ram_fault").join("triage.json"));
+    assert_eq!(
+        mapper_ram_triage["input"]["fault_injection"],
+        Value::String("mapper2_prg_ram".to_string())
+    );
+    assert_eq!(
+        mapper_ram_triage["failure"]["likely_domain"],
+        Value::String("mapper.uxrom.prg_ram".to_string())
+    );
+    assert!(mapper_ram_triage["probes"]["failed"]
+        .as_array()
+        .expect("mapper PRG RAM triage failed probes should be an array")
+        .iter()
+        .any(|probe| probe["id"] == Value::String("cartridge.test.16.result".to_string())));
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("mapper2_prg_ram_fault"),
+        true,
+        false,
+        "0x28",
+        Some("mapper2_prg_ram"),
+    );
+
     let ppu_nmi = find_scenario(scenarios, "ppu_nmi_timeout_fault");
     assert_eq!(
         ppu_nmi["actual_health"],
@@ -1324,7 +1436,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(24));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(25));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -1332,7 +1444,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     );
     assert_eq!(
         triage["debug_focus"]["focus_test_name"],
-        Value::String("mapper2_prg_bank_switch".to_string())
+        Value::String("mapper2_prg_ram_roundtrip".to_string())
     );
     assert_eq!(
         triage["debug_focus"]["terminal_instruction"]["symbol"],
@@ -1341,7 +1453,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(triage["debug_focus"]["terminal_instruction"]["instruction"]
         .as_str()
         .is_some_and(|instruction| instruction.starts_with("JMP 0x")));
-    assert_eq!(triage["coverage"]["passed_tests"], Value::from(15));
+    assert_eq!(triage["coverage"]["passed_tests"], Value::from(16));
     assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
     assert!(triage["dma"]["oam_dma_active_cycles"]
         .as_u64()
@@ -1419,7 +1531,7 @@ fn assert_bundle_artifacts_with_config(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(2));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(24));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(25));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],
