@@ -12,11 +12,16 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - `cargo clippy -- -D warnings`
 - `git diff --check`
 - `cargo audit`
-- GitHub Actions CI is green on Windows, Linux, macOS, rustfmt, clippy, security audit, and IP compliance jobs.
+- The diagnostic cartridge bundle commands pass and write an AI-ready bundle:
+  `cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/release-baseline.json --no-stdout`
+  then
+  `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/latest-bundle --baseline-json target/diagnostics/release-baseline.json --no-stdout`
+- GitHub Actions CI is green on Windows, Linux, macOS, rustfmt, clippy, security audit, IP compliance, and diagnostic bundle jobs.
 
 ### Compatibility And Safety
 
 - CPU fetch/decode execution is covered by generated in-memory test ROM content.
+- The generated diagnostic cartridge bundle contains `manifest.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`; when a baseline is supplied it also contains `comparison.json` and `comparison.md`.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.
 - PPU mirroring and save-state truncation regressions pass.
 - Malformed user inputs for save states, recordings, scripts, updater payloads, ROM metadata, and cartridge headers fail closed without panics.
