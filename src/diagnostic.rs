@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 23;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 24;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v23";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v24";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -22,11 +22,19 @@ const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "structured expected-vs-observed probes for AI triage",
 ];
 
-const PROGRAM_BASE: u16 = 0x8000;
-const PRG_BANKS: u8 = 2;
+const PROGRAM_BASE: u16 = 0xC000;
+const PRG_BANK_SIZE: usize = 16 * 1024;
+const DIAGNOSTIC_MAPPER: u8 = 2;
+const PRG_BANKS: u8 = 4;
 const CHR_BANKS: u8 = 1;
-const PRG_SIZE: usize = PRG_BANKS as usize * 16 * 1024;
+const PRG_SIZE: usize = PRG_BANKS as usize * PRG_BANK_SIZE;
 const CHR_SIZE: usize = CHR_BANKS as usize * 8 * 1024;
+const PROGRAM_PRG_BANK: usize = PRG_BANKS as usize - 1;
+const PROGRAM_PRG_OFFSET: usize = PROGRAM_PRG_BANK * PRG_BANK_SIZE;
+const MAPPER2_SWITCHABLE_ADDR: u16 = 0x8000;
+const MAPPER2_FIXED_SENTINEL_ADDR: u16 = 0xFF00;
+const MAPPER2_BANK_SENTINELS: &[(u8, u8)] = &[(0, 0xA0), (1, 0xB1), (2, 0xC2)];
+const MAPPER2_FIXED_SENTINEL: u8 = 0xD3;
 
 const STATUS_ADDR: u8 = 0xF0;
 const CURRENT_TEST_ADDR: u8 = 0xF1;
@@ -51,6 +59,7 @@ const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
+const MAPPER2_BANK_SWITCH_FAULT_LABEL: &str = "mapper2_prg_bank_switch_before_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 
@@ -62,6 +71,7 @@ pub enum DiagnosticSubsystem {
     Ppu,
     Apu,
     Dma,
+    Cartridge,
     Joypad,
 }
 
@@ -233,6 +243,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "first $2007 read from $2000 loads the internal read buffer",
             "second and third reads return the $2000 and $2001 VRAM sentinels",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 15,
+        name: "mapper2_prg_bank_switch",
+        subsystem: DiagnosticSubsystem::Cartridge,
+        tier: DiagnosticTestTier::Integration,
+        intent: "Verify Mapper 2/UXROM PRG bank switching through CPU-visible cartridge reads.",
+        expected_observations: &[
+            "$8000 exposes distinct sentinels after selecting switchable PRG banks 0, 1, and 2",
+            "$FF00 remains mapped to the fixed final PRG bank after switchable bank writes",
         ],
     },
 ];
@@ -553,6 +574,42 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         likely_domain: "ppu.registers.ppudata_increment",
         remediation_hint: "Inspect PPUDATA read-side VRAM increment and buffer reload behavior after non-palette reads.",
     },
+    DiagnosticFailureSpec {
+        code: 0xF0,
+        test_id: 15,
+        assertion: "Mapper 2 switchable PRG window starts on bank 0",
+        expected: "$8000 reads the bank-0 sentinel after selecting PRG bank 0",
+        observed: "$8000 did not expose the bank-0 sentinel",
+        likely_domain: "mapper.uxrom.prg_bank_switch",
+        remediation_hint: "Inspect Mapper 2 bank-select initialization and CPU $8000-$BFFF read mapping.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xF1,
+        test_id: 15,
+        assertion: "Mapper 2 switches the $8000-$BFFF PRG window to bank 1",
+        expected: "$8000 reads the bank-1 sentinel after writing bank select 1",
+        observed: "$8000 did not expose the bank-1 sentinel",
+        likely_domain: "mapper.uxrom.prg_bank_switch",
+        remediation_hint: "Inspect Mapper 2 PRG write handling and modulo selection for the switchable bank window.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xF2,
+        test_id: 15,
+        assertion: "Mapper 2 switches the $8000-$BFFF PRG window to bank 2",
+        expected: "$8000 reads the bank-2 sentinel after writing bank select 2",
+        observed: "$8000 did not expose the bank-2 sentinel",
+        likely_domain: "mapper.uxrom.prg_bank_switch",
+        remediation_hint: "Inspect Mapper 2 PRG bank indexing for nonzero switchable banks.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xF3,
+        test_id: 15,
+        assertion: "Mapper 2 keeps the final PRG bank fixed at $C000-$FFFF",
+        expected: "$FF00 reads the fixed-bank sentinel after switchable bank writes",
+        observed: "$FF00 did not expose the fixed final-bank sentinel",
+        likely_domain: "mapper.uxrom.fixed_prg_bank",
+        remediation_hint: "Inspect Mapper 2 fixed-bank mapping for CPU $C000-$FFFF reads.",
+    },
 ];
 
 const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
@@ -575,10 +632,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
-        risk: "The diagnostic cartridge is NROM-only, so mapper bank switching is not exercised end to end through the headless runner.",
-        current_coverage: "The generated cartridge validates mapper-0 loading and normal CPU/PPU cartridge reads.",
-        missing_coverage: "Runtime PRG/CHR bank switching, IRQ-generating mappers, mirroring changes, and battery-backed RAM behavior.",
-        suggested_next_test: "Generate mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
+        risk: "The diagnostic cartridge now exercises one PRG bank-switching mapper, but broader mapper behavior can still regress outside this fixture.",
+        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching and the fixed final-bank window end to end.",
+        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, mirroring changes, MMC register edge cases, and battery-backed RAM behavior.",
+        suggested_next_test: "Generate additional mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
     },
     DiagnosticCoverageGapSpec {
         id: "apu_audio_depth",
@@ -632,6 +689,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    Mapper2PrgBankSwitch,
     PpuNmiTimeout,
     PpuVramReadBuffer,
 }
@@ -643,6 +701,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
@@ -654,6 +713,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
         }
@@ -1185,11 +1245,11 @@ fn build_diagnostic_cartridge_from_program(
     program: &[u8],
     labels: &HashMap<String, u16>,
 ) -> Result<Vec<u8>, String> {
-    if program.len() > PRG_SIZE {
+    if program.len() > PRG_BANK_SIZE {
         return Err(format!(
             "diagnostic program is too large: {} bytes > {} bytes",
             program.len(),
-            PRG_SIZE
+            PRG_BANK_SIZE
         ));
     }
 
@@ -1197,12 +1257,20 @@ fn build_diagnostic_cartridge_from_program(
     rom.extend_from_slice(b"NES\x1A");
     rom.push(PRG_BANKS);
     rom.push(CHR_BANKS);
-    rom.push(0x00); // mapper 0, horizontal mirroring
-    rom.push(0x00);
+    rom.push((DIAGNOSTIC_MAPPER & 0x0F) << 4); // Mapper 2, horizontal mirroring.
+    rom.push(DIAGNOSTIC_MAPPER & 0xF0);
     rom.extend_from_slice(&[0; 8]);
 
     let mut prg = vec![0xEA; PRG_SIZE];
-    prg[..program.len()].copy_from_slice(program);
+    for (bank, sentinel) in MAPPER2_BANK_SENTINELS {
+        prg[*bank as usize * PRG_BANK_SIZE] = *sentinel;
+    }
+    write_prg_cpu_byte(
+        &mut prg,
+        MAPPER2_FIXED_SENTINEL_ADDR,
+        MAPPER2_FIXED_SENTINEL,
+    );
+    prg[PROGRAM_PRG_OFFSET..PROGRAM_PRG_OFFSET + program.len()].copy_from_slice(program);
     write_vector(&mut prg, 0xFFFA, label_addr(labels, "nmi")?);
     write_vector(&mut prg, 0xFFFC, PROGRAM_BASE);
     write_vector(&mut prg, 0xFFFE, label_addr(labels, "irq")?);
@@ -3364,6 +3432,7 @@ fn diagnostic_subsystem_probe_domain(subsystem: DiagnosticSubsystem) -> &'static
         DiagnosticSubsystem::Ppu => "ppu.rendering",
         DiagnosticSubsystem::Apu => "apu.audio",
         DiagnosticSubsystem::Dma => "dma.transfer",
+        DiagnosticSubsystem::Cartridge => "cartridge.mapper",
         DiagnosticSubsystem::Joypad => "joypad.input",
     }
 }
@@ -3400,6 +3469,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_zero_page_index_wrap();
     program.cpu_indirect_jmp_page_wrap();
     program.ppu_vram_read_buffer();
+    program.mapper2_prg_bank_switch();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3552,7 +3622,7 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x4011);
         self.asm.lda_imm(0x00);
-        self.asm.sta_abs(0x4012); // Sample starts at $C000 in this NROM cartridge.
+        self.asm.sta_abs(0x4012); // Sample starts at $C000 in the fixed Mapper 2 PRG bank.
         self.asm.lda_imm(0x01);
         self.asm.sta_abs(0x4013); // 17 bytes, enough to request again during OAM DMA.
         self.asm.lda_imm(0x10);
@@ -3769,6 +3839,24 @@ impl DiagnosticProgram {
         self.asm.lda_abs(0x2007);
         self.expect_a_eq(0x6B, 0xD1);
         self.pass_test(14);
+    }
+
+    fn mapper2_prg_bank_switch(&mut self) {
+        self.begin_test(15);
+        for (bank, sentinel) in MAPPER2_BANK_SENTINELS {
+            self.asm.lda_imm(*bank);
+            self.asm.sta_abs(MAPPER2_SWITCHABLE_ADDR);
+            if *bank == 1 {
+                self.asm
+                    .label(MAPPER2_BANK_SWITCH_FAULT_LABEL)
+                    .expect("diagnostic fault-injection label should not collide");
+            }
+            self.asm.lda_abs(MAPPER2_SWITCHABLE_ADDR);
+            self.expect_a_eq(*sentinel, 0xF0 + *bank);
+        }
+        self.asm.lda_abs(MAPPER2_FIXED_SENTINEL_ADDR);
+        self.expect_a_eq(MAPPER2_FIXED_SENTINEL, 0xF3);
+        self.pass_test(15);
     }
 
     fn expect_serial_bits(&mut self, addr: u16, expected: &[u8], fail_base: u8) {
@@ -4075,8 +4163,21 @@ fn build_chr_rom() -> Vec<u8> {
     chr
 }
 
+fn diagnostic_prg_offset_for_cpu_addr(addr: u16) -> usize {
+    match addr {
+        0x8000..=0xBFFF => (addr - 0x8000) as usize,
+        0xC000..=0xFFFF => PROGRAM_PRG_OFFSET + (addr - 0xC000) as usize,
+        _ => panic!("diagnostic PRG CPU address out of cartridge range: 0x{addr:04X}"),
+    }
+}
+
+fn write_prg_cpu_byte(prg: &mut [u8], addr: u16, value: u8) {
+    let index = diagnostic_prg_offset_for_cpu_addr(addr);
+    prg[index] = value;
+}
+
 fn write_vector(prg: &mut [u8], vector_addr: u16, value: u16) {
-    let index = (vector_addr - 0x8000) as usize;
+    let index = diagnostic_prg_offset_for_cpu_addr(vector_addr);
     prg[index] = value as u8;
     prg[index + 1] = (value >> 8) as u8;
 }
@@ -4096,7 +4197,7 @@ fn cartridge_telemetry(rom: &[u8]) -> CartridgeTelemetry {
     let prg_start = 16;
     let prg = &rom[prg_start..prg_start + PRG_SIZE];
     CartridgeTelemetry {
-        mapper: 0,
+        mapper: DIAGNOSTIC_MAPPER,
         prg_banks: PRG_BANKS,
         chr_banks: CHR_BANKS,
         size_bytes: rom.len(),
@@ -4108,7 +4209,7 @@ fn cartridge_telemetry(rom: &[u8]) -> CartridgeTelemetry {
 }
 
 fn read_vector(prg: &[u8], vector_addr: u16) -> u16 {
-    let index = (vector_addr - 0x8000) as usize;
+    let index = diagnostic_prg_offset_for_cpu_addr(vector_addr);
     prg[index] as u16 | ((prg[index + 1] as u16) << 8)
 }
 
@@ -4193,6 +4294,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
+        }
+        DiagnosticFaultInjection::Mapper2PrgBankSwitch => {
+            bus.cpu_write(MAPPER2_SWITCHABLE_ADDR, 0x00);
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
@@ -5784,6 +5888,7 @@ fn diagnostic_subsystem_label(subsystem: DiagnosticSubsystem) -> &'static str {
         DiagnosticSubsystem::Ppu => "ppu",
         DiagnosticSubsystem::Apu => "apu",
         DiagnosticSubsystem::Dma => "dma",
+        DiagnosticSubsystem::Cartridge => "cartridge",
         DiagnosticSubsystem::Joypad => "joypad",
     }
 }
@@ -5967,6 +6072,7 @@ mod tests {
         Cartridge::new(&rom).expect("diagnostic cartridge should load");
 
         let info = cartridge_telemetry(&rom);
+        assert_eq!(info.mapper, DIAGNOSTIC_MAPPER);
         assert_eq!(info.reset_vector, PROGRAM_BASE);
         assert!(info.nmi_vector >= PROGRAM_BASE);
         assert!(info.irq_vector >= PROGRAM_BASE);

@@ -43,10 +43,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 14);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 15);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_vram_read_buffer")
+        Some("mapper2_prg_bank_switch")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -66,7 +66,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("ppu_vram_read_buffer")
+        Some("mapper2_prg_bank_switch")
     );
     assert_eq!(
         telemetry
@@ -90,6 +90,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .subsystem_summary
         .iter()
         .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 3));
+    assert!(telemetry
+        .analysis
+        .coverage
+        .subsystem_summary
+        .iter()
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cartridge && entry.total == 1));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0x70
             && failure.test_name == Some("joypad_strobe_shift")
@@ -109,6 +115,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         failure.code == 0xD0
             && failure.test_name == Some("ppu_vram_read_buffer")
             && failure.likely_domain == "ppu.registers.ppudata_buffer"
+    }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0xF1
+            && failure.test_name == Some("mapper2_prg_bank_switch")
+            && failure.likely_domain == "mapper.uxrom.prg_bank_switch"
     }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
@@ -134,6 +145,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     }));
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "ppu_vram_read_buffer" && test.intent.contains("PPUDATA") && test.passed
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "mapper2_prg_bank_switch" && test.intent.contains("Mapper 2") && test.passed
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
@@ -331,7 +345,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | ppu_vram_read_buffer (14) |"));
+    assert!(report.contains("| Focus test | mapper2_prg_bank_switch (15) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -353,6 +367,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 12 | cpu_zero_page_index_wrap | cpu | edge_case | passed |"));
     assert!(report.contains("| 13 | cpu_indirect_jmp_page_wrap | cpu | edge_case | passed |"));
     assert!(report.contains("| 14 | ppu_vram_read_buffer | ppu | edge_case | passed |"));
+    assert!(report.contains("| 15 | mapper2_prg_bank_switch | cartridge | integration | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -491,7 +506,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 7);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 8);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -603,7 +618,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 14);
+    assert_eq!(telemetry.verdict.current_test, 15);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -735,7 +750,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 6);
     assert_eq!(telemetry.analysis.timing.ended_tests, 6);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 8);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 9);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -806,7 +821,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failu
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 12);
     assert_eq!(telemetry.analysis.timing.ended_tests, 12);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -880,7 +895,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 13);
     assert_eq!(telemetry.analysis.timing.ended_tests, 13);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -951,7 +966,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 14);
     assert_eq!(telemetry.analysis.timing.ended_tests, 14);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -962,6 +977,80 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     assert!(report.contains("| Focus domain | ppu.registers.ppudata_buffer |"));
     assert!(report.contains("| Likely domain | ppu.registers.ppudata_buffer |"));
     assert!(report.contains("| 14 | ppu_vram_read_buffer | ppu | edge_case | failed |"));
+    assert!(
+        report.contains("| 15 | mapper2_prg_bank_switch | cartridge | integration | not_started |")
+    );
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::Mapper2PrgBankSwitch),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported mapper failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("mapper2_prg_bank_switch")
+    );
+    assert_eq!(telemetry.verdict.current_test, 15);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("mapper2_prg_bank_switch")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xF1);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include mapper failure localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 15);
+    assert_eq!(failure.test_name, Some("mapper2_prg_bank_switch"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cartridge));
+    assert_eq!(failure.failure_code_hex, "0xF1");
+    assert_eq!(failure.likely_domain, "mapper.uxrom.prg_bank_switch");
+    assert!(failure.assertion.contains("bank 1"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cartridge)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("mapper2_prg_bank_switch")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("mapper.uxrom.prg_bank_switch")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 15);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("mapper.uxrom.prg_bank_switch")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.15.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(15)
+            && probe.likely_domain == "mapper.uxrom.prg_bank_switch"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 15);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 15);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "mapper2_prg_bank_switch_before_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | mapper2_prg_bank_switch (15) |"));
+    assert!(report.contains("| Focus domain | mapper.uxrom.prg_bank_switch |"));
+    assert!(report.contains("| Likely domain | mapper.uxrom.prg_bank_switch |"));
+    assert!(report.contains("| 15 | mapper2_prg_bank_switch | cartridge | integration | failed |"));
 }
 
 #[test]
@@ -1143,7 +1232,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 14 |"));
+    assert!(report.contains("| Not started tests | 15 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }
@@ -1306,7 +1395,10 @@ fn generated_diagnostic_cartridge_has_no_bundled_rom_provenance() {
     let rom = build_diagnostic_cartridge().expect("diagnostic cartridge should build");
 
     assert_eq!(&rom[0..4], b"NES\x1A");
-    assert_eq!(rom.len(), 16 + 2 * 16 * 1024 + 8 * 1024);
+    assert_eq!(rom[4], 4);
+    assert_eq!(rom[6], 0x20);
+    assert_eq!(rom[7], 0x00);
+    assert_eq!(rom.len(), 16 + 4 * 16 * 1024 + 8 * 1024);
     assert!(DIAGNOSTIC_PROVENANCE.contains("Generated OxideNES diagnostic"));
     assert!(DIAGNOSTIC_PROVENANCE.contains("no ROM content"));
 }
