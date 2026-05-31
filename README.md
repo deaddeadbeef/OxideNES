@@ -127,10 +127,10 @@ nes.log(text)         -- Print to stderr
 OxideNES can generate and run an IP-safe diagnostic cartridge headlessly:
 
 ```powershell
-cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/telemetry.json --dump-rom target/diagnostics/oxidenes-diagnostic.nes
+cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/latest-bundle --no-stdout
 ```
 
-The generated cartridge exercises CPU, bus, PPU, APU, DMA, joypad, and frame/NMI paths, then emits JSON telemetry for debugging. See [docs/DIAGNOSTIC_CARTRIDGE.md](docs/DIAGNOSTIC_CARTRIDGE.md).
+The generated cartridge exercises CPU, bus, PPU, APU, DMA, joypad, and frame/NMI paths, then emits an AI-ready bundle with telemetry JSON, Markdown report, generated cartridge, and a manifest with artifact hashes. See [docs/DIAGNOSTIC_CARTRIDGE.md](docs/DIAGNOSTIC_CARTRIDGE.md).
 
 ## Achievements
 

@@ -30,6 +30,25 @@ differences for timing and observable artifact drift such as frame/OAM
 checksums, allowing CI and AI agents to separate real correctness regressions
 from values that need review.
 
+To hand a complete run to an automated debugger, write a diagnostic bundle:
+
+```powershell
+cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/latest-bundle --baseline-json target/diagnostics/baseline.json --no-stdout
+```
+
+The bundle always includes:
+
+- `manifest.json`: bundle schema, pass/fail state, runner config, artifact list,
+  SHA-256 digests, and AI handoff hints
+- `telemetry.json`: full machine-readable diagnostic telemetry
+- `report.md`: Markdown triage report for human and AI review
+- `diagnostic.nes`: the generated IP-safe test cartridge used for the run
+
+When `--baseline-json` is supplied, the bundle also includes `comparison.json`
+and `comparison.md`. The runner still exits `1` for diagnostic or comparison
+failures after writing the bundle, so CI can upload the artifact directory for
+post-failure analysis.
+
 ## Coverage
 
 The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU, APU, DMA, and joypad paths:
