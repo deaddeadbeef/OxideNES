@@ -38,6 +38,35 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.analysis.failing_subsystem, None);
     assert_eq!(telemetry.analysis.failing_test, None);
     assert_eq!(telemetry.analysis.first_failure_domain, None);
+    assert_eq!(
+        telemetry.analysis.debug_focus.health,
+        DiagnosticHealth::Healthy
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 11);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_test_name,
+        Some("joypad2_strobe_shift")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
+    assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
+    assert_eq!(telemetry.analysis.debug_focus.failed_probe_ids.len(), 0);
+    assert_eq!(telemetry.analysis.debug_focus.skipped_probe_count, 0);
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .terminal_instruction
+        .as_ref()
+        .and_then(|instruction| instruction.instruction.as_deref())
+        .is_some_and(|text| text.starts_with("JMP 0x")));
+    assert_eq!(
+        telemetry
+            .analysis
+            .debug_focus
+            .terminal_instruction
+            .as_ref()
+            .and_then(|instruction| instruction.symbol.as_deref()),
+        Some("hang")
+    );
     assert!(telemetry.analysis.summary.contains("diagnostic passed"));
     assert!(telemetry
         .analysis
@@ -257,6 +286,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Health | healthy |"));
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
+    assert!(report.contains("## Debug Focus"));
+    assert!(report.contains("| Focus test | joypad2_strobe_shift (11) |"));
+    assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
     assert!(report.contains("| mapper_banking_runtime | cartridge |"));
@@ -331,6 +363,50 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
         telemetry.analysis.first_failure_domain.as_deref(),
         Some("joypad.strobe_shift")
     );
+    assert_eq!(
+        telemetry.analysis.debug_focus.health,
+        DiagnosticHealth::CartridgeAssertionFailed
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 7);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_test_name,
+        Some("joypad_strobe_shift")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_subsystem,
+        Some(DiagnosticSubsystem::Joypad)
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("joypad.strobe_shift")
+    );
+    assert_eq!(
+        telemetry.analysis.debug_focus.failure_kind,
+        Some(DiagnosticFailureKind::CartridgeAssertion)
+    );
+    assert_eq!(telemetry.analysis.debug_focus.failure_code_hex, "0x70");
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .iter()
+        .any(|id| id == "cartridge.status.pass"));
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .iter()
+        .any(|id| id == "cartridge.test.7.result"));
+    assert!(telemetry.analysis.debug_focus.skipped_probe_count > 0);
+    assert_eq!(
+        telemetry
+            .analysis
+            .debug_focus
+            .last_test_instruction
+            .as_ref()
+            .and_then(|instruction| instruction.current_test_name),
+        Some("joypad_strobe_shift")
+    );
     assert!(telemetry
         .analysis
         .summary
@@ -392,6 +468,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Result | fail |"));
     assert!(report.contains("| Health | cartridge_assertion_failed |"));
+    assert!(report.contains("## Debug Focus"));
+    assert!(report.contains("| Focus test | joypad_strobe_shift (7) |"));
+    assert!(report.contains("| Focus domain | joypad.strobe_shift |"));
+    assert!(report.contains("cartridge.test.7.result"));
     assert!(report.contains("## Failure Localization"));
     assert!(report.contains("| Likely domain | joypad.strobe_shift |"));
     assert!(report.contains("| Remediation hint | Inspect joypad strobe"));
@@ -449,6 +529,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
         telemetry.analysis.first_failure_domain.as_deref(),
         Some("joypad2.strobe_shift")
     );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 11);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("joypad2.strobe_shift")
+    );
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "cartridge.test.11.result"
             && probe.status == DiagnosticProbeStatus::Failed
@@ -483,6 +568,10 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     assert!(failure.observed.contains("status was"));
 
     assert_eq!(telemetry.analysis.health, DiagnosticHealth::TimedOut);
+    assert_eq!(
+        telemetry.analysis.debug_focus.health,
+        DiagnosticHealth::TimedOut
+    );
     assert_eq!(
         telemetry.analysis.first_failure_domain.as_deref(),
         Some("emulator.progress_or_infinite_loop")

@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 13;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 14;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v13";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v14";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -649,6 +649,7 @@ pub enum DiagnosticHealth {
 pub struct DiagnosticAnalysisTelemetry {
     pub health: DiagnosticHealth,
     pub summary: String,
+    pub debug_focus: DiagnosticDebugFocusTelemetry,
     pub coverage: DiagnosticCoverageTelemetry,
     pub coverage_gaps: Vec<DiagnosticCoverageGapTelemetry>,
     pub timing: DiagnosticTimingSummaryTelemetry,
@@ -658,6 +659,49 @@ pub struct DiagnosticAnalysisTelemetry {
     pub first_failure_domain: Option<String>,
     pub next_actions: Vec<String>,
     pub test_transition_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticDebugFocusTelemetry {
+    pub health: DiagnosticHealth,
+    pub focus_test_id: u8,
+    pub focus_test_name: Option<&'static str>,
+    pub focus_subsystem: Option<DiagnosticSubsystem>,
+    pub focus_domain: Option<String>,
+    pub failure_kind: Option<DiagnosticFailureKind>,
+    pub failure_code_hex: String,
+    pub failed_probe_ids: Vec<String>,
+    pub skipped_probe_count: usize,
+    pub last_event: Option<DiagnosticDebugEventFocusTelemetry>,
+    pub terminal_instruction: Option<DiagnosticDebugInstructionFocusTelemetry>,
+    pub last_test_instruction: Option<DiagnosticDebugInstructionFocusTelemetry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticDebugEventFocusTelemetry {
+    pub kind: DiagnosticEventKind,
+    pub cycle: u64,
+    pub frame: u64,
+    pub status_hex: String,
+    pub current_test: u8,
+    pub current_test_name: Option<&'static str>,
+    pub pc_hex: String,
+    pub note: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticDebugInstructionFocusTelemetry {
+    pub sequence: u64,
+    pub cycle: u64,
+    pub frame: u64,
+    pub current_test: u8,
+    pub current_test_name: Option<&'static str>,
+    pub pc_hex: String,
+    pub instruction: Option<String>,
+    pub symbol: Option<String>,
+    pub status_hex: String,
+    pub current_result_hex: Option<String>,
+    pub failure_code_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1291,15 +1335,17 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         audio_sample_count,
         frames,
     });
-    let analysis = analysis_telemetry(
-        &verdict,
-        &test_results,
-        &timeline,
-        &probes,
-        &events,
+    let instruction_trace = instruction_trace.telemetry();
+    let analysis = analysis_telemetry(AnalysisTelemetryInput {
+        verdict: &verdict,
+        tests: &test_results,
+        timeline: &timeline,
+        probes: &probes,
+        instruction_trace: &instruction_trace,
+        events: &events,
         cycles,
         frames,
-    );
+    });
 
     Ok(DiagnosticTelemetry {
         schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
@@ -1328,7 +1374,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             sample_count: audio_sample_count,
             peak_abs: audio_peak_abs,
         },
-        instruction_trace: instruction_trace.telemetry(),
+        instruction_trace,
         events,
     })
 }
@@ -1537,6 +1583,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     writeln!(report).expect("write report");
 
     write_input_section(&mut report, telemetry);
+    write_debug_focus_section(&mut report, telemetry);
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_coverage_gaps_section(&mut report, telemetry);
@@ -1549,6 +1596,94 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_event_tail_section(&mut report, telemetry);
 
     report
+}
+
+fn write_debug_focus_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    let focus = &telemetry.analysis.debug_focus;
+
+    writeln!(report, "## Debug Focus").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "This derived focus is the recommended first stop for automated triage before drilling into the full event, probe, and instruction streams."
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Health | {} |",
+        diagnostic_health_label(focus.health)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Focus test | {} ({}) |",
+        focus.focus_test_name.unwrap_or("unknown_test"),
+        focus.focus_test_id
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Focus subsystem | {} |",
+        focus
+            .focus_subsystem
+            .map(diagnostic_subsystem_label)
+            .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Focus domain | {} |",
+        focus.focus_domain.as_deref().unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Failure kind | {} |",
+        focus
+            .failure_kind
+            .map(diagnostic_failure_kind_label)
+            .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(report, "| Failure code | {} |", focus.failure_code_hex).expect("write report");
+    writeln!(
+        report,
+        "| Failed probe ids | {} |",
+        if focus.failed_probe_ids.is_empty() {
+            "none".to_string()
+        } else {
+            focus.failed_probe_ids.join(", ")
+        }
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Skipped probe count | {} |",
+        focus.skipped_probe_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Last event | {} |",
+        format_debug_event_focus(focus.last_event.as_ref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Terminal instruction | {} |",
+        format_debug_instruction_focus(focus.terminal_instruction.as_ref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Last focus-test instruction | {} |",
+        format_debug_instruction_focus(focus.last_test_instruction.as_ref())
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
 }
 
 fn write_failure_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
@@ -3882,35 +4017,42 @@ fn failure_telemetry(
     })
 }
 
-fn analysis_telemetry(
-    verdict: &VerdictTelemetry,
-    tests: &[TestTelemetry],
-    timeline: &[TestTimelineTelemetry],
-    probes: &[DiagnosticProbeTelemetry],
-    events: &[EventTelemetry],
+struct AnalysisTelemetryInput<'a> {
+    verdict: &'a VerdictTelemetry,
+    tests: &'a [TestTelemetry],
+    timeline: &'a [TestTimelineTelemetry],
+    probes: &'a [DiagnosticProbeTelemetry],
+    instruction_trace: &'a InstructionTraceTelemetry,
+    events: &'a [EventTelemetry],
     cycles: u64,
     frames: u64,
-) -> DiagnosticAnalysisTelemetry {
-    let coverage = coverage_telemetry(tests);
-    let timing = timing_summary(timeline);
-    let probe_summary = probe_summary(probes);
-    let health = diagnostic_health(verdict);
-    let test_transition_count = events
+}
+
+fn analysis_telemetry(input: AnalysisTelemetryInput<'_>) -> DiagnosticAnalysisTelemetry {
+    let coverage = coverage_telemetry(input.tests);
+    let timing = timing_summary(input.timeline);
+    let probe_summary = probe_summary(input.probes);
+    let health = diagnostic_health(input.verdict);
+    let test_transition_count = input
+        .events
         .iter()
         .filter(|event| event.kind == DiagnosticEventKind::TestChanged)
         .count();
 
-    let failing_subsystem = verdict
+    let failing_subsystem = input
+        .verdict
         .failure
         .as_ref()
         .and_then(|failure| failure.subsystem)
-        .or_else(|| first_failed_test(tests).map(|test| test.subsystem));
-    let failing_test = verdict
+        .or_else(|| first_failed_test(input.tests).map(|test| test.subsystem));
+    let failing_test = input
+        .verdict
         .failure
         .as_ref()
         .and_then(|failure| failure.test_name)
-        .or_else(|| first_failed_test(tests).map(|test| test.name));
-    let first_failure_domain = verdict
+        .or_else(|| first_failed_test(input.tests).map(|test| test.name));
+    let first_failure_domain = input
+        .verdict
         .failure
         .as_ref()
         .map(|failure| failure.likely_domain.clone());
@@ -3918,17 +4060,25 @@ fn analysis_telemetry(
     let summary = analysis_summary(
         health,
         &coverage,
-        verdict,
+        input.verdict,
         failing_test,
         first_failure_domain.as_deref(),
-        cycles,
-        frames,
+        input.cycles,
+        input.frames,
     );
-    let next_actions = analysis_next_actions(health, verdict);
+    let next_actions = analysis_next_actions(health, input.verdict);
+    let debug_focus = debug_focus_telemetry(
+        health,
+        input.verdict,
+        input.probes,
+        input.events,
+        input.instruction_trace,
+    );
 
     DiagnosticAnalysisTelemetry {
         health,
         summary,
+        debug_focus,
         coverage,
         coverage_gaps: coverage_gap_telemetry(),
         timing,
@@ -3938,6 +4088,125 @@ fn analysis_telemetry(
         first_failure_domain,
         next_actions,
         test_transition_count,
+    }
+}
+
+fn debug_focus_telemetry(
+    health: DiagnosticHealth,
+    verdict: &VerdictTelemetry,
+    probes: &[DiagnosticProbeTelemetry],
+    events: &[EventTelemetry],
+    instruction_trace: &InstructionTraceTelemetry,
+) -> DiagnosticDebugFocusTelemetry {
+    let focus_test_id = verdict
+        .failure
+        .as_ref()
+        .map(|failure| failure.test_id)
+        .unwrap_or(verdict.current_test);
+    let focus_spec = test_spec(focus_test_id);
+    let focus_test_name = verdict
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.test_name)
+        .or_else(|| focus_spec.map(|spec| spec.name))
+        .or(verdict.current_test_name);
+    let focus_subsystem = verdict
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.subsystem)
+        .or_else(|| focus_spec.map(|spec| spec.subsystem));
+    let focus_domain = verdict
+        .failure
+        .as_ref()
+        .map(|failure| failure.likely_domain.clone())
+        .or_else(|| {
+            probes
+                .iter()
+                .find(|probe| probe.status == DiagnosticProbeStatus::Failed)
+                .map(|probe| probe.likely_domain.clone())
+        });
+    let failure_kind = verdict.failure.as_ref().map(|failure| failure.kind);
+    let failed_probe_ids = probes
+        .iter()
+        .filter(|probe| probe.status == DiagnosticProbeStatus::Failed)
+        .take(8)
+        .map(|probe| probe.id.clone())
+        .collect();
+    let skipped_probe_count = probes
+        .iter()
+        .filter(|probe| probe.status == DiagnosticProbeStatus::Skipped)
+        .count();
+    let terminal_instruction = instruction_trace
+        .tail
+        .last()
+        .map(debug_instruction_focus_telemetry);
+    let last_test_instruction = instruction_trace
+        .tail
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.diagnostic_ram.current_test == focus_test_id
+                && entry
+                    .symbol
+                    .as_ref()
+                    .is_none_or(|symbol| symbol.name != "hang")
+        })
+        .or_else(|| {
+            instruction_trace
+                .tail
+                .iter()
+                .rev()
+                .find(|entry| entry.diagnostic_ram.current_test == focus_test_id)
+        })
+        .map(debug_instruction_focus_telemetry);
+
+    DiagnosticDebugFocusTelemetry {
+        health,
+        focus_test_id,
+        focus_test_name,
+        focus_subsystem,
+        focus_domain,
+        failure_kind,
+        failure_code_hex: hex_byte(verdict.failure_code),
+        failed_probe_ids,
+        skipped_probe_count,
+        last_event: events.last().map(debug_event_focus_telemetry),
+        terminal_instruction,
+        last_test_instruction,
+    }
+}
+
+fn debug_event_focus_telemetry(event: &EventTelemetry) -> DiagnosticDebugEventFocusTelemetry {
+    DiagnosticDebugEventFocusTelemetry {
+        kind: event.kind,
+        cycle: event.cycle,
+        frame: event.frame,
+        status_hex: hex_byte(event.status),
+        current_test: event.current_test,
+        current_test_name: event.current_test_name,
+        pc_hex: format_pc(event.pc),
+        note: event.note.clone(),
+    }
+}
+
+fn debug_instruction_focus_telemetry(
+    entry: &InstructionTraceEntryTelemetry,
+) -> DiagnosticDebugInstructionFocusTelemetry {
+    DiagnosticDebugInstructionFocusTelemetry {
+        sequence: entry.sequence,
+        cycle: entry.cycle,
+        frame: entry.frame,
+        current_test: entry.diagnostic_ram.current_test,
+        current_test_name: entry.diagnostic_ram.current_test_name,
+        pc_hex: entry.pc_hex.clone(),
+        instruction: entry
+            .instruction
+            .as_ref()
+            .map(|instruction| instruction.text.clone()),
+        symbol: entry.symbol.as_ref().map(format_symbol),
+        status_hex: entry.diagnostic_ram.status_hex.clone(),
+        current_result_hex: entry.diagnostic_ram.current_result_hex.clone(),
+        failure_code_hex: entry.diagnostic_ram.failure_code_hex.clone(),
     }
 }
 
@@ -5205,6 +5474,45 @@ fn optional_u8(value: Option<u8>) -> String {
 
 fn optional_pc(value: Option<u16>) -> String {
     value.map(format_pc).unwrap_or_else(|| "none".to_string())
+}
+
+fn format_debug_event_focus(event: Option<&DiagnosticDebugEventFocusTelemetry>) -> String {
+    let Some(event) = event else {
+        return "none".to_string();
+    };
+
+    format!(
+        "{} at cycle {} pc {} status {} test {} ({}) note {}",
+        diagnostic_event_kind_label(event.kind),
+        event.cycle,
+        event.pc_hex,
+        event.status_hex,
+        event.current_test,
+        event.current_test_name.unwrap_or("unknown_test"),
+        event.note
+    )
+}
+
+fn format_debug_instruction_focus(
+    instruction: Option<&DiagnosticDebugInstructionFocusTelemetry>,
+) -> String {
+    let Some(instruction) = instruction else {
+        return "none".to_string();
+    };
+
+    format!(
+        "seq {} cycle {} pc {} {} symbol {} status {} failure {}",
+        instruction.sequence,
+        instruction.cycle,
+        instruction.pc_hex,
+        instruction
+            .instruction
+            .as_deref()
+            .unwrap_or("unknown_instruction"),
+        instruction.symbol.as_deref().unwrap_or("none"),
+        instruction.status_hex,
+        instruction.failure_code_hex
+    )
 }
 
 fn format_symbol(symbol: &DiagnosticSymbolTelemetry) -> String {

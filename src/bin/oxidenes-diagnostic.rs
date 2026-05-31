@@ -4,14 +4,15 @@ use std::path::{Path, PathBuf};
 use oxidenes::diagnostic::{
     build_diagnostic_cartridge, compare_diagnostic_to_baseline,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
-    DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticProbeStatus, DiagnosticTelemetry,
+    DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticDebugEventFocusTelemetry,
+    DiagnosticDebugInstructionFocusTelemetry, DiagnosticProbeStatus, DiagnosticTelemetry,
     DIAGNOSTIC_PROVENANCE,
 };
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 1;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 4;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 5;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -55,6 +56,7 @@ struct DiagnosticTriageReport {
     health: String,
     summary: String,
     current_test: DiagnosticTriageCurrentTest,
+    debug_focus: DiagnosticTriageDebugFocus,
     input: DiagnosticTriageInput,
     failure: Option<DiagnosticTriageFailure>,
     coverage: DiagnosticTriageCoverage,
@@ -76,6 +78,49 @@ struct DiagnosticTriageCurrentTest {
     status_hex: String,
     failure_code_hex: String,
     timed_out: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageDebugFocus {
+    health: String,
+    focus_test_id: u8,
+    focus_test_name: Option<&'static str>,
+    focus_subsystem: Option<String>,
+    focus_domain: Option<String>,
+    failure_kind: Option<String>,
+    failure_code_hex: String,
+    failed_probe_ids: Vec<String>,
+    skipped_probe_count: usize,
+    last_event: Option<DiagnosticTriageDebugEventFocus>,
+    terminal_instruction: Option<DiagnosticTriageDebugInstructionFocus>,
+    last_test_instruction: Option<DiagnosticTriageDebugInstructionFocus>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageDebugEventFocus {
+    kind: String,
+    cycle: u64,
+    frame: u64,
+    status_hex: String,
+    current_test: u8,
+    current_test_name: Option<&'static str>,
+    pc_hex: String,
+    note: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticTriageDebugInstructionFocus {
+    sequence: u64,
+    cycle: u64,
+    frame: u64,
+    current_test: u8,
+    current_test_name: Option<&'static str>,
+    pc_hex: String,
+    instruction: Option<String>,
+    symbol: Option<String>,
+    status_hex: String,
+    current_result_hex: Option<String>,
+    failure_code_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -615,7 +660,7 @@ fn bundle_ai_handoff(
 ) -> Vec<String> {
     let mut handoff = vec![
         "Start with manifest.json to verify artifact hashes and bundle result.".to_string(),
-        "Read triage.json for a compact machine-readable failure focus, event tail, and instruction trace tail before loading full telemetry.".to_string(),
+        "Read triage.json debug_focus first for the compact failing test, probes, last event, and instruction anchors before loading full telemetry.".to_string(),
         "Read report.md for human triage and telemetry.json for exact probe, timeline, event, instruction trace, and execution-snapshot data.".to_string(),
     ];
     if comparison.is_some() {
@@ -625,7 +670,7 @@ fn bundle_ai_handoff(
     }
     if !telemetry_passed {
         handoff.push(
-            "Prioritize verdict.failure, analysis.probe_summary, failed probes, instruction_trace.tail, and the event tail."
+            "Prioritize analysis.debug_focus, verdict.failure, analysis.probe_summary, failed probes, instruction_trace.tail, and the event tail."
                 .to_string(),
         );
     }
@@ -666,6 +711,7 @@ fn diagnostic_triage_report(
             failure_code_hex: hex_byte(telemetry.verdict.failure_code),
             timed_out: telemetry.verdict.timeout,
         },
+        debug_focus: triage_debug_focus(telemetry)?,
         input: DiagnosticTriageInput {
             joypad1_mask_hex: telemetry.input.joypad1_mask_hex.clone(),
             joypad1_expected_mask_hex: telemetry.input.joypad1_expected_mask_hex.clone(),
@@ -725,6 +771,75 @@ fn diagnostic_triage_report(
         artifact_hints: triage_artifact_hints(comparison.is_some()),
         event_tail: triage_event_tail(telemetry)?,
     })
+}
+
+fn triage_debug_focus(
+    telemetry: &DiagnosticTelemetry,
+) -> Result<DiagnosticTriageDebugFocus, String> {
+    let focus = &telemetry.analysis.debug_focus;
+    Ok(DiagnosticTriageDebugFocus {
+        health: json_label(&focus.health)?,
+        focus_test_id: focus.focus_test_id,
+        focus_test_name: focus.focus_test_name,
+        focus_subsystem: focus
+            .focus_subsystem
+            .map(|subsystem| json_label(&subsystem))
+            .transpose()?,
+        focus_domain: focus.focus_domain.clone(),
+        failure_kind: focus
+            .failure_kind
+            .map(|kind| json_label(&kind))
+            .transpose()?,
+        failure_code_hex: focus.failure_code_hex.clone(),
+        failed_probe_ids: focus.failed_probe_ids.clone(),
+        skipped_probe_count: focus.skipped_probe_count,
+        last_event: focus
+            .last_event
+            .as_ref()
+            .map(triage_debug_event_focus)
+            .transpose()?,
+        terminal_instruction: focus
+            .terminal_instruction
+            .as_ref()
+            .map(triage_debug_instruction_focus),
+        last_test_instruction: focus
+            .last_test_instruction
+            .as_ref()
+            .map(triage_debug_instruction_focus),
+    })
+}
+
+fn triage_debug_event_focus(
+    event: &DiagnosticDebugEventFocusTelemetry,
+) -> Result<DiagnosticTriageDebugEventFocus, String> {
+    Ok(DiagnosticTriageDebugEventFocus {
+        kind: json_label(&event.kind)?,
+        cycle: event.cycle,
+        frame: event.frame,
+        status_hex: event.status_hex.clone(),
+        current_test: event.current_test,
+        current_test_name: event.current_test_name,
+        pc_hex: event.pc_hex.clone(),
+        note: event.note.clone(),
+    })
+}
+
+fn triage_debug_instruction_focus(
+    instruction: &DiagnosticDebugInstructionFocusTelemetry,
+) -> DiagnosticTriageDebugInstructionFocus {
+    DiagnosticTriageDebugInstructionFocus {
+        sequence: instruction.sequence,
+        cycle: instruction.cycle,
+        frame: instruction.frame,
+        current_test: instruction.current_test,
+        current_test_name: instruction.current_test_name,
+        pc_hex: instruction.pc_hex.clone(),
+        instruction: instruction.instruction.clone(),
+        symbol: instruction.symbol.clone(),
+        status_hex: instruction.status_hex.clone(),
+        current_result_hex: instruction.current_result_hex.clone(),
+        failure_code_hex: instruction.failure_code_hex.clone(),
+    }
 }
 
 fn triage_failure(
@@ -947,7 +1062,7 @@ fn triage_artifact_hints(comparison_included: bool) -> Vec<DiagnosticTriageArtif
         DiagnosticTriageArtifactHint {
             path: "triage.json",
             kind: "ai_triage_json",
-            purpose: "Compact machine-readable failure focus and next actions.",
+            purpose: "Compact machine-readable debug focus, failure summary, probes, trace anchors, and next actions.",
         },
         DiagnosticTriageArtifactHint {
             path: "report.md",
