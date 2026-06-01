@@ -104,7 +104,10 @@ root files. It also writes `diagnostic-code-map.json` and
 `diagnostic-code-map.md`, which map each focus domain to the emulator source
 files, regression tests, diagnostic support files, search terms, debug anchor,
 first artifact to open, and replay/test commands an automated debugger should
-use next. When `--compare-suite-dir <DIR>` is supplied, it also writes
+use next. The wrapper then writes `diagnostic-investigation-plan.json` and
+`diagnostic-investigation-plan.md`, which join the ranked hypotheses, debug
+index rows, code-map entries, primary artifacts, replay commands, and ordered
+handoff steps into executable debug routes. When `--compare-suite-dir <DIR>` is supplied, it also writes
 `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`. The root scenario-suite files are
 `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
@@ -138,7 +141,9 @@ debugger needs an aggregate cross-suite starting point before drilling into one
 scenario. The code map is the next routing layer: use it after choosing a focus
 domain to open the relevant emulator files, nearby regression tests, and focused
 replay command without guessing where that domain lives in the repository. The
-optional comparison artifact compares two observability suites by
+investigation plan is the executable routing layer: start with
+`top_route`, open its primary artifact, replay the scenario, inspect the mapped
+source/search terms, and run the listed narrow tests. The optional comparison artifact compares two observability suites by
 scenario health/focus/probes/scores and hypothesis rank/score changes, then
 reports matched, changed, or regressed verdicts with replay args and current-run
 artifact pointers for any regression. Use `--fail-on-comparison-regression`
@@ -209,8 +214,9 @@ manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 To validate the full observability wrapper output that AI tooling consumes,
-including the debug index, aggregate analysis, diagnostic code map, optional
-cross-run comparison, focused replay evidence, and `observability-run.json`, run:
+including the debug index, aggregate analysis, diagnostic code map, diagnostic
+investigation plan, optional cross-run comparison, focused replay evidence, and
+`observability-run.json`, run:
 
 ```powershell
 python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -226,7 +232,9 @@ summaries.
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` files, plus
-`diagnostic-code-map.json` and `diagnostic-code-map.md`. With
+`diagnostic-code-map.json`, `diagnostic-code-map.md`,
+`diagnostic-investigation-plan.json`, and `diagnostic-investigation-plan.md`.
+With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
 `--fail-on-comparison-regression` it exits non-zero when the current run

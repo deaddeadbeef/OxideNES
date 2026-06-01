@@ -16,6 +16,7 @@ EXPECTED_DEBUG_INDEX_SCHEMA = 1
 EXPECTED_ANALYSIS_SCHEMA = 1
 EXPECTED_COMPARISON_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
+EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
 EXPECTED_SCENARIOS = {
@@ -78,6 +79,11 @@ class ObservabilityVerifier:
         debug_entries = self.verify_debug_index(as_dict(run.get("debug_index")))
         self.verify_analysis(as_dict(run.get("analysis")), debug_entries)
         code_map_domains = self.verify_code_map(as_dict(run.get("code_map")), debug_entries)
+        investigation_routes = self.verify_investigation_plan(
+            as_dict(run.get("investigation_plan")),
+            debug_entries,
+            code_map_domains,
+        )
         self.verify_comparison(run.get("comparison"))
         self.verify_replay(run.get("replay"))
 
@@ -89,6 +95,7 @@ class ObservabilityVerifier:
             "debug_index_entries": len(debug_entries),
             "hypothesis_count": as_dict(run.get("analysis")).get("hypothesis_count"),
             "code_map_domains": len(code_map_domains),
+            "investigation_routes": len(investigation_routes),
             "comparison_verdict": as_dict(run.get("comparison")).get("verdict")
             if isinstance(run.get("comparison"), dict)
             else None,
@@ -160,6 +167,7 @@ class ObservabilityVerifier:
             "## Debug Index",
             "## Observability Analysis",
             "## Diagnostic Code Map",
+            "## Investigation Plan",
             "## Observability Comparison",
             "## Replay",
             "## AI Handoff",
@@ -404,6 +412,143 @@ class ObservabilityVerifier:
                     self.expect_existing_file(record.get("path"), f"{label} {group} path")
         return code_map_domains
 
+    def verify_investigation_plan(
+        self,
+        plan: dict[str, Any],
+        debug_entries: list[dict[str, Any]],
+        code_map_domains: set[Any],
+    ) -> list[dict[str, Any]]:
+        self.expect_equal(
+            plan.get("investigation_plan_schema_version"),
+            EXPECTED_INVESTIGATION_PLAN_SCHEMA,
+            "investigation plan schema version",
+        )
+        self.expect_equal(plan.get("status"), "passed", "investigation plan status")
+        self.expect_equal(
+            plan.get("recommended_exit_code"),
+            0,
+            "investigation plan recommended_exit_code",
+        )
+        self.expect_equal(
+            plan.get("route_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "investigation plan route_count",
+        )
+        self.expect_equal(
+            plan.get("focus_domain_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "investigation plan focus_domain_count",
+        )
+        self.expect_equal(plan.get("errors"), [], "investigation plan errors")
+        self.verify_artifact_map(as_dict(plan.get("artifacts")), "investigation plan")
+        self.verify_artifact_map(
+            as_dict(plan.get("source_artifacts")),
+            "investigation plan source artifacts",
+        )
+
+        artifact_json = self.resolve_existing_file(
+            as_dict(plan.get("artifacts")).get("investigation_plan_json"),
+            "investigation plan JSON",
+        )
+        if artifact_json:
+            artifact_data = self.read_json_file(artifact_json, "investigation plan JSON")
+            self.expect_equal(
+                artifact_data.get("investigation_plan_schema_version"),
+                EXPECTED_INVESTIGATION_PLAN_SCHEMA,
+                "investigation plan artifact schema version",
+            )
+
+        routes = [route for route in as_list(plan.get("routes")) if isinstance(route, dict)]
+        self.expect_equal(
+            len(routes),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "investigation plan routes",
+        )
+        route_domains = {route.get("focus_domain") for route in routes}
+        debug_domains = {
+            as_dict(entry.get("debug_focus")).get("focus_domain")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        self.expect_equal(route_domains, debug_domains, "investigation plan domains")
+        self.expect_equal(route_domains, code_map_domains, "investigation plan code-map domains")
+        self.expect_equal(
+            [route.get("rank") for route in routes],
+            list(range(1, EXPECTED_ACTIONABLE_SCENARIO_COUNT + 1)),
+            "investigation plan route ranks",
+        )
+
+        top_route = as_dict(plan.get("top_route"))
+        self.expect_nonempty_string(top_route.get("route_id"), "investigation plan top route id")
+        self.expect_nonempty_string(
+            top_route.get("focus_domain"),
+            "investigation plan top route focus_domain",
+        )
+        self.expect_existing_file(
+            top_route.get("primary_artifact"),
+            "investigation plan top route primary_artifact",
+        )
+
+        expected_scenarios = {
+            entry.get("scenario_id")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        route_scenarios = {route.get("primary_scenario_id") for route in routes}
+        self.expect_equal(
+            route_scenarios,
+            expected_scenarios,
+            "investigation plan primary scenarios",
+        )
+
+        for route in routes:
+            domain = route.get("focus_domain")
+            label = f"investigation plan {domain}"
+            self.expect_nonempty_string(route.get("route_id"), f"{label} route_id")
+            self.expect_nonempty_string(domain, f"{label} focus_domain")
+            self.expect_nonempty_string(route.get("focus_subsystem"), f"{label} focus_subsystem")
+            self.expect_nonempty_string(
+                route.get("primary_scenario_id"),
+                f"{label} primary_scenario_id",
+            )
+            self.expect_nonempty_list(route.get("scenario_ids"), f"{label} scenario_ids")
+            self.expect_existing_file(route.get("primary_artifact"), f"{label} primary_artifact")
+            self.expect_nonempty_list(route.get("replay_args"), f"{label} replay_args")
+            self.expect_nonempty_list(
+                route.get("suggested_commands"),
+                f"{label} suggested_commands",
+            )
+            self.expect_nonempty_list(route.get("why_this_route"), f"{label} why_this_route")
+            self.expect_nonempty_list(route.get("handoff_steps"), f"{label} handoff_steps")
+            self.expect_nonempty_list(route.get("stop_conditions"), f"{label} stop_conditions")
+            if not as_dict(route.get("debug_anchor")):
+                self.errors.append(f"{label} debug_anchor must be an object")
+
+            start_artifacts = as_dict(route.get("start_artifacts"))
+            for artifact_name in ("primary_artifact", "triage_json", "telemetry_json"):
+                self.expect_existing_file(
+                    start_artifacts.get(artifact_name),
+                    f"{label} start artifact {artifact_name}",
+                )
+
+            for group in ("source_files", "test_files", "diagnostic_files"):
+                records = as_list(route.get(group))
+                self.expect_nonempty_list(records, f"{label} {group}")
+                for record in records:
+                    if not isinstance(record, dict):
+                        self.errors.append(f"{label} {group} entries must be objects")
+                        continue
+                    self.expect_equal(record.get("exists"), True, f"{label} {group} exists")
+                    self.expect_existing_file(record.get("path"), f"{label} {group} path")
+
+            for step in as_list(route.get("handoff_steps")):
+                if not isinstance(step, dict):
+                    self.errors.append(f"{label} handoff_steps entries must be objects")
+                    continue
+                self.expect_nonempty_string(step.get("action"), f"{label} step action")
+                self.expect_nonempty_string(step.get("purpose"), f"{label} step purpose")
+        return routes
+
     def verify_comparison(self, comparison_value: Any) -> None:
         if comparison_value is None:
             return
@@ -625,6 +770,7 @@ def main() -> int:
             f"debug_index={summary['debug_index_entries']} "
             f"hypotheses={summary['hypothesis_count']} "
             f"code_map={summary['code_map_domains']} "
+            f"investigation_routes={summary['investigation_routes']} "
             f"comparison={summary['comparison_verdict'] or '-'} "
             f"replay={summary['replay_scenario'] or '-'}"
         )

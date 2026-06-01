@@ -58,9 +58,9 @@ body:
           required: true
         - label: Diagnostic scenario suite verifier passes, including `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic observability runner passes and writes debug-index, analysis, code-map, and focused replay evidence, including `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic observability runner passes and writes debug-index, analysis, code-map, investigation-plan, and focused replay evidence, including `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including code-map source/test paths and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including code-map source/test paths, investigation-plan routes, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
         - label: Diagnostic observability comparison passes without regressions when a prior suite is supplied, including `--compare-suite-dir` and `--fail-on-comparison-regression`.
           required: false
