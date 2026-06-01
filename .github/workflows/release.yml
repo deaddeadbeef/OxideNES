@@ -28,15 +28,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev
-      - name: Run diagnostic cartridge bundle
+      - name: Resolve diagnostic comparison ref
+        shell: bash
         run: |
+          set -euo pipefail
+          compare_ref=""
+          if [[ -n "${{ github.event.before }}" && ! "${{ github.event.before }}" =~ ^0+$ ]]; then
+            compare_ref="${{ github.event.before }}"
+          fi
+          echo "OXIDENES_COMPARE_REF=$compare_ref" >> "$GITHUB_ENV"
+      - name: Run diagnostic cartridge bundle
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p target/diagnostics
           cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/release-baseline.json --no-stdout
           cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/release-bundle --baseline-json target/diagnostics/release-baseline.json --no-stdout
-          python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/release-scenario-suite
+          comparison_args=()
+          if [[ -n "${OXIDENES_COMPARE_REF:-}" ]]; then
+            prior_checkout="$RUNNER_TEMP/oxidenes-prior-checkout"
+            rm -rf "$prior_checkout"
+            git worktree add --detach "$prior_checkout" "$OXIDENES_COMPARE_REF"
+            (
+              cd "$prior_checkout"
+              python scripts/run_diagnostic_observability.py \
+                --suite-dir "$GITHUB_WORKSPACE/target/diagnostics/release-prior-scenario-suite" \
+                --skip-replay
+            )
+            comparison_args=(
+              --compare-suite-dir target/diagnostics/release-prior-scenario-suite
+              --fail-on-comparison-regression
+            )
+          fi
+          python scripts/run_diagnostic_observability.py \
+            --suite-dir target/diagnostics/release-scenario-suite \
+            "${comparison_args[@]}"
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
@@ -51,6 +82,13 @@ jobs:
           name: oxidenes-diagnostic-scenario-suite
           path: target/diagnostics/release-scenario-suite
           if-no-files-found: warn
+      - name: Upload prior diagnostic scenario suite
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-prior-scenario-suite
+          path: target/diagnostics/release-prior-scenario-suite
+          if-no-files-found: ignore
 
   build:
     needs: [ip-compliance, security-audit]

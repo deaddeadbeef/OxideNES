@@ -64,7 +64,7 @@ body:
           required: false
         - label: GitHub Actions are green on Windows, macOS, Linux, clippy, fmt, security audit, IP compliance, and diagnostic bundle jobs.
           required: true
-        - label: The `oxidenes-diagnostic-bundle` and `oxidenes-diagnostic-scenario-suite` workflow artifacts are attached or linked as release evidence.
+        - label: The `oxidenes-diagnostic-bundle`, `oxidenes-diagnostic-scenario-suite`, and prior-suite artifact when available are attached or linked as release evidence.
           required: true
   - type: checkboxes
     id: packaging
