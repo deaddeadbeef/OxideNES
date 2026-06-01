@@ -60,6 +60,18 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/cpu_tests.rs"],
         "search_terms": ["JMP", "indirect", "page wrap", "$04FF"],
     },
+    "cpu.addressing.page_cross_load": {
+        "subsystem": "cpu",
+        "description": "6502 load-addressing matrix cases that cross CPU pages for absolute,X and indirect,Y effective addresses.",
+        "source_files": ["src/cpu.rs"],
+        "test_files": ["tests/cpu_tests.rs"],
+        "search_terms": [
+            "AddressingMode::AbsoluteX",
+            "AddressingMode::IndirectY",
+            "page_crossed",
+            "cpu_addressing_mode_matrix",
+        ],
+    },
     "dma.oam_transfer": {
         "subsystem": "dma",
         "description": "OAM DMA transfer, CPU stall bucket, and DMC overlap telemetry.",
@@ -156,6 +168,7 @@ FOCUS_DOMAIN_CODE_MAP = {
 SCENARIO_TEST_FILTERS = {
     "apu_status_fault": "generated_diagnostic_cartridge_localizes_intentional_apu_status_failure",
     "cpu_indirect_jmp_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure",
+    "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
     "dma_oam_transfer_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure",
     "joypad1_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad_failure",

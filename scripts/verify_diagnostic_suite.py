@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 30
+EXPECTED_TELEMETRY_SCHEMA = 31
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -24,6 +24,7 @@ EXPECTED_SCENARIOS = {
     "apu_status_fault",
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
+    "cpu_addressing_matrix_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
@@ -84,7 +85,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            16,
+            17,
             "analysis baseline_divergence_count",
         )
 
@@ -134,13 +135,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            16,
+            17,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 16, "observer next_actions count")
+        self.expect_equal(len(actions), 17, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -178,6 +179,7 @@ class SuiteVerifier:
             "apu_status_fault",
             "cpu_zero_page_wrap_fault",
             "cpu_indirect_jmp_fault",
+            "cpu_addressing_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
@@ -213,7 +215,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=113",
+            "comparison_difference_count=118",
             evidence,
             "timeout observer evidence",
         )
@@ -656,6 +658,40 @@ class SuiteVerifier:
             jmp_evidence,
             "indirect JMP observer evidence",
         )
+
+        addressing = by_scenario.get("cpu_addressing_matrix_fault")
+        if not isinstance(addressing, dict):
+            self.errors.append("missing observer action for cpu_addressing_matrix_fault")
+            return
+
+        self.expect_equal(
+            addressing.get("priority"),
+            "known_divergence",
+            "CPU addressing matrix observer action priority",
+        )
+        self.expect_equal(
+            addressing.get("action_type"),
+            "inspect_known_divergence",
+            "CPU addressing matrix observer action type",
+        )
+        self.expect_equal(
+            addressing.get("primary_artifact"),
+            "cpu_addressing_matrix_fault/comparison.json",
+            "CPU addressing matrix observer primary_artifact",
+        )
+        addressing_evidence = self.expect_list(
+            addressing.get("evidence"), "CPU addressing matrix observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.addressing.page_cross_load",
+            addressing_evidence,
+            "CPU addressing matrix observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.22.result",
+            addressing_evidence,
+            "CPU addressing matrix observer evidence",
+        )
         self.expect_in(
             "top_difference_path=dma.oam_dma_observed",
             evidence,
@@ -730,7 +766,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                113,
+                118,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -1115,6 +1151,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_indirect_jmp_fault")
+
+        addressing = by_scenario.get("cpu_addressing_matrix_fault")
+        if isinstance(addressing, dict):
+            self.expect_equal(
+                addressing.get("role"),
+                "expected_failure_fixture",
+                "CPU addressing matrix observer role",
+            )
+            self.expect_equal(
+                addressing.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU addressing matrix observer outcome",
+            )
+            self.expect_equal(
+                addressing.get("health"),
+                "cartridge_assertion_failed",
+                "CPU addressing matrix observer health",
+            )
+            self.expect_equal(
+                addressing.get("focus_domain"),
+                "cpu.addressing.page_cross_load",
+                "CPU addressing matrix observer focus_domain",
+            )
+            self.expect_equal(
+                addressing.get("next_artifact"),
+                "cpu_addressing_matrix_fault/comparison.json",
+                "CPU addressing matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_addressing_matrix_fault")
 
     def verify_replay_args(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
         scenarios = {
