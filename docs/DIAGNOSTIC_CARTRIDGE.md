@@ -127,10 +127,15 @@ narrow-test results, source/test anchors, and fix-loop commands. It then writes
 `diagnostic-ai-debug-packet.json`, `diagnostic-ai-debug-packet.md`, and
 `ai-debug-packet/`, packaging the selected route's compact evidence, replay
 telemetry, source/test context windows, and fix commands into one relocatable
-AI handoff. It then writes `diagnostic-ai-artifact-verification.json` and
+AI handoff. It then writes `diagnostic-ai-debug-packet-verification.json` and
+`diagnostic-ai-debug-packet-verification.md`, proving that the selected packet
+can be validated from packet-local files, digests, route identity, replay
+evidence, source/test context, and narrow commands without trusting the original
+suite graph. It then writes `diagnostic-ai-artifact-verification.json` and
 `diagnostic-ai-artifact-verification.md`, proving the AI index, query smoke,
-diagnosis smoke, fix handoff, AI route matrix, AI debug packet, and all-route
-AI debug packet matrix agree on route identities, artifact paths, and stop
+diagnosis smoke, fix handoff, AI route matrix, AI debug packet, packet
+self-verification, and all-route AI debug packet matrix agree on route
+identities, artifact paths, and stop
 conditions. Start with the e2e report to decide whether the diagnostic corpus
 is trusted, then use the AI artifact verification, AI debug packet matrix, AI
 debug packet, AI route matrix, AI index, query CLI, diagnosis runner, or fix
@@ -210,6 +215,18 @@ triage, full replay telemetry, replay report, generated cartridge, and a
 `source-context.json` file with bounded source/test windows around the mapped
 line anchors.
 
+To verify a copied debug packet without the original scenario suite, run:
+
+```powershell
+python scripts/verify_diagnostic_ai_debug_packet.py --packet-dir target/diagnostics/scenario-suite/ai-debug-packet
+```
+
+This writes `diagnostic-ai-debug-packet-verification.json` plus
+`diagnostic-ai-debug-packet-verification.md`. A passed verifier means the
+packet-local manifest, read order, required files, SHA-256 digests, selected
+route identity, diagnosis, fix handoff, route check, replay triage/telemetry,
+source/test context windows, and narrow commands are internally consistent.
+
 To prove every AI focus-domain route can be packaged into a relocatable debug
 packet, run:
 
@@ -220,8 +237,9 @@ python scripts/run_diagnostic_ai_debug_packet_matrix.py --suite-dir target/diagn
 This writes `diagnostic-ai-debug-packet-matrix.json` plus
 `diagnostic-ai-debug-packet-matrix.md`, with per-route packets under
 `ai-debug-packet-matrix/<route>/`. A passed matrix means every accepted AI
-route has copied replay evidence, digest-checked packet files, source context,
-test context, matching route identity, and passed packet stop conditions.
+route has copied replay evidence, a packet-local verification result,
+digest-checked packet files, source context, test context, matching route
+identity, and passed packet stop conditions.
 
 To validate the AI-facing artifact graph directly, run:
 
@@ -237,13 +255,14 @@ include a selected-route packet with digest-checked copied evidence and source
 context, and `--require-ai-debug-packet-matrix` when the bundle should include
 all-route packet coverage. The verifier checks that the AI index, query smoke,
 diagnosis smoke, fix handoff, AI route matrix, AI debug packet, AI debug packet
-matrix, and optional e2e summary all passed, agree on route identities, include
-the expected non-happy-path coverage counts, preserve source/test anchors, and
-still point to present artifacts after a CI bundle is downloaded to a different
-directory. It also writes `automation_readiness.routes`, a compact per-route
-map that tells an automated debugger whether each route has replay evidence,
-diagnosis, fix handoff, narrow tests, source/test anchors, and a debug packet
-with context windows.
+matrix, packet self-verification, and optional e2e summary all passed, agree on
+route identities, include the expected non-happy-path coverage counts, preserve
+source/test anchors, and still point to present artifacts after a CI bundle is
+downloaded to a different directory. It also writes
+`automation_readiness.routes`, a compact per-route map that tells an automated
+debugger whether each route has replay evidence,
+diagnosis, fix handoff, narrow tests, source/test anchors, packet
+self-verification, and a debug packet with context windows.
 
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
@@ -469,10 +488,15 @@ every AI route can regenerate diagnosis and fix-handoff artifacts. It then runs
 `diagnostic-ai-debug-packet.json`, `diagnostic-ai-debug-packet.md`, and
 `ai-debug-packet/`, proving the selected route can be consumed as one
 relocatable packet with copied evidence and source/test context. It then runs
+`verify_diagnostic_ai_debug_packet.py` and writes
+`diagnostic-ai-debug-packet-verification.json` plus
+`diagnostic-ai-debug-packet-verification.md`, proving the selected packet is
+self-verifiable after it is copied away from the suite. It then runs
 `run_diagnostic_ai_debug_packet_matrix.py` and writes
 `diagnostic-ai-debug-packet-matrix.json` plus
 `diagnostic-ai-debug-packet-matrix.md`, proving every accepted AI route can be
-consumed as a relocatable packet with copied evidence and source/test context.
+consumed as a relocatable packet with copied evidence, source/test context, and
+packet-local verification evidence.
 It then runs `verify_diagnostic_ai_artifacts.py` and writes
 `diagnostic-ai-artifact-verification.json` plus
 `diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
@@ -488,10 +512,12 @@ handoff smoke proves that diagnosis can be translated into code-inspection
 anchors and exact regression commands. The AI route matrix proves the same
 diagnosis and fix-handoff path works for every focus-domain route. The AI debug
 packet gives an automated debugger one selected-route packet with compact
-evidence, replay telemetry, source/test context, and fix commands. The AI debug
-packet matrix proves that every route has the same packet-level handoff quality
-instead of only the top route. The AI artifact verification proves the uploaded
-bundle can be trusted as a coherent graph before an automated debugger starts
+evidence, replay telemetry, source/test context, and fix commands. The packet
+self-verifier proves that the selected packet is internally consistent after it is
+copied away from the suite. The AI debug packet matrix proves that every route
+has the same packet-level handoff quality instead of only the top route. The AI
+artifact verification proves the uploaded bundle can be trusted as a coherent
+graph before an automated debugger starts
 making emulator changes, and its `automation_readiness` section gives automated
 agents one compact route-by-route readiness map after a CI artifact is
 downloaded.

@@ -163,6 +163,12 @@ def route_output_artifacts(route_dir: Path) -> dict[str, str]:
     return {
         "diagnostic_ai_debug_packet_json": str(route_dir / "diagnostic-ai-debug-packet.json"),
         "diagnostic_ai_debug_packet_report": str(route_dir / "diagnostic-ai-debug-packet.md"),
+        "diagnostic_ai_debug_packet_verification_json": str(
+            route_dir / "diagnostic-ai-debug-packet-verification.json"
+        ),
+        "diagnostic_ai_debug_packet_verification_report": str(
+            route_dir / "diagnostic-ai-debug-packet-verification.md"
+        ),
         "diagnostic_ai_debug_packet_dir": str(packet_dir),
         "diagnostic_ai_debug_packet_manifest": str(packet_dir / "manifest.json"),
         "diagnostic_ai_debug_packet_readme": str(packet_dir / "README.md"),
@@ -174,6 +180,8 @@ def required_route_artifact_names() -> list[str]:
     return [
         "diagnostic_ai_debug_packet_json",
         "diagnostic_ai_debug_packet_report",
+        "diagnostic_ai_debug_packet_verification_json",
+        "diagnostic_ai_debug_packet_verification_report",
         "diagnostic_ai_debug_packet_dir",
         "diagnostic_ai_debug_packet_manifest",
         "diagnostic_ai_debug_packet_readme",
@@ -210,6 +218,19 @@ def debug_packet_command(
     return argv
 
 
+def verify_packet_command(artifacts: dict[str, str]) -> list[str]:
+    return [
+        sys.executable,
+        script_path("verify_diagnostic_ai_debug_packet.py"),
+        "--packet-dir",
+        artifacts["diagnostic_ai_debug_packet_dir"],
+        "--summary-json",
+        artifacts["diagnostic_ai_debug_packet_verification_json"],
+        "--summary-report",
+        artifacts["diagnostic_ai_debug_packet_verification_report"],
+    ]
+
+
 def build_route_row(
     args: argparse.Namespace,
     repo_root: Path,
@@ -225,9 +246,18 @@ def build_route_row(
         debug_packet_command(args, route_id, artifacts),
         repo_root,
     )
+    verification_execution = run_command(
+        "verify_diagnostic_ai_debug_packet",
+        verify_packet_command(artifacts),
+        repo_root,
+    )
     packet = load_json(Path(artifacts["diagnostic_ai_debug_packet_json"]))
+    packet_verification = load_json(
+        Path(artifacts["diagnostic_ai_debug_packet_verification_json"])
+    )
     manifest = as_dict(packet.get("packet_manifest"))
     context = as_dict(packet.get("context_summary"))
+    verification_summary = as_dict(packet_verification.get("summary"))
     route_identity = as_dict(route.get("identity"))
     packet_identity = selection_identity(packet)
     artifact_flags = artifact_presence(artifacts)
@@ -240,10 +270,16 @@ def build_route_row(
         errors.append("route is missing route_id")
     if execution.get("status") != "passed":
         errors.append("debug packet command did not pass")
+    if verification_execution.get("status") != "passed":
+        errors.append("debug packet verifier command did not pass")
     if packet.get("status") != "passed":
         errors.append("debug packet status is not passed")
+    if packet_verification.get("status") != "passed":
+        errors.append("debug packet verification status is not passed")
     if not identities_match(packet_identity, route_identity):
         errors.append("debug packet identity does not match route matrix identity")
+    if not identities_match(selection_identity(packet_verification), route_identity):
+        errors.append("debug packet verification identity does not match route matrix identity")
     if as_int(manifest.get("missing_required_file_count")) != 0:
         errors.append("debug packet has missing required files")
     if as_int(manifest.get("file_count")) < 1:
@@ -265,10 +301,18 @@ def build_route_row(
         "primary_scenario_id": route.get("primary_scenario_id"),
         "status": status,
         "packet_status": packet.get("status"),
+        "packet_verification_status": packet_verification.get("status"),
         "identity": packet_identity,
         "route_matrix_identity": route_identity,
         "identities_match": identities_match(packet_identity, route_identity),
         "packet_file_count": manifest.get("file_count"),
+        "packet_verifier_check_count": verification_summary.get("check_count"),
+        "packet_verifier_passed_check_count": verification_summary.get(
+            "passed_check_count"
+        ),
+        "packet_verifier_digest_mismatch_count": verification_summary.get(
+            "digest_mismatch_count"
+        ),
         "missing_required_file_count": manifest.get("missing_required_file_count"),
         "source_window_count": context.get("source_window_count"),
         "test_window_count": context.get("test_window_count"),
@@ -277,6 +321,7 @@ def build_route_row(
         "artifact_presence": artifact_flags,
         "missing_artifacts": missing_artifacts,
         "execution": execution,
+        "verification_execution": verification_execution,
         "errors": errors,
     }
 
@@ -301,6 +346,9 @@ def build_summary(
 ) -> dict[str, Any]:
     failed_rows = [row for row in route_rows if row.get("status") != "passed"]
     packet_failures = [row for row in route_rows if row.get("packet_status") != "passed"]
+    verification_failures = [
+        row for row in route_rows if row.get("packet_verification_status") != "passed"
+    ]
     identity_failures = [row for row in route_rows if row.get("identities_match") is not True]
     context_failures = [
         row
@@ -342,11 +390,22 @@ def build_summary(
             "passed_route_count": len(route_rows) - len(failed_rows),
             "failed_route_count": len(failed_rows),
             "packet_failure_count": len(packet_failures),
+            "packet_verification_failure_count": len(verification_failures),
             "identity_failure_count": len(identity_failures),
             "context_failure_count": len(context_failures),
             "stop_condition_failure_count": len(stop_condition_failures),
             "missing_artifact_count": missing_artifact_count,
             "packet_file_count": sum(as_int(row.get("packet_file_count")) for row in route_rows),
+            "packet_verifier_check_count": sum(
+                as_int(row.get("packet_verifier_check_count")) for row in route_rows
+            ),
+            "packet_verifier_passed_check_count": sum(
+                as_int(row.get("packet_verifier_passed_check_count")) for row in route_rows
+            ),
+            "packet_verifier_digest_mismatch_count": sum(
+                as_int(row.get("packet_verifier_digest_mismatch_count"))
+                for row in route_rows
+            ),
             "source_window_count": sum(as_int(row.get("source_window_count")) for row in route_rows),
             "test_window_count": sum(as_int(row.get("test_window_count")) for row in route_rows),
             "context_lines": args.context_lines,
@@ -358,7 +417,7 @@ def build_summary(
         "ai_handoff": [
             "Use this matrix to prove every AI focus-domain route can be packaged as a self-contained debug packet.",
             "Start with failed_routes when status is failed; otherwise use routes[].artifacts for per-route packet manifests.",
-            "Each passed row has digest-checked packet files, replay evidence, source/test context windows, and fix-loop commands.",
+            "Each passed row has a packet-local verifier result, digest-checked files, replay evidence, source/test context windows, and fix-loop commands.",
         ],
     }
 
@@ -375,30 +434,34 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Suite dir | {markdown_cell(summary.get('suite_dir'))} |",
         f"| Routes | {totals.get('passed_route_count')}/{totals.get('route_count')} |",
         f"| Packet failures | {totals.get('packet_failure_count')} |",
+        f"| Packet verification failures | {totals.get('packet_verification_failure_count')} |",
         f"| Identity failures | {totals.get('identity_failure_count')} |",
         f"| Context failures | {totals.get('context_failure_count')} |",
         f"| Stop-condition failures | {totals.get('stop_condition_failure_count')} |",
         f"| Missing artifacts | {totals.get('missing_artifact_count')} |",
         f"| Packet files | {totals.get('packet_file_count')} |",
+        f"| Packet verifier checks | {totals.get('packet_verifier_passed_check_count')}/{totals.get('packet_verifier_check_count')} |",
+        f"| Packet verifier digest mismatches | {totals.get('packet_verifier_digest_mismatch_count')} |",
         f"| Source windows | {totals.get('source_window_count')} |",
         f"| Test windows | {totals.get('test_window_count')} |",
         "",
         "## Routes",
         "",
-        "| Rank | Route | Focus domain | Scenario | Status | Files | Source windows | Test windows | Packet |",
-        "| ---: | --- | --- | --- | --- | ---: | ---: | ---: | --- |",
+        "| Rank | Route | Focus domain | Scenario | Status | Packet verify | Files | Source windows | Test windows | Packet |",
+        "| ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for row in as_list(summary.get("routes")):
         if not isinstance(row, dict):
             continue
         artifacts = as_dict(row.get("artifacts"))
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 row.get("rank"),
                 markdown_cell(row.get("route_id")),
                 markdown_cell(row.get("focus_domain")),
                 markdown_cell(row.get("primary_scenario_id")),
                 row.get("status"),
+                row.get("packet_verification_status"),
                 row.get("packet_file_count"),
                 row.get("source_window_count"),
                 row.get("test_window_count"),
@@ -499,6 +562,7 @@ def main() -> int:
             f"{summary['status']}: suite={args.suite_dir} "
             f"routes={totals.get('passed_route_count')}/{totals.get('route_count')} "
             f"packet_failures={totals.get('packet_failure_count')} "
+            f"packet_verification_failures={totals.get('packet_verification_failure_count')} "
             f"context_failures={totals.get('context_failure_count')} "
             f"missing_artifacts={totals.get('missing_artifact_count')} "
             f"summary_json={summary_json} summary_report={summary_report}"
