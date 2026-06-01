@@ -182,6 +182,12 @@ matrix, AI drilldown order, and bundle artifact maps for humans or agents
 inspecting CI artifacts. The command exits `0` when all known-good and
 intentionally failing scenarios match their expected debug-focus contracts. CI
 and release workflows upload this corpus as `oxidenes-diagnostic-scenario-suite`.
+Those workflows also resolve a prior commit when one is available, generate a
+prior scenario suite in a temporary worktree, run the current observability
+suite with `--compare-suite-dir` and `--fail-on-comparison-regression`, and
+upload the prior corpus as `oxidenes-diagnostic-prior-scenario-suite`. On pull
+requests the prior commit is the base SHA; on pushes it is the previous commit
+from the event payload.
 
 To validate a generated suite artifact before handing it to an automated
 debugger or attaching it to a release, run:
@@ -202,7 +208,10 @@ uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
 `--fail-on-comparison-regression` it exits non-zero when the current run
-regresses against that prior suite. It then writes focused replay evidence under
+regresses against that prior suite. CI and release workflows use that flag when
+a prior suite can be generated, so cross-run diagnostic regressions fail the
+diagnostic bundle job before artifacts are accepted. It then writes focused
+replay evidence under
 `replay-runs/<scenario>/` by default. The replay summary records the source
 `replay_args`, effective command, expected and actual exit code, expected and
 actual health/focus values, required bundle-artifact presence, and paths to the
