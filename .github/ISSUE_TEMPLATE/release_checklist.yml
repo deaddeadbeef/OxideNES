@@ -62,7 +62,9 @@ body:
           required: true
         - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including coverage-ledger counts/gaps, telemetry-catalog signal/probe/event/trace mappings, code-map source/test paths, investigation-plan routes, scenario-dossier joins, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic e2e runner passes and writes the root acceptance report plus AI observability index, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic e2e runner passes and writes the root acceptance report, AI observability index, and AI query smoke, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
+          required: true
+        - label: Diagnostic AI index query smoke passes, including `python scripts/query_diagnostic_ai_index.py --suite-dir target/diagnostics/scenario-suite smoke`.
           required: true
         - label: Diagnostic route matrix passes for every investigation route, including `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --all-routes --skip-tests --output-dir target/diagnostics/scenario-suite/route-replay-matrix`.
           required: true
