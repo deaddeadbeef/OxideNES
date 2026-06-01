@@ -89,8 +89,8 @@ cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/s
 
 For the full local observability loop, use the wrapper that generates the
 scenario suite, runs the verifier, replays one selected scenario from its
-`replay_args`, writes a root debug index and aggregate analysis, optionally
-compares the run against a prior observability suite, and writes
+`replay_args`, writes a root debug index, aggregate analysis, and coverage
+ledger, optionally compares the run against a prior observability suite, and writes
 `observability-run.json` plus `observability-run.md` into the suite directory:
 
 ```powershell
@@ -100,7 +100,11 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` alongside the generated scenario-suite
-root files. It also writes `diagnostic-code-map.json` and
+root files. It also writes `diagnostic-coverage-ledger.json` and
+`diagnostic-coverage-ledger.md`, which summarize the happy-path versus
+intentional-negative fixture balance, every cartridge test, paired negative
+fixtures, subsystem/tier coverage, and known coverage gaps. It also writes
+`diagnostic-code-map.json` and
 `diagnostic-code-map.md`, which map each focus domain to the emulator source
 files, regression tests, diagnostic support files, search terms, debug anchor,
 first artifact to open, and replay/test commands an automated debugger should
@@ -138,7 +142,10 @@ observability analysis consumes that index and emits ranked focus-domain
 hypotheses, health counts, scenario priority, suggested replay args, and the
 first artifact to open for each candidate subsystem. Use it when an automated
 debugger needs an aggregate cross-suite starting point before drilling into one
-scenario. The code map is the next routing layer: use it after choosing a focus
+scenario. The coverage ledger answers whether the suite only contains happy
+paths, maps negative fixtures back to cartridge tests and focus domains, and
+keeps known untested risk areas attached to the uploaded artifact. The code map
+is the next routing layer: use it after choosing a focus
 domain to open the relevant emulator files, nearby regression tests, and focused
 replay command without guessing where that domain lives in the repository. The
 investigation plan is the executable routing layer: start with
@@ -214,9 +221,9 @@ manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 To validate the full observability wrapper output that AI tooling consumes,
-including the debug index, aggregate analysis, diagnostic code map, diagnostic
-investigation plan, optional cross-run comparison, focused replay evidence, and
-`observability-run.json`, run:
+including the debug index, aggregate analysis, coverage ledger, diagnostic code
+map, diagnostic investigation plan, optional cross-run comparison, focused
+replay evidence, and `observability-run.json`, run:
 
 ```powershell
 python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -274,6 +281,7 @@ evidence without replaying the cartridge again.
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` files, plus
+`diagnostic-coverage-ledger.json`, `diagnostic-coverage-ledger.md`,
 `diagnostic-code-map.json`, `diagnostic-code-map.md`,
 `diagnostic-investigation-plan.json`, and `diagnostic-investigation-plan.md`.
 With

@@ -15,10 +15,14 @@ EXPECTED_REPLAY_SCHEMA = 1
 EXPECTED_DEBUG_INDEX_SCHEMA = 1
 EXPECTED_ANALYSIS_SCHEMA = 1
 EXPECTED_COMPARISON_SCHEMA = 1
+EXPECTED_COVERAGE_LEDGER_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
+EXPECTED_PASS_SCENARIO_COUNT = 2
+EXPECTED_CARTRIDGE_TEST_COUNT = 21
+EXPECTED_COVERAGE_GAP_COUNT = 6
 EXPECTED_SCENARIOS = {
     "pass",
     "input_mask_matrix_pass",
@@ -78,6 +82,7 @@ class ObservabilityVerifier:
 
         debug_entries = self.verify_debug_index(as_dict(run.get("debug_index")))
         self.verify_analysis(as_dict(run.get("analysis")), debug_entries)
+        self.verify_coverage_ledger(as_dict(run.get("coverage_ledger")), debug_entries)
         code_map_domains = self.verify_code_map(as_dict(run.get("code_map")), debug_entries)
         investigation_routes = self.verify_investigation_plan(
             as_dict(run.get("investigation_plan")),
@@ -94,6 +99,7 @@ class ObservabilityVerifier:
             "scenario_count": as_dict(run.get("suite")).get("scenario_count"),
             "debug_index_entries": len(debug_entries),
             "hypothesis_count": as_dict(run.get("analysis")).get("hypothesis_count"),
+            "coverage_ledger_tests": as_dict(run.get("coverage_ledger")).get("test_count"),
             "code_map_domains": len(code_map_domains),
             "investigation_routes": len(investigation_routes),
             "comparison_verdict": as_dict(run.get("comparison")).get("verdict")
@@ -166,6 +172,7 @@ class ObservabilityVerifier:
         for section in (
             "## Debug Index",
             "## Observability Analysis",
+            "## Coverage Ledger",
             "## Diagnostic Code Map",
             "## Investigation Plan",
             "## Observability Comparison",
@@ -323,6 +330,152 @@ class ObservabilityVerifier:
             debug_domains,
             "observability analysis hypothesis domains",
         )
+
+    def verify_coverage_ledger(
+        self, ledger: dict[str, Any], debug_entries: list[dict[str, Any]]
+    ) -> None:
+        self.expect_equal(
+            ledger.get("diagnostic_coverage_ledger_schema_version"),
+            EXPECTED_COVERAGE_LEDGER_SCHEMA,
+            "diagnostic coverage ledger schema version",
+        )
+        self.expect_equal(ledger.get("status"), "passed", "diagnostic coverage ledger status")
+        self.expect_equal(
+            ledger.get("recommended_exit_code"),
+            0,
+            "diagnostic coverage ledger recommended_exit_code",
+        )
+        self.expect_equal(
+            ledger.get("scenario_count"),
+            EXPECTED_SCENARIO_COUNT,
+            "diagnostic coverage ledger scenario_count",
+        )
+        self.expect_equal(
+            ledger.get("test_count"),
+            EXPECTED_CARTRIDGE_TEST_COUNT,
+            "diagnostic coverage ledger test_count",
+        )
+        self.expect_equal(
+            ledger.get("happy_path_scenario_count"),
+            EXPECTED_PASS_SCENARIO_COUNT,
+            "diagnostic coverage ledger happy_path_scenario_count",
+        )
+        self.expect_equal(
+            ledger.get("negative_fixture_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "diagnostic coverage ledger negative_fixture_count",
+        )
+        self.expect_equal(
+            ledger.get("known_gap_count"),
+            EXPECTED_COVERAGE_GAP_COUNT,
+            "diagnostic coverage ledger known_gap_count",
+        )
+        self.expect_equal(ledger.get("errors"), [], "diagnostic coverage ledger errors")
+        self.verify_artifact_map(as_dict(ledger.get("artifacts")), "diagnostic coverage ledger")
+
+        artifact_json = self.resolve_existing_file(
+            as_dict(ledger.get("artifacts")).get("diagnostic_coverage_ledger_json"),
+            "diagnostic coverage ledger JSON",
+        )
+        if artifact_json:
+            artifact_data = self.read_json_file(artifact_json, "diagnostic coverage ledger JSON")
+            self.expect_equal(
+                artifact_data.get("diagnostic_coverage_ledger_schema_version"),
+                EXPECTED_COVERAGE_LEDGER_SCHEMA,
+                "diagnostic coverage ledger artifact schema version",
+            )
+
+        posture = as_dict(ledger.get("coverage_posture"))
+        self.expect_equal(posture.get("only_happy_paths"), False, "coverage posture only_happy_paths")
+        self.expect_equal(
+            len(as_list(posture.get("happy_path_scenario_ids"))),
+            EXPECTED_PASS_SCENARIO_COUNT,
+            "coverage posture happy_path_scenario_ids",
+        )
+        self.expect_equal(
+            len(as_list(posture.get("negative_fixture_scenario_ids"))),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "coverage posture negative_fixture_scenario_ids",
+        )
+
+        tests = [test for test in as_list(ledger.get("tests")) if isinstance(test, dict)]
+        self.expect_equal(
+            len(tests),
+            EXPECTED_CARTRIDGE_TEST_COUNT,
+            "diagnostic coverage ledger tests",
+        )
+        self.expect_equal(
+            {test.get("id") for test in tests},
+            set(range(1, EXPECTED_CARTRIDGE_TEST_COUNT + 1)),
+            "diagnostic coverage ledger test ids",
+        )
+        for test in tests:
+            label = f"diagnostic coverage ledger test {test.get('id')}"
+            self.expect_nonempty_string(test.get("name"), f"{label} name")
+            self.expect_nonempty_string(test.get("subsystem"), f"{label} subsystem")
+            self.expect_nonempty_string(test.get("tier"), f"{label} tier")
+            self.expect_nonempty_string(test.get("intent"), f"{label} intent")
+            self.expect_equal(test.get("baseline_passed"), True, f"{label} baseline_passed")
+
+        negative_fixtures = [
+            fixture
+            for fixture in as_list(ledger.get("negative_fixtures"))
+            if isinstance(fixture, dict)
+        ]
+        self.expect_equal(
+            len(negative_fixtures),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "diagnostic coverage ledger negative_fixtures",
+        )
+        fixture_ids = {fixture.get("scenario_id") for fixture in negative_fixtures}
+        debug_fixture_ids = {
+            entry.get("scenario_id")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        self.expect_equal(fixture_ids, debug_fixture_ids, "coverage ledger negative fixture ids")
+        fixture_domains = {fixture.get("expected_focus_domain") for fixture in negative_fixtures}
+        debug_domains = {
+            as_dict(entry.get("debug_focus")).get("focus_domain")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        self.expect_equal(fixture_domains, debug_domains, "coverage ledger negative domains")
+        for fixture in negative_fixtures:
+            label = f"diagnostic coverage ledger fixture {fixture.get('scenario_id')}"
+            self.expect_nonempty_string(
+                fixture.get("expected_health"),
+                f"{label} expected_health",
+            )
+            self.expect_nonempty_string(
+                fixture.get("expected_focus_domain"),
+                f"{label} expected_focus_domain",
+            )
+            self.expect_nonempty_list(fixture.get("failed_probe_ids"), f"{label} failed_probe_ids")
+            self.expect_nonempty_list(fixture.get("replay_args"), f"{label} replay_args")
+            self.expect_existing_file(fixture.get("primary_artifact"), f"{label} primary_artifact")
+            self.expect_existing_file(fixture.get("telemetry_json"), f"{label} telemetry_json")
+            self.expect_existing_file(fixture.get("comparison_json"), f"{label} comparison_json")
+
+        gaps = [gap for gap in as_list(ledger.get("coverage_gaps")) if isinstance(gap, dict)]
+        self.expect_equal(
+            len(gaps),
+            EXPECTED_COVERAGE_GAP_COUNT,
+            "diagnostic coverage ledger coverage_gaps",
+        )
+        for gap in gaps:
+            label = f"diagnostic coverage ledger gap {gap.get('id')}"
+            self.expect_nonempty_string(gap.get("id"), f"{label} id")
+            self.expect_nonempty_string(gap.get("subsystem"), f"{label} subsystem")
+            self.expect_nonempty_string(gap.get("risk"), f"{label} risk")
+            self.expect_nonempty_string(
+                gap.get("missing_coverage"),
+                f"{label} missing_coverage",
+            )
+            self.expect_nonempty_string(
+                gap.get("suggested_next_test"),
+                f"{label} suggested_next_test",
+            )
 
     def verify_code_map(
         self, code_map: dict[str, Any], debug_entries: list[dict[str, Any]]
@@ -769,6 +922,7 @@ def main() -> int:
             f"scenarios={summary['scenario_count']} "
             f"debug_index={summary['debug_index_entries']} "
             f"hypotheses={summary['hypothesis_count']} "
+            f"coverage_tests={summary['coverage_ledger_tests']} "
             f"code_map={summary['code_map_domains']} "
             f"investigation_routes={summary['investigation_routes']} "
             f"comparison={summary['comparison_verdict'] or '-'} "
