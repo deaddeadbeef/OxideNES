@@ -43,10 +43,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 27);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_sprite_priority_mux")
+        Some("ppu_fine_x_scroll_seam")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -66,7 +66,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("ppu_sprite_priority_mux")
+        Some("ppu_fine_x_scroll_seam")
     );
     assert_eq!(
         telemetry
@@ -89,7 +89,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 9));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 10));
     assert!(telemetry
         .analysis
         .coverage
@@ -257,6 +257,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && test.intent.contains("sprite/background overlap")
             && test.passed
     }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "ppu_fine_x_scroll_seam" && test.intent.contains("fine-X") && test.passed
+    }));
     assert!(telemetry.cpu_addressing_matrix.passed);
     assert_eq!(telemetry.cpu_addressing_matrix.observed_case_count, 3);
     assert_eq!(
@@ -342,6 +345,23 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "ppu.sprite_priority.samples"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "ppu.sprite_priority"
+    }));
+    assert!(telemetry.ppu_scroll_seam.passed);
+    assert_eq!(telemetry.ppu_scroll_seam.observed_case_count, 2);
+    assert_eq!(telemetry.ppu_scroll_seam.scroll_x, 4);
+    assert_eq!(telemetry.ppu_scroll_seam.scroll_y, 0);
+    assert_eq!(
+        telemetry.ppu_scroll_seam.left_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.ppu_scroll_seam.right_observed_color_hex,
+        "0xB53120"
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.scroll_seam.samples"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.scroll_seam"
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
@@ -570,7 +590,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | ppu_sprite_priority_mux (27) |"));
+    assert!(report.contains("| Focus test | ppu_fine_x_scroll_seam (28) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -584,6 +604,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report
         .contains("| Sprite-priority behind sample / expected | (42, 18) 0x64B0FF / 0x64B0FF |"));
     assert!(report.contains("| Sprite-priority cases / expected | 2 / 2 |"));
+    assert!(report.contains("| Scroll-seam left sample / expected | (2, 18) 0x64B0FF / 0x64B0FF |"));
+    assert!(
+        report.contains("| Scroll-seam right sample / expected | (10, 18) 0xB53120 / 0xB53120 |")
+    );
+    assert!(report.contains("| Scroll-seam cases / expected | 2 / 2 |"));
     assert!(report.contains("## DMA Timing"));
     assert!(report.contains("| OAM DMA completed | true |"));
     assert!(report.contains("| Active cycles / expected |"));
@@ -621,6 +646,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 25 | ppu_sprite_zero_hit | ppu | edge_case | passed |"));
     assert!(report.contains("| 26 | ppu_sprite_overflow | ppu | edge_case | passed |"));
     assert!(report.contains("| 27 | ppu_sprite_priority_mux | ppu | edge_case | passed |"));
+    assert!(report.contains("| 28 | ppu_fine_x_scroll_seam | ppu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -646,10 +672,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
     assert!(telemetry.verdict.passed);
     assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 27);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_sprite_priority_mux")
+        Some("ppu_fine_x_scroll_seam")
     );
     assert_eq!(telemetry.input.joypad1_mask_hex, "0xAA");
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0xAA");
@@ -913,7 +939,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 27);
+    assert_eq!(telemetry.verdict.current_test, 28);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -1223,6 +1249,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_fail
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x00 / 0x20 |"));
     assert!(report.contains("| 26 | ppu_sprite_overflow | ppu | edge_case | failed |"));
     assert!(report.contains("| 27 | ppu_sprite_priority_mux | ppu | edge_case | not_started |"));
+    assert!(report.contains("| 28 | ppu_fine_x_scroll_seam | ppu | edge_case | not_started |"));
 }
 
 #[test]
@@ -1239,10 +1266,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
         Some("ppu_sprite_priority")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 27);
+    assert_eq!(telemetry.verdict.current_test, 28);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("ppu_sprite_priority_mux")
+        Some("ppu_fine_x_scroll_seam")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -1303,8 +1330,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
             && probe.test_id == Some(27)
             && probe.likely_domain == "ppu.sprite_priority"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 27);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 27);
+    assert_eq!(telemetry.analysis.timing.started_tests, 28);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 28);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
@@ -1319,6 +1346,106 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
     assert!(report
         .contains("| Sprite-priority behind sample / expected | (42, 18) 0xB53120 / 0x64B0FF |"));
     assert!(report.contains("| 27 | ppu_sprite_priority_mux | ppu | edge_case | passed |"));
+    assert!(report.contains("| 28 | ppu_fine_x_scroll_seam | ppu | edge_case | passed |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuScrollSeam),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU scroll-seam failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_scroll_seam")
+    );
+    assert_eq!(telemetry.verdict.status, 0x80);
+    assert_eq!(telemetry.verdict.current_test, 28);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("ppu_fine_x_scroll_seam")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x00);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU scroll-seam localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::HostValidation);
+    assert_eq!(failure.test_id, 28);
+    assert_eq!(failure.test_name, Some("ppu_fine_x_scroll_seam"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0x00");
+    assert_eq!(failure.likely_domain, "ppu.scroll_seam");
+    assert!(failure.assertion.contains("fine-X scroll"));
+    assert!(failure.expected.contains("right sample"));
+    assert!(failure.observed.contains("right sample 0x64B0FF"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::HostValidationFailed
+    );
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_fine_x_scroll_seam")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.scroll_seam")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.scroll_seam")
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.scroll_seam.samples".to_string()));
+    assert_eq!(
+        telemetry.ppu_scroll_seam.left_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.ppu_scroll_seam.right_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.ppu_scroll_seam.right_expected_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(telemetry.ppu_scroll_seam.observed_case_count, 2);
+    assert!(!telemetry.ppu_scroll_seam.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.scroll_seam.samples"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(28)
+            && probe.likely_domain == "ppu.scroll_seam"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 28);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 28);
+    assert_eq!(
+        telemetry.analysis.timing.not_started_tests,
+        DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
+    );
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_fine_x_scroll_seam (28) |"));
+    assert!(report.contains("| Focus domain | ppu.scroll_seam |"));
+    assert!(report.contains("| Likely domain | ppu.scroll_seam |"));
+    assert!(
+        report.contains("| Scroll-seam right sample / expected | (10, 18) 0x64B0FF / 0xB53120 |")
+    );
+    assert!(report.contains("| 28 | ppu_fine_x_scroll_seam | ppu | edge_case | passed |"));
 }
 
 #[test]
@@ -2512,7 +2639,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 27 |"));
+    assert!(report.contains("| Not started tests | 28 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }

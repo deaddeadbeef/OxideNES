@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 36;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 37;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v36";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v37";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -73,6 +73,7 @@ const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
     "ppu_horizontal_nametable_mirroring_before_first_mirror_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
+const PPU_SCROLL_SEAM_FAULT_LABEL: &str = "ppu_scroll_seam_before_render_enable";
 const PPU_SPRITE_OVERFLOW_FAULT_LABEL: &str = "ppu_sprite_overflow_before_render_enable";
 const PPU_SPRITE_PRIORITY_FAULT_LABEL: &str = "ppu_sprite_priority_before_render_enable";
 const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
@@ -122,6 +123,15 @@ const PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X: usize = 42;
 const PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y: usize = 18;
 const PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR: u32 = 0xB53120;
 const PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR: u32 = 0x64B0FF;
+const PPU_SCROLL_SEAM_TEST_ID: u8 = 28;
+const PPU_SCROLL_SEAM_CASE_COUNT_ADDR: u16 = 0x0254;
+const PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT: u8 = 2;
+const PPU_SCROLL_SEAM_LEFT_SAMPLE_X: usize = 2;
+const PPU_SCROLL_SEAM_LEFT_SAMPLE_Y: usize = 18;
+const PPU_SCROLL_SEAM_RIGHT_SAMPLE_X: usize = 10;
+const PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y: usize = 18;
+const PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR: u32 = 0x64B0FF;
+const PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR: u32 = 0xB53120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -449,6 +459,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "front-priority sprite sample uses the sprite palette color over a non-transparent background pixel",
             "behind-priority sprite sample uses the background palette color over a non-transparent sprite pixel",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 28,
+        name: "ppu_fine_x_scroll_seam",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify fine-X scrolling renders the expected pixels across a deterministic horizontal background tile seam.",
+        expected_observations: &[
+            "left sample remains on the first tile after fine-X scroll",
+            "right sample crosses the fine-X seam into the next tile",
         ],
     },
 ];
@@ -1099,9 +1120,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, NMI delivery, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Scrolling seams, vblank timing, sprite overflow hardware-bug false positives/negatives, and per-dot rendering behavior beyond targeted sprite-priority samples.",
-        suggested_next_test: "Add deterministic scrolling seam scenes with expected frame checksums and targeted vblank-timing probes.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, NMI delivery, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Vblank timing, sprite overflow hardware-bug false positives/negatives, coarse-X and vertical scrolling seams, and per-dot rendering behavior beyond targeted sprite-priority and fine-X scroll-seam samples.",
+        suggested_next_test: "Add deterministic vblank-timing probes or vertical scrolling seam scenes with expected frame checksums.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1176,6 +1197,7 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuScrollSeam,
     PpuSpriteOverflow,
     PpuSpritePriority,
     PpuSpriteZeroHit,
@@ -1185,7 +1207,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 19] = [
+    pub const ALL: [DiagnosticFaultInjection; 20] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
@@ -1199,6 +1221,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::Mapper2PrgRam,
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuScrollSeam,
         DiagnosticFaultInjection::PpuSpriteOverflow,
         DiagnosticFaultInjection::PpuSpritePriority,
         DiagnosticFaultInjection::PpuSpriteZeroHit,
@@ -1222,6 +1245,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuScrollSeam => "ppu_scroll_seam",
             DiagnosticFaultInjection::PpuSpriteOverflow => "ppu_sprite_overflow",
             DiagnosticFaultInjection::PpuSpritePriority => "ppu_sprite_priority",
             DiagnosticFaultInjection::PpuSpriteZeroHit => "ppu_sprite_zero_hit",
@@ -1250,6 +1274,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuScrollSeam => PPU_SCROLL_SEAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteOverflow => PPU_SPRITE_OVERFLOW_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpritePriority => PPU_SPRITE_PRIORITY_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteZeroHit => PPU_SPRITE_ZERO_HIT_FAULT_LABEL,
@@ -1274,6 +1299,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
+    pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
     pub ppu_sprite_priority: PpuSpritePriorityTelemetry,
     pub ppu_sprite_zero_hit: PpuSpriteZeroHitTelemetry,
@@ -1622,6 +1648,27 @@ pub struct PpuSpritePriorityTelemetry {
     pub passed: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PpuScrollSeamTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub scroll_x: u8,
+    pub scroll_y: u8,
+    pub left_sample_x: usize,
+    pub left_sample_y: usize,
+    pub left_expected_color: u32,
+    pub left_expected_color_hex: String,
+    pub left_observed_color: u32,
+    pub left_observed_color_hex: String,
+    pub right_sample_x: usize,
+    pub right_sample_y: usize,
+    pub right_expected_color: u32,
+    pub right_expected_color_hex: String,
+    pub right_observed_color: u32,
+    pub right_observed_color_hex: String,
+    pub passed: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticRamWatchTelemetry {
     pub status: u8,
@@ -1942,6 +1989,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut audio_sample_count = 0usize;
     let mut audio_peak_abs = 0.0f32;
     let mut diagnostic_render_frame = None;
+    let mut ppu_scroll_seam_frame = None;
     let mut ppu_sprite_priority_frame = None;
     let mut events = Vec::new();
     let mut last_status = read_ram_byte(&mut bus, STATUS_ADDR);
@@ -2019,6 +2067,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             );
             maybe_capture_ppu_sprite_priority_frame(
                 &mut ppu_sprite_priority_frame,
+                current_test,
+                &bus.ppu.frame_data,
+            );
+            maybe_capture_ppu_scroll_seam_frame(
+                &mut ppu_scroll_seam_frame,
                 current_test,
                 &bus.ppu.frame_data,
             );
@@ -2136,6 +2189,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     current_test,
                     &bus.ppu.frame_data,
                 );
+                maybe_capture_ppu_scroll_seam_frame(
+                    &mut ppu_scroll_seam_frame,
+                    current_test,
+                    &bus.ppu.frame_data,
+                );
                 bus.apu.end_frame();
                 let samples = bus.apu.drain_samples();
                 audio_sample_count += samples.len();
@@ -2167,6 +2225,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
+    let ppu_scroll_seam =
+        ppu_scroll_seam_telemetry(&ram, ppu_scroll_seam_frame.as_ref(), &bus.ppu.frame_data);
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
     let ppu_sprite_priority = ppu_sprite_priority_telemetry(
         &ram,
@@ -2181,6 +2241,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
@@ -2207,6 +2268,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
@@ -2262,6 +2324,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         input_port_matrix,
+        ppu_scroll_seam,
         ppu_sprite_overflow,
         ppu_sprite_priority,
         ppu_sprite_zero_hit,
@@ -2798,6 +2861,43 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Sprite-priority passed | {} |",
         telemetry.ppu_sprite_priority.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam left sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_scroll_seam.left_sample_x,
+        telemetry.ppu_scroll_seam.left_sample_y,
+        telemetry.ppu_scroll_seam.left_observed_color_hex,
+        telemetry.ppu_scroll_seam.left_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam right sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_scroll_seam.right_sample_x,
+        telemetry.ppu_scroll_seam.right_sample_y,
+        telemetry.ppu_scroll_seam.right_observed_color_hex,
+        telemetry.ppu_scroll_seam.right_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam scroll X/Y | {} / {} |",
+        telemetry.ppu_scroll_seam.scroll_x, telemetry.ppu_scroll_seam.scroll_y
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam cases / expected | {} / {} |",
+        telemetry.ppu_scroll_seam.observed_case_count,
+        telemetry.ppu_scroll_seam.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam passed | {} |",
+        telemetry.ppu_scroll_seam.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -3827,6 +3927,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
@@ -3846,6 +3947,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
@@ -3946,6 +4048,23 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_sprite_priority.behind_expected_color_hex,
             input.ppu_sprite_priority.observed_case_count,
             input.ppu_sprite_priority.expected_case_count
+        ));
+    }
+    if !input.ppu_scroll_seam.passed {
+        failures.push(format!(
+            "PPU scroll-seam mismatch: left sample ({}, {}) {} expected {}, right sample ({}, {}) {} expected {}, scroll {}/{}, cases {}/{}",
+            input.ppu_scroll_seam.left_sample_x,
+            input.ppu_scroll_seam.left_sample_y,
+            input.ppu_scroll_seam.left_observed_color_hex,
+            input.ppu_scroll_seam.left_expected_color_hex,
+            input.ppu_scroll_seam.right_sample_x,
+            input.ppu_scroll_seam.right_sample_y,
+            input.ppu_scroll_seam.right_observed_color_hex,
+            input.ppu_scroll_seam.right_expected_color_hex,
+            input.ppu_scroll_seam.scroll_x,
+            input.ppu_scroll_seam.scroll_y,
+            input.ppu_scroll_seam.observed_case_count,
+            input.ppu_scroll_seam.expected_case_count
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -4259,6 +4378,40 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.ppu_sprite_priority.expected_case_count
             ),
             likely_domain: "ppu.sprite_priority".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.scroll_seam.samples".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_SCROLL_SEAM_TEST_ID),
+            test_name: test_name(PPU_SCROLL_SEAM_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_scroll_seam.passed),
+            description:
+                "Host-sampled frame pixels prove fine-X scroll across a horizontal background tile seam"
+                    .to_string(),
+            expected: format!(
+                "left sample ({}, {}) {}, right sample ({}, {}) {}, scroll {}/{}, cases {}",
+                input.ppu_scroll_seam.left_sample_x,
+                input.ppu_scroll_seam.left_sample_y,
+                input.ppu_scroll_seam.left_expected_color_hex,
+                input.ppu_scroll_seam.right_sample_x,
+                input.ppu_scroll_seam.right_sample_y,
+                input.ppu_scroll_seam.right_expected_color_hex,
+                input.ppu_scroll_seam.scroll_x,
+                input.ppu_scroll_seam.scroll_y,
+                input.ppu_scroll_seam.expected_case_count
+            ),
+            observed: format!(
+                "left sample {}, right sample {}, cases {}/{}",
+                input.ppu_scroll_seam.left_observed_color_hex,
+                input.ppu_scroll_seam.right_observed_color_hex,
+                input.ppu_scroll_seam.observed_case_count,
+                input.ppu_scroll_seam.expected_case_count
+            ),
+            likely_domain: "ppu.scroll_seam".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -4627,6 +4780,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_sprite_zero_hit();
     program.ppu_sprite_overflow();
     program.ppu_sprite_priority();
+    program.ppu_scroll_seam();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -5659,8 +5813,109 @@ impl DiagnosticProgram {
         self.asm.cmp_imm(0x80);
         self.asm.bne(&second_vblank);
 
+        self.delay_host_frame_capture();
         self.restore_oam_prefix_from_dma_source(PPU_SPRITE_OVERFLOW_RESTORE_BYTES);
         self.pass_test(PPU_SPRITE_PRIORITY_TEST_ID);
+    }
+
+    fn ppu_scroll_seam(&mut self) {
+        self.begin_test(PPU_SCROLL_SEAM_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x40);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x41);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x23);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0xC0);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x23);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0xC7);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x0F);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x16);
+        self.asm.sta_abs(0x2007);
+
+        self.asm
+            .label(PPU_SCROLL_SEAM_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x04);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x0A);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("scroll_seam_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("scroll_seam_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        self.delay_host_frame_capture();
+        self.pass_test(PPU_SCROLL_SEAM_TEST_ID);
+    }
+
+    fn delay_host_frame_capture(&mut self) {
+        for _ in 0..3 {
+            let delay = self.unique_label("host_frame_capture_delay");
+            self.asm.ldx_imm(0x00);
+            self.asm
+                .label(&delay)
+                .expect("unique label should not collide");
+            self.asm.inx();
+            self.asm.bne(&delay);
+        }
     }
 
     fn write_oam_bytes(&mut self, bytes: &[u8]) {
@@ -5995,6 +6250,10 @@ fn build_chr_rom() -> Vec<u8> {
         chr[32 + row] = 0xFF;
         chr[32 + 8 + row] = 0;
     }
+    for row in 0..8 {
+        chr[48 + row] = 0;
+        chr[48 + 8 + row] = 0xFF;
+    }
 
     chr
 }
@@ -6160,6 +6419,12 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
+        }
+        DiagnosticFaultInjection::PpuScrollSeam => {
+            bus.cpu_write(0x2006, 0x20);
+            bus.cpu_write(0x2006, 0x41);
+            bus.cpu_write(0x2007, 0x02);
+            let _ = bus.cpu_read(0x2002);
         }
         DiagnosticFaultInjection::PpuSpriteOverflow => {
             bus.ppu.oam_data[32..].fill(0xF0);
@@ -6345,6 +6610,48 @@ fn ppu_sprite_priority_telemetry(
         passed: observed_case_count == PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT
             && sample.front_color == PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR
             && sample.behind_color == PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR,
+    }
+}
+
+fn ppu_scroll_seam_telemetry(
+    ram: &[u8],
+    captured_sample: Option<&PpuScrollSeamFrameSample>,
+    final_frame: &[u32],
+) -> PpuScrollSeamTelemetry {
+    let observed_case_count = ram[(PPU_SCROLL_SEAM_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let fallback_sample = PpuScrollSeamFrameSample {
+        left_color: sample_frame_color(
+            final_frame,
+            PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
+            PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
+        ),
+        right_color: sample_frame_color(
+            final_frame,
+            PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
+            PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
+        ),
+    };
+    let sample = captured_sample.copied().unwrap_or(fallback_sample);
+    PpuScrollSeamTelemetry {
+        expected_case_count: PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        scroll_x: 0x04,
+        scroll_y: 0x00,
+        left_sample_x: PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
+        left_sample_y: PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
+        left_expected_color: PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR,
+        left_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR),
+        left_observed_color: sample.left_color,
+        left_observed_color_hex: hex_color(sample.left_color),
+        right_sample_x: PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
+        right_sample_y: PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
+        right_expected_color: PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR,
+        right_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR),
+        right_observed_color: sample.right_color,
+        right_observed_color_hex: hex_color(sample.right_color),
+        passed: observed_case_count == PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT
+            && sample.left_color == PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR
+            && sample.right_color == PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR,
     }
 }
 
@@ -7225,6 +7532,12 @@ struct PpuSpritePriorityFrameSample {
     behind_color: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PpuScrollSeamFrameSample {
+    left_color: u32,
+    right_color: u32,
+}
+
 fn maybe_capture_diagnostic_render_frame(
     retained_frame: &mut Option<FrameTelemetry>,
     current_test: u8,
@@ -7257,6 +7570,28 @@ fn maybe_capture_ppu_sprite_priority_frame(
             frame,
             PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X,
             PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y,
+        ),
+    });
+}
+
+fn maybe_capture_ppu_scroll_seam_frame(
+    retained_sample: &mut Option<PpuScrollSeamFrameSample>,
+    current_test: u8,
+    frame: &[u32],
+) {
+    if current_test != PPU_SCROLL_SEAM_TEST_ID {
+        return;
+    }
+    *retained_sample = Some(PpuScrollSeamFrameSample {
+        left_color: sample_frame_color(
+            frame,
+            PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
+            PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
+        ),
+        right_color: sample_frame_color(
+            frame,
+            PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
+            PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
         ),
     });
 }
@@ -7661,6 +7996,10 @@ fn compare_observation_checksums(
         &["ppu_sprite_priority", "behind_observed_color"][..],
         &["ppu_sprite_priority", "observed_case_count"][..],
         &["ppu_sprite_priority", "passed"][..],
+        &["ppu_scroll_seam", "left_observed_color"][..],
+        &["ppu_scroll_seam", "right_observed_color"][..],
+        &["ppu_scroll_seam", "observed_case_count"][..],
+        &["ppu_scroll_seam", "passed"][..],
         &["frame", "checksum"][..],
         &["frame", "unique_colors"][..],
         &["audio", "sample_count"][..],
@@ -8255,10 +8594,12 @@ mod tests {
             .coverage_gaps
             .iter()
             .any(|gap| gap.id == "ppu_pixel_pipeline"
-                && gap.missing_coverage.contains("Scrolling seams")
+                && gap
+                    .missing_coverage
+                    .contains("coarse-X and vertical scrolling seams")
                 && gap
                     .current_coverage
-                    .contains("sprite/background priority pixel sampling")));
+                    .contains("fine-X horizontal scroll seam sampling")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(

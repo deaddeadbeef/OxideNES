@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 36
+EXPECTED_TELEMETRY_SCHEMA = 37
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -30,6 +30,7 @@ EXPECTED_SCENARIOS = {
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
+    "ppu_scroll_seam_fault",
     "ppu_sprite_overflow_fault",
     "ppu_sprite_priority_fault",
     "ppu_sprite_zero_hit_fault",
@@ -90,7 +91,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            22,
+            23,
             "analysis baseline_divergence_count",
         )
 
@@ -140,13 +141,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            22,
+            23,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 22, "observer next_actions count")
+        self.expect_equal(len(actions), 23, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -190,6 +191,7 @@ class SuiteVerifier:
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
+            "ppu_scroll_seam_fault",
             "ppu_sprite_overflow_fault",
             "ppu_sprite_priority_fault",
             "ppu_sprite_zero_hit_fault",
@@ -350,6 +352,40 @@ class SuiteVerifier:
             "failed_probe_ids=ppu.sprite_priority.samples",
             ppu_priority_evidence,
             "PPU sprite-priority observer evidence",
+        )
+
+        ppu_scroll = by_scenario.get("ppu_scroll_seam_fault")
+        if not isinstance(ppu_scroll, dict):
+            self.errors.append("missing observer action for ppu_scroll_seam_fault")
+            return
+
+        self.expect_equal(
+            ppu_scroll.get("priority"),
+            "known_divergence",
+            "PPU scroll-seam observer action priority",
+        )
+        self.expect_equal(
+            ppu_scroll.get("action_type"),
+            "inspect_known_divergence",
+            "PPU scroll-seam observer action type",
+        )
+        self.expect_equal(
+            ppu_scroll.get("primary_artifact"),
+            "ppu_scroll_seam_fault/comparison.json",
+            "PPU scroll-seam observer primary_artifact",
+        )
+        ppu_scroll_evidence = self.expect_list(
+            ppu_scroll.get("evidence"), "PPU scroll-seam observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=ppu.scroll_seam",
+            ppu_scroll_evidence,
+            "PPU scroll-seam observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=ppu.scroll_seam.samples",
+            ppu_scroll_evidence,
+            "PPU scroll-seam observer evidence",
         )
 
         joypad_reset = by_scenario.get("joypad_strobe_reset_fault")

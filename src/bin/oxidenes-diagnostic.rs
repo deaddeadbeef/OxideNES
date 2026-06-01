@@ -1810,7 +1810,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(27),
+            expected_focus_test_id: Some(28),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1826,7 +1826,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(27),
+            expected_focus_test_id: Some(28),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -2040,6 +2040,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::HostValidationFailed,
             expected_focus_test_id: Some(27),
             expected_focus_domain: Some("ppu.sprite_priority"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_scroll_seam_fault",
+            title: "Intentional PPU scroll-seam host-observation failure",
+            purpose:
+                "Failure-localization fixture for fine-X horizontal scroll seam regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuScrollSeam),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::HostValidationFailed,
+            expected_focus_test_id: Some(28),
+            expected_focus_domain: Some("ppu.scroll_seam"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",
