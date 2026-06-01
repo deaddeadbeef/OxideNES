@@ -100,7 +100,11 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` alongside the generated scenario-suite
-root files. When `--compare-suite-dir <DIR>` is supplied, it also writes
+root files. It also writes `diagnostic-code-map.json` and
+`diagnostic-code-map.md`, which map each focus domain to the emulator source
+files, regression tests, diagnostic support files, search terms, debug anchor,
+first artifact to open, and replay/test commands an automated debugger should
+use next. When `--compare-suite-dir <DIR>` is supplied, it also writes
 `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`. The root scenario-suite files are
 `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
@@ -131,7 +135,10 @@ observability analysis consumes that index and emits ranked focus-domain
 hypotheses, health counts, scenario priority, suggested replay args, and the
 first artifact to open for each candidate subsystem. Use it when an automated
 debugger needs an aggregate cross-suite starting point before drilling into one
-scenario. The optional comparison artifact compares two observability suites by
+scenario. The code map is the next routing layer: use it after choosing a focus
+domain to open the relevant emulator files, nearby regression tests, and focused
+replay command without guessing where that domain lives in the repository. The
+optional comparison artifact compares two observability suites by
 scenario health/focus/probes/scores and hypothesis rank/score changes, then
 reports matched, changed, or regressed verdicts with replay args and current-run
 artifact pointers for any regression. Use `--fail-on-comparison-regression`
@@ -202,8 +209,8 @@ manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 To validate the full observability wrapper output that AI tooling consumes,
-including the debug index, aggregate analysis, optional cross-run comparison,
-focused replay evidence, and `observability-run.json`, run:
+including the debug index, aggregate analysis, diagnostic code map, optional
+cross-run comparison, focused replay evidence, and `observability-run.json`, run:
 
 ```powershell
 python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -218,8 +225,9 @@ summaries.
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
-`diagnostic-observability-analysis.md` files. With `--compare-suite-dir <DIR>`
-it also writes `diagnostic-observability-comparison.json` and
+`diagnostic-observability-analysis.md` files, plus
+`diagnostic-code-map.json` and `diagnostic-code-map.md`. With
+`--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
 `--fail-on-comparison-regression` it exits non-zero when the current run
 regresses against that prior suite. CI and release workflows use that flag when
