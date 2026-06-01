@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 30;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 31;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v30";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v31";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -75,6 +75,13 @@ const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
+const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
+
+const CPU_ADDRESSING_MATRIX_ABS_X_NO_CROSS_ADDR: u16 = 0x0240;
+const CPU_ADDRESSING_MATRIX_ABS_X_PAGE_CROSS_ADDR: u16 = 0x0241;
+const CPU_ADDRESSING_MATRIX_INDIRECT_Y_PAGE_CROSS_ADDR: u16 = 0x0242;
+const CPU_ADDRESSING_MATRIX_CASE_COUNT_ADDR: u16 = 0x0243;
+const CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -334,6 +341,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "two strobe-high reads both return the configured joypad-1 A bit",
             "the first post-strobe-low read still starts at the configured joypad-1 A bit",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 22,
+        name: "cpu_addressing_mode_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify CPU load-addressing matrix cases that include absolute,X and (zero-page),Y page-crossing loads.",
+        expected_observations: &[
+            "LDA $0440,X with X=0x02 reads a non-crossing absolute,X sentinel",
+            "LDA $04FF,X with X=0x01 reads the $0500 page-crossing sentinel",
+            "LDA ($42),Y with pointer $04FF and Y=0x01 reads the same page-crossing sentinel",
         ],
     },
 ];
@@ -709,6 +728,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect JMP indirect target calculation and program-counter update after resolving the target address.",
     },
     DiagnosticFailureSpec {
+        code: 0xB2,
+        test_id: 22,
+        assertion: "Absolute,X non-crossing load reads the expected sentinel",
+        expected: "LDA $0440,X with X=0x02 reads the byte stored at $0442",
+        observed: "A differed from the $0442 absolute,X sentinel",
+        likely_domain: "cpu.addressing.absolute_x_load",
+        remediation_hint: "Inspect absolute,X effective-address calculation and LDA readback before broadening the opcode search.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB3,
+        test_id: 22,
+        assertion: "Absolute,X page-crossing load reads the expected sentinel",
+        expected: "LDA $04FF,X with X=0x01 reads the byte stored at $0500",
+        observed: "A differed from the $0500 absolute,X page-crossing sentinel",
+        likely_domain: "cpu.addressing.page_cross_load",
+        remediation_hint: "Inspect absolute,X page-crossing effective-address calculation and page-cross cycle penalty handling.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB4,
+        test_id: 22,
+        assertion: "Indirect,Y page-crossing load reads the expected sentinel",
+        expected: "LDA ($42),Y with pointer $04FF and Y=0x01 reads the byte stored at $0500",
+        observed: "A differed from the $0500 indirect,Y page-crossing sentinel",
+        likely_domain: "cpu.addressing.indirect_y_page_cross_load",
+        remediation_hint: "Inspect indirect,Y zero-page pointer wrapping, Y indexing, and page-cross cycle penalty handling.",
+    },
+    DiagnosticFailureSpec {
         code: 0xD0,
         test_id: 14,
         assertion: "PPUDATA read from $2000 returns the buffered VRAM byte on the second read",
@@ -823,8 +869,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, and indirect JMP page-wrap behavior.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, broader addressing-mode combinations, and cycle-accurate addressing penalties.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, indirect JMP page-wrap behavior, and a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, write/modify addressing-mode combinations, and broader cycle-accurate addressing penalties.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case.",
     },
     DiagnosticCoverageGapSpec {
@@ -896,6 +942,7 @@ impl Default for DiagnosticConfig {
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticFaultInjection {
     ApuStatusRegister,
+    CpuAddressingModeMatrix,
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
@@ -911,8 +958,9 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 13] = [
+    pub const ALL: [DiagnosticFaultInjection; 14] = [
         DiagnosticFaultInjection::ApuStatusRegister,
+        DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
@@ -930,6 +978,7 @@ impl DiagnosticFaultInjection {
     pub fn as_str(self) -> &'static str {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
+            DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
@@ -952,6 +1001,7 @@ impl DiagnosticFaultInjection {
     fn injection_label(self) -> &'static str {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
@@ -980,6 +1030,7 @@ pub struct DiagnosticTelemetry {
     pub cycles: u64,
     pub frames: u64,
     pub cpu: CpuTelemetry,
+    pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
     pub timeline: Vec<TestTimelineTelemetry>,
@@ -1245,6 +1296,19 @@ pub struct CpuTelemetry {
     pub sp: u8,
     pub status: u8,
     pub pending_cycles: u8,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuAddressingMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub passed: bool,
+    pub abs_x_no_cross_result: u8,
+    pub abs_x_no_cross_result_hex: String,
+    pub abs_x_page_cross_result: u8,
+    pub abs_x_page_cross_result_hex: String,
+    pub indirect_y_page_cross_result: u8,
+    pub indirect_y_page_cross_result_hex: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1758,11 +1822,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let dma = dma_observation.telemetry();
     let oam = oam_telemetry(&bus.ppu.oam_data);
     let frame = frame_telemetry(&bus.ppu.frame_data);
+    let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let mut host_failures = host_validate(HostValidationInput {
         status,
         timeout,
         tests: &test_results,
         ram: &ram,
+        cpu_addressing_matrix: &cpu_addressing_matrix,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -1784,6 +1850,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         failure_code,
         tests: &test_results,
         ram: &ram,
+        cpu_addressing_matrix: &cpu_addressing_matrix,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -1834,6 +1901,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cycles,
         frames,
         cpu: cpu_telemetry(&cpu),
+        cpu_addressing_matrix,
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
             nmi_count: ram[NMI_COUNT_ADDR as usize],
@@ -2860,11 +2928,14 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x8D => OpcodeDecode::absolute("STA"),
         0x9A => OpcodeDecode::implied("TXS"),
         0x9D => OpcodeDecode::absolute_x("STA"),
+        0xA0 => OpcodeDecode::immediate("LDY"),
         0xA2 => OpcodeDecode::immediate("LDX"),
         0xA5 => OpcodeDecode::zero_page("LDA"),
         0xA9 => OpcodeDecode::immediate("LDA"),
         0xAD => OpcodeDecode::absolute("LDA"),
+        0xB1 => OpcodeDecode::indirect_y("LDA"),
         0xB5 => OpcodeDecode::zero_page_x("LDA"),
+        0xBD => OpcodeDecode::absolute_x("LDA"),
         0xC9 => OpcodeDecode::immediate("CMP"),
         0xD0 => OpcodeDecode::relative("BNE"),
         0xD8 => OpcodeDecode::implied("CLD"),
@@ -2935,6 +3006,14 @@ impl OpcodeDecode {
         }
     }
 
+    fn indirect_y(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "indirect_y",
+            byte_len: 2,
+        }
+    }
+
     fn relative(mnemonic: &'static str) -> Self {
         Self {
             mnemonic,
@@ -2964,6 +3043,7 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
             decode.mnemonic,
             format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
         ),
+        "indirect_y" => format!("{} (${:02X}),Y", decode.mnemonic, operand_bytes[0]),
         "relative" => {
             let target = (pc as i32 + 2 + operand_bytes[0] as i8 as i32) as u16;
             format!("{} {}", decode.mnemonic, format_pc(target))
@@ -3185,6 +3265,7 @@ struct HostValidationInput<'a> {
     timeout: bool,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3199,6 +3280,7 @@ struct ProbeTelemetryInput<'a> {
     failure_code: u8,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3241,6 +3323,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
                 test.id, test.name, test.result
             ));
         }
+    }
+    if !input.cpu_addressing_matrix.passed {
+        failures.push(format!(
+            "CPU addressing matrix mismatch: abs_x_no_cross={}, abs_x_page_cross={}, indirect_y_page_cross={}, cases {}/{}",
+            input.cpu_addressing_matrix.abs_x_no_cross_result_hex,
+            input.cpu_addressing_matrix.abs_x_page_cross_result_hex,
+            input.cpu_addressing_matrix.indirect_y_page_cross_result_hex,
+            input.cpu_addressing_matrix.observed_case_count,
+            input.cpu_addressing_matrix.expected_case_count
+        ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
         failures.push(format!(
@@ -3401,6 +3493,32 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     }
 
     let passed_suite = input.status == STATUS_PASS;
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.addressing_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(22),
+            test_name: test_name(22),
+            status: gated_probe_status(passed_suite, input.cpu_addressing_matrix.passed),
+            description:
+                "CPU addressing matrix retained expected load sentinels for non-crossing and page-crossing cases"
+                    .to_string(),
+            expected:
+                "absolute,X no-cross=0x34, absolute,X page-cross=0x56, indirect,Y page-cross=0x56, cases=3"
+                    .to_string(),
+            observed: format!(
+                "absolute,X no-cross {}, absolute,X page-cross {}, indirect,Y page-cross {}, cases {}/{}",
+                input.cpu_addressing_matrix.abs_x_no_cross_result_hex,
+                input.cpu_addressing_matrix.abs_x_page_cross_result_hex,
+                input.cpu_addressing_matrix.indirect_y_page_cross_result_hex,
+                input.cpu_addressing_matrix.observed_case_count,
+                input.cpu_addressing_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.addressing.page_cross_load".to_string(),
+        },
+    );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
     let should_validate_ppu_render_observations = passed_suite || active_ppu_render_test;
     push_probe(
@@ -3732,6 +3850,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_vram_increment_32();
     program.ppu_status_latch_reset();
     program.joypad_strobe_high_hold();
+    program.cpu_addressing_mode_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -4361,6 +4480,42 @@ impl DiagnosticProgram {
         self.pass_test(21);
     }
 
+    fn cpu_addressing_mode_matrix(&mut self) {
+        self.begin_test(22);
+        self.asm.lda_imm(0x34);
+        self.asm.sta_abs(0x0442);
+        self.asm.lda_imm(0x56);
+        self.asm.sta_abs(0x0500);
+
+        self.asm.ldx_imm(0x02);
+        self.asm.lda_abs_x(0x0440);
+        self.asm.sta_abs(CPU_ADDRESSING_MATRIX_ABS_X_NO_CROSS_ADDR);
+        self.expect_a_eq(0x34, 0xB2);
+
+        self.asm.ldx_imm(0x01);
+        self.asm
+            .label(CPU_ADDRESSING_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_abs_x(0x04FF);
+        self.asm
+            .sta_abs(CPU_ADDRESSING_MATRIX_ABS_X_PAGE_CROSS_ADDR);
+        self.expect_a_eq(0x56, 0xB3);
+
+        self.asm.lda_imm(0xFF);
+        self.asm.sta_zp(0x42);
+        self.asm.lda_imm(0x04);
+        self.asm.sta_zp(0x43);
+        self.asm.ldy_imm(0x01);
+        self.asm.lda_indirect_y(0x42);
+        self.asm
+            .sta_abs(CPU_ADDRESSING_MATRIX_INDIRECT_Y_PAGE_CROSS_ADDR);
+        self.expect_a_eq(0x56, 0xB4);
+
+        self.asm.lda_imm(CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(CPU_ADDRESSING_MATRIX_CASE_COUNT_ADDR);
+        self.pass_test(22);
+    }
+
     fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
         for index in 0..8 {
             self.asm.lda_abs(addr);
@@ -4541,8 +4696,20 @@ impl Assembler {
         self.op_abs(0xAD, addr);
     }
 
+    fn lda_abs_x(&mut self, addr: u16) {
+        self.op_abs(0xBD, addr);
+    }
+
+    fn lda_indirect_y(&mut self, addr: u8) {
+        self.op_zp(0xB1, addr);
+    }
+
     fn ldx_imm(&mut self, value: u8) {
         self.op_imm(0xA2, value);
+    }
+
+    fn ldy_imm(&mut self, value: u8) {
+        self.op_imm(0xA0, value);
     }
 
     fn sta_zp(&mut self, addr: u8) {
@@ -4787,6 +4954,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::ApuStatusRegister => {
             bus.cpu_write(0x4015, 0x00);
         }
+        DiagnosticFaultInjection::CpuAddressingModeMatrix => {
+            bus.cpu_write(0x0500, 0x00);
+        }
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
             let wrong_target_high = bus.cpu_read(0x0500);
             bus.cpu_write(0x0400, wrong_target_high);
@@ -4850,6 +5020,29 @@ fn cpu_telemetry(cpu: &Cpu) -> CpuTelemetry {
         sp: cpu.sp,
         status: cpu.status,
         pending_cycles: cpu.cycles,
+    }
+}
+
+fn cpu_addressing_matrix_telemetry(ram: &[u8]) -> CpuAddressingMatrixTelemetry {
+    let abs_x_no_cross_result = ram[(CPU_ADDRESSING_MATRIX_ABS_X_NO_CROSS_ADDR & 0x07FF) as usize];
+    let abs_x_page_cross_result =
+        ram[(CPU_ADDRESSING_MATRIX_ABS_X_PAGE_CROSS_ADDR & 0x07FF) as usize];
+    let indirect_y_page_cross_result =
+        ram[(CPU_ADDRESSING_MATRIX_INDIRECT_Y_PAGE_CROSS_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_ADDRESSING_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuAddressingMatrixTelemetry {
+        expected_case_count: CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        passed: observed_case_count == CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT
+            && abs_x_no_cross_result == 0x34
+            && abs_x_page_cross_result == 0x56
+            && indirect_y_page_cross_result == 0x56,
+        abs_x_no_cross_result,
+        abs_x_no_cross_result_hex: hex_byte(abs_x_no_cross_result),
+        abs_x_page_cross_result,
+        abs_x_page_cross_result_hex: hex_byte(abs_x_page_cross_result),
+        indirect_y_page_cross_result,
+        indirect_y_page_cross_result_hex: hex_byte(indirect_y_page_cross_result),
     }
 }
 

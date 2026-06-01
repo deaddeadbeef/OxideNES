@@ -20,13 +20,13 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 30
-EXPECTED_SCENARIO_COUNT = 18
-EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
+EXPECTED_TELEMETRY_SCHEMA = 31
+EXPECTED_SCENARIO_COUNT = 19
+EXPECTED_ACTIONABLE_SCENARIO_COUNT = 17
 EXPECTED_PASS_SCENARIO_COUNT = 2
-EXPECTED_CARTRIDGE_TEST_COUNT = 21
+EXPECTED_CARTRIDGE_TEST_COUNT = 22
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 32
+EXPECTED_PROBE_COUNT = 34
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -60,6 +60,7 @@ EXPECTED_SCENARIOS = {
     "apu_status_fault",
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
+    "cpu_addressing_matrix_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
@@ -1077,19 +1078,37 @@ class ObservabilityVerifier:
         )
         self.verify_artifact_map(as_dict(comparison.get("artifacts")), "observability comparison")
 
-        for side in ("baseline", "current"):
-            summary = as_dict(comparison.get(side))
-            self.expect_equal(
-                summary.get("scenario_count"),
-                EXPECTED_SCENARIO_COUNT,
-                f"observability comparison {side} scenario_count",
+        current = as_dict(comparison.get("current"))
+        self.expect_equal(
+            current.get("scenario_count"),
+            EXPECTED_SCENARIO_COUNT,
+            "observability comparison current scenario_count",
+        )
+        self.expect_equal(
+            current.get("hypothesis_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "observability comparison current hypothesis_count",
+        )
+        self.verify_artifact_map(as_dict(current.get("artifacts")), "comparison current")
+
+        baseline = as_dict(comparison.get("baseline"))
+        baseline_scenario_count = baseline.get("scenario_count")
+        if not isinstance(baseline_scenario_count, int) or not (
+            1 <= baseline_scenario_count <= EXPECTED_SCENARIO_COUNT
+        ):
+            self.errors.append(
+                "observability comparison baseline scenario_count: "
+                f"expected 1..{EXPECTED_SCENARIO_COUNT}, got {baseline_scenario_count}"
             )
-            self.expect_equal(
-                summary.get("hypothesis_count"),
-                EXPECTED_ACTIONABLE_SCENARIO_COUNT,
-                f"observability comparison {side} hypothesis_count",
+        baseline_hypothesis_count = baseline.get("hypothesis_count")
+        if not isinstance(baseline_hypothesis_count, int) or not (
+            1 <= baseline_hypothesis_count <= EXPECTED_ACTIONABLE_SCENARIO_COUNT
+        ):
+            self.errors.append(
+                "observability comparison baseline hypothesis_count: "
+                f"expected 1..{EXPECTED_ACTIONABLE_SCENARIO_COUNT}, got {baseline_hypothesis_count}"
             )
-            self.verify_artifact_map(as_dict(summary.get("artifacts")), f"comparison {side}")
+        self.verify_artifact_map(as_dict(baseline.get("artifacts")), "comparison baseline")
 
         scenario_changes = as_list(comparison.get("scenario_changes"))
         if scenario_changes:
