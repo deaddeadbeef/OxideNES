@@ -131,15 +131,24 @@ AI handoff. It then writes `diagnostic-ai-debug-packet-verification.json` and
 `diagnostic-ai-debug-packet-verification.md`, proving that the selected packet
 can be validated from packet-local files, digests, route identity, replay
 evidence, source/test context, and narrow commands without trusting the original
-suite graph. It then writes `diagnostic-ai-artifact-verification.json` and
+suite graph. It then writes `diagnostic-ai-debug-packet-matrix.json` and
+`diagnostic-ai-debug-packet-matrix.md`, proving every AI route has the same
+relocatable packet quality. It then writes
+`diagnostic-ai-localization-eval.json` plus
+`diagnostic-ai-localization-eval.md`, scoring whether every scenario matches
+its expected health/focus-domain contract. It then writes
+`diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`, turning
+the accepted routes into deterministic debugger startup plans with read order,
+commands, and stop conditions. It then writes
+`diagnostic-ai-artifact-verification.json` and
 `diagnostic-ai-artifact-verification.md`, proving the AI index, query smoke,
 diagnosis smoke, fix handoff, AI route matrix, AI debug packet, packet
-self-verification, and all-route AI debug packet matrix agree on route
-identities, artifact paths, and stop
+self-verification, all-route AI debug packet matrix, localization evaluation,
+and session plan agree on route identities, artifact paths, and stop
 conditions. Start with the e2e report to decide whether the diagnostic corpus
-is trusted, then use the AI artifact verification, AI debug packet matrix, AI
-debug packet, AI route matrix, AI index, query CLI, diagnosis runner, or fix
-handoff before opening full telemetry.
+is trusted, then use the AI artifact verification, AI session plan, AI debug
+packet matrix, AI debug packet, AI route matrix, AI index, query CLI, diagnosis
+runner, or fix handoff before opening full telemetry.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -254,6 +263,18 @@ intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
 
+To build a deterministic startup plan for automated debugging sessions, run:
+
+```powershell
+python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostics/scenario-suite
+```
+
+This writes `diagnostic-ai-session-plan.json` plus
+`diagnostic-ai-session-plan.md`. A passed plan means all 16 accepted AI routes
+have ordered read artifacts, replay commands, narrow-test commands,
+verification commands, and stop conditions before an automated debugger starts
+editing emulator code.
+
 To validate the AI-facing artifact graph directly, run:
 
 ```powershell
@@ -270,8 +291,9 @@ all-route packet coverage. The verifier checks that the AI index, query smoke,
 diagnosis smoke, fix handoff, AI route matrix, AI debug packet, AI debug packet
 matrix, packet self-verification, localization evaluation, and optional e2e
 summary all passed, agree on route identities, include the expected
-non-happy-path coverage counts, preserve source/test anchors, and still point
-to present artifacts after a CI bundle is
+non-happy-path coverage counts, preserve source/test anchors, prove the session
+plan has ready routes, commands, read-order artifacts, and stop conditions, and
+still point to present artifacts after a CI bundle is
 downloaded to a different directory. It also writes
 `automation_readiness.routes`, a compact per-route map that tells an automated
 debugger whether each route has replay evidence,
@@ -516,6 +538,11 @@ packet-local verification evidence. It then runs
 `diagnostic-ai-localization-eval.md`, scoring whether every scenario matches
 its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
+It then runs `build_diagnostic_ai_session_plan.py` and writes
+`diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
+turning all 16 accepted AI routes into deterministic debugger startup plans
+with ordered artifacts, replay commands, narrow tests, verification commands,
+and stop conditions.
 It then runs `verify_diagnostic_ai_artifacts.py` and writes
 `diagnostic-ai-artifact-verification.json` plus
 `diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
@@ -537,8 +564,9 @@ copied away from the suite. The AI debug packet matrix proves that every route
 has the same packet-level handoff quality instead of only the top route. The AI
 localization evaluation proves the corpus is not only present but scoring at
 the expected localization quality across healthy controls and intentional
-negative fixtures. The AI artifact verification proves the uploaded bundle can
-be trusted as a coherent
+negative fixtures. The AI session plan gives automated debuggers one compact
+route-by-route startup contract with read order, commands, and stop conditions.
+The AI artifact verification proves the uploaded bundle can be trusted as a coherent
 graph before an automated debugger starts
 making emulator changes, and its `automation_readiness` section gives automated
 agents one compact route-by-route readiness map after a CI artifact is
