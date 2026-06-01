@@ -231,7 +231,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 21 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 22 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -285,8 +285,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 23
-scenarios match their expected health and focus-domain contracts, the 21
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 24
+scenarios match their expected health and focus-domain contracts, the 22
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -298,7 +298,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 21 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 22 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -386,7 +386,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `cpu_addressing_matrix_fault`, `input_port_matrix_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `ppu_sprite_zero_hit_fault`,
-`ppu_sprite_overflow_fault`, `joypad_strobe_reset_fault`,
+`ppu_sprite_overflow_fault`, `ppu_sprite_priority_fault`, `joypad_strobe_reset_fault`,
 `joypad_strobe_high_hold_fault`, `ppu_vram_increment_32_fault`,
 `ppu_status_latch_reset_fault`,
 `ppu_nmi_timeout_fault`, and
@@ -454,6 +454,9 @@ sprite-zero-hit regressions localize to `ppu.sprite_zero_hit`.
 `ppu_sprite_overflow_fault` moves the post-eighth sprite candidates out of
 range before the cartridge asserts PPUSTATUS bit 5, proving sprite-evaluation
 overflow regressions localize to `ppu.sprite_overflow`.
+`ppu_sprite_priority_fault` swaps the two overlapping sprite priority
+attributes after OAM setup, proving sprite/background pixel-mux regressions
+localize to `ppu.sprite_priority` through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -621,7 +624,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 21 accepted AI routes into deterministic debugger startup plans
+turning all 22 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -975,6 +978,14 @@ after sprite evaluation completes, restores the full OAM page from the DMA
 source pattern before reporting pass or fail, records `ppu_sprite_overflow`
 telemetry, and exposes `cartridge.test.26.result` plus
 `ppu.sprite_overflow.status` probes for automated localization.
+
+Schema version `36` adds the `ppu_sprite_priority_mux` cartridge test plus the
+`ppu_sprite_priority_fault` scenario-suite fixture. The generated cartridge
+builds two deterministic background/sprite overlaps, verifies one front-priority
+sprite sample and one behind-background sample through host-observed frame
+pixels, records `ppu_sprite_priority` telemetry, and exposes
+`cartridge.test.27.result` plus `ppu.sprite_priority.samples` probes for
+automated localization.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

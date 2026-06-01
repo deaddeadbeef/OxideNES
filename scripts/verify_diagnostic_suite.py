@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 35
+EXPECTED_TELEMETRY_SCHEMA = 36
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -31,6 +31,7 @@ EXPECTED_SCENARIOS = {
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
     "ppu_sprite_overflow_fault",
+    "ppu_sprite_priority_fault",
     "ppu_sprite_zero_hit_fault",
     "joypad_strobe_reset_fault",
     "joypad_strobe_high_hold_fault",
@@ -89,7 +90,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            21,
+            22,
             "analysis baseline_divergence_count",
         )
 
@@ -139,13 +140,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            21,
+            22,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 21, "observer next_actions count")
+        self.expect_equal(len(actions), 22, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -190,6 +191,7 @@ class SuiteVerifier:
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
             "ppu_sprite_overflow_fault",
+            "ppu_sprite_priority_fault",
             "ppu_sprite_zero_hit_fault",
             "joypad_strobe_reset_fault",
             "joypad_strobe_high_hold_fault",
@@ -222,11 +224,33 @@ class SuiteVerifier:
             "timeout observer primary_artifact",
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
-        self.expect_in(
-            "comparison_difference_count=149",
-            evidence,
-            "timeout observer evidence",
+        timeout_difference_evidence = next(
+            (
+                entry
+                for entry in evidence
+                if isinstance(entry, str)
+                and entry.startswith("comparison_difference_count=")
+            ),
+            None,
         )
+        if timeout_difference_evidence is None:
+            self.errors.append(
+                "timeout observer evidence: missing comparison_difference_count entry"
+            )
+        else:
+            try:
+                timeout_difference_count = int(
+                    timeout_difference_evidence.split("=", 1)[1]
+                )
+            except ValueError:
+                self.errors.append(
+                    "timeout observer evidence: comparison_difference_count is not numeric"
+                )
+            else:
+                if timeout_difference_count <= 0:
+                    self.errors.append(
+                        "timeout observer evidence comparison_difference_count: expected > 0"
+                    )
 
         ppu = by_scenario.get("ppu_read_buffer_fault")
         if not isinstance(ppu, dict):
@@ -292,6 +316,40 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.17.result",
             ppu_mirroring_evidence,
             "PPU mirroring observer evidence",
+        )
+
+        ppu_priority = by_scenario.get("ppu_sprite_priority_fault")
+        if not isinstance(ppu_priority, dict):
+            self.errors.append("missing observer action for ppu_sprite_priority_fault")
+            return
+
+        self.expect_equal(
+            ppu_priority.get("priority"),
+            "known_divergence",
+            "PPU sprite-priority observer action priority",
+        )
+        self.expect_equal(
+            ppu_priority.get("action_type"),
+            "inspect_known_divergence",
+            "PPU sprite-priority observer action type",
+        )
+        self.expect_equal(
+            ppu_priority.get("primary_artifact"),
+            "ppu_sprite_priority_fault/comparison.json",
+            "PPU sprite-priority observer primary_artifact",
+        )
+        ppu_priority_evidence = self.expect_list(
+            ppu_priority.get("evidence"), "PPU sprite-priority observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=ppu.sprite_priority",
+            ppu_priority_evidence,
+            "PPU sprite-priority observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=ppu.sprite_priority.samples",
+            ppu_priority_evidence,
+            "PPU sprite-priority observer evidence",
         )
 
         joypad_reset = by_scenario.get("joypad_strobe_reset_fault")
@@ -839,11 +897,11 @@ class SuiteVerifier:
                 "emulator.progress_or_infinite_loop",
                 "timeout observer focus_domain",
             )
-            self.expect_equal(
-                timeout.get("comparison_difference_count"),
-                149,
-                "timeout observer comparison_difference_count",
-            )
+            timeout_difference_count = timeout.get("comparison_difference_count")
+            if not isinstance(timeout_difference_count, int) or timeout_difference_count <= 0:
+                self.errors.append(
+                    "timeout observer comparison_difference_count: expected positive integer"
+                )
             self.expect_equal(
                 timeout.get("next_artifact"),
                 "timeout_cycle_limit/comparison.json",

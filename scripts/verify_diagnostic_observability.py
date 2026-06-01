@@ -20,13 +20,13 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 35
-EXPECTED_SCENARIO_COUNT = 23
-EXPECTED_ACTIONABLE_SCENARIO_COUNT = 21
+EXPECTED_TELEMETRY_SCHEMA = 36
+EXPECTED_SCENARIO_COUNT = 24
+EXPECTED_ACTIONABLE_SCENARIO_COUNT = 22
 EXPECTED_PASS_SCENARIO_COUNT = 2
-EXPECTED_CARTRIDGE_TEST_COUNT = 26
+EXPECTED_CARTRIDGE_TEST_COUNT = 27
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 42
+EXPECTED_PROBE_COUNT = 44
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -67,6 +67,7 @@ EXPECTED_SCENARIOS = {
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
     "ppu_sprite_overflow_fault",
+    "ppu_sprite_priority_fault",
     "ppu_sprite_zero_hit_fault",
     "joypad_strobe_reset_fault",
     "joypad_strobe_high_hold_fault",
@@ -628,6 +629,8 @@ class ObservabilityVerifier:
             "cartridge.test.21.result",
             "cartridge.test.25.result",
             "cartridge.test.26.result",
+            "cartridge.test.27.result",
+            "ppu.sprite_priority.samples",
             "ppu.sprite_overflow.status",
             "ppu.sprite_zero_hit.status",
             "dma.dmc_stall_phase",
