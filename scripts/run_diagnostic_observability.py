@@ -181,6 +181,19 @@ FOCUS_DOMAIN_CODE_MAP = {
             "sprite 0",
         ],
     },
+    "ppu.sprite_overflow": {
+        "subsystem": "ppu",
+        "description": "Sprite overflow signaling when more than eight in-range sprites share a scanline.",
+        "source_files": ["src/ppu.rs", "src/bus.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/ppu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "sprite_count",
+            "sprite overflow",
+            "PPUSTATUS",
+            "0x2002",
+            "secondary OAM",
+        ],
+    },
     "ppu.registers.ppudata_buffer": {
         "subsystem": "ppu",
         "description": "Non-palette PPUDATA read buffering and address auto-increment.",
@@ -221,6 +234,7 @@ SCENARIO_TEST_FILTERS = {
     "ppu_nametable_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_failure",
     "ppu_nmi_timeout_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout",
     "ppu_read_buffer_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure",
+    "ppu_sprite_overflow_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_failure",
     "ppu_sprite_zero_hit_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_zero_hit_failure",
     "ppu_status_latch_reset_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_status_latch_reset_failure",
     "ppu_vram_increment_32_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_vram_increment_32_failure",

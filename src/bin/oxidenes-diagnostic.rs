@@ -1810,7 +1810,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(25),
+            expected_focus_test_id: Some(26),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1826,7 +1826,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(25),
+            expected_focus_test_id: Some(26),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -2014,6 +2014,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(25),
             expected_focus_domain: Some("ppu.sprite_zero_hit"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_sprite_overflow_fault",
+            title: "Intentional PPU sprite-overflow assertion failure",
+            purpose: "Failure-localization fixture for sprite evaluation overflow regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuSpriteOverflow),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(26),
+            expected_focus_domain: Some("ppu.sprite_overflow"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",

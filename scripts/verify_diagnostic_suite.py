@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 34
+EXPECTED_TELEMETRY_SCHEMA = 35
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -30,6 +30,7 @@ EXPECTED_SCENARIOS = {
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
+    "ppu_sprite_overflow_fault",
     "ppu_sprite_zero_hit_fault",
     "joypad_strobe_reset_fault",
     "joypad_strobe_high_hold_fault",
@@ -88,7 +89,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            20,
+            21,
             "analysis baseline_divergence_count",
         )
 
@@ -138,13 +139,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            20,
+            21,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 20, "observer next_actions count")
+        self.expect_equal(len(actions), 21, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -188,6 +189,7 @@ class SuiteVerifier:
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
             "ppu_nametable_mirroring_fault",
+            "ppu_sprite_overflow_fault",
             "ppu_sprite_zero_hit_fault",
             "joypad_strobe_reset_fault",
             "joypad_strobe_high_hold_fault",
@@ -221,7 +223,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=142",
+            "comparison_difference_count=149",
             evidence,
             "timeout observer evidence",
         )
@@ -839,7 +841,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                142,
+                149,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(

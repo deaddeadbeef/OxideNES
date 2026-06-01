@@ -11,7 +11,7 @@ from typing import Any
 
 
 AI_SESSION_PLAN_SCHEMA_VERSION = 1
-EXPECTED_ROUTE_COUNT = 20
+EXPECTED_ROUTE_COUNT = 21
 
 
 def as_dict(value: Any) -> dict[str, Any]:
