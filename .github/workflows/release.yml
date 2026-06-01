@@ -68,6 +68,8 @@ jobs:
           python scripts/run_diagnostic_observability.py \
             --suite-dir target/diagnostics/release-scenario-suite \
             "${comparison_args[@]}"
+          python scripts/verify_diagnostic_observability.py \
+            --suite-dir target/diagnostics/release-scenario-suite
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4

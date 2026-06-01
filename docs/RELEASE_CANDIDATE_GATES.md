@@ -22,6 +22,8 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
   `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite`
 - The diagnostic observability runner passes and writes `observability-run.json`, `observability-run.md`, `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, `diagnostic-observability-analysis.md`, and focused `replay-runs/<scenario>/` evidence:
   `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`
+- The diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts:
+  `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`
 - When a prior suite is available, the diagnostic observability comparison passes without regressions:
   `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite --compare-suite-dir target/diagnostics/prior-scenario-suite --fail-on-comparison-regression`
 - CI and release diagnostic-bundle jobs generate the prior suite from the pull request base SHA or previous push SHA when available, run the comparison gate, and upload `oxidenes-diagnostic-prior-scenario-suite` with the current `oxidenes-diagnostic-scenario-suite`.
@@ -41,6 +43,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - Diagnostic observability comparisons add `diagnostic-observability-comparison.json` and `diagnostic-observability-comparison.md` to report cross-run scenario regressions, health/focus/probe drift, and hypothesis rank/score changes.
 - Diagnostic workflow artifacts include the current and prior scenario suites when a prior comparison ref is available, so automated reviewers can inspect both sides of a comparison failure.
 - `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite` validates the uploaded scenario-suite artifact contract before release evidence is accepted.
+- `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite` validates `observability-run.json`, root artifact pointers, debug-index rows, ranked hypotheses, optional comparison summaries, and focused replay evidence before AI-facing observability evidence is accepted.
 - `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite` records the command status, git commit, verifier summary, debug-index status and entry count, analysis status and hypothesis count, optional comparison verdict/regression count, first AI next action, focused replay status, expected-vs-actual replay exit/health/focus checks, and artifact pointers for debugging handoff.
 - `telemetry.json` includes actual and expected joypad masks for both controller ports, and the diagnostic cartridge exercises `$4016` and `$4017` serial reads, configurable expected masks, mid-stream strobe reset, and strobe-high hold behavior.
 - `telemetry.json` includes OAM DMA start/end, active-cycle, first active-cycle parity, and DMC-overlap telemetry proving the transfer completed within the expected 513-514 CPU-cycle bucket while a phase-specific 3-cycle or 4-cycle DMC sample-DMA stall bucket was serviced during the OAM stall window.
