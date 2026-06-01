@@ -114,6 +114,19 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/joypad_tests.rs"],
         "search_terms": ["joypad2", "$4017", "strobe", "read"],
     },
+    "joypad.input_port_matrix": {
+        "subsystem": "joypad",
+        "description": "Combined $4016/$4017 strobe-high, serial-shift, and overread matrix behavior.",
+        "source_files": ["src/joypad.rs", "src/bus.rs"],
+        "test_files": ["tests/joypad_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "$4016",
+            "$4017",
+            "input_port_serial_matrix",
+            "button_index",
+            "set_button_pressed",
+        ],
+    },
     "mapper.uxrom.prg_bank_switch": {
         "subsystem": "mapper",
         "description": "Mapper 2/UXROM switchable PRG bank selection and fixed-bank reads.",
@@ -173,6 +186,7 @@ SCENARIO_TEST_FILTERS = {
     "dma_oam_transfer_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure",
     "joypad1_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad_failure",
     "joypad2_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad2_failure",
+    "input_port_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_input_port_matrix_failure",
     "joypad_strobe_high_hold_fault": "generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_high_hold_failure",
     "joypad_strobe_reset_fault": "generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_reset_failure",
     "mapper2_bank_switch_fault": "generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_failure",

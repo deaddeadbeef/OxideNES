@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 31;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 32;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v31";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v32";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -76,12 +76,23 @@ const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_rea
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
 const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
+const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 
 const CPU_ADDRESSING_MATRIX_ABS_X_NO_CROSS_ADDR: u16 = 0x0240;
 const CPU_ADDRESSING_MATRIX_ABS_X_PAGE_CROSS_ADDR: u16 = 0x0241;
 const CPU_ADDRESSING_MATRIX_INDIRECT_Y_PAGE_CROSS_ADDR: u16 = 0x0242;
 const CPU_ADDRESSING_MATRIX_CASE_COUNT_ADDR: u16 = 0x0243;
 const CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT: u8 = 3;
+const INPUT_PORT_MATRIX_JOYPAD1_HIGH_FIRST_ADDR: u16 = 0x0244;
+const INPUT_PORT_MATRIX_JOYPAD1_HIGH_SECOND_ADDR: u16 = 0x0245;
+const INPUT_PORT_MATRIX_JOYPAD2_HIGH_FIRST_ADDR: u16 = 0x0246;
+const INPUT_PORT_MATRIX_JOYPAD2_HIGH_SECOND_ADDR: u16 = 0x0247;
+const INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_FIRST_ADDR: u16 = 0x0248;
+const INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_SECOND_ADDR: u16 = 0x0249;
+const INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_FIRST_ADDR: u16 = 0x024A;
+const INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_SECOND_ADDR: u16 = 0x024B;
+const INPUT_PORT_MATRIX_CASE_COUNT_ADDR: u16 = 0x024C;
+const INPUT_PORT_MATRIX_EXPECTED_CASE_COUNT: u8 = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -353,6 +364,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "LDA $0440,X with X=0x02 reads a non-crossing absolute,X sentinel",
             "LDA $04FF,X with X=0x01 reads the $0500 page-crossing sentinel",
             "LDA ($42),Y with pointer $04FF and Y=0x01 reads the same page-crossing sentinel",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 23,
+        name: "input_port_serial_matrix",
+        subsystem: DiagnosticSubsystem::Joypad,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify both input ports under strobe-high hold, serial shift, and post-eight-read overread behavior.",
+        expected_observations: &[
+            "$4016 and $4017 strobe-high reads repeatedly expose each port's configured A bit",
+            "$4016 and $4017 serial reads match the configured expected masks for all eight buttons",
+            "$4016 and $4017 reads after the eighth button return 1",
         ],
     },
 ];
@@ -692,6 +715,96 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect joypad overread behavior and make sure the shift index saturates or returns 1 after button 7.",
     },
     DiagnosticFailureSpec {
+        code: 0x92,
+        test_id: 23,
+        assertion: "Joypad 1 input-port matrix first strobe-high read matches the configured A bit",
+        expected: "$4016 read bit 0 matches configured joypad-1 mask bit 0 while strobe is high",
+        observed: "$4016 first strobe-high matrix read did not match the configured joypad-1 A bit",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect $4016 strobe-high reads for joypad 1 before broadening the serial-shift search.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x93,
+        test_id: 23,
+        assertion: "Joypad 1 input-port matrix repeated strobe-high read still matches the configured A bit",
+        expected: "$4016 read bit 0 stays on configured joypad-1 mask bit 0 while strobe remains high",
+        observed: "$4016 repeated strobe-high matrix read advanced or changed unexpectedly",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 1 strobe-high index handling; reads should not advance until strobe falls low.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x94,
+        test_id: 23,
+        assertion: "Joypad 2 input-port matrix first strobe-high read matches the configured A bit",
+        expected: "$4017 read bit 0 matches configured joypad-2 mask bit 0 while strobe is high",
+        observed: "$4017 first strobe-high matrix read did not match the configured joypad-2 A bit",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect $4017 strobe-high reads and shared strobe dispatch for joypad 2.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x95,
+        test_id: 23,
+        assertion: "Joypad 2 input-port matrix repeated strobe-high read still matches the configured A bit",
+        expected: "$4017 read bit 0 stays on configured joypad-2 mask bit 0 while strobe remains high",
+        observed: "$4017 repeated strobe-high matrix read advanced or changed unexpectedly",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 2 strobe-high index handling and shared $4016 strobe writes.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x96,
+        test_id: 23,
+        assertion: "Joypad 1 input-port matrix overread 8 returns one",
+        expected: "$4016 read bit 0 == 1 after eight serial reads",
+        observed: "$4016 first matrix overread after the eighth button was not 1",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 1 read behavior once the serial index moves past button 7.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x97,
+        test_id: 23,
+        assertion: "Joypad 1 input-port matrix overread 9 keeps returning one",
+        expected: "$4016 read bit 0 == 1 on repeated overread",
+        observed: "$4016 second matrix overread after the eighth button was not 1",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 1 overread saturation behavior after the eighth button.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x98,
+        test_id: 23,
+        assertion: "Joypad 2 input-port matrix overread 8 returns one",
+        expected: "$4017 read bit 0 == 1 after eight serial reads",
+        observed: "$4017 first matrix overread after the eighth button was not 1",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 2 read behavior once the serial index moves past button 7.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x99,
+        test_id: 23,
+        assertion: "Joypad 2 input-port matrix overread 9 keeps returning one",
+        expected: "$4017 read bit 0 == 1 on repeated overread",
+        observed: "$4017 second matrix overread after the eighth button was not 1",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 2 overread saturation behavior after the eighth button.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x9A,
+        test_id: 23,
+        assertion: "Joypad 1 input-port matrix serial reads match the configured expected mask",
+        expected: "$4016 serial bits 0..7 match the configured joypad-1 mask",
+        observed: "$4016 matrix serial reads diverged from the configured joypad-1 mask",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 1 bit order, index advancement, and button-state reads across a complete serial sequence.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x9B,
+        test_id: 23,
+        assertion: "Joypad 2 input-port matrix serial reads match the configured expected mask",
+        expected: "$4017 serial bits 0..7 match the configured joypad-2 mask",
+        observed: "$4017 matrix serial reads diverged from the configured joypad-2 mask",
+        likely_domain: "joypad.input_port_matrix",
+        remediation_hint: "Inspect joypad 2 bit order, index advancement, and shared strobe behavior across a complete serial sequence.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -909,8 +1022,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes a non-default alternating-mask pass fixture, joypad 1 verifies strobe-high reads hold the A bit, joypad 1 verifies mid-stream strobe reset behavior, and joypad 1 verifies overreads after the eighth latched button.",
-        missing_coverage: "Full generated mask table per port, disconnected input defaults, and host input remapping.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes a non-default alternating-mask pass fixture, joypad 1 verifies mid-stream strobe reset behavior, and a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads.",
+        missing_coverage: "Broader generated mask table per port, disconnected input defaults, and host input remapping.",
         suggested_next_test: "Run the serial-read program across a generated mask table for both ports, including disconnected-controller and remapping fixtures.",
     },
 ];
@@ -946,6 +1059,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    InputPortMatrix,
     JoypadStrobeHighHold,
     JoypadStrobeReset,
     Mapper2PrgBankSwitch,
@@ -958,12 +1072,13 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 14] = [
+    pub const ALL: [DiagnosticFaultInjection; 15] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
+        DiagnosticFaultInjection::InputPortMatrix,
         DiagnosticFaultInjection::JoypadStrobeHighHold,
         DiagnosticFaultInjection::JoypadStrobeReset,
         DiagnosticFaultInjection::Mapper2PrgBankSwitch,
@@ -982,6 +1097,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::InputPortMatrix => "input_port_matrix",
             DiagnosticFaultInjection::JoypadStrobeHighHold => "joypad_strobe_high_hold",
             DiagnosticFaultInjection::JoypadStrobeReset => "joypad_strobe_reset",
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => "mapper2_prg_bank_switch",
@@ -1005,6 +1121,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::InputPortMatrix => INPUT_PORT_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::JoypadStrobeHighHold => JOYPAD_STROBE_HIGH_HOLD_FAULT_LABEL,
             DiagnosticFaultInjection::JoypadStrobeReset => JOYPAD_STROBE_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::Mapper2PrgBankSwitch => MAPPER2_BANK_SWITCH_FAULT_LABEL,
@@ -1031,6 +1148,7 @@ pub struct DiagnosticTelemetry {
     pub frames: u64,
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
+    pub input_port_matrix: InputPortMatrixTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
     pub timeline: Vec<TestTimelineTelemetry>,
@@ -1309,6 +1427,29 @@ pub struct CpuAddressingMatrixTelemetry {
     pub abs_x_page_cross_result_hex: String,
     pub indirect_y_page_cross_result: u8,
     pub indirect_y_page_cross_result_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InputPortMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub passed: bool,
+    pub joypad1_high_first: u8,
+    pub joypad1_high_first_hex: String,
+    pub joypad1_high_second: u8,
+    pub joypad1_high_second_hex: String,
+    pub joypad2_high_first: u8,
+    pub joypad2_high_first_hex: String,
+    pub joypad2_high_second: u8,
+    pub joypad2_high_second_hex: String,
+    pub joypad1_overread_first: u8,
+    pub joypad1_overread_first_hex: String,
+    pub joypad1_overread_second: u8,
+    pub joypad1_overread_second_hex: String,
+    pub joypad2_overread_first: u8,
+    pub joypad2_overread_first_hex: String,
+    pub joypad2_overread_second: u8,
+    pub joypad2_overread_second_hex: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1823,12 +1964,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let oam = oam_telemetry(&bus.ppu.oam_data);
     let frame = frame_telemetry(&bus.ppu.frame_data);
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
+    let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let mut host_failures = host_validate(HostValidationInput {
         status,
         timeout,
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        input_port_matrix: &input_port_matrix,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -1851,6 +1994,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        input_port_matrix: &input_port_matrix,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -1902,6 +2046,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         frames,
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
+        input_port_matrix,
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
             nmi_count: ram[NMI_COUNT_ADDR as usize],
@@ -3266,6 +3411,7 @@ struct HostValidationInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    input_port_matrix: &'a InputPortMatrixTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3281,6 +3427,7 @@ struct ProbeTelemetryInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    input_port_matrix: &'a InputPortMatrixTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3332,6 +3479,21 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_addressing_matrix.indirect_y_page_cross_result_hex,
             input.cpu_addressing_matrix.observed_case_count,
             input.cpu_addressing_matrix.expected_case_count
+        ));
+    }
+    if !input.input_port_matrix.passed {
+        failures.push(format!(
+            "input port matrix mismatch: j1_high={}/{}, j2_high={}/{}, j1_overread={}/{}, j2_overread={}/{}, cases {}/{}",
+            input.input_port_matrix.joypad1_high_first_hex,
+            input.input_port_matrix.joypad1_high_second_hex,
+            input.input_port_matrix.joypad2_high_first_hex,
+            input.input_port_matrix.joypad2_high_second_hex,
+            input.input_port_matrix.joypad1_overread_first_hex,
+            input.input_port_matrix.joypad1_overread_second_hex,
+            input.input_port_matrix.joypad2_overread_first_hex,
+            input.input_port_matrix.joypad2_overread_second_hex,
+            input.input_port_matrix.observed_case_count,
+            input.input_port_matrix.expected_case_count
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -3517,6 +3679,37 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_addressing_matrix.expected_case_count
             ),
             likely_domain: "cpu.addressing.page_cross_load".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "joypad.input_port_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Joypad),
+            test_id: Some(23),
+            test_name: test_name(23),
+            status: gated_probe_status(passed_suite, input.input_port_matrix.passed),
+            description:
+                "Input-port matrix retained expected strobe-high and overread observations for $4016 and $4017"
+                    .to_string(),
+            expected:
+                "both ports hold the configured A bit while strobe is high, shift eight configured mask bits, overread=1, cases=24"
+                    .to_string(),
+            observed: format!(
+                "j1_high {}/{}, j2_high {}/{}, j1_overread {}/{}, j2_overread {}/{}, cases {}/{}",
+                input.input_port_matrix.joypad1_high_first_hex,
+                input.input_port_matrix.joypad1_high_second_hex,
+                input.input_port_matrix.joypad2_high_first_hex,
+                input.input_port_matrix.joypad2_high_second_hex,
+                input.input_port_matrix.joypad1_overread_first_hex,
+                input.input_port_matrix.joypad1_overread_second_hex,
+                input.input_port_matrix.joypad2_overread_first_hex,
+                input.input_port_matrix.joypad2_overread_second_hex,
+                input.input_port_matrix.observed_case_count,
+                input.input_port_matrix.expected_case_count
+            ),
+            likely_domain: "joypad.input_port_matrix".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -3851,6 +4044,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_status_latch_reset();
     program.joypad_strobe_high_hold();
     program.cpu_addressing_mode_matrix();
+    program.input_port_serial_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -4516,6 +4710,77 @@ impl DiagnosticProgram {
         self.pass_test(22);
     }
 
+    fn input_port_serial_matrix(&mut self) {
+        self.begin_test(23);
+
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4016);
+
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.asm.sta_abs(INPUT_PORT_MATRIX_JOYPAD1_HIGH_FIRST_ADDR);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x92);
+
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.asm.sta_abs(INPUT_PORT_MATRIX_JOYPAD1_HIGH_SECOND_ADDR);
+        self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 0x01, 0x93);
+
+        self.asm.lda_abs(0x4017);
+        self.asm.and_imm(0x01);
+        self.asm.sta_abs(INPUT_PORT_MATRIX_JOYPAD2_HIGH_FIRST_ADDR);
+        self.expect_a_matches_mask_bit(JOYPAD2_EXPECTED_MASK_ADDR, 0x01, 0x94);
+
+        self.asm.lda_abs(0x4017);
+        self.asm.and_imm(0x01);
+        self.asm.sta_abs(INPUT_PORT_MATRIX_JOYPAD2_HIGH_SECOND_ADDR);
+        self.expect_a_matches_mask_bit(JOYPAD2_EXPECTED_MASK_ADDR, 0x01, 0x95);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4016);
+        self.asm
+            .label(INPUT_PORT_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        for index in 0..8 {
+            self.asm.lda_abs(0x4016);
+            self.asm.and_imm(0x01);
+            self.expect_a_matches_mask_bit(JOYPAD1_EXPECTED_MASK_ADDR, 1 << index, 0x9A);
+
+            self.asm.lda_abs(0x4017);
+            self.asm.and_imm(0x01);
+            self.expect_a_matches_mask_bit(JOYPAD2_EXPECTED_MASK_ADDR, 1 << index, 0x9B);
+        }
+
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.asm
+            .sta_abs(INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_FIRST_ADDR);
+        self.expect_a_eq(0x01, 0x96);
+
+        self.asm.lda_abs(0x4016);
+        self.asm.and_imm(0x01);
+        self.asm
+            .sta_abs(INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_SECOND_ADDR);
+        self.expect_a_eq(0x01, 0x97);
+
+        self.asm.lda_abs(0x4017);
+        self.asm.and_imm(0x01);
+        self.asm
+            .sta_abs(INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_FIRST_ADDR);
+        self.expect_a_eq(0x01, 0x98);
+
+        self.asm.lda_abs(0x4017);
+        self.asm.and_imm(0x01);
+        self.asm
+            .sta_abs(INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_SECOND_ADDR);
+        self.expect_a_eq(0x01, 0x99);
+
+        self.asm.lda_imm(INPUT_PORT_MATRIX_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(INPUT_PORT_MATRIX_CASE_COUNT_ADDR);
+        self.pass_test(23);
+    }
+
     fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
         for index in 0..8 {
             self.asm.lda_abs(addr);
@@ -4967,6 +5232,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
         }
+        DiagnosticFaultInjection::InputPortMatrix => {
+            bus.joypad2.set_button_pressed(JoypadButton::Start, false);
+        }
         DiagnosticFaultInjection::JoypadStrobeHighHold => {
             bus.joypad1.set_button_pressed(JoypadButton::A, false);
         }
@@ -5043,6 +5311,53 @@ fn cpu_addressing_matrix_telemetry(ram: &[u8]) -> CpuAddressingMatrixTelemetry {
         abs_x_page_cross_result_hex: hex_byte(abs_x_page_cross_result),
         indirect_y_page_cross_result,
         indirect_y_page_cross_result_hex: hex_byte(indirect_y_page_cross_result),
+    }
+}
+
+fn input_port_matrix_telemetry(ram: &[u8], config: &DiagnosticConfig) -> InputPortMatrixTelemetry {
+    let joypad1_high_first = ram[(INPUT_PORT_MATRIX_JOYPAD1_HIGH_FIRST_ADDR & 0x07FF) as usize];
+    let joypad1_high_second = ram[(INPUT_PORT_MATRIX_JOYPAD1_HIGH_SECOND_ADDR & 0x07FF) as usize];
+    let joypad2_high_first = ram[(INPUT_PORT_MATRIX_JOYPAD2_HIGH_FIRST_ADDR & 0x07FF) as usize];
+    let joypad2_high_second = ram[(INPUT_PORT_MATRIX_JOYPAD2_HIGH_SECOND_ADDR & 0x07FF) as usize];
+    let joypad1_overread_first =
+        ram[(INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_FIRST_ADDR & 0x07FF) as usize];
+    let joypad1_overread_second =
+        ram[(INPUT_PORT_MATRIX_JOYPAD1_OVERREAD_SECOND_ADDR & 0x07FF) as usize];
+    let joypad2_overread_first =
+        ram[(INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_FIRST_ADDR & 0x07FF) as usize];
+    let joypad2_overread_second =
+        ram[(INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_SECOND_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(INPUT_PORT_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let joypad1_a_bit = config.expected_joypad1_mask & 0x01;
+    let joypad2_a_bit = config.expected_joypad2_mask & 0x01;
+    InputPortMatrixTelemetry {
+        expected_case_count: INPUT_PORT_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        passed: observed_case_count == INPUT_PORT_MATRIX_EXPECTED_CASE_COUNT
+            && joypad1_high_first == joypad1_a_bit
+            && joypad1_high_second == joypad1_a_bit
+            && joypad2_high_first == joypad2_a_bit
+            && joypad2_high_second == joypad2_a_bit
+            && joypad1_overread_first == 0x01
+            && joypad1_overread_second == 0x01
+            && joypad2_overread_first == 0x01
+            && joypad2_overread_second == 0x01,
+        joypad1_high_first,
+        joypad1_high_first_hex: hex_byte(joypad1_high_first),
+        joypad1_high_second,
+        joypad1_high_second_hex: hex_byte(joypad1_high_second),
+        joypad2_high_first,
+        joypad2_high_first_hex: hex_byte(joypad2_high_first),
+        joypad2_high_second,
+        joypad2_high_second_hex: hex_byte(joypad2_high_second),
+        joypad1_overread_first,
+        joypad1_overread_first_hex: hex_byte(joypad1_overread_first),
+        joypad1_overread_second,
+        joypad1_overread_second_hex: hex_byte(joypad1_overread_second),
+        joypad2_overread_first,
+        joypad2_overread_first_hex: hex_byte(joypad2_overread_first),
+        joypad2_overread_second,
+        joypad2_overread_second_hex: hex_byte(joypad2_overread_second),
     }
 }
 
