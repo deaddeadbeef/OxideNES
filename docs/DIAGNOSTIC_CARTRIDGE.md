@@ -107,9 +107,13 @@ python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-sui
 ```
 
 This writes `diagnostic-e2e-report.json` and `diagnostic-e2e-report.md` at the
-suite root. Start there when an automated reviewer needs to decide whether the
-diagnostic corpus is trusted before opening telemetry, dossiers, route evidence,
-or replay bundles.
+suite root. The same command also writes
+`diagnostic-ai-observability-index.json` and
+`diagnostic-ai-observability-index.md`, a compact joined index across the
+scenario dossiers, route table, telemetry catalog, coverage ledger, and route
+evidence verifier. Start with the e2e report to decide whether the diagnostic
+corpus is trusted, then use the AI index to choose a scenario card, failed
+probe, or focus-domain route before opening full telemetry or replay bundles.
 
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
@@ -315,9 +319,13 @@ evidence without replaying the cartridge again.
 `diagnostic-code-map.json`, `diagnostic-code-map.md`,
 `diagnostic-investigation-plan.json`, `diagnostic-investigation-plan.md`,
 `diagnostic-scenario-dossiers.json`, and `diagnostic-scenario-dossiers.md`.
-`run_diagnostic_e2e.py` additionally writes `diagnostic-e2e-report.json` and
-`diagnostic-e2e-report.md` after the observability and route evidence gates
-finish.
+`run_diagnostic_e2e.py` additionally writes `diagnostic-e2e-report.json`,
+`diagnostic-e2e-report.md`, `diagnostic-ai-observability-index.json`, and
+`diagnostic-ai-observability-index.md` after the observability and route
+evidence gates finish. The AI index is the smallest single artifact for
+automated debuggers that need to join scenario health, failed probes,
+start-artifact pointers, replay arguments, mapped source files, narrow tests,
+and known coverage limits.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
