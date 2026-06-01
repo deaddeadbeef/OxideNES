@@ -19,7 +19,149 @@ REPLAY_RUN_SCHEMA_VERSION = 1
 DEBUG_INDEX_SCHEMA_VERSION = 1
 OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
 OBSERVABILITY_COMPARISON_SCHEMA_VERSION = 1
+DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
+
+DIAGNOSTIC_SUPPORT_FILES = [
+    "src/diagnostic.rs",
+    "src/bin/oxidenes-diagnostic.rs",
+    "tests/diagnostic_cartridge_tests.rs",
+    "tests/diagnostic_cli_tests.rs",
+]
+
+FOCUS_DOMAIN_CODE_MAP = {
+    "apu.status": {
+        "subsystem": "apu",
+        "description": "APU status register and channel-enable behavior observed through $4015.",
+        "source_files": ["src/apu.rs", "src/bus.rs"],
+        "test_files": ["tests/apu_tests.rs"],
+        "search_terms": ["read_status", "write_status", "$4015", "apu_status_register"],
+    },
+    "cpu.addressing.zero_page_x_wrap": {
+        "subsystem": "cpu",
+        "description": "6502 zero-page indexed addressing wraparound for reads and writes.",
+        "source_files": ["src/cpu.rs"],
+        "test_files": ["tests/cpu_tests.rs"],
+        "search_terms": ["zero_page", "zero page", "LDA $FF,X", "STA $FF,X"],
+    },
+    "cpu.control_flow.indirect_jmp_page_wrap": {
+        "subsystem": "cpu",
+        "description": "Original 6502 indirect JMP page-wrap control-flow behavior.",
+        "source_files": ["src/cpu.rs"],
+        "test_files": ["tests/cpu_tests.rs"],
+        "search_terms": ["JMP", "indirect", "page wrap", "$04FF"],
+    },
+    "dma.oam_transfer": {
+        "subsystem": "dma",
+        "description": "OAM DMA transfer, CPU stall bucket, and DMC overlap telemetry.",
+        "source_files": ["src/bus.rs", "src/apu.rs", "src/ppu.rs"],
+        "test_files": ["tests/bus_tests.rs", "tests/ppu_tests.rs"],
+        "search_terms": ["oam_dma", "DMC", "$4014", "dma_oam_transfer"],
+    },
+    "emulator.progress_or_infinite_loop": {
+        "subsystem": "emulator",
+        "description": "Headless diagnostic progress, timeout, reset, and terminal loop detection.",
+        "source_files": ["src/diagnostic.rs", "src/cpu.rs", "src/bus.rs", "src/ppu.rs"],
+        "test_files": ["tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": ["max_cycles", "timed_out", "hang", "runtime.completed"],
+    },
+    "joypad.strobe_high_hold": {
+        "subsystem": "joypad",
+        "description": "Player-1 $4016 strobe-high repeated-read hold behavior.",
+        "source_files": ["src/joypad.rs", "src/bus.rs"],
+        "test_files": ["tests/joypad_tests.rs"],
+        "search_terms": ["strobe_high", "$4016", "A button", "joypad_strobe_high_hold"],
+    },
+    "joypad.strobe_reset": {
+        "subsystem": "joypad",
+        "description": "Player-1 mid-stream strobe reset and serial read-index behavior.",
+        "source_files": ["src/joypad.rs", "src/bus.rs"],
+        "test_files": ["tests/joypad_tests.rs"],
+        "search_terms": ["strobe", "read_index", "$4016", "joypad_strobe_reset"],
+    },
+    "joypad.strobe_shift": {
+        "subsystem": "joypad",
+        "description": "Player-1 $4016 strobe and serial button shift reads.",
+        "source_files": ["src/joypad.rs", "src/bus.rs"],
+        "test_files": ["tests/joypad_tests.rs"],
+        "search_terms": ["read", "write", "$4016", "joypad1"],
+    },
+    "joypad2.strobe_shift": {
+        "subsystem": "joypad",
+        "description": "Player-2 $4017 strobe and serial button shift reads.",
+        "source_files": ["src/joypad.rs", "src/bus.rs"],
+        "test_files": ["tests/joypad_tests.rs"],
+        "search_terms": ["joypad2", "$4017", "strobe", "read"],
+    },
+    "mapper.uxrom.prg_bank_switch": {
+        "subsystem": "mapper",
+        "description": "Mapper 2/UXROM switchable PRG bank selection and fixed-bank reads.",
+        "source_files": ["src/mapper.rs", "src/cartridge.rs", "src/bus.rs"],
+        "test_files": ["tests/mapper_tests.rs", "tests/cartridge_tests.rs"],
+        "search_terms": ["Uxrom", "Mapper 2", "bank_select", "prg_bank_switch"],
+    },
+    "mapper.uxrom.prg_ram": {
+        "subsystem": "mapper",
+        "description": "Mapper 2 PRG RAM reads, writes, boundaries, and bank-select persistence.",
+        "source_files": ["src/mapper.rs", "src/cartridge.rs", "src/bus.rs"],
+        "test_files": ["tests/mapper_tests.rs", "tests/cartridge_tests.rs"],
+        "search_terms": ["prg_ram", "$6000", "$7FFF", "mapper2_prg_ram"],
+    },
+    "ppu.nametables.horizontal_mirroring": {
+        "subsystem": "ppu",
+        "description": "Mapper-declared horizontal nametable mirroring through PPUDATA.",
+        "source_files": ["src/ppu.rs", "src/cartridge.rs", "src/mapper.rs"],
+        "test_files": ["tests/ppu_tests.rs", "tests/mapper_tests.rs"],
+        "search_terms": ["horizontal_mirroring", "nametable", "$2000", "$2400"],
+    },
+    "ppu.nmi": {
+        "subsystem": "ppu",
+        "description": "PPUCTRL NMI enable, vblank NMI delivery, and rendered-frame progress.",
+        "source_files": ["src/ppu.rs", "src/bus.rs"],
+        "test_files": ["tests/ppu_tests.rs"],
+        "search_terms": ["nmi", "vblank", "PPUCTRL", "ppu_nmi"],
+    },
+    "ppu.registers.ppudata_buffer": {
+        "subsystem": "ppu",
+        "description": "Non-palette PPUDATA read buffering and address auto-increment.",
+        "source_files": ["src/ppu.rs", "src/bus.rs"],
+        "test_files": ["tests/ppu_tests.rs"],
+        "search_terms": ["read_buffer", "PPUDATA", "$2007", "ppu_read_buffer"],
+    },
+    "ppu.registers.ppudata_increment_32": {
+        "subsystem": "ppu",
+        "description": "PPUCTRL bit-2 PPUDATA increment-by-32 behavior.",
+        "source_files": ["src/ppu.rs", "src/bus.rs"],
+        "test_files": ["tests/ppu_tests.rs"],
+        "search_terms": ["increment_32", "PPUCTRL", "PPUDATA", "$2020"],
+    },
+    "ppu.registers.status_latch_reset": {
+        "subsystem": "ppu",
+        "description": "PPUSTATUS read side effect that resets the PPUADDR/PPUSCROLL write latch.",
+        "source_files": ["src/ppu.rs", "src/bus.rs"],
+        "test_files": ["tests/ppu_tests.rs"],
+        "search_terms": ["status_latch", "PPUSTATUS", "PPUADDR", "write latch"],
+    },
+}
+
+SCENARIO_TEST_FILTERS = {
+    "apu_status_fault": "generated_diagnostic_cartridge_localizes_intentional_apu_status_failure",
+    "cpu_indirect_jmp_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure",
+    "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
+    "dma_oam_transfer_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure",
+    "joypad1_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad_failure",
+    "joypad2_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad2_failure",
+    "joypad_strobe_high_hold_fault": "generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_high_hold_failure",
+    "joypad_strobe_reset_fault": "generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_reset_failure",
+    "mapper2_bank_switch_fault": "generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_failure",
+    "mapper2_prg_ram_fault": "generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure",
+    "ppu_nametable_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_failure",
+    "ppu_nmi_timeout_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout",
+    "ppu_read_buffer_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure",
+    "ppu_status_latch_reset_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_status_latch_reset_failure",
+    "ppu_vram_increment_32_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_vram_increment_32_failure",
+    "timeout_cycle_limit": "generated_diagnostic_cartridge_localizes_timeout",
+}
 
 
 def command_tail(output: str, limit: int = OUTPUT_TAIL_LINES) -> list[str]:
@@ -114,6 +256,7 @@ def artifact_paths(
     replay_summary: dict[str, Any] | None,
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
@@ -134,6 +277,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if observability_analysis:
         for name, path in observability_analysis.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if diagnostic_code_map:
+        for name, path in diagnostic_code_map.get("artifacts", {}).items():
             artifacts[name] = str(path)
     if observability_comparison:
         for name, path in observability_comparison.get("artifacts", {}).items():
@@ -180,6 +326,13 @@ def observability_analysis_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "observability_analysis_json": str(suite_dir / "diagnostic-observability-analysis.json"),
         "observability_analysis_report": str(suite_dir / "diagnostic-observability-analysis.md"),
+    }
+
+
+def diagnostic_code_map_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "diagnostic_code_map_json": str(suite_dir / "diagnostic-code-map.json"),
+        "diagnostic_code_map_report": str(suite_dir / "diagnostic-code-map.md"),
     }
 
 
@@ -816,6 +969,257 @@ def write_observability_analysis(
     json_path.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_observability_analysis_markdown(report_path, analysis)
     return analysis
+
+
+def path_records(repo_root: Path, paths: list[str]) -> list[dict[str, Any]]:
+    records = []
+    for path in unique_strings(paths):
+        records.append(
+            {
+                "path": path,
+                "exists": (repo_root / path).is_file(),
+            }
+        )
+    return records
+
+
+def command_record(purpose: str, argv: list[Any]) -> dict[str, Any]:
+    return {
+        "purpose": purpose,
+        "argv": [str(value) for value in argv if value is not None],
+    }
+
+
+def command_text(command: dict[str, Any]) -> str:
+    return " ".join(str(value) for value in as_list(command.get("argv")))
+
+
+def subsystem_test_command(test_path: str) -> dict[str, Any] | None:
+    path = Path(test_path)
+    if path.suffix != ".rs" or path.parent.name != "tests":
+        return None
+    return command_record(
+        f"Run {path.stem} regression tests",
+        ["cargo", "test", "--test", path.stem],
+    )
+
+
+def scenario_test_command(scenario_id: str) -> dict[str, Any] | None:
+    test_filter = SCENARIO_TEST_FILTERS.get(scenario_id)
+    if not test_filter:
+        return None
+    return command_record(
+        f"Run diagnostic localization test for {scenario_id}",
+        ["cargo", "test", "--test", "diagnostic_cartridge_tests", test_filter],
+    )
+
+
+def code_map_debug_anchor(entry: dict[str, Any]) -> dict[str, Any]:
+    return entry_debug_anchor(entry)
+
+
+def build_code_map_entry(
+    focus_domain: str, entries: list[dict[str, Any]], repo_root: Path
+) -> dict[str, Any]:
+    mapping = as_dict(FOCUS_DOMAIN_CODE_MAP.get(focus_domain))
+    scenario_ids = sorted(
+        str(entry.get("scenario_id"))
+        for entry in entries
+        if isinstance(entry.get("scenario_id"), str)
+    )
+    first_entry = sorted(entries, key=lambda entry: str(entry.get("scenario_id")))[0]
+    source_files = as_list(mapping.get("source_files"))
+    test_files = as_list(mapping.get("test_files"))
+    diagnostic_files = DIAGNOSTIC_SUPPORT_FILES
+    commands: list[dict[str, Any]] = []
+
+    replay_args = as_list(first_entry.get("replay_args"))
+    if replay_args:
+        commands.append(command_record("Replay the first mapped scenario", replay_args))
+    for scenario_id in scenario_ids:
+        test_command = scenario_test_command(scenario_id)
+        if test_command:
+            commands.append(test_command)
+    for test_file in test_files:
+        if isinstance(test_file, str):
+            test_command = subsystem_test_command(test_file)
+            if test_command:
+                commands.append(test_command)
+
+    deduped_commands: list[dict[str, Any]] = []
+    seen_commands: set[str] = set()
+    for command in commands:
+        key = command_text(command)
+        if key and key not in seen_commands:
+            seen_commands.add(key)
+            deduped_commands.append(command)
+
+    return {
+        "focus_domain": focus_domain,
+        "focus_subsystem": mapping.get("subsystem") or entry_focus_subsystem(first_entry),
+        "description": mapping.get("description"),
+        "scenario_ids": scenario_ids,
+        "healths": unique_strings([entry.get("health") for entry in entries]),
+        "failure_kinds": unique_strings(
+            [as_dict(entry.get("debug_focus")).get("failure_kind") for entry in entries]
+        ),
+        "failed_probe_ids": unique_strings(
+            [
+                probe_id
+                for entry in entries
+                for probe_id in entry_failed_probe_ids(entry)
+            ]
+        ),
+        "source_files": path_records(repo_root, [str(path) for path in source_files]),
+        "test_files": path_records(repo_root, [str(path) for path in test_files]),
+        "diagnostic_files": path_records(repo_root, diagnostic_files),
+        "search_terms": unique_strings([str(term) for term in as_list(mapping.get("search_terms"))]),
+        "primary_artifact": entry_primary_artifact(first_entry),
+        "replay_args": replay_args,
+        "suggested_commands": deduped_commands,
+        "debug_anchor": code_map_debug_anchor(first_entry),
+    }
+
+
+def build_diagnostic_code_map(
+    suite_dir: Path, debug_index_summary: dict[str, Any] | None, repo_root: Path
+) -> dict[str, Any]:
+    paths = diagnostic_code_map_paths(suite_dir)
+    debug_paths = debug_index_summary.get("artifacts", {}) if debug_index_summary else {}
+    debug_index_path = Path(
+        debug_paths.get("debug_index_jsonl")
+        or debug_index_paths(suite_dir)["debug_index_jsonl"]
+    )
+    entries, errors = load_jsonl(debug_index_path)
+    if debug_index_summary and debug_index_summary.get("status") != "passed":
+        errors.extend(
+            f"debug index failed: {error}"
+            for error in as_list(debug_index_summary.get("errors"))
+        )
+    actionable_entries = [
+        entry
+        for entry in entries
+        if entry.get("role") == "expected_failure_fixture" and entry_focus_domain(entry)
+    ]
+    if not actionable_entries:
+        errors.append("debug index has no actionable focus-domain entries")
+    entries_by_domain: dict[str, list[dict[str, Any]]] = {}
+    for entry in actionable_entries:
+        domain = entry_focus_domain(entry)
+        if domain:
+            entries_by_domain.setdefault(domain, []).append(entry)
+
+    unknown_focus_domains = sorted(
+        domain for domain in entries_by_domain if domain not in FOCUS_DOMAIN_CODE_MAP
+    )
+    for domain in unknown_focus_domains:
+        errors.append(f"missing code map entry for focus domain: {domain}")
+
+    focus_entries = [
+        build_code_map_entry(domain, domain_entries, repo_root)
+        for domain, domain_entries in sorted(entries_by_domain.items())
+        if domain in FOCUS_DOMAIN_CODE_MAP
+    ]
+    for entry in focus_entries:
+        for group in ("source_files", "test_files", "diagnostic_files"):
+            for path_record in as_list(entry.get(group)):
+                if isinstance(path_record, dict) and not path_record.get("exists"):
+                    errors.append(
+                        f"{entry.get('focus_domain')}: missing {group} path "
+                        f"{path_record.get('path')}"
+                    )
+        if not as_list(entry.get("suggested_commands")):
+            errors.append(f"{entry.get('focus_domain')}: missing suggested commands")
+
+    return {
+        "diagnostic_code_map_schema_version": DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "git": git_metadata(repo_root),
+        "source_artifacts": {
+            "debug_index_jsonl": str(debug_index_path),
+            "debug_index_report": debug_paths.get("debug_index_report")
+            or debug_index_paths(suite_dir)["debug_index_report"],
+        },
+        "artifacts": paths,
+        "scenario_count": len(actionable_entries),
+        "focus_domain_count": len(focus_entries),
+        "unknown_focus_domains": unknown_focus_domains,
+        "focus_domains": focus_entries,
+        "errors": errors,
+        "ai_handoff": [
+            "Use this code map after diagnostic-observability-analysis.json identifies the focus domain.",
+            "Open source_files first for emulator behavior, diagnostic_files for cartridge probes, and test_files for nearby regression coverage.",
+            "Run suggested_commands[0] to replay the mapped scenario before editing emulator code.",
+        ],
+    }
+
+
+def write_diagnostic_code_map_markdown(path: Path, code_map: dict[str, Any]) -> None:
+    lines = [
+        "# Diagnostic Code Map",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {code_map.get('status')} |",
+        f"| Generated at UTC | {code_map.get('generated_at_utc')} |",
+        f"| Git commit | {code_map.get('git', {}).get('short_commit', '')} |",
+        f"| Focus domains | {code_map.get('focus_domain_count')} |",
+        f"| Scenarios | {code_map.get('scenario_count')} |",
+        "",
+        "## Focus Domains",
+        "",
+        "| Focus domain | Scenarios | Source files | Test files | Open first | First command |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for entry in as_list(code_map.get("focus_domains")):
+        if not isinstance(entry, dict):
+            continue
+        commands = as_list(entry.get("suggested_commands"))
+        first_command = as_dict(commands[0]) if commands else {}
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} |".format(
+                markdown_cell(str(entry.get("focus_domain") or "-")),
+                markdown_cell(",".join(str(value) for value in as_list(entry.get("scenario_ids")))),
+                markdown_cell(
+                    ",".join(
+                        str(path.get("path"))
+                        for path in as_list(entry.get("source_files"))
+                        if isinstance(path, dict)
+                    )
+                ),
+                markdown_cell(
+                    ",".join(
+                        str(path.get("path"))
+                        for path in as_list(entry.get("test_files"))
+                        if isinstance(path, dict)
+                    )
+                ),
+                markdown_cell(str(entry.get("primary_artifact") or "-")),
+                markdown_cell(command_text(first_command) or "-"),
+            )
+        )
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(code_map.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if code_map.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(code_map.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_diagnostic_code_map(
+    suite_dir: Path, debug_index_summary: dict[str, Any] | None, repo_root: Path
+) -> dict[str, Any]:
+    code_map = build_diagnostic_code_map(suite_dir, debug_index_summary, repo_root)
+    artifacts = as_dict(code_map.get("artifacts"))
+    json_path = Path(str(artifacts["diagnostic_code_map_json"]))
+    report_path = Path(str(artifacts["diagnostic_code_map_report"]))
+    json_path.write_text(json.dumps(code_map, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_diagnostic_code_map_markdown(report_path, code_map)
+    return code_map
 
 
 def load_observability_snapshot(suite_dir: Path) -> dict[str, Any]:
@@ -1500,6 +1904,7 @@ def build_run_summary(
     verification_summary: dict[str, Any],
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
@@ -1519,6 +1924,8 @@ def build_run_summary(
         status = "failed"
     if observability_analysis and observability_analysis.get("status") != "passed":
         status = "failed"
+    if diagnostic_code_map and diagnostic_code_map.get("status") != "passed":
+        status = "failed"
     if observability_comparison and observability_comparison.get("status") != "passed":
         status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
@@ -1535,6 +1942,7 @@ def build_run_summary(
         "verification": verification_summary,
         "debug_index": debug_index_summary,
         "analysis": observability_analysis,
+        "code_map": diagnostic_code_map,
         "comparison": observability_comparison,
         "replay": replay_summary,
         "suite": suite,
@@ -1545,11 +1953,13 @@ def build_run_summary(
             replay_summary,
             debug_index_summary,
             observability_analysis,
+            diagnostic_code_map,
             observability_comparison,
         ),
         "ai_handoff": [
             "Start with suite.first_next_action and open its primary_artifact.",
             "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
+            "Use code_map.focus_domains to jump from a focus domain to source files, tests, and replay commands.",
             "Use comparison.regressions first when --compare-suite-dir is supplied.",
             "Use debug_index.artifacts.debug_index_jsonl for one-row-per-scenario routing before raw telemetry.",
             "Use replay.artifacts.bundle_triage_json for the focused replay evidence of the selected scenario.",
@@ -1626,6 +2036,21 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Top focus domain | {top_hypothesis.get('focus_domain', '-')} |",
             f"| JSON | {analysis.get('artifacts', {}).get('observability_analysis_json', '-')} |",
             f"| Report | {analysis.get('artifacts', {}).get('observability_analysis_report', '-')} |",
+        ]
+    )
+    code_map = summary.get("code_map") or {}
+    lines.extend(
+        [
+            "",
+            "## Diagnostic Code Map",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {code_map.get('status', '-')} |",
+            f"| Focus domains | {code_map.get('focus_domain_count', '-')} |",
+            f"| Scenarios | {code_map.get('scenario_count', '-')} |",
+            f"| JSON | {code_map.get('artifacts', {}).get('diagnostic_code_map_json', '-')} |",
+            f"| Report | {code_map.get('artifacts', {}).get('diagnostic_code_map_report', '-')} |",
         ]
     )
     comparison = summary.get("comparison") or {}
@@ -1780,6 +2205,7 @@ def main() -> int:
     verification_summary: dict[str, Any] = {}
     debug_index_summary: dict[str, Any] | None = None
     observability_analysis: dict[str, Any] | None = None
+    diagnostic_code_map: dict[str, Any] | None = None
     observability_comparison: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
@@ -1795,6 +2221,9 @@ def main() -> int:
             verification_summary = json.loads("\n".join(verify_command["stdout_tail"]))
             debug_index_summary = write_debug_index(suite_dir)
             observability_analysis = write_observability_analysis(
+                suite_dir, debug_index_summary, repo_root
+            )
+            diagnostic_code_map = write_diagnostic_code_map(
                 suite_dir, debug_index_summary, repo_root
             )
             if args.compare_suite_dir:
@@ -1842,6 +2271,7 @@ def main() -> int:
         verification_summary,
         debug_index_summary,
         observability_analysis,
+        diagnostic_code_map,
         observability_comparison,
         replay_summary,
         repo_root,
@@ -1873,6 +2303,12 @@ def main() -> int:
             analysis_note = (
                 f" analysis={analysis.get('hypothesis_count')}:{analysis.get('status')}"
             )
+        code_map = summary.get("code_map") or {}
+        code_map_note = ""
+        if code_map:
+            code_map_note = (
+                f" code_map={code_map.get('focus_domain_count')}:{code_map.get('status')}"
+            )
         comparison = summary.get("comparison") or {}
         comparison_note = ""
         if comparison:
@@ -1889,7 +2325,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{comparison_note}{replay_note}"
+            f"{debug_note}{analysis_note}{code_map_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 

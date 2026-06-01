@@ -15,6 +15,7 @@ EXPECTED_REPLAY_SCHEMA = 1
 EXPECTED_DEBUG_INDEX_SCHEMA = 1
 EXPECTED_ANALYSIS_SCHEMA = 1
 EXPECTED_COMPARISON_SCHEMA = 1
+EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
 EXPECTED_SCENARIOS = {
@@ -76,6 +77,7 @@ class ObservabilityVerifier:
 
         debug_entries = self.verify_debug_index(as_dict(run.get("debug_index")))
         self.verify_analysis(as_dict(run.get("analysis")), debug_entries)
+        code_map_domains = self.verify_code_map(as_dict(run.get("code_map")), debug_entries)
         self.verify_comparison(run.get("comparison"))
         self.verify_replay(run.get("replay"))
 
@@ -86,6 +88,7 @@ class ObservabilityVerifier:
             "scenario_count": as_dict(run.get("suite")).get("scenario_count"),
             "debug_index_entries": len(debug_entries),
             "hypothesis_count": as_dict(run.get("analysis")).get("hypothesis_count"),
+            "code_map_domains": len(code_map_domains),
             "comparison_verdict": as_dict(run.get("comparison")).get("verdict")
             if isinstance(run.get("comparison"), dict)
             else None,
@@ -156,6 +159,7 @@ class ObservabilityVerifier:
         for section in (
             "## Debug Index",
             "## Observability Analysis",
+            "## Diagnostic Code Map",
             "## Observability Comparison",
             "## Replay",
             "## AI Handoff",
@@ -311,6 +315,94 @@ class ObservabilityVerifier:
             debug_domains,
             "observability analysis hypothesis domains",
         )
+
+    def verify_code_map(
+        self, code_map: dict[str, Any], debug_entries: list[dict[str, Any]]
+    ) -> set[Any]:
+        self.expect_equal(
+            code_map.get("diagnostic_code_map_schema_version"),
+            EXPECTED_CODE_MAP_SCHEMA,
+            "diagnostic code map schema version",
+        )
+        self.expect_equal(code_map.get("status"), "passed", "diagnostic code map status")
+        self.expect_equal(
+            code_map.get("recommended_exit_code"),
+            0,
+            "diagnostic code map recommended_exit_code",
+        )
+        self.expect_equal(
+            code_map.get("scenario_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "diagnostic code map scenario_count",
+        )
+        self.expect_equal(
+            code_map.get("focus_domain_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "diagnostic code map focus_domain_count",
+        )
+        self.expect_equal(
+            code_map.get("unknown_focus_domains"),
+            [],
+            "diagnostic code map unknown_focus_domains",
+        )
+        self.expect_equal(code_map.get("errors"), [], "diagnostic code map errors")
+        self.verify_artifact_map(as_dict(code_map.get("artifacts")), "diagnostic code map")
+
+        artifact_json = self.resolve_existing_file(
+            as_dict(code_map.get("artifacts")).get("diagnostic_code_map_json"),
+            "diagnostic code map JSON",
+        )
+        if artifact_json:
+            artifact_data = self.read_json_file(artifact_json, "diagnostic code map JSON")
+            self.expect_equal(
+                artifact_data.get("diagnostic_code_map_schema_version"),
+                EXPECTED_CODE_MAP_SCHEMA,
+                "diagnostic code map artifact schema version",
+            )
+
+        focus_entries = as_list(code_map.get("focus_domains"))
+        self.expect_equal(
+            len(focus_entries),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "diagnostic code map focus domain entries",
+        )
+        code_map_domains = {
+            entry.get("focus_domain")
+            for entry in focus_entries
+            if isinstance(entry, dict)
+        }
+        debug_domains = {
+            as_dict(entry.get("debug_focus")).get("focus_domain")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        self.expect_equal(code_map_domains, debug_domains, "diagnostic code map domains")
+
+        for entry in focus_entries:
+            if not isinstance(entry, dict):
+                self.errors.append("diagnostic code map entries must be objects")
+                continue
+            domain = entry.get("focus_domain")
+            label = f"diagnostic code map {domain}"
+            self.expect_nonempty_string(domain, f"{label} focus_domain")
+            self.expect_nonempty_string(entry.get("description"), f"{label} description")
+            self.expect_nonempty_list(entry.get("scenario_ids"), f"{label} scenario_ids")
+            self.expect_nonempty_string(entry.get("primary_artifact"), f"{label} primary_artifact")
+            self.expect_nonempty_list(entry.get("replay_args"), f"{label} replay_args")
+            self.expect_nonempty_list(
+                entry.get("suggested_commands"),
+                f"{label} suggested_commands",
+            )
+            for group in ("source_files", "test_files", "diagnostic_files"):
+                records = as_list(entry.get(group))
+                self.expect_nonempty_list(records, f"{label} {group}")
+                for record in records:
+                    if not isinstance(record, dict):
+                        self.errors.append(f"{label} {group} entries must be objects")
+                        continue
+                    self.expect_equal(record.get("exists"), True, f"{label} {group} exists")
+                    self.expect_existing_file(record.get("path"), f"{label} {group} path")
+        return code_map_domains
 
     def verify_comparison(self, comparison_value: Any) -> None:
         if comparison_value is None:
@@ -532,6 +624,7 @@ def main() -> int:
             f"scenarios={summary['scenario_count']} "
             f"debug_index={summary['debug_index_entries']} "
             f"hypotheses={summary['hypothesis_count']} "
+            f"code_map={summary['code_map_domains']} "
             f"comparison={summary['comparison_verdict'] or '-'} "
             f"replay={summary['replay_scenario'] or '-'}"
         )
