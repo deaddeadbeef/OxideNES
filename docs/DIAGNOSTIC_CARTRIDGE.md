@@ -89,7 +89,8 @@ cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/s
 
 For the full local observability loop, use the wrapper that generates the
 scenario suite, runs the verifier, replays one selected scenario from its
-`replay_args`, writes a root debug index and aggregate analysis, and writes
+`replay_args`, writes a root debug index and aggregate analysis, optionally
+compares the run against a prior observability suite, and writes
 `observability-run.json` plus `observability-run.md` into the suite directory:
 
 ```powershell
@@ -99,9 +100,11 @@ python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/sc
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` alongside the generated scenario-suite
-root files: `scenario-suite.json`, `scenario-suite.md`,
-`scenario-suite-observer.json`, and `scenario-suite-observer.md`. The suite
-also writes one full bundle per
+root files. When `--compare-suite-dir <DIR>` is supplied, it also writes
+`diagnostic-observability-comparison.json` and
+`diagnostic-observability-comparison.md`. The root scenario-suite files are
+`scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
+`scenario-suite-observer.md`. The suite also writes one full bundle per
 scenario: `pass`, `input_mask_matrix_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
@@ -128,7 +131,11 @@ observability analysis consumes that index and emits ranked focus-domain
 hypotheses, health counts, scenario priority, suggested replay args, and the
 first artifact to open for each candidate subsystem. Use it when an automated
 debugger needs an aggregate cross-suite starting point before drilling into one
-scenario. The
+scenario. The optional comparison artifact compares two observability suites by
+scenario health/focus/probes/scores and hypothesis rank/score changes, then
+reports matched, changed, or regressed verdicts with replay args and current-run
+artifact pointers for any regression. Use `--fail-on-comparison-regression`
+with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -191,15 +198,18 @@ uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
-`diagnostic-observability-analysis.md` files, then writes focused replay
-evidence under `replay-runs/<scenario>/` by default. The replay summary records
-the source `replay_args`, effective command, expected and actual exit code,
-expected and actual health/focus values, required bundle-artifact presence, and
-paths to the focused bundle's `manifest.json`, `triage.json`, `telemetry.json`,
-`report.md`, and `diagnostic.nes`. Use `--replay-scenario <ID>` to target a
-specific scenario, `--replay-output-dir <DIR>` to place the focused evidence
-elsewhere, or `--skip-replay` when only suite generation and verification are
-needed.
+`diagnostic-observability-analysis.md` files. With `--compare-suite-dir <DIR>`
+it also writes `diagnostic-observability-comparison.json` and
+`diagnostic-observability-comparison.md`, and with
+`--fail-on-comparison-regression` it exits non-zero when the current run
+regresses against that prior suite. It then writes focused replay evidence under
+`replay-runs/<scenario>/` by default. The replay summary records the source
+`replay_args`, effective command, expected and actual exit code, expected and
+actual health/focus values, required bundle-artifact presence, and paths to the
+focused bundle's `manifest.json`, `triage.json`, `telemetry.json`, `report.md`,
+and `diagnostic.nes`. Use `--replay-scenario <ID>` to target a specific
+scenario, `--replay-output-dir <DIR>` to place the focused evidence elsewhere,
+or `--skip-replay` when only suite generation and verification are needed.
 
 ## Coverage
 
