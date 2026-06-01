@@ -1810,7 +1810,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(24),
+            expected_focus_test_id: Some(25),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1826,7 +1826,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(24),
+            expected_focus_test_id: Some(25),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -2000,6 +2000,20 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(17),
             expected_focus_domain: Some("ppu.nametables.horizontal_mirroring"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_sprite_zero_hit_fault",
+            title: "Intentional PPU sprite-zero-hit assertion failure",
+            purpose:
+                "Failure-localization fixture for sprite/background collision signaling regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuSpriteZeroHit),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(25),
+            expected_focus_domain: Some("ppu.sprite_zero_hit"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",

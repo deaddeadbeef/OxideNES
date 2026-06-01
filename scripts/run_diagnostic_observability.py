@@ -168,6 +168,19 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/ppu_tests.rs"],
         "search_terms": ["nmi", "vblank", "PPUCTRL", "ppu_nmi"],
     },
+    "ppu.sprite_zero_hit": {
+        "subsystem": "ppu",
+        "description": "Sprite-zero-hit signaling when sprite 0 overlaps a non-transparent background pixel.",
+        "source_files": ["src/ppu.rs", "src/bus.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/ppu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "sprite_zero_hit",
+            "sprite_zero_being_rendered",
+            "PPUSTATUS",
+            "0x2002",
+            "sprite 0",
+        ],
+    },
     "ppu.registers.ppudata_buffer": {
         "subsystem": "ppu",
         "description": "Non-palette PPUDATA read buffering and address auto-increment.",
@@ -208,6 +221,7 @@ SCENARIO_TEST_FILTERS = {
     "ppu_nametable_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_failure",
     "ppu_nmi_timeout_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout",
     "ppu_read_buffer_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure",
+    "ppu_sprite_zero_hit_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_zero_hit_failure",
     "ppu_status_latch_reset_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_status_latch_reset_failure",
     "ppu_vram_increment_32_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_vram_increment_32_failure",
     "timeout_cycle_limit": "generated_diagnostic_cartridge_localizes_timeout",

@@ -231,7 +231,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 19 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 20 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -285,8 +285,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 21
-scenarios match their expected health and focus-domain contracts, the 19
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 22
+scenarios match their expected health and focus-domain contracts, the 20
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -298,7 +298,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 19 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 20 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -385,9 +385,10 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
 `cpu_addressing_matrix_fault`, `input_port_matrix_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
-`ppu_nametable_mirroring_fault`, `joypad_strobe_reset_fault`,
-`joypad_strobe_high_hold_fault`, `ppu_vram_increment_32_fault`,
-`ppu_status_latch_reset_fault`, `ppu_nmi_timeout_fault`, and
+`ppu_nametable_mirroring_fault`, `ppu_sprite_zero_hit_fault`,
+`joypad_strobe_reset_fault`, `joypad_strobe_high_hold_fault`,
+`ppu_vram_increment_32_fault`, `ppu_status_latch_reset_fault`,
+`ppu_nmi_timeout_fault`, and
 `timeout_cycle_limit`. The
 observer JSON is the compact machine entry point: it turns the root attention
 queue into ordered next actions, scenario observations, and evidence pointers so
@@ -446,6 +447,9 @@ cartridge reads it, proving Mapper 2 PRG RAM regressions localize to
 nametable mirror pair before the cartridge reads it, proving mapper-declared
 horizontal mirroring regressions localize to
 `ppu.nametables.horizontal_mirroring`.
+`ppu_sprite_zero_hit_fault` clears the deterministic sprite/background
+collision observation before the cartridge asserts PPUSTATUS bit 6, proving
+sprite-zero-hit regressions localize to `ppu.sprite_zero_hit`.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -474,7 +478,8 @@ active cartridge test. The suite can prove CPU addressing, CPU control-flow,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
 joypad masks, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
-host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion, and PPU progress-timeout failure
+host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion,
+PPU sprite-zero-hit signaling, and PPU progress-timeout failure
 localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -612,7 +617,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 19 accepted AI routes into deterministic debugger startup plans
+turning all 20 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -688,6 +693,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - PPU non-palette PPUDATA read buffering, PPUCTRL-driven increment-by-32
   behavior, and PPUSTATUS write-latch reset behavior
 - PPU horizontal nametable mirroring through CPU-driven PPUDATA reads
+- PPU sprite-zero-hit signaling through a deterministic sprite/background
+  overlap scene
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
@@ -948,6 +955,13 @@ cartridge triggers two additional `$4014` OAM DMA transfers, host telemetry
 records per-transfer active-cycle buckets and start parities, and the
 `dma.oam_phase_matrix` probe verifies the accepted run covers both 513-cycle
 and 514-cycle OAM DMA phases.
+
+Schema version `34` adds the `ppu_sprite_zero_hit` cartridge test plus the
+`ppu_sprite_zero_hit_fault` scenario-suite fixture. The generated cartridge
+builds a deterministic visible overlap between solid background tile 2 and
+sprite 0 tile 2, asserts PPUSTATUS bit 6 after two vblanks, records
+`ppu_sprite_zero_hit` telemetry, and exposes `cartridge.test.25.result` plus
+`ppu.sprite_zero_hit.status` probes for automated localization.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
