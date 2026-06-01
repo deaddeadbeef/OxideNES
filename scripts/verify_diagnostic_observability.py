@@ -16,13 +16,40 @@ EXPECTED_DEBUG_INDEX_SCHEMA = 1
 EXPECTED_ANALYSIS_SCHEMA = 1
 EXPECTED_COMPARISON_SCHEMA = 1
 EXPECTED_COVERAGE_LEDGER_SCHEMA = 1
+EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
+EXPECTED_TELEMETRY_SCHEMA = 30
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
 EXPECTED_PASS_SCENARIO_COUNT = 2
 EXPECTED_CARTRIDGE_TEST_COUNT = 21
 EXPECTED_COVERAGE_GAP_COUNT = 6
+EXPECTED_PROBE_COUNT = 32
+EXPECTED_EVENT_KIND_COUNT = 9
+EXPECTED_SIGNAL_FAMILY_COUNT = 8
+EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
+EXPECTED_SIGNAL_FAMILIES = {
+    "verdict",
+    "debug_focus",
+    "probes",
+    "timeline",
+    "events",
+    "instruction_trace",
+    "input_dma_audio",
+    "coverage_limits",
+}
+EXPECTED_EVENT_KINDS = {
+    "reset",
+    "status_changed",
+    "test_changed",
+    "oam_dma_started",
+    "oam_dma_completed",
+    "dmc_dma_fetched",
+    "dmc_dma_oam_overlap",
+    "frame_complete",
+    "post_pass_frame_complete",
+}
 EXPECTED_SCENARIOS = {
     "pass",
     "input_mask_matrix_pass",
@@ -83,6 +110,7 @@ class ObservabilityVerifier:
         debug_entries = self.verify_debug_index(as_dict(run.get("debug_index")))
         self.verify_analysis(as_dict(run.get("analysis")), debug_entries)
         self.verify_coverage_ledger(as_dict(run.get("coverage_ledger")), debug_entries)
+        self.verify_telemetry_catalog(as_dict(run.get("telemetry_catalog")))
         code_map_domains = self.verify_code_map(as_dict(run.get("code_map")), debug_entries)
         investigation_routes = self.verify_investigation_plan(
             as_dict(run.get("investigation_plan")),
@@ -100,6 +128,10 @@ class ObservabilityVerifier:
             "debug_index_entries": len(debug_entries),
             "hypothesis_count": as_dict(run.get("analysis")).get("hypothesis_count"),
             "coverage_ledger_tests": as_dict(run.get("coverage_ledger")).get("test_count"),
+            "telemetry_catalog_probes": as_dict(run.get("telemetry_catalog")).get("probe_count"),
+            "telemetry_catalog_event_kinds": as_dict(run.get("telemetry_catalog")).get(
+                "event_kind_count"
+            ),
             "code_map_domains": len(code_map_domains),
             "investigation_routes": len(investigation_routes),
             "comparison_verdict": as_dict(run.get("comparison")).get("verdict")
@@ -173,6 +205,7 @@ class ObservabilityVerifier:
             "## Debug Index",
             "## Observability Analysis",
             "## Coverage Ledger",
+            "## Telemetry Catalog",
             "## Diagnostic Code Map",
             "## Investigation Plan",
             "## Observability Comparison",
@@ -476,6 +509,173 @@ class ObservabilityVerifier:
                 gap.get("suggested_next_test"),
                 f"{label} suggested_next_test",
             )
+
+    def verify_telemetry_catalog(self, catalog: dict[str, Any]) -> None:
+        self.expect_equal(
+            catalog.get("diagnostic_telemetry_catalog_schema_version"),
+            EXPECTED_TELEMETRY_CATALOG_SCHEMA,
+            "diagnostic telemetry catalog schema version",
+        )
+        self.expect_equal(catalog.get("status"), "passed", "diagnostic telemetry catalog status")
+        self.expect_equal(
+            catalog.get("recommended_exit_code"),
+            0,
+            "diagnostic telemetry catalog recommended_exit_code",
+        )
+        self.expect_equal(
+            catalog.get("telemetry_schema_version"),
+            EXPECTED_TELEMETRY_SCHEMA,
+            "diagnostic telemetry catalog telemetry_schema_version",
+        )
+        self.expect_equal(
+            catalog.get("test_count"),
+            EXPECTED_CARTRIDGE_TEST_COUNT,
+            "diagnostic telemetry catalog test_count",
+        )
+        self.expect_equal(
+            catalog.get("probe_count"),
+            EXPECTED_PROBE_COUNT,
+            "diagnostic telemetry catalog probe_count",
+        )
+        self.expect_equal(
+            catalog.get("event_kind_count"),
+            EXPECTED_EVENT_KIND_COUNT,
+            "diagnostic telemetry catalog event_kind_count",
+        )
+        self.expect_equal(
+            catalog.get("timeline_entry_count"),
+            EXPECTED_CARTRIDGE_TEST_COUNT,
+            "diagnostic telemetry catalog timeline_entry_count",
+        )
+        self.expect_equal(
+            catalog.get("trace_retained_instruction_count"),
+            EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT,
+            "diagnostic telemetry catalog trace_retained_instruction_count",
+        )
+        self.expect_equal(
+            catalog.get("signal_family_count"),
+            EXPECTED_SIGNAL_FAMILY_COUNT,
+            "diagnostic telemetry catalog signal_family_count",
+        )
+        self.expect_equal(catalog.get("errors"), [], "diagnostic telemetry catalog errors")
+        self.verify_artifact_map(as_dict(catalog.get("artifacts")), "diagnostic telemetry catalog")
+
+        artifact_json = self.resolve_existing_file(
+            as_dict(catalog.get("artifacts")).get("diagnostic_telemetry_catalog_json"),
+            "diagnostic telemetry catalog JSON",
+        )
+        if artifact_json:
+            artifact_data = self.read_json_file(artifact_json, "diagnostic telemetry catalog JSON")
+            self.expect_equal(
+                artifact_data,
+                catalog,
+                "diagnostic telemetry catalog artifact payload",
+            )
+            self.expect_equal(
+                artifact_data.get("diagnostic_telemetry_catalog_schema_version"),
+                EXPECTED_TELEMETRY_CATALOG_SCHEMA,
+                "diagnostic telemetry catalog artifact schema version",
+            )
+
+        families = [
+            family
+            for family in as_list(catalog.get("signal_families"))
+            if isinstance(family, dict)
+        ]
+        self.expect_equal(
+            {family.get("id") for family in families},
+            EXPECTED_SIGNAL_FAMILIES,
+            "diagnostic telemetry catalog signal families",
+        )
+        for family in families:
+            label = f"diagnostic telemetry catalog family {family.get('id')}"
+            self.expect_equal(family.get("available"), True, f"{label} available")
+            self.expect_nonempty_string(family.get("purpose"), f"{label} purpose")
+            self.expect_nonempty_string(family.get("first_artifact"), f"{label} first_artifact")
+            self.expect_nonempty_list(family.get("telemetry_paths"), f"{label} telemetry_paths")
+            self.expect_nonempty_string(family.get("ai_usage"), f"{label} ai_usage")
+
+        probes = [
+            probe
+            for probe in as_list(catalog.get("probe_catalog"))
+            if isinstance(probe, dict)
+        ]
+        self.expect_equal(
+            len(probes),
+            EXPECTED_PROBE_COUNT,
+            "diagnostic telemetry catalog probe_catalog",
+        )
+        probe_ids = {probe.get("id") for probe in probes}
+        for expected_probe in (
+            "runtime.completed",
+            "cartridge.status.pass",
+            "cartridge.test.21.result",
+            "dma.dmc_stall_phase",
+            "apu.sample_count",
+        ):
+            self.expect_in(expected_probe, list(probe_ids), "diagnostic telemetry catalog probes")
+        for probe in probes:
+            label = f"diagnostic telemetry catalog probe {probe.get('id')}"
+            self.expect_nonempty_string(probe.get("id"), f"{label} id")
+            self.expect_nonempty_string(probe.get("source"), f"{label} source")
+            self.expect_nonempty_string(probe.get("status"), f"{label} status")
+            self.expect_nonempty_string(probe.get("description"), f"{label} description")
+            self.expect_nonempty_string(probe.get("expected"), f"{label} expected")
+            self.expect_nonempty_string(probe.get("observed"), f"{label} observed")
+            self.expect_nonempty_string(probe.get("likely_domain"), f"{label} likely_domain")
+
+        event_kinds = [
+            event_kind
+            for event_kind in as_list(catalog.get("event_kind_catalog"))
+            if isinstance(event_kind, dict)
+        ]
+        self.expect_equal(
+            {event_kind.get("kind") for event_kind in event_kinds},
+            EXPECTED_EVENT_KINDS,
+            "diagnostic telemetry catalog event kinds",
+        )
+        for event_kind in event_kinds:
+            self.expect_nonempty_string(
+                event_kind.get("kind"),
+                "diagnostic telemetry catalog event kind",
+            )
+            if not isinstance(event_kind.get("count"), int) or event_kind.get("count", 0) < 1:
+                self.errors.append(
+                    f"diagnostic telemetry catalog event {event_kind.get('kind')} count must be positive"
+                )
+
+        test_signals = [
+            test for test in as_list(catalog.get("test_signals")) if isinstance(test, dict)
+        ]
+        self.expect_equal(
+            len(test_signals),
+            EXPECTED_CARTRIDGE_TEST_COUNT,
+            "diagnostic telemetry catalog test_signals",
+        )
+        self.expect_equal(
+            {test.get("id") for test in test_signals},
+            set(range(1, EXPECTED_CARTRIDGE_TEST_COUNT + 1)),
+            "diagnostic telemetry catalog test signal ids",
+        )
+        for test in test_signals:
+            label = f"diagnostic telemetry catalog test {test.get('id')}"
+            self.expect_nonempty_string(test.get("name"), f"{label} name")
+            self.expect_nonempty_string(test.get("subsystem"), f"{label} subsystem")
+            self.expect_nonempty_string(test.get("result_probe_id"), f"{label} result_probe_id")
+            self.expect_equal(test.get("result_probe_present"), True, f"{label} result_probe_present")
+            self.expect_equal(test.get("timeline_present"), True, f"{label} timeline_present")
+            self.expect_nonempty_list(test.get("probe_ids"), f"{label} probe_ids")
+
+        trace = as_dict(catalog.get("trace_catalog"))
+        self.expect_equal(
+            trace.get("retained_instruction_count"),
+            EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT,
+            "diagnostic telemetry catalog trace retained count",
+        )
+        self.expect_equal(trace.get("truncated"), True, "diagnostic telemetry catalog trace truncated")
+        trace_fields = set(as_list(trace.get("tail_fields")))
+        for expected_field in ("instruction", "symbol", "cpu", "diagnostic_ram"):
+            self.expect_in(expected_field, list(trace_fields), "diagnostic telemetry catalog trace fields")
 
     def verify_code_map(
         self, code_map: dict[str, Any], debug_entries: list[dict[str, Any]]
@@ -923,6 +1123,7 @@ def main() -> int:
             f"debug_index={summary['debug_index_entries']} "
             f"hypotheses={summary['hypothesis_count']} "
             f"coverage_tests={summary['coverage_ledger_tests']} "
+            f"telemetry_catalog={summary['telemetry_catalog_probes']}:{summary['telemetry_catalog_event_kinds']} "
             f"code_map={summary['code_map_domains']} "
             f"investigation_routes={summary['investigation_routes']} "
             f"comparison={summary['comparison_verdict'] or '-'} "
