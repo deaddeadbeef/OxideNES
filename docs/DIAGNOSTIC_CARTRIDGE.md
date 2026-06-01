@@ -231,7 +231,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 17 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 18 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -285,8 +285,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 19
-scenarios match their expected health and focus-domain contracts, the 17
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 20
+scenarios match their expected health and focus-domain contracts, the 18
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -298,7 +298,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 17 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 18 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -382,7 +382,7 @@ scenario-id-first automated debugging. When `--compare-suite-dir <DIR>` is suppl
 scenario: `pass`, `input_mask_matrix_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
-`cpu_addressing_matrix_fault`, `ppu_read_buffer_fault`,
+`cpu_addressing_matrix_fault`, `input_port_matrix_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `joypad_strobe_reset_fault`,
 `joypad_strobe_high_hold_fault`, `ppu_vram_increment_32_fault`,
@@ -426,7 +426,7 @@ reports matched, changed, or regressed verdicts with replay args and current-run
 artifact pointers for any regression. Use `--fail-on-comparison-regression`
 with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
-`cpu_addressing_matrix_fault`, and
+`cpu_addressing_matrix_fault`, `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
 assertion reads them, while `dma_oam_transfer_fault` corrupts the host-observed
@@ -455,6 +455,9 @@ localize to `joypad.strobe_high_hold`.
 `cpu_addressing_matrix_fault` corrupts the page-cross sentinel before the
 generated cartridge exercises absolute,X and indirect,Y loads, proving CPU load
 addressing regressions localize to `cpu.addressing.page_cross_load`.
+`input_port_matrix_fault` clears joypad 2's Start button before the combined
+input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
+and overread regressions localize to `joypad.input_port_matrix`.
 `ppu_vram_increment_32_fault` corrupts the `$2020` stride target after the
 cartridge writes through `$2007` with PPUCTRL bit 2 set, proving PPUDATA
 increment-by-32 regressions localize to `ppu.registers.ppudata_increment_32`.
@@ -605,7 +608,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 17 accepted AI routes into deterministic debugger startup plans
+turning all 18 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -688,6 +691,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Joypad strobe and shift reads with configurable expected masks
 - Joypad mid-stream strobe reset behavior
 - Joypad strobe-high hold behavior
+- Combined `$4016`/`$4017` strobe-high, serial-shift, and overread matrix
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery and rendered frame production
@@ -925,6 +929,14 @@ generated cartridge records absolute,X no-cross, absolute,X page-cross, and
 indirect,Y page-cross load results in RAM, exposes them as
 `cpu_addressing_matrix` telemetry, and localizes page-cross load regressions to
 `cpu.addressing.page_cross_load`.
+
+Schema version `32` adds the `input_port_serial_matrix` edge-case cartridge
+test plus the `input_port_matrix_fault` scenario-suite fixture. The generated
+cartridge records both ports' strobe-high and overread observations in RAM,
+asserts all eight serial bits for `$4016` and `$4017` against configured masks,
+exposes `input_port_matrix` telemetry and a `joypad.input_port_matrix.results`
+probe, and localizes combined input-port regressions to
+`joypad.input_port_matrix`.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
