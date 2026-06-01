@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -113,6 +114,39 @@ def artifact_record(
     }
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def resolve_packet_record_path(
+    suite_dir: Path,
+    original_suite_dirs: list[str],
+    record: dict[str, Any],
+) -> Path | None:
+    relative_path = record.get("relative_path")
+    if isinstance(relative_path, str) and relative_path:
+        candidate = suite_dir / relative_path.replace("\\", "/")
+        if candidate.exists():
+            return candidate
+    return resolve_artifact_path(suite_dir, original_suite_dirs, record.get("path"))
+
+
+def packet_record_valid(
+    suite_dir: Path,
+    original_suite_dirs: list[str],
+    record: dict[str, Any],
+) -> bool:
+    path = resolve_packet_record_path(suite_dir, original_suite_dirs, record)
+    expected_sha = record.get("sha256")
+    if path is None or not path.is_file() or not isinstance(expected_sha, str):
+        return False
+    return sha256_file(path) == expected_sha
+
+
 def find_by_key(rows: Any, key: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, str):
         return {}
@@ -143,15 +177,18 @@ def input_artifacts(
     ai_diagnosis: dict[str, Any],
     ai_fix_handoff: dict[str, Any],
     ai_route_matrix: dict[str, Any],
+    ai_debug_packet: dict[str, Any],
     e2e_report: dict[str, Any],
     check_e2e_report: bool,
     check_ai_route_matrix: bool,
+    check_ai_debug_packet: bool,
 ) -> dict[str, str]:
     index_artifacts = as_dict(ai_index.get("artifacts"))
     query_artifacts = as_dict(ai_query.get("artifacts"))
     diagnosis_artifacts = as_dict(ai_diagnosis.get("artifacts"))
     fix_artifacts = as_dict(ai_fix_handoff.get("artifacts"))
     route_matrix_artifacts = as_dict(ai_route_matrix.get("artifacts"))
+    debug_packet_artifacts = as_dict(ai_debug_packet.get("artifacts"))
     e2e_artifacts = as_dict(e2e_report.get("artifacts"))
 
     artifacts = {
@@ -232,6 +269,35 @@ def input_artifacts(
                 "diagnostic_ai_route_matrix_dir": artifact_value(
                     route_matrix_artifacts.get("diagnostic_ai_route_matrix_dir"),
                     str(suite_dir / "ai-route-matrix"),
+                ),
+            }
+        )
+    if check_ai_debug_packet:
+        artifacts.update(
+            {
+                "diagnostic_ai_debug_packet_json": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_json"),
+                    str(suite_dir / "diagnostic-ai-debug-packet.json"),
+                ),
+                "diagnostic_ai_debug_packet_report": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_report"),
+                    str(suite_dir / "diagnostic-ai-debug-packet.md"),
+                ),
+                "diagnostic_ai_debug_packet_dir": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_dir"),
+                    str(suite_dir / "ai-debug-packet"),
+                ),
+                "diagnostic_ai_debug_packet_manifest": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_manifest"),
+                    str(suite_dir / "ai-debug-packet" / "manifest.json"),
+                ),
+                "diagnostic_ai_debug_packet_readme": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_readme"),
+                    str(suite_dir / "ai-debug-packet" / "README.md"),
+                ),
+                "diagnostic_ai_debug_packet_source_context": artifact_value(
+                    debug_packet_artifacts.get("diagnostic_ai_debug_packet_source_context"),
+                    str(suite_dir / "ai-debug-packet" / "source-context.json"),
                 ),
             }
         )
@@ -342,6 +408,7 @@ def build_summary(
     ai_diagnosis_path = suite_dir / "diagnostic-ai-diagnosis-smoke.json"
     ai_fix_handoff_path = suite_dir / "diagnostic-ai-fix-handoff-smoke.json"
     ai_route_matrix_path = suite_dir / "diagnostic-ai-route-matrix.json"
+    ai_debug_packet_path = suite_dir / "diagnostic-ai-debug-packet.json"
     e2e_report_path = suite_dir / "diagnostic-e2e-report.json"
 
     ai_index = load_json(ai_index_path)
@@ -349,15 +416,18 @@ def build_summary(
     ai_diagnosis = load_json(ai_diagnosis_path)
     ai_fix_handoff = load_json(ai_fix_handoff_path)
     ai_route_matrix = load_json(ai_route_matrix_path)
+    ai_debug_packet = load_json(ai_debug_packet_path)
     e2e_report = load_json(e2e_report_path)
     check_e2e_report = args.require_e2e_report or bool(e2e_report)
     check_ai_route_matrix = args.require_ai_route_matrix or bool(ai_route_matrix)
+    check_ai_debug_packet = args.require_ai_debug_packet or bool(ai_debug_packet)
     source_artifacts = [
         ai_index,
         ai_query,
         ai_diagnosis,
         ai_fix_handoff,
         ai_route_matrix,
+        ai_debug_packet,
         e2e_report,
     ]
     original_dirs = original_suite_dirs(suite_dir, source_artifacts)
@@ -368,9 +438,11 @@ def build_summary(
         ai_diagnosis,
         ai_fix_handoff,
         ai_route_matrix,
+        ai_debug_packet,
         e2e_report,
         check_e2e_report,
         check_ai_route_matrix,
+        check_ai_debug_packet,
     )
     artifact_records = [
         artifact_record(suite_dir, original_dirs, name, value)
@@ -425,6 +497,22 @@ def build_summary(
             "diagnostic_ai_route_matrix_passed",
             ai_route_matrix.get("status") == "passed",
             ai_route_matrix.get("status"),
+        )
+    if args.require_ai_debug_packet:
+        add_check(
+            checks,
+            errors,
+            "diagnostic_ai_debug_packet_loaded",
+            bool(ai_debug_packet),
+            str(ai_debug_packet_path),
+        )
+    if check_ai_debug_packet:
+        add_check(
+            checks,
+            errors,
+            "diagnostic_ai_debug_packet_passed",
+            ai_debug_packet.get("status") == "passed",
+            ai_debug_packet.get("status"),
         )
 
     index_summary = as_dict(ai_index.get("summary"))
@@ -671,6 +759,86 @@ def build_summary(
             route_artifact_missing,
         )
 
+    if check_ai_debug_packet:
+        packet_identity = selection_identity(ai_debug_packet)
+        packet_manifest = as_dict(ai_debug_packet.get("packet_manifest"))
+        context_summary = as_dict(ai_debug_packet.get("context_summary"))
+        packet_route_matrix_row = find_by_key(
+            ai_route_matrix.get("routes"), "route_id", packet_identity.get("route_id")
+        )
+        packet_route_matrix_identity = as_dict(packet_route_matrix_row.get("identity"))
+        packet_matches_fix_handoff = matching_identity(
+            packet_identity,
+            fix_identity,
+            ["route_id", "scenario_id", "focus_domain", "probe_id"],
+        )
+        packet_matches_route_matrix = matching_identity(
+            packet_identity,
+            packet_route_matrix_identity,
+            ["route_id", "scenario_id", "focus_domain", "probe_id"],
+        )
+        packet_records = [
+            record
+            for record in as_list(packet_manifest.get("files"))
+            if isinstance(record, dict)
+        ]
+        missing_required = [
+            record.get("name")
+            for record in packet_records
+            if record.get("required") is True and record.get("present") is not True
+        ]
+        invalid_digests = [
+            record.get("name")
+            for record in packet_records
+            if not packet_record_valid(suite_dir, original_dirs, record)
+        ]
+        add_check(
+            checks,
+            errors,
+            "ai_debug_packet_identity_known",
+            packet_matches_fix_handoff or packet_matches_route_matrix,
+            {
+                "packet": packet_identity,
+                "fix_handoff": fix_identity,
+                "route_matrix": packet_route_matrix_identity,
+            },
+        )
+        add_check(
+            checks,
+            errors,
+            "ai_debug_packet_required_files_present",
+            packet_manifest.get("file_count") == len(packet_records)
+            and packet_manifest.get("missing_required_file_count") == 0
+            and not missing_required,
+            {
+                "file_count": packet_manifest.get("file_count"),
+                "records": len(packet_records),
+                "missing_required": missing_required,
+            },
+        )
+        add_check(
+            checks,
+            errors,
+            "ai_debug_packet_file_digests",
+            bool(packet_records) and not invalid_digests,
+            invalid_digests,
+        )
+        add_check(
+            checks,
+            errors,
+            "ai_debug_packet_context_present",
+            as_int(context_summary.get("source_window_count")) > 0
+            and as_int(context_summary.get("test_window_count")) > 0,
+            context_summary,
+        )
+        add_check(
+            checks,
+            errors,
+            "ai_debug_packet_stop_conditions_passed",
+            stop_conditions_passed(ai_debug_packet),
+            as_list(ai_debug_packet.get("stop_conditions")),
+        )
+
     if check_e2e_report:
         add_check(
             checks,
@@ -720,6 +888,23 @@ def build_summary(
                 == as_dict(ai_route_matrix.get("summary")).get("failed_route_count"),
                 e2e_route_matrix,
             )
+        if check_ai_debug_packet:
+            e2e_debug_packet = as_dict(e2e_report.get("ai_debug_packet"))
+            packet_manifest = as_dict(ai_debug_packet.get("packet_manifest"))
+            context_summary = as_dict(ai_debug_packet.get("context_summary"))
+            add_check(
+                checks,
+                errors,
+                "e2e_ai_debug_packet_matches",
+                e2e_debug_packet.get("status") == ai_debug_packet.get("status")
+                and e2e_debug_packet.get("file_count")
+                == packet_manifest.get("file_count")
+                and e2e_debug_packet.get("source_window_count")
+                == context_summary.get("source_window_count")
+                and e2e_debug_packet.get("test_window_count")
+                == context_summary.get("test_window_count"),
+                e2e_debug_packet,
+            )
 
     missing_artifacts = [
         record["name"]
@@ -752,6 +937,7 @@ def build_summary(
             "missing_artifact_count": len(missing_artifacts),
             "e2e_report_checked": check_e2e_report,
             "ai_route_matrix_checked": check_ai_route_matrix,
+            "ai_debug_packet_checked": check_ai_debug_packet,
             "scenario_count": index_summary.get("scenario_count"),
             "actionable_scenario_count": index_summary.get("actionable_scenario_count"),
             "focus_domain_count": index_summary.get("focus_domain_count"),
@@ -770,6 +956,15 @@ def build_summary(
             "ai_route_passed_count": as_dict(ai_route_matrix.get("summary")).get(
                 "passed_route_count"
             ),
+            "ai_debug_packet_file_count": as_dict(
+                ai_debug_packet.get("packet_manifest")
+            ).get("file_count"),
+            "ai_debug_packet_source_window_count": as_dict(
+                ai_debug_packet.get("context_summary")
+            ).get("source_window_count"),
+            "ai_debug_packet_test_window_count": as_dict(
+                ai_debug_packet.get("context_summary")
+            ).get("test_window_count"),
         },
         "artifacts": artifacts,
         "artifact_presence": {
@@ -783,6 +978,7 @@ def build_summary(
             "Use this verifier before trusting a downloaded diagnostic scenario-suite artifact for automated debugging.",
             "A passed verifier proves the AI index, query smoke, diagnosis smoke, and fix handoff agree on route, scenario, focus domain, and probe.",
             "When diagnostic-ai-route-matrix.json is present, this verifier also proves every AI route can regenerate diagnosis and fix-handoff artifacts.",
+            "When diagnostic-ai-debug-packet.json is present, this verifier also proves the selected route has a relocatable packet with digest-checked evidence and source/test context.",
             "Use --require-e2e-report when validating a completed CI artifact after diagnostic-e2e-report.json has been written.",
             "If this verifier fails, repair the artifact graph before asking an AI debugger to edit emulator code.",
         ],
@@ -805,6 +1001,10 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| E2E report checked | {totals.get('e2e_report_checked')} |",
         f"| AI route matrix checked | {totals.get('ai_route_matrix_checked')} |",
         f"| AI routes | {totals.get('ai_route_passed_count')}/{totals.get('ai_route_count')} |",
+        f"| AI debug packet checked | {totals.get('ai_debug_packet_checked')} |",
+        f"| AI debug packet files | {totals.get('ai_debug_packet_file_count')} |",
+        f"| AI debug packet source windows | {totals.get('ai_debug_packet_source_window_count')} |",
+        f"| AI debug packet test windows | {totals.get('ai_debug_packet_test_window_count')} |",
         f"| Top route | {markdown_cell(totals.get('top_route_id'))} |",
         f"| Top scenario | {markdown_cell(totals.get('top_route_scenario'))} |",
         f"| Top focus domain | {markdown_cell(totals.get('top_route_focus_domain'))} |",
@@ -873,6 +1073,11 @@ def parse_args() -> argparse.Namespace:
         "--require-ai-route-matrix",
         action="store_true",
         help="Require diagnostic-ai-route-matrix.json and cross-check every AI route.",
+    )
+    parser.add_argument(
+        "--require-ai-debug-packet",
+        action="store_true",
+        help="Require diagnostic-ai-debug-packet.json and verify the selected AI debug packet.",
     )
     parser.add_argument("--json", action="store_true", help="Print the verifier JSON.")
     return parser.parse_args()
