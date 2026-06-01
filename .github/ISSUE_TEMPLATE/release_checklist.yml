@@ -60,6 +60,8 @@ body:
           required: true
         - label: Diagnostic observability runner passes and writes debug-index, analysis, and focused replay evidence, including `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
+        - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
+          required: true
         - label: Diagnostic observability comparison passes without regressions when a prior suite is supplied, including `--compare-suite-dir` and `--fail-on-comparison-regression`.
           required: false
         - label: GitHub Actions are green on Windows, macOS, Linux, clippy, fmt, security audit, IP compliance, and diagnostic bundle jobs.

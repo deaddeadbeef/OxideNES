@@ -201,6 +201,20 @@ observations, Markdown sections, and every artifact path referenced by the
 manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
+To validate the full observability wrapper output that AI tooling consumes,
+including the debug index, aggregate analysis, optional cross-run comparison,
+focused replay evidence, and `observability-run.json`, run:
+
+```powershell
+python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
+```
+
+This verifier contract-checks the wrapper-level artifact graph after
+`run_diagnostic_observability.py` completes. CI and release workflows run it
+before uploading the current scenario-suite artifact so accepted diagnostic
+corpora have both valid base suite files and valid AI-facing observability
+summaries.
+
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
