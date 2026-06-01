@@ -24,8 +24,10 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
   `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`
 - The diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts:
   `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`
-- The diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI query smoke, AI diagnosis smoke, and AI fix-handoff smoke after observability, route matrix, top-route replay, and route evidence verification:
+- The diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI query smoke, AI diagnosis smoke, AI fix-handoff smoke, and AI artifact verification after observability, route matrix, top-route replay, and route evidence verification:
   `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`
+- The diagnostic AI artifact verifier passes and cross-checks the completed AI artifact graph:
+  `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report`
 - The diagnostic AI diagnosis runner passes and writes an executable route handoff with fresh replay evidence and mapped narrow-test results:
   `python scripts/run_diagnostic_ai_diagnosis.py --suite-dir target/diagnostics/scenario-suite`
 - The diagnostic AI fix-handoff builder passes and resolves the selected diagnosis to source/test anchors and fix-loop commands:
@@ -64,6 +66,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - Diagnostic AI diagnosis runs add `ai-diagnosis/<route>/diagnostic-ai-diagnosis.json`, `diagnostic-ai-diagnosis.md`, and a nested route-check replay bundle to join the selected route, scenario, probe, source files, tests, search terms, stop conditions, and next actions for automated debugging.
 - Diagnostic e2e runs add `diagnostic-ai-fix-handoff-smoke.json` and `diagnostic-ai-fix-handoff-smoke.md` to prove a diagnosis can be resolved into source/test line anchors, replay commands, narrow tests, verification commands, and fix-loop stop conditions.
 - Diagnostic AI fix-handoff runs add `diagnostic-ai-fix-handoff.json` and `diagnostic-ai-fix-handoff.md` to give automated debuggers bounded code-inspection anchors before editing emulator source.
+- Diagnostic e2e runs add `diagnostic-ai-artifact-verification.json` and `diagnostic-ai-artifact-verification.md` to prove the AI-facing artifact graph is internally consistent before automated debugger or fix loops consume it.
 - Diagnostic route matrices add `route-replay-matrix/diagnostic-route-matrix.json` and `diagnostic-route-matrix.md` plus per-route replay bundles to prove every generated route can regenerate focused replay evidence.
 - Diagnostic route checks add `route-checks/<route>/diagnostic-route-check.json` and `diagnostic-route-check.md` to prove the selected route can regenerate focused replay evidence and pass its narrow regression-test commands.
 - Diagnostic observability comparisons add `diagnostic-observability-comparison.json` and `diagnostic-observability-comparison.md` to report cross-run scenario regressions, health/focus/probe drift, and hypothesis rank/score changes.
@@ -74,6 +77,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - `python scripts/query_diagnostic_ai_index.py --suite-dir target/diagnostics/scenario-suite smoke` validates the accepted AI index can be queried by top route, scenario, focus domain, failed probe, and coverage posture without hand-joining the underlying JSON files.
 - `python scripts/run_diagnostic_ai_diagnosis.py --suite-dir target/diagnostics/scenario-suite` validates that the accepted AI index can drive a selected route into a fresh route-check bundle, mapped narrow tests, stop conditions, and next actions without hand-joining the underlying JSON files.
 - `python scripts/build_diagnostic_ai_fix_handoff.py --suite-dir target/diagnostics/scenario-suite` validates that a passed diagnosis can be resolved to concrete source matches, test matches, narrow commands, and verification commands before emulator edits begin.
+- `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report` validates that the AI index, query smoke, diagnosis smoke, fix handoff, e2e summary, selected route identity, coverage posture, stop conditions, and required artifact paths agree before release evidence is accepted.
 - `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --all-routes --skip-tests --output-dir target/diagnostics/scenario-suite/route-replay-matrix` executes every investigation route replay into isolated bundles before route-table evidence is accepted.
 - `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite` executes the top investigation route by replaying its scenario into an isolated bundle and running its mapped narrow tests before route-level evidence is accepted.
 - `python scripts/verify_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --require-matrix --require-top-route --expect-matrix-tests-skipped --write-summary` validates route matrix schema/counts, per-route replay bundles, top-route expected-vs-actual health/focus checks, and narrow-test command results, then persists the accepted verifier verdict before route evidence is accepted.
