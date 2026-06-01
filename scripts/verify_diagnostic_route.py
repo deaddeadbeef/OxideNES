@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ from typing import Any
 EXPECTED_ROUTE_CHECK_SCHEMA = 1
 EXPECTED_ROUTE_MATRIX_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
+ROUTE_EVIDENCE_VERIFICATION_SCHEMA_VERSION = 1
+DEFAULT_VERIFICATION_JSON_NAME = "diagnostic-route-evidence-verification.json"
+DEFAULT_VERIFICATION_REPORT_NAME = "diagnostic-route-evidence-verification.md"
 REQUIRED_REPLAY_BUNDLE_FILES = {
     "manifest": "manifest.json",
     "triage": "triage.json",
@@ -41,6 +45,18 @@ def path_text(value: Any) -> str:
 
 def normalized_path(value: Any) -> str:
     return path_text(value).replace("\\", "/")
+
+
+def utc_now_text() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def markdown_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value).replace("|", "\\|")
 
 
 class RouteEvidenceVerifier:
@@ -422,6 +438,147 @@ class RouteEvidenceVerifier:
             self.errors.append(f"{label}: expected path suffix {expected!r}, got {value!r}")
 
 
+def summary_paths(args: argparse.Namespace) -> tuple[Path | None, Path | None]:
+    if not args.write_summary and args.summary_json is None and args.summary_report is None:
+        return None, None
+    summary_json = args.summary_json or args.suite_dir / DEFAULT_VERIFICATION_JSON_NAME
+    summary_report = args.summary_report or args.suite_dir / DEFAULT_VERIFICATION_REPORT_NAME
+    return summary_json, summary_report
+
+
+def build_summary(
+    verifier: RouteEvidenceVerifier,
+    verification: dict[str, Any],
+    status: str,
+    recommended_exit_code: int,
+    summary_json: Path | None,
+    summary_report: Path | None,
+) -> dict[str, Any]:
+    top_route_id = str(verification.get("top_route_id") or "")
+    top_route_dir = verifier.top_route_dir(top_route_id)
+    matrix_json = verifier.matrix_dir / "diagnostic-route-matrix.json"
+    matrix_report = matrix_json.with_name("diagnostic-route-matrix.md")
+    top_route_json = top_route_dir / "diagnostic-route-check.json"
+    top_route_report = top_route_dir / "diagnostic-route-check.md"
+
+    artifacts: dict[str, str] = {
+        "route_matrix_json": str(matrix_json),
+        "route_matrix_report": str(matrix_report),
+        "top_route_check_json": str(top_route_json),
+        "top_route_check_report": str(top_route_report),
+    }
+    if summary_json is not None:
+        artifacts["diagnostic_route_evidence_verification_json"] = str(summary_json)
+    if summary_report is not None:
+        artifacts["diagnostic_route_evidence_verification_report"] = str(summary_report)
+
+    return {
+        "diagnostic_route_evidence_verification_schema_version": ROUTE_EVIDENCE_VERIFICATION_SCHEMA_VERSION,
+        "generated_at_utc": utc_now_text(),
+        "status": status,
+        "recommended_exit_code": recommended_exit_code,
+        "suite_dir": str(verifier.suite_dir),
+        "route_count": verification.get("route_count"),
+        "matrix_verified": bool(verification.get("matrix_verified")),
+        "matrix_route_count": verification.get("matrix_route_count"),
+        "matrix_passed_route_count": verification.get("matrix_passed_route_count"),
+        "matrix_replay_failure_count": verification.get("matrix_replay_failure_count"),
+        "top_route_verified": bool(verification.get("top_route_verified")),
+        "top_route_id": top_route_id,
+        "configuration": {
+            "matrix_dir": str(verifier.matrix_dir),
+            "top_route_dir": str(top_route_dir),
+            "require_matrix": verifier.require_matrix,
+            "require_top_route": verifier.require_top_route,
+            "expect_matrix_tests_skipped": verifier.expect_matrix_tests_skipped,
+        },
+        "artifacts": artifacts,
+        "errors": list(verifier.errors),
+        "ai_handoff": [
+            "Read this summary first to decide whether diagnostic route evidence is trusted.",
+            "If status is failed, triage the errors array before replaying routes.",
+            "If status is passed, use route_matrix_json for broad route coverage and top_route_check_json for the full highest-ranked route proof.",
+        ],
+    }
+
+
+def render_summary_report(summary: dict[str, Any]) -> str:
+    artifacts = as_dict(summary.get("artifacts"))
+    configuration = as_dict(summary.get("configuration"))
+    errors = [str(error) for error in as_list(summary.get("errors"))]
+    handoff = [str(step) for step in as_list(summary.get("ai_handoff"))]
+
+    lines = [
+        "# Diagnostic Route Evidence Verification",
+        "",
+        "## Verdict",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {markdown_value(summary.get('status'))} |",
+        f"| Recommended exit code | {markdown_value(summary.get('recommended_exit_code'))} |",
+        f"| Generated at UTC | {markdown_value(summary.get('generated_at_utc'))} |",
+        f"| Suite directory | `{markdown_value(summary.get('suite_dir'))}` |",
+        "",
+        "## Route Matrix",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Verified | {markdown_value(summary.get('matrix_verified'))} |",
+        f"| Route count | {markdown_value(summary.get('matrix_route_count'))} |",
+        f"| Passed route count | {markdown_value(summary.get('matrix_passed_route_count'))} |",
+        f"| Replay failure count | {markdown_value(summary.get('matrix_replay_failure_count'))} |",
+        f"| Tests skipped expected | {markdown_value(configuration.get('expect_matrix_tests_skipped'))} |",
+        f"| Matrix JSON | `{markdown_value(artifacts.get('route_matrix_json'))}` |",
+        f"| Matrix report | `{markdown_value(artifacts.get('route_matrix_report'))}` |",
+        "",
+        "## Top Route",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Verified | {markdown_value(summary.get('top_route_verified'))} |",
+        f"| Route ID | {markdown_value(summary.get('top_route_id'))} |",
+        f"| Route check JSON | `{markdown_value(artifacts.get('top_route_check_json'))}` |",
+        f"| Route check report | `{markdown_value(artifacts.get('top_route_check_report'))}` |",
+        "",
+        "## Configuration",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Require matrix | {markdown_value(configuration.get('require_matrix'))} |",
+        f"| Require top route | {markdown_value(configuration.get('require_top_route'))} |",
+        f"| Matrix directory | `{markdown_value(configuration.get('matrix_dir'))}` |",
+        f"| Top-route directory | `{markdown_value(configuration.get('top_route_dir'))}` |",
+        "",
+        "## Artifacts",
+        "",
+    ]
+    for name, path in sorted(artifacts.items()):
+        lines.append(f"- `{name}`: `{path}`")
+
+    lines.extend(["", "## AI Handoff", ""])
+    lines.extend(f"- {step}" for step in handoff)
+
+    if errors:
+        lines.extend(["", "## Errors", ""])
+        lines.extend(f"- {error}" for error in errors)
+
+    return "\n".join(lines) + "\n"
+
+
+def write_summary_files(
+    summary: dict[str, Any],
+    summary_json: Path | None,
+    summary_report: Path | None,
+) -> None:
+    if summary_json is not None:
+        summary_json.parent.mkdir(parents=True, exist_ok=True)
+        summary_json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    if summary_report is not None:
+        summary_report.parent.mkdir(parents=True, exist_ok=True)
+        summary_report.write_text(render_summary_report(summary), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Validate OxideNES diagnostic route evidence artifacts."
@@ -457,6 +614,30 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Require the all-route matrix to have skipped narrow tests.",
     )
+    parser.add_argument(
+        "--write-summary",
+        action="store_true",
+        help=(
+            "Write diagnostic-route-evidence-verification.json and "
+            "diagnostic-route-evidence-verification.md under --suite-dir."
+        ),
+    )
+    parser.add_argument(
+        "--summary-json",
+        type=Path,
+        help=(
+            "Path for the machine-readable verification summary. "
+            "Implies --write-summary for this file."
+        ),
+    )
+    parser.add_argument(
+        "--summary-report",
+        type=Path,
+        help=(
+            "Path for the Markdown verification summary. "
+            "Implies --write-summary for this file."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -471,10 +652,28 @@ def main() -> int:
         args.expect_matrix_tests_skipped,
     )
     summary = verifier.verify()
+    summary_json, summary_report = summary_paths(args)
+    status = "failed" if verifier.errors else "passed"
+    recommended_exit_code = 1 if verifier.errors else 0
+    verification_summary = build_summary(
+        verifier,
+        summary,
+        status,
+        recommended_exit_code,
+        summary_json,
+        summary_report,
+    )
+    write_summary_files(verification_summary, summary_json, summary_report)
     if verifier.errors:
         print("Diagnostic route evidence verification failed:", file=sys.stderr)
         for error in verifier.errors:
             print(f"- {error}", file=sys.stderr)
+        if summary_json is not None or summary_report is not None:
+            print(
+                "Diagnostic route evidence verification summary written: "
+                f"json={summary_json} report={summary_report}",
+                file=sys.stderr,
+            )
         return 1
     print(
         "Diagnostic route evidence verification passed: "
@@ -483,6 +682,11 @@ def main() -> int:
         f"replay_failures={summary.get('matrix_replay_failure_count')} "
         f"top_route={summary['top_route_verified']}:{summary.get('top_route_id')}"
     )
+    if summary_json is not None or summary_report is not None:
+        print(
+            "Diagnostic route evidence verification summary written: "
+            f"json={summary_json} report={summary_report}"
+        )
     return 0
 
 

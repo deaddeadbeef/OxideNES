@@ -89,7 +89,8 @@ jobs:
             --suite-dir target/diagnostics/ci-scenario-suite \
             --require-matrix \
             --require-top-route \
-            --expect-matrix-tests-skipped
+            --expect-matrix-tests-skipped \
+            --write-summary
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
