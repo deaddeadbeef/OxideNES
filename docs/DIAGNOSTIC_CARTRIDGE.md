@@ -88,8 +88,9 @@ cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/s
 ```
 
 For the full local observability loop, use the wrapper that generates the
-scenario suite, runs the verifier, and writes `observability-run.json` plus
-`observability-run.md` into the suite directory:
+scenario suite, runs the verifier, replays one selected scenario from its
+`replay_args`, and writes `observability-run.json` plus `observability-run.md`
+into the suite directory:
 
 ```powershell
 python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -173,6 +174,15 @@ The verifier checks the root schema versions, observer next actions,
 observations, Markdown sections, and every artifact path referenced by the
 manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
+
+`run_diagnostic_observability.py` also writes focused replay evidence under
+`replay-runs/<scenario>/` by default. The replay summary records the source
+`replay_args`, effective command, expected and actual exit code, expected and
+actual health/focus values, required bundle-artifact presence, and paths to the
+focused bundle's `manifest.json`, `triage.json`, `telemetry.json`, `report.md`,
+and `diagnostic.nes`. Use `--replay-scenario <ID>` to target a specific
+scenario, `--replay-output-dir <DIR>` to place the focused evidence elsewhere,
+or `--skip-replay` when only suite generation and verification are needed.
 
 ## Coverage
 
