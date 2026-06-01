@@ -62,6 +62,8 @@ body:
           required: true
         - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including code-map source/test paths, investigation-plan routes, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
+        - label: Diagnostic route matrix passes for every investigation route, including `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --all-routes --skip-tests --output-dir target/diagnostics/scenario-suite/route-replay-matrix`.
+          required: true
         - label: Diagnostic route-check runner passes for the top investigation route, including `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
         - label: Diagnostic observability comparison passes without regressions when a prior suite is supplied, including `--compare-suite-dir` and `--fail-on-comparison-regression`.

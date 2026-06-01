@@ -79,6 +79,11 @@ jobs:
           python scripts/verify_diagnostic_observability.py \
             --suite-dir target/diagnostics/ci-scenario-suite
           python scripts/run_diagnostic_route.py \
+            --suite-dir target/diagnostics/ci-scenario-suite \
+            --all-routes \
+            --skip-tests \
+            --output-dir target/diagnostics/ci-scenario-suite/route-replay-matrix
+          python scripts/run_diagnostic_route.py \
             --suite-dir target/diagnostics/ci-scenario-suite
       - name: Upload diagnostic bundle
         if: always()
