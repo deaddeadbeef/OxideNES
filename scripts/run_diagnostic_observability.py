@@ -23,6 +23,7 @@ DIAGNOSTIC_COVERAGE_LEDGER_SCHEMA_VERSION = 1
 DIAGNOSTIC_TELEMETRY_CATALOG_SCHEMA_VERSION = 1
 DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION = 1
 INVESTIGATION_PLAN_SCHEMA_VERSION = 1
+SCENARIO_DOSSIERS_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
 
 DIAGNOSTIC_SUPPORT_FILES = [
@@ -263,6 +264,7 @@ def artifact_paths(
     diagnostic_telemetry_catalog: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
+    scenario_dossiers: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
@@ -295,6 +297,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if investigation_plan:
         for name, path in investigation_plan.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if scenario_dossiers:
+        for name, path in scenario_dossiers.get("artifacts", {}).items():
             artifacts[name] = str(path)
     if observability_comparison:
         for name, path in observability_comparison.get("artifacts", {}).items():
@@ -369,6 +374,13 @@ def investigation_plan_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "investigation_plan_json": str(suite_dir / "diagnostic-investigation-plan.json"),
         "investigation_plan_report": str(suite_dir / "diagnostic-investigation-plan.md"),
+    }
+
+
+def scenario_dossiers_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "scenario_dossiers_json": str(suite_dir / "diagnostic-scenario-dossiers.json"),
+        "scenario_dossiers_report": str(suite_dir / "diagnostic-scenario-dossiers.md"),
     }
 
 
@@ -2451,6 +2463,308 @@ def write_investigation_plan(
     return plan
 
 
+def route_by_primary_scenario_id(plan: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return {
+        str(route.get("primary_scenario_id")): route
+        for route in as_list(as_dict(plan).get("routes"))
+        if isinstance(route, dict) and isinstance(route.get("primary_scenario_id"), str)
+    }
+
+
+def telemetry_signal_lookup(catalog: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return {
+        str(family.get("id")): {
+            "id": family.get("id"),
+            "telemetry_paths": as_list(family.get("telemetry_paths")),
+            "triage_paths": as_list(family.get("triage_paths")),
+            "first_artifact": family.get("first_artifact"),
+            "ai_usage": family.get("ai_usage"),
+        }
+        for family in as_list(as_dict(catalog).get("signal_families"))
+        if isinstance(family, dict) and isinstance(family.get("id"), str)
+    }
+
+
+def scenario_signal_family_ids(entry: dict[str, Any], route: dict[str, Any]) -> list[str]:
+    focus = as_dict(entry.get("debug_focus"))
+    failure = as_dict(entry.get("failure"))
+    domain = str(route.get("focus_domain") or focus.get("focus_domain") or "")
+    ids = ["verdict", "debug_focus", "probes", "timeline", "events", "instruction_trace"]
+    if domain.startswith("joypad") or domain.startswith("dma") or domain.startswith("apu"):
+        ids.append("input_dma_audio")
+    if as_list(entry.get("coverage_gap_ids")):
+        ids.append("coverage_limits")
+    if failure.get("kind") == "timeout":
+        ids.append("coverage_limits")
+    return unique_strings(ids)
+
+
+def compact_route_for_dossier(route: dict[str, Any]) -> dict[str, Any] | None:
+    if not route:
+        return None
+    return {
+        "route_id": route.get("route_id"),
+        "rank": route.get("rank"),
+        "score": route.get("score"),
+        "confidence": route.get("confidence"),
+        "focus_domain": route.get("focus_domain"),
+        "primary_scenario_id": route.get("primary_scenario_id"),
+        "primary_artifact": route.get("primary_artifact"),
+        "replay_args": as_list(route.get("replay_args")),
+        "suggested_commands": as_list(route.get("suggested_commands")),
+        "source_files": as_list(route.get("source_files")),
+        "test_files": as_list(route.get("test_files")),
+        "diagnostic_files": as_list(route.get("diagnostic_files")),
+        "search_terms": as_list(route.get("search_terms")),
+        "debug_anchor": as_dict(route.get("debug_anchor")),
+        "handoff_steps": as_list(route.get("handoff_steps")),
+        "stop_conditions": as_list(route.get("stop_conditions")),
+    }
+
+
+def scenario_dossier_next_actions(dossier: dict[str, Any]) -> list[dict[str, Any]]:
+    route = as_dict(dossier.get("route"))
+    start_artifacts = as_dict(dossier.get("start_artifacts"))
+    source_files = [
+        path.get("path")
+        for path in as_list(route.get("source_files"))
+        if isinstance(path, dict) and path.get("path")
+    ]
+    return [
+        {
+            "order": 1,
+            "action": "open_triage",
+            "artifact": start_artifacts.get("triage_json") or dossier.get("primary_artifact"),
+            "purpose": "Read the compact health, failure, and debug-focus summary.",
+        },
+        {
+            "order": 2,
+            "action": "inspect_telemetry_signals",
+            "signal_family_ids": as_list(dossier.get("signal_family_ids")),
+            "failed_probe_ids": as_list(dossier.get("failed_probe_ids")),
+            "purpose": "Open only the cataloged signal paths that explain this scenario.",
+        },
+        {
+            "order": 3,
+            "action": "replay_scenario",
+            "command": " ".join(str(part) for part in as_list(dossier.get("replay_args"))),
+            "purpose": "Regenerate the focused bundle before editing emulator code.",
+        },
+        {
+            "order": 4,
+            "action": "inspect_mapped_code",
+            "paths": source_files,
+            "search_terms": as_list(route.get("search_terms")),
+            "purpose": "Use the route-to-code map before changing diagnostic scaffolding.",
+        },
+        {
+            "order": 5,
+            "action": "run_narrow_tests",
+            "commands": as_list(route.get("suggested_commands"))[1:],
+            "purpose": "Confirm the subsystem route after an emulator fix.",
+        },
+    ]
+
+
+def build_scenario_dossiers(
+    suite_dir: Path,
+    debug_index_summary: dict[str, Any] | None,
+    diagnostic_telemetry_catalog: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
+    investigation_plan: dict[str, Any] | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    paths = scenario_dossiers_paths(suite_dir)
+    errors: list[str] = []
+    if as_dict(debug_index_summary).get("status") != "passed":
+        errors.append("debug index is not passed")
+    if as_dict(diagnostic_telemetry_catalog).get("status") != "passed":
+        errors.append("diagnostic telemetry catalog is not passed")
+    if as_dict(diagnostic_code_map).get("status") != "passed":
+        errors.append("diagnostic code map is not passed")
+    if as_dict(investigation_plan).get("status") != "passed":
+        errors.append("investigation plan is not passed")
+
+    debug_paths = as_dict(debug_index_summary).get("artifacts", {})
+    debug_index_path = Path(
+        as_dict(debug_paths).get("debug_index_jsonl")
+        or debug_index_paths(suite_dir)["debug_index_jsonl"]
+    )
+    entries, debug_errors = load_jsonl(debug_index_path)
+    errors.extend(debug_errors)
+    route_by_scenario = route_by_primary_scenario_id(investigation_plan)
+    signal_lookup = telemetry_signal_lookup(diagnostic_telemetry_catalog)
+
+    dossiers: list[dict[str, Any]] = []
+    for entry in entries:
+        scenario_id = str(entry.get("scenario_id") or "")
+        route = route_by_scenario.get(scenario_id, {})
+        focus = as_dict(entry.get("debug_focus"))
+        failure = as_dict(entry.get("failure"))
+        primary_relative = entry_primary_artifact(entry)
+        start_artifacts = investigation_start_artifacts(suite_dir, entry, primary_relative)
+        signal_family_ids = scenario_signal_family_ids(entry, route)
+        signal_families = [
+            signal_lookup[family_id]
+            for family_id in signal_family_ids
+            if family_id in signal_lookup
+        ]
+        if entry.get("role") == "expected_failure_fixture" and not route:
+            errors.append(f"{scenario_id}: missing investigation route")
+        if not start_artifacts.get("triage_json"):
+            errors.append(f"{scenario_id}: missing triage start artifact")
+        if not start_artifacts.get("telemetry_json"):
+            errors.append(f"{scenario_id}: missing telemetry start artifact")
+
+        dossier = {
+            "scenario_id": scenario_id,
+            "title": entry.get("title"),
+            "role": entry.get("role"),
+            "outcome": entry.get("outcome"),
+            "health": entry.get("health"),
+            "expected_passed": entry.get("expected_passed"),
+            "actual_passed": entry.get("actual_passed"),
+            "expectation_met": entry.get("expectation_met"),
+            "contract_all_matched": entry.get("contract_all_matched"),
+            "comparison_passed": entry.get("comparison_passed"),
+            "summary": entry.get("summary"),
+            "focus_domain": route.get("focus_domain") or focus.get("focus_domain"),
+            "focus_subsystem": route.get("focus_subsystem") or focus.get("focus_subsystem"),
+            "focus_test_id": focus.get("focus_test_id"),
+            "focus_test_name": focus.get("focus_test_name"),
+            "failure_kind": focus.get("failure_kind") or failure.get("kind"),
+            "failure_code_hex": focus.get("failure_code_hex") or failure.get("failure_code_hex"),
+            "failure": failure,
+            "failed_probe_ids": entry_failed_probe_ids(entry),
+            "first_failed_probe": as_dict(entry.get("probes")).get("first_failed_probe"),
+            "probe_counts": entry.get("probes"),
+            "coverage_gap_ids": as_list(entry.get("coverage_gap_ids")),
+            "debug_anchor": route.get("debug_anchor") or entry_debug_anchor(entry),
+            "primary_artifact": route.get("primary_artifact") or start_artifacts.get("primary_artifact"),
+            "start_artifacts": start_artifacts,
+            "replay_args": as_list(route.get("replay_args")) or as_list(entry.get("replay_args")),
+            "signal_family_ids": signal_family_ids,
+            "signal_families": signal_families,
+            "route": compact_route_for_dossier(route) if route else None,
+            "artifacts": as_dict(entry.get("artifacts")),
+        }
+        dossier["next_actions"] = scenario_dossier_next_actions(dossier)
+        dossiers.append(dossier)
+
+    actionable = [dossier for dossier in dossiers if dossier.get("role") == "expected_failure_fixture"]
+    healthy = [dossier for dossier in dossiers if dossier.get("health") == "healthy"]
+    source_artifacts = {
+        "debug_index_jsonl": str(debug_index_path),
+        "diagnostic_telemetry_catalog_json": as_dict(
+            as_dict(diagnostic_telemetry_catalog).get("artifacts")
+        ).get("diagnostic_telemetry_catalog_json"),
+        "diagnostic_code_map_json": as_dict(as_dict(diagnostic_code_map).get("artifacts")).get(
+            "diagnostic_code_map_json"
+        ),
+        "investigation_plan_json": as_dict(as_dict(investigation_plan).get("artifacts")).get(
+            "investigation_plan_json"
+        ),
+        "scenario_suite_json": str(suite_dir / "scenario-suite.json"),
+    }
+
+    return {
+        "scenario_dossiers_schema_version": SCENARIO_DOSSIERS_SCHEMA_VERSION,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "git": git_metadata(repo_root),
+        "suite_dir": str(suite_dir),
+        "source_artifacts": source_artifacts,
+        "artifacts": paths,
+        "dossier_count": len(dossiers),
+        "actionable_dossier_count": len(actionable),
+        "healthy_dossier_count": len(healthy),
+        "dossiers": dossiers,
+        "errors": errors,
+        "ai_handoff": [
+            "Read diagnostic-scenario-dossiers.json when you already know the scenario id.",
+            "Use each dossier's start_artifacts before opening full telemetry.",
+            "Use signal_families to load only the telemetry paths relevant to the scenario.",
+            "Use route.suggested_commands and next_actions to replay, inspect mapped code, and run narrow tests.",
+        ],
+    }
+
+
+def write_scenario_dossiers_markdown(path: Path, summary: dict[str, Any]) -> None:
+    lines = [
+        "# Diagnostic Scenario Dossiers",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {summary.get('status')} |",
+        f"| Dossiers | {summary.get('dossier_count')} |",
+        f"| Actionable dossiers | {summary.get('actionable_dossier_count')} |",
+        f"| Healthy dossiers | {summary.get('healthy_dossier_count')} |",
+        "",
+        "## Dossiers",
+        "",
+        "| Scenario | Role | Health | Focus domain | Failed probes | Route | Primary artifact |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for dossier in as_list(summary.get("dossiers")):
+        if not isinstance(dossier, dict):
+            continue
+        route = as_dict(dossier.get("route"))
+        lines.append(
+            "| "
+            f"{dossier.get('scenario_id')} | "
+            f"{dossier.get('role') or '-'} | "
+            f"{dossier.get('health') or '-'} | "
+            f"{dossier.get('focus_domain') or '-'} | "
+            f"{markdown_cell(','.join(str(value) for value in as_list(dossier.get('failed_probe_ids'))) or '-')} | "
+            f"{route.get('route_id') or '-'} | "
+            f"{markdown_cell(str(dossier.get('primary_artifact') or '-'))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Artifacts",
+            "",
+            "| Name | Path |",
+            "| --- | --- |",
+        ]
+    )
+    for name, artifact_path in as_dict(summary.get("artifacts")).items():
+        lines.append(f"| {name} | {artifact_path} |")
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(summary.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if summary.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(summary.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_scenario_dossiers(
+    suite_dir: Path,
+    debug_index_summary: dict[str, Any] | None,
+    diagnostic_telemetry_catalog: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
+    investigation_plan: dict[str, Any] | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    summary = build_scenario_dossiers(
+        suite_dir,
+        debug_index_summary,
+        diagnostic_telemetry_catalog,
+        diagnostic_code_map,
+        investigation_plan,
+        repo_root,
+    )
+    artifacts = as_dict(summary.get("artifacts"))
+    json_path = Path(str(artifacts["scenario_dossiers_json"]))
+    report_path = Path(str(artifacts["scenario_dossiers_report"]))
+    json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_scenario_dossiers_markdown(report_path, summary)
+    return summary
+
+
 def load_observability_snapshot(suite_dir: Path) -> dict[str, Any]:
     analysis_path = suite_dir / "diagnostic-observability-analysis.json"
     debug_index_path = suite_dir / "diagnostic-debug-index.jsonl"
@@ -3137,6 +3451,7 @@ def build_run_summary(
     diagnostic_telemetry_catalog: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
+    scenario_dossiers: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
@@ -3164,6 +3479,8 @@ def build_run_summary(
         status = "failed"
     if investigation_plan and investigation_plan.get("status") != "passed":
         status = "failed"
+    if scenario_dossiers and scenario_dossiers.get("status") != "passed":
+        status = "failed"
     if observability_comparison and observability_comparison.get("status") != "passed":
         status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
@@ -3184,6 +3501,7 @@ def build_run_summary(
         "telemetry_catalog": diagnostic_telemetry_catalog,
         "code_map": diagnostic_code_map,
         "investigation_plan": investigation_plan,
+        "scenario_dossiers": scenario_dossiers,
         "comparison": observability_comparison,
         "replay": replay_summary,
         "suite": suite,
@@ -3198,10 +3516,12 @@ def build_run_summary(
             diagnostic_telemetry_catalog,
             diagnostic_code_map,
             investigation_plan,
+            scenario_dossiers,
             observability_comparison,
         ),
         "ai_handoff": [
             "Start with investigation_plan.top_route and follow routes[0].handoff_steps in order.",
+            "Use scenario_dossiers when you already know a scenario id and need joined probe, route, telemetry, and code pointers.",
             "Use suite.first_next_action when inspecting the base scenario-suite observer.",
             "Use coverage_ledger to audit happy-path versus negative-fixture coverage and known gaps.",
             "Use telemetry_catalog to understand signal families, probes, event kinds, and trace fields before loading full telemetry.",
@@ -3351,6 +3671,22 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Top scenario | {top_route.get('primary_scenario_id', '-')} |",
             f"| JSON | {investigation_plan.get('artifacts', {}).get('investigation_plan_json', '-')} |",
             f"| Report | {investigation_plan.get('artifacts', {}).get('investigation_plan_report', '-')} |",
+        ]
+    )
+    scenario_dossiers = summary.get("scenario_dossiers") or {}
+    lines.extend(
+        [
+            "",
+            "## Scenario Dossiers",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {scenario_dossiers.get('status', '-')} |",
+            f"| Dossiers | {scenario_dossiers.get('dossier_count', '-')} |",
+            f"| Actionable dossiers | {scenario_dossiers.get('actionable_dossier_count', '-')} |",
+            f"| Healthy dossiers | {scenario_dossiers.get('healthy_dossier_count', '-')} |",
+            f"| JSON | {scenario_dossiers.get('artifacts', {}).get('scenario_dossiers_json', '-')} |",
+            f"| Report | {scenario_dossiers.get('artifacts', {}).get('scenario_dossiers_report', '-')} |",
         ]
     )
     comparison = summary.get("comparison") or {}
@@ -3509,6 +3845,7 @@ def main() -> int:
     diagnostic_telemetry_catalog: dict[str, Any] | None = None
     diagnostic_code_map: dict[str, Any] | None = None
     investigation_plan: dict[str, Any] | None = None
+    scenario_dossiers: dict[str, Any] | None = None
     observability_comparison: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
@@ -3573,6 +3910,14 @@ def main() -> int:
                 replay_summary,
                 repo_root,
             )
+            scenario_dossiers = write_scenario_dossiers(
+                suite_dir,
+                debug_index_summary,
+                diagnostic_telemetry_catalog,
+                diagnostic_code_map,
+                investigation_plan,
+                repo_root,
+            )
 
     summary_json.parent.mkdir(parents=True, exist_ok=True)
     summary_md.parent.mkdir(parents=True, exist_ok=True)
@@ -3589,6 +3934,7 @@ def main() -> int:
         diagnostic_telemetry_catalog,
         diagnostic_code_map,
         investigation_plan,
+        scenario_dossiers,
         observability_comparison,
         replay_summary,
         repo_root,
@@ -3650,6 +3996,15 @@ def main() -> int:
             investigation_note = (
                 f" investigation_plan={investigation.get('route_count')}:{investigation.get('status')}"
             )
+        dossiers = summary.get("scenario_dossiers") or {}
+        dossiers_note = ""
+        if dossiers:
+            dossiers_note = (
+                " scenario_dossiers="
+                f"{dossiers.get('dossier_count')}:"
+                f"{dossiers.get('actionable_dossier_count')}:"
+                f"{dossiers.get('status')}"
+            )
         comparison = summary.get("comparison") or {}
         comparison_note = ""
         if comparison:
@@ -3666,7 +4021,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{coverage_note}{telemetry_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
+            f"{debug_note}{analysis_note}{coverage_note}{telemetry_note}{code_map_note}{investigation_note}{dossiers_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 

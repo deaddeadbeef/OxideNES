@@ -58,9 +58,9 @@ body:
           required: true
         - label: Diagnostic scenario suite verifier passes, including `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic observability runner passes and writes debug-index, analysis, coverage-ledger, telemetry-catalog, code-map, investigation-plan, and focused replay evidence, including `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic observability runner passes and writes debug-index, analysis, coverage-ledger, telemetry-catalog, code-map, investigation-plan, scenario-dossiers, and focused replay evidence, including `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including coverage-ledger counts/gaps, telemetry-catalog signal/probe/event/trace mappings, code-map source/test paths, investigation-plan routes, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including coverage-ledger counts/gaps, telemetry-catalog signal/probe/event/trace mappings, code-map source/test paths, investigation-plan routes, scenario-dossier joins, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
         - label: Diagnostic route matrix passes for every investigation route, including `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --all-routes --skip-tests --output-dir target/diagnostics/scenario-suite/route-replay-matrix`.
           required: true
