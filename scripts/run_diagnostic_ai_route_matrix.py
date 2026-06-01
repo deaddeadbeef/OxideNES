@@ -304,6 +304,7 @@ def build_route_row(
     fix_handoff = load_json(fix_json)
     route_check = as_dict(diagnosis.get("route_check"))
     source_scan = as_dict(fix_handoff.get("source_scan"))
+    test_scan = as_dict(fix_handoff.get("test_scan"))
     fix_commands = as_dict(fix_handoff.get("fix_commands"))
     artifact_flags = artifact_presence(artifacts)
     missing_artifacts = [
@@ -320,6 +321,7 @@ def build_route_row(
         and (args.skip_tests or as_int(route_check.get("test_command_count")) >= 1)
     )
     source_matches = as_int(source_scan.get("source_match_count"))
+    test_matches = as_int(test_scan.get("test_match_count"))
     narrow_commands = len(as_list(fix_commands.get("narrow_test_commands")))
 
     errors: list[str] = []
@@ -341,6 +343,8 @@ def build_route_row(
         errors.append("diagnosis and fix handoff selections do not match")
     if source_matches < 1:
         errors.append("fix handoff has no source matches")
+    if test_matches < 1:
+        errors.append("fix handoff has no test matches")
     if narrow_commands < 1 and not args.skip_tests:
         errors.append("fix handoff has no narrow test commands")
     if not stop_conditions_passed(diagnosis):
@@ -364,6 +368,7 @@ def build_route_row(
         "tests_skipped": args.skip_tests,
         "test_command_count": route_check.get("test_command_count"),
         "source_match_count": source_matches,
+        "test_match_count": test_matches,
         "narrow_test_command_count": narrow_commands,
         "diagnosis_stop_conditions_passed": stop_conditions_passed(diagnosis),
         "fix_handoff_stop_conditions_passed": stop_conditions_passed(fix_handoff),
@@ -400,6 +405,9 @@ def build_summary(
     test_failures = [row for row in route_rows if row.get("tests_status") != "passed"]
     source_match_failures = [
         row for row in route_rows if as_int(row.get("source_match_count")) < 1
+    ]
+    test_match_failures = [
+        row for row in route_rows if as_int(row.get("test_match_count")) < 1
     ]
     narrow_command_failures = [
         row
@@ -447,6 +455,7 @@ def build_summary(
             "replay_failure_count": len(replay_failures),
             "test_failure_count": len(test_failures),
             "source_match_failure_count": len(source_match_failures),
+            "test_match_failure_count": len(test_match_failures),
             "narrow_command_failure_count": len(narrow_command_failures),
             "stop_condition_failure_count": len(stop_condition_failures),
             "missing_artifact_count": missing_artifact_count,
@@ -479,20 +488,21 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Replay failures | {totals.get('replay_failure_count')} |",
         f"| Test failures | {totals.get('test_failure_count')} |",
         f"| Source-match failures | {totals.get('source_match_failure_count')} |",
+        f"| Test-match failures | {totals.get('test_match_failure_count')} |",
         f"| Missing artifacts | {totals.get('missing_artifact_count')} |",
         f"| Tests skipped | {totals.get('tests_skipped')} |",
         "",
         "## Routes",
         "",
-        "| Rank | Route | Focus domain | Scenario | Probe | Status | Replay | Tests | Source matches | Narrow commands |",
-        "| ---: | --- | --- | --- | --- | --- | --- | --- | ---: | ---: |",
+        "| Rank | Route | Focus domain | Scenario | Probe | Status | Replay | Tests | Source matches | Test matches | Narrow commands |",
+        "| ---: | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |",
     ]
     for row in as_list(summary.get("routes")):
         if not isinstance(row, dict):
             continue
         identity = as_dict(row.get("identity"))
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 row.get("rank"),
                 markdown_cell(row.get("route_id")),
                 markdown_cell(row.get("focus_domain")),
@@ -502,6 +512,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
                 row.get("replay_status"),
                 row.get("tests_status"),
                 row.get("source_match_count"),
+                row.get("test_match_count"),
                 row.get("narrow_test_command_count"),
             )
         )
