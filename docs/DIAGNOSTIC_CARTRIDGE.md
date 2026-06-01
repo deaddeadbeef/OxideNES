@@ -89,8 +89,8 @@ cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/s
 
 For the full local observability loop, use the wrapper that generates the
 scenario suite, runs the verifier, replays one selected scenario from its
-`replay_args`, writes a root debug index, aggregate analysis, and coverage
-ledger, optionally compares the run against a prior observability suite, and writes
+`replay_args`, writes a root debug index, aggregate analysis, coverage ledger,
+and telemetry catalog, optionally compares the run against a prior observability suite, and writes
 `observability-run.json` plus `observability-run.md` into the suite directory:
 
 ```powershell
@@ -103,8 +103,10 @@ The observability wrapper writes `diagnostic-debug-index.jsonl`,
 root files. It also writes `diagnostic-coverage-ledger.json` and
 `diagnostic-coverage-ledger.md`, which summarize the happy-path versus
 intentional-negative fixture balance, every cartridge test, paired negative
-fixtures, subsystem/tier coverage, and known coverage gaps. It also writes
-`diagnostic-code-map.json` and
+fixtures, subsystem/tier coverage, and known coverage gaps. It writes
+`diagnostic-telemetry-catalog.json` and `diagnostic-telemetry-catalog.md`,
+which catalog telemetry signal families, probe ids, event kinds, test signal
+mappings, and retained trace fields. It also writes `diagnostic-code-map.json` and
 `diagnostic-code-map.md`, which map each focus domain to the emulator source
 files, regression tests, diagnostic support files, search terms, debug anchor,
 first artifact to open, and replay/test commands an automated debugger should
@@ -144,8 +146,11 @@ first artifact to open for each candidate subsystem. Use it when an automated
 debugger needs an aggregate cross-suite starting point before drilling into one
 scenario. The coverage ledger answers whether the suite only contains happy
 paths, maps negative fixtures back to cartridge tests and focus domains, and
-keeps known untested risk areas attached to the uploaded artifact. The code map
-is the next routing layer: use it after choosing a focus
+keeps known untested risk areas attached to the uploaded artifact. The telemetry
+catalog is the signal dictionary: use it to map failed probe ids, event kinds,
+timeline entries, and instruction trace fields to the right JSON paths and
+artifacts before opening full telemetry. The code map is the next routing layer:
+use it after choosing a focus
 domain to open the relevant emulator files, nearby regression tests, and focused
 replay command without guessing where that domain lives in the repository. The
 investigation plan is the executable routing layer: start with
@@ -222,8 +227,8 @@ uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 To validate the full observability wrapper output that AI tooling consumes,
 including the debug index, aggregate analysis, coverage ledger, diagnostic code
-map, diagnostic investigation plan, optional cross-run comparison, focused
-replay evidence, and `observability-run.json`, run:
+map, telemetry catalog, diagnostic investigation plan, optional cross-run
+comparison, focused replay evidence, and `observability-run.json`, run:
 
 ```powershell
 python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -282,6 +287,7 @@ evidence without replaying the cartridge again.
 `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` files, plus
 `diagnostic-coverage-ledger.json`, `diagnostic-coverage-ledger.md`,
+`diagnostic-telemetry-catalog.json`, `diagnostic-telemetry-catalog.md`,
 `diagnostic-code-map.json`, `diagnostic-code-map.md`,
 `diagnostic-investigation-plan.json`, and `diagnostic-investigation-plan.md`.
 With

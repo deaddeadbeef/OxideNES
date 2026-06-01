@@ -20,6 +20,7 @@ DEBUG_INDEX_SCHEMA_VERSION = 1
 OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
 OBSERVABILITY_COMPARISON_SCHEMA_VERSION = 1
 DIAGNOSTIC_COVERAGE_LEDGER_SCHEMA_VERSION = 1
+DIAGNOSTIC_TELEMETRY_CATALOG_SCHEMA_VERSION = 1
 DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION = 1
 INVESTIGATION_PLAN_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
@@ -259,6 +260,7 @@ def artifact_paths(
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
     diagnostic_coverage_ledger: dict[str, Any] | None,
+    diagnostic_telemetry_catalog: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
@@ -284,6 +286,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if diagnostic_coverage_ledger:
         for name, path in diagnostic_coverage_ledger.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if diagnostic_telemetry_catalog:
+        for name, path in diagnostic_telemetry_catalog.get("artifacts", {}).items():
             artifacts[name] = str(path)
     if diagnostic_code_map:
         for name, path in diagnostic_code_map.get("artifacts", {}).items():
@@ -343,6 +348,13 @@ def diagnostic_coverage_ledger_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "diagnostic_coverage_ledger_json": str(suite_dir / "diagnostic-coverage-ledger.json"),
         "diagnostic_coverage_ledger_report": str(suite_dir / "diagnostic-coverage-ledger.md"),
+    }
+
+
+def diagnostic_telemetry_catalog_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "diagnostic_telemetry_catalog_json": str(suite_dir / "diagnostic-telemetry-catalog.json"),
+        "diagnostic_telemetry_catalog_report": str(suite_dir / "diagnostic-telemetry-catalog.md"),
     }
 
 
@@ -1364,6 +1376,454 @@ def write_diagnostic_coverage_ledger(suite_dir: Path) -> dict[str, Any]:
     json_path.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_diagnostic_coverage_ledger_markdown(report_path, ledger)
     return ledger
+
+
+def value_kind(value: Any) -> str:
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
+def counter_dict(values: list[Any]) -> dict[str, int]:
+    counts = Counter(str(value) for value in values if value is not None)
+    return dict(sorted(counts.items()))
+
+
+def telemetry_signal_family(
+    family_id: str,
+    title: str,
+    purpose: str,
+    telemetry_paths: list[str],
+    triage_paths: list[str],
+    first_artifact: str,
+    ai_usage: str,
+    available: bool,
+) -> dict[str, Any]:
+    return {
+        "id": family_id,
+        "title": title,
+        "purpose": purpose,
+        "telemetry_paths": telemetry_paths,
+        "triage_paths": triage_paths,
+        "first_artifact": first_artifact,
+        "ai_usage": ai_usage,
+        "available": available,
+    }
+
+
+def build_diagnostic_telemetry_catalog(suite_dir: Path) -> dict[str, Any]:
+    manifest = load_json(suite_dir / "scenario-suite.json")
+    scenarios = [scenario for scenario in as_list(manifest.get("scenarios")) if isinstance(scenario, dict)]
+    scenarios_by_id = {
+        scenario.get("id"): scenario
+        for scenario in scenarios
+        if isinstance(scenario.get("id"), str)
+    }
+    baseline_id = manifest.get("baseline_scenario_id")
+    baseline_scenario_id = baseline_id if isinstance(baseline_id, str) and baseline_id else "pass"
+    baseline_scenario = as_dict(scenarios_by_id.get(baseline_scenario_id))
+    baseline_artifacts = as_dict(baseline_scenario.get("artifacts"))
+    baseline_telemetry_path = scenario_telemetry_path(suite_dir, baseline_scenario)
+    baseline_triage_path = (
+        artifact_path(suite_dir, baseline_artifacts["triage_json"])
+        if isinstance(baseline_artifacts.get("triage_json"), str)
+        else None
+    )
+    baseline_telemetry = load_json(baseline_telemetry_path) if baseline_telemetry_path else {}
+    baseline_triage = load_json(baseline_triage_path) if baseline_triage_path else {}
+
+    errors: list[str] = []
+    if not manifest:
+        errors.append(f"missing scenario-suite.json in {suite_dir}")
+    if baseline_telemetry_path is None or not baseline_telemetry_path.is_file():
+        errors.append(f"missing baseline telemetry for {baseline_scenario_id}")
+    if baseline_triage_path is None or not baseline_triage_path.is_file():
+        errors.append(f"missing baseline triage for {baseline_scenario_id}")
+    if not baseline_telemetry:
+        errors.append(f"invalid baseline telemetry for {baseline_scenario_id}")
+    if not baseline_triage:
+        errors.append(f"invalid baseline triage for {baseline_scenario_id}")
+
+    tests = [test for test in as_list(baseline_telemetry.get("tests")) if isinstance(test, dict)]
+    probes = [probe for probe in as_list(baseline_telemetry.get("probes")) if isinstance(probe, dict)]
+    events = [event for event in as_list(baseline_telemetry.get("events")) if isinstance(event, dict)]
+    timeline = [entry for entry in as_list(baseline_telemetry.get("timeline")) if isinstance(entry, dict)]
+    trace = as_dict(baseline_telemetry.get("instruction_trace"))
+    trace_tail = [entry for entry in as_list(trace.get("tail")) if isinstance(entry, dict)]
+
+    if not tests:
+        errors.append("telemetry catalog requires baseline telemetry tests")
+    if not probes:
+        errors.append("telemetry catalog requires baseline telemetry probes")
+    if not events:
+        errors.append("telemetry catalog requires baseline telemetry events")
+    if not timeline:
+        errors.append("telemetry catalog requires baseline telemetry timeline")
+    if not trace_tail:
+        errors.append("telemetry catalog requires retained instruction trace tail")
+
+    probe_ids = unique_strings([probe.get("id") for probe in probes])
+    probes_by_test_id: dict[int, list[str]] = {}
+    for probe in probes:
+        test_id = probe.get("test_id")
+        probe_id = probe.get("id")
+        if isinstance(test_id, int) and isinstance(probe_id, str):
+            probes_by_test_id.setdefault(test_id, []).append(probe_id)
+
+    timeline_test_ids = {
+        entry.get("test_id")
+        for entry in timeline
+        if isinstance(entry.get("test_id"), int)
+    }
+    test_signals = []
+    for test in tests:
+        test_id = test.get("id")
+        result_probe_id = f"cartridge.test.{test_id}.result" if isinstance(test_id, int) else ""
+        test_signals.append(
+            {
+                "id": test_id,
+                "name": test.get("name"),
+                "subsystem": test.get("subsystem"),
+                "tier": test.get("tier"),
+                "intent": test.get("intent"),
+                "result_addr": test.get("result_addr"),
+                "result_probe_id": result_probe_id,
+                "result_probe_present": result_probe_id in probe_ids,
+                "timeline_present": test_id in timeline_test_ids,
+                "probe_ids": sorted(probes_by_test_id.get(test_id, []))
+                if isinstance(test_id, int)
+                else [],
+                "expected_observations": as_list(test.get("expected_observations")),
+            }
+        )
+
+    probe_catalog = [
+        {
+            "id": probe.get("id"),
+            "source": probe.get("source"),
+            "subsystem": probe.get("subsystem"),
+            "test_id": probe.get("test_id"),
+            "test_name": probe.get("test_name"),
+            "status": probe.get("status"),
+            "description": probe.get("description"),
+            "expected": probe.get("expected"),
+            "observed": probe.get("observed"),
+            "likely_domain": probe.get("likely_domain"),
+        }
+        for probe in probes
+    ]
+
+    event_kind_catalog = []
+    event_kinds = sorted({str(event.get("kind")) for event in events if event.get("kind") is not None})
+    for kind in event_kinds:
+        matching = [event for event in events if event.get("kind") == kind]
+        first_event = matching[0] if matching else {}
+        last_event = matching[-1] if matching else {}
+        event_kind_catalog.append(
+            {
+                "kind": kind,
+                "count": len(matching),
+                "first_cycle": first_event.get("cycle"),
+                "last_cycle": last_event.get("cycle"),
+                "first_frame": first_event.get("frame"),
+                "last_frame": last_event.get("frame"),
+            }
+        )
+
+    trace_fields = sorted({field for entry in trace_tail for field in entry})
+    top_level_fields = [
+        {
+            "path": key,
+            "kind": value_kind(value),
+        }
+        for key, value in sorted(baseline_telemetry.items())
+    ]
+    baseline_triage_text = str(baseline_triage_path) if baseline_triage_path else ""
+    baseline_telemetry_text = str(baseline_telemetry_path) if baseline_telemetry_path else ""
+    signal_families = [
+        telemetry_signal_family(
+            "verdict",
+            "Verdict and terminal status",
+            "Answers whether the run passed, failed, or timed out and why.",
+            ["verdict", "verdict.failure", "analysis.health"],
+            ["health", "failure", "recommended_exit_code"],
+            baseline_triage_text,
+            "Read before deeper telemetry to decide whether the run is healthy or needs triage.",
+            bool(baseline_telemetry.get("verdict")) and bool(baseline_triage.get("health")),
+        ),
+        telemetry_signal_family(
+            "debug_focus",
+            "Debug focus",
+            "Points to the first actionable test, subsystem, domain, failed probes, final event, and terminal instruction.",
+            ["analysis.debug_focus"],
+            ["debug_focus"],
+            baseline_triage_text,
+            "Use as the first drilldown target for a failed or timed-out scenario.",
+            bool(as_dict(baseline_telemetry.get("analysis")).get("debug_focus"))
+            and bool(baseline_triage.get("debug_focus")),
+        ),
+        telemetry_signal_family(
+            "probes",
+            "Structured observation probes",
+            "Normalizes cartridge result bytes and host-observed signals into passed, failed, or skipped checks.",
+            ["probes", "analysis.probe_summary"],
+            ["probes"],
+            baseline_telemetry_text,
+            "Use failed probe ids to rank concrete broken observations before reading full events.",
+            bool(probes),
+        ),
+        telemetry_signal_family(
+            "timeline",
+            "Per-test timing timeline",
+            "Maps every diagnostic test to start/end cycles, frames, outcome, and terminal status.",
+            ["timeline", "analysis.timing"],
+            ["timing"],
+            baseline_telemetry_text,
+            "Use when a test is slow, skipped, timed out, or has suspicious cycle/frame drift.",
+            bool(timeline),
+        ),
+        telemetry_signal_family(
+            "events",
+            "Runtime event stream",
+            "Records reset, status changes, test transitions, DMA/DMC events, and frame completions.",
+            ["events"],
+            ["event_tail"],
+            baseline_telemetry_text,
+            "Use event kinds and tails to reconstruct the final state transition sequence.",
+            bool(events),
+        ),
+        telemetry_signal_family(
+            "instruction_trace",
+            "Decoded instruction trace tail",
+            "Retains final instruction-boundary CPU state with decoded mnemonic and nearest diagnostic cartridge symbol.",
+            ["instruction_trace"],
+            ["instruction_trace"],
+            baseline_telemetry_text,
+            "Use terminal instructions and symbols to anchor CPU-side debugging without disassembling the ROM first.",
+            bool(trace_tail),
+        ),
+        telemetry_signal_family(
+            "input_dma_audio",
+            "Host-observed input, DMA, and audio side channels",
+            "Captures controller masks, OAM/DMC DMA timing, frame output, and APU sample evidence.",
+            ["input", "dma", "oam", "frame", "audio"],
+            ["input", "dma"],
+            baseline_telemetry_text,
+            "Use for failures where the cartridge passes but host-observed side effects are wrong.",
+            bool(baseline_telemetry.get("input")) and bool(baseline_telemetry.get("dma")),
+        ),
+        telemetry_signal_family(
+            "coverage_limits",
+            "Coverage and known limits",
+            "Summarizes exercised subsystems, tiers, and explicit known coverage gaps.",
+            ["analysis.coverage", "analysis.coverage_gaps"],
+            ["coverage", "coverage_gaps"],
+            baseline_triage_text,
+            "Use before making broad compatibility claims from a passing cartridge run.",
+            bool(as_dict(baseline_telemetry.get("analysis")).get("coverage_gaps")),
+        ),
+    ]
+
+    artifacts = diagnostic_telemetry_catalog_paths(suite_dir)
+    artifacts.update(
+        {
+            "baseline_telemetry_json": baseline_telemetry_text,
+            "baseline_triage_json": baseline_triage_text,
+            "scenario_suite_json": str(suite_dir / "scenario-suite.json"),
+        }
+    )
+
+    return {
+        "diagnostic_telemetry_catalog_schema_version": DIAGNOSTIC_TELEMETRY_CATALOG_SCHEMA_VERSION,
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "suite_dir": str(suite_dir),
+        "baseline_scenario_id": baseline_scenario_id,
+        "telemetry_schema_version": baseline_telemetry.get("schema_version"),
+        "triage_schema_version": baseline_triage.get("triage_schema_version"),
+        "test_count": len(tests),
+        "probe_count": len(probes),
+        "event_count": len(events),
+        "event_kind_count": len(event_kind_catalog),
+        "timeline_entry_count": len(timeline),
+        "trace_retained_instruction_count": trace.get("retained_instruction_count"),
+        "trace_captured_instruction_count": trace.get("captured_instruction_count"),
+        "signal_family_count": len(signal_families),
+        "top_level_fields": top_level_fields,
+        "signal_families": signal_families,
+        "probe_status_counts": counter_dict([probe.get("status") for probe in probes]),
+        "probe_source_counts": counter_dict([probe.get("source") for probe in probes]),
+        "probe_catalog": probe_catalog,
+        "event_kind_catalog": event_kind_catalog,
+        "test_signals": test_signals,
+        "trace_catalog": {
+            "retention_limit": trace.get("retention_limit"),
+            "retained_instruction_count": trace.get("retained_instruction_count"),
+            "captured_instruction_count": trace.get("captured_instruction_count"),
+            "truncated": trace.get("truncated"),
+            "tail_fields": trace_fields,
+        },
+        "artifacts": artifacts,
+        "errors": errors,
+        "ai_handoff": [
+            "Read this catalog before loading full telemetry when you need to know what each signal family means.",
+            "Use signal_families to choose the right artifact and JSON path for the debugging question.",
+            "Use probe_catalog to map failed_probe_ids to expected observations, observed values, and likely domains.",
+            "Use event_kind_catalog and trace_catalog when reconstructing the final execution path.",
+        ],
+    }
+
+
+def write_diagnostic_telemetry_catalog_markdown(path: Path, catalog: dict[str, Any]) -> None:
+    lines = [
+        "# Diagnostic Telemetry Catalog",
+        "",
+        "## Verdict",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {catalog.get('status')} |",
+        f"| Telemetry schema | {catalog.get('telemetry_schema_version')} |",
+        f"| Triage schema | {catalog.get('triage_schema_version')} |",
+        f"| Tests | {catalog.get('test_count')} |",
+        f"| Probes | {catalog.get('probe_count')} |",
+        f"| Event kinds | {catalog.get('event_kind_count')} |",
+        f"| Timeline entries | {catalog.get('timeline_entry_count')} |",
+        f"| Retained trace instructions | {catalog.get('trace_retained_instruction_count')} |",
+        "",
+        "## Signal Families",
+        "",
+        "| ID | Purpose | First Artifact | AI Usage |",
+        "| --- | --- | --- | --- |",
+    ]
+    for family in as_list(catalog.get("signal_families")):
+        if not isinstance(family, dict):
+            continue
+        lines.append(
+            "| "
+            f"{family.get('id')} | "
+            f"{markdown_cell(str(family.get('purpose', '')))} | "
+            f"{family.get('first_artifact')} | "
+            f"{markdown_cell(str(family.get('ai_usage', '')))} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Probe Summary",
+            "",
+            "| Group | Counts |",
+            "| --- | --- |",
+            f"| Status | {json.dumps(catalog.get('probe_status_counts', {}), sort_keys=True)} |",
+            f"| Source | {json.dumps(catalog.get('probe_source_counts', {}), sort_keys=True)} |",
+            "",
+            "## Probe Catalog",
+            "",
+            "| ID | Source | Subsystem | Test | Likely Domain |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    for probe in as_list(catalog.get("probe_catalog")):
+        if not isinstance(probe, dict):
+            continue
+        lines.append(
+            "| "
+            f"{probe.get('id')} | "
+            f"{probe.get('source')} | "
+            f"{probe.get('subsystem')} | "
+            f"{probe.get('test_id') or '-'} | "
+            f"{probe.get('likely_domain')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Event Kinds",
+            "",
+            "| Kind | Count | First Cycle | Last Cycle |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+    )
+    for event_kind in as_list(catalog.get("event_kind_catalog")):
+        if not isinstance(event_kind, dict):
+            continue
+        lines.append(
+            f"| {event_kind.get('kind')} | {event_kind.get('count')} | {event_kind.get('first_cycle')} | {event_kind.get('last_cycle')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Test Signals",
+            "",
+            "| ID | Name | Result Probe | Timeline | Probe Count |",
+            "| ---: | --- | --- | --- | ---: |",
+        ]
+    )
+    for test in as_list(catalog.get("test_signals")):
+        if not isinstance(test, dict):
+            continue
+        lines.append(
+            "| "
+            f"{test.get('id')} | "
+            f"{test.get('name')} | "
+            f"{test.get('result_probe_id')} | "
+            f"{test.get('timeline_present')} | "
+            f"{len(as_list(test.get('probe_ids')))} |"
+        )
+
+    trace = as_dict(catalog.get("trace_catalog"))
+    lines.extend(
+        [
+            "",
+            "## Trace Catalog",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Captured instructions | {trace.get('captured_instruction_count')} |",
+            f"| Retained instructions | {trace.get('retained_instruction_count')} |",
+            f"| Retention limit | {trace.get('retention_limit')} |",
+            f"| Truncated | {trace.get('truncated')} |",
+            f"| Tail fields | {', '.join(str(field) for field in as_list(trace.get('tail_fields')))} |",
+            "",
+            "## Artifacts",
+            "",
+            "| Name | Path |",
+            "| --- | --- |",
+        ]
+    )
+    for name, artifact_path in as_dict(catalog.get("artifacts")).items():
+        lines.append(f"| {name} | {artifact_path} |")
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(catalog.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if catalog.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(catalog.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_diagnostic_telemetry_catalog(suite_dir: Path) -> dict[str, Any]:
+    catalog = build_diagnostic_telemetry_catalog(suite_dir)
+    artifacts = as_dict(catalog.get("artifacts"))
+    json_path = Path(str(artifacts["diagnostic_telemetry_catalog_json"]))
+    report_path = Path(str(artifacts["diagnostic_telemetry_catalog_report"]))
+    json_path.write_text(json.dumps(catalog, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_diagnostic_telemetry_catalog_markdown(report_path, catalog)
+    return catalog
 
 
 def path_records(repo_root: Path, paths: list[str]) -> list[dict[str, Any]]:
@@ -2674,6 +3134,7 @@ def build_run_summary(
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
     diagnostic_coverage_ledger: dict[str, Any] | None,
+    diagnostic_telemetry_catalog: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
@@ -2697,6 +3158,8 @@ def build_run_summary(
         status = "failed"
     if diagnostic_coverage_ledger and diagnostic_coverage_ledger.get("status") != "passed":
         status = "failed"
+    if diagnostic_telemetry_catalog and diagnostic_telemetry_catalog.get("status") != "passed":
+        status = "failed"
     if diagnostic_code_map and diagnostic_code_map.get("status") != "passed":
         status = "failed"
     if investigation_plan and investigation_plan.get("status") != "passed":
@@ -2718,6 +3181,7 @@ def build_run_summary(
         "debug_index": debug_index_summary,
         "analysis": observability_analysis,
         "coverage_ledger": diagnostic_coverage_ledger,
+        "telemetry_catalog": diagnostic_telemetry_catalog,
         "code_map": diagnostic_code_map,
         "investigation_plan": investigation_plan,
         "comparison": observability_comparison,
@@ -2731,6 +3195,7 @@ def build_run_summary(
             debug_index_summary,
             observability_analysis,
             diagnostic_coverage_ledger,
+            diagnostic_telemetry_catalog,
             diagnostic_code_map,
             investigation_plan,
             observability_comparison,
@@ -2739,6 +3204,7 @@ def build_run_summary(
             "Start with investigation_plan.top_route and follow routes[0].handoff_steps in order.",
             "Use suite.first_next_action when inspecting the base scenario-suite observer.",
             "Use coverage_ledger to audit happy-path versus negative-fixture coverage and known gaps.",
+            "Use telemetry_catalog to understand signal families, probes, event kinds, and trace fields before loading full telemetry.",
             "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
             "Use code_map.focus_domains to jump from a focus domain to source files, tests, and replay commands.",
             "Use comparison.regressions first when --compare-suite-dir is supplied.",
@@ -2834,6 +3300,24 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Known gaps | {coverage_ledger.get('known_gap_count', '-')} |",
             f"| JSON | {coverage_ledger.get('artifacts', {}).get('diagnostic_coverage_ledger_json', '-')} |",
             f"| Report | {coverage_ledger.get('artifacts', {}).get('diagnostic_coverage_ledger_report', '-')} |",
+        ]
+    )
+    telemetry_catalog = summary.get("telemetry_catalog") or {}
+    lines.extend(
+        [
+            "",
+            "## Telemetry Catalog",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {telemetry_catalog.get('status', '-')} |",
+            f"| Signal families | {telemetry_catalog.get('signal_family_count', '-')} |",
+            f"| Probes | {telemetry_catalog.get('probe_count', '-')} |",
+            f"| Event kinds | {telemetry_catalog.get('event_kind_count', '-')} |",
+            f"| Timeline entries | {telemetry_catalog.get('timeline_entry_count', '-')} |",
+            f"| Retained trace instructions | {telemetry_catalog.get('trace_retained_instruction_count', '-')} |",
+            f"| JSON | {telemetry_catalog.get('artifacts', {}).get('diagnostic_telemetry_catalog_json', '-')} |",
+            f"| Report | {telemetry_catalog.get('artifacts', {}).get('diagnostic_telemetry_catalog_report', '-')} |",
         ]
     )
     code_map = summary.get("code_map") or {}
@@ -3022,6 +3506,7 @@ def main() -> int:
     debug_index_summary: dict[str, Any] | None = None
     observability_analysis: dict[str, Any] | None = None
     diagnostic_coverage_ledger: dict[str, Any] | None = None
+    diagnostic_telemetry_catalog: dict[str, Any] | None = None
     diagnostic_code_map: dict[str, Any] | None = None
     investigation_plan: dict[str, Any] | None = None
     observability_comparison: dict[str, Any] | None = None
@@ -3042,6 +3527,7 @@ def main() -> int:
                 suite_dir, debug_index_summary, repo_root
             )
             diagnostic_coverage_ledger = write_diagnostic_coverage_ledger(suite_dir)
+            diagnostic_telemetry_catalog = write_diagnostic_telemetry_catalog(suite_dir)
             diagnostic_code_map = write_diagnostic_code_map(
                 suite_dir, debug_index_summary, repo_root
             )
@@ -3100,6 +3586,7 @@ def main() -> int:
         debug_index_summary,
         observability_analysis,
         diagnostic_coverage_ledger,
+        diagnostic_telemetry_catalog,
         diagnostic_code_map,
         investigation_plan,
         observability_comparison,
@@ -3142,6 +3629,15 @@ def main() -> int:
                 f"{coverage_ledger.get('negative_fixture_count')}:"
                 f"{coverage_ledger.get('status')}"
             )
+        telemetry_catalog = summary.get("telemetry_catalog") or {}
+        telemetry_note = ""
+        if telemetry_catalog:
+            telemetry_note = (
+                " telemetry_catalog="
+                f"{telemetry_catalog.get('probe_count')}:"
+                f"{telemetry_catalog.get('event_kind_count')}:"
+                f"{telemetry_catalog.get('status')}"
+            )
         code_map = summary.get("code_map") or {}
         code_map_note = ""
         if code_map:
@@ -3170,7 +3666,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{coverage_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
+            f"{debug_note}{analysis_note}{coverage_note}{telemetry_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 
