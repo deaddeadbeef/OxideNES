@@ -117,6 +117,8 @@ def artifact_paths(
         "scenario_dossiers_report": str(suite_dir / "diagnostic-scenario-dossiers.md"),
         "diagnostic_telemetry_catalog_json": str(suite_dir / "diagnostic-telemetry-catalog.json"),
         "diagnostic_telemetry_catalog_report": str(suite_dir / "diagnostic-telemetry-catalog.md"),
+        "diagnostic_ai_index_json": str(suite_dir / "diagnostic-ai-observability-index.json"),
+        "diagnostic_ai_index_report": str(suite_dir / "diagnostic-ai-observability-index.md"),
         "investigation_plan_json": str(suite_dir / "diagnostic-investigation-plan.json"),
         "investigation_plan_report": str(suite_dir / "diagnostic-investigation-plan.md"),
         "route_evidence_verification_json": str(
@@ -163,6 +165,7 @@ def build_summary(
     top_route_path = Path(str(as_dict(route_verification.get("artifacts")).get("top_route_check_json") or ""))
     top_route_check = load_json(top_route_path) if str(top_route_path) else {}
     scenario_dossiers = load_json(suite_dir / "diagnostic-scenario-dossiers.json")
+    ai_index = load_json(suite_dir / "diagnostic-ai-observability-index.json")
 
     artifacts = artifact_paths(suite_dir, summary_json, summary_report, route_verification)
     artifact_presence = existing_artifact_map(artifacts)
@@ -180,6 +183,8 @@ def build_summary(
         errors.append("route matrix status is not passed")
     if scenario_dossiers.get("status") != "passed":
         errors.append("scenario dossiers status is not passed")
+    if ai_index.get("status") != "passed":
+        errors.append("diagnostic AI index status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
     if missing:
         errors.append(f"missing artifacts: {', '.join(missing)}")
@@ -218,6 +223,16 @@ def build_summary(
             "top_route_id": route_verification.get("top_route_id"),
             "top_route_scenario": as_dict(top_route_check.get("selection")).get("primary_scenario_id"),
         },
+        "ai_index": {
+            "status": ai_index.get("status"),
+            "scenario_cards": as_dict(ai_index.get("summary")).get("scenario_count"),
+            "focus_domains": as_dict(ai_index.get("summary")).get("focus_domain_count"),
+            "failed_probe_ids": as_dict(ai_index.get("summary")).get("failed_probe_id_count"),
+            "only_happy_paths": as_dict(ai_index.get("summary")).get("only_happy_paths"),
+            "top_route_focus_domain": as_dict(ai_index.get("summary")).get(
+                "top_route_focus_domain"
+            ),
+        },
         "top_route": {
             "route_id": top_route.get("route_id"),
             "focus_domain": top_route.get("focus_domain"),
@@ -231,7 +246,8 @@ def build_summary(
         "ai_handoff": [
             "Read this e2e report first to decide whether the diagnostic corpus is accepted.",
             "If status is failed, inspect errors and the failed command tails before opening telemetry.",
-            "If status is passed, use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
+            "If status is passed, use diagnostic_ai_index_json as the compact joined index before opening larger artifacts.",
+            "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
             "Use route_evidence_verification_json to prove the investigation routes can regenerate focused replay evidence.",
         ],
     }
@@ -240,6 +256,7 @@ def build_summary(
 def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     observability = as_dict(summary.get("observability"))
     routes = as_dict(summary.get("routes"))
+    ai_index = as_dict(summary.get("ai_index"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
         "# Diagnostic E2E Report",
@@ -283,6 +300,17 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Focus domain | {top_route.get('focus_domain')} |",
         f"| Scenario | {top_route.get('primary_scenario_id')} |",
         f"| Primary artifact | {top_route.get('primary_artifact')} |",
+        "",
+        "## AI Index",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_index.get('status')} |",
+        f"| Scenario cards | {ai_index.get('scenario_cards')} |",
+        f"| Focus domains | {ai_index.get('focus_domains')} |",
+        f"| Failed probe ids | {ai_index.get('failed_probe_ids')} |",
+        f"| Only happy paths | {ai_index.get('only_happy_paths')} |",
+        f"| Top route focus domain | {ai_index.get('top_route_focus_domain')} |",
         "",
         "## Commands",
         "",
@@ -450,6 +478,24 @@ def main() -> int:
         )
     else:
         commands.append(skipped_command("verify_diagnostic_route_evidence", "top route failed"))
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
+                "build_diagnostic_ai_index",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_index.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command("build_diagnostic_ai_index", "route evidence verification failed")
+        )
 
     summary = build_summary(suite_dir, summary_json, summary_report, commands, repo_root)
     summary_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
