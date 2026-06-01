@@ -19,6 +19,7 @@ EXPECTED_COVERAGE_LEDGER_SCHEMA = 1
 EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
+EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
 EXPECTED_TELEMETRY_SCHEMA = 30
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
@@ -117,6 +118,11 @@ class ObservabilityVerifier:
             debug_entries,
             code_map_domains,
         )
+        self.verify_scenario_dossiers(
+            as_dict(run.get("scenario_dossiers")),
+            debug_entries,
+            investigation_routes,
+        )
         self.verify_comparison(run.get("comparison"))
         self.verify_replay(run.get("replay"))
 
@@ -134,6 +140,10 @@ class ObservabilityVerifier:
             ),
             "code_map_domains": len(code_map_domains),
             "investigation_routes": len(investigation_routes),
+            "scenario_dossiers": as_dict(run.get("scenario_dossiers")).get("dossier_count"),
+            "actionable_dossiers": as_dict(run.get("scenario_dossiers")).get(
+                "actionable_dossier_count"
+            ),
             "comparison_verdict": as_dict(run.get("comparison")).get("verdict")
             if isinstance(run.get("comparison"), dict)
             else None,
@@ -208,6 +218,7 @@ class ObservabilityVerifier:
             "## Telemetry Catalog",
             "## Diagnostic Code Map",
             "## Investigation Plan",
+            "## Scenario Dossiers",
             "## Observability Comparison",
             "## Replay",
             "## AI Handoff",
@@ -902,6 +913,147 @@ class ObservabilityVerifier:
                 self.expect_nonempty_string(step.get("purpose"), f"{label} step purpose")
         return routes
 
+    def verify_scenario_dossiers(
+        self,
+        summary: dict[str, Any],
+        debug_entries: list[dict[str, Any]],
+        investigation_routes: list[dict[str, Any]],
+    ) -> None:
+        self.expect_equal(
+            summary.get("scenario_dossiers_schema_version"),
+            EXPECTED_SCENARIO_DOSSIERS_SCHEMA,
+            "scenario dossiers schema version",
+        )
+        self.expect_equal(summary.get("status"), "passed", "scenario dossiers status")
+        self.expect_equal(
+            summary.get("recommended_exit_code"),
+            0,
+            "scenario dossiers recommended_exit_code",
+        )
+        self.expect_equal(
+            summary.get("dossier_count"),
+            EXPECTED_SCENARIO_COUNT,
+            "scenario dossiers dossier_count",
+        )
+        self.expect_equal(
+            summary.get("actionable_dossier_count"),
+            EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            "scenario dossiers actionable_dossier_count",
+        )
+        self.expect_equal(
+            summary.get("healthy_dossier_count"),
+            EXPECTED_PASS_SCENARIO_COUNT,
+            "scenario dossiers healthy_dossier_count",
+        )
+        self.expect_equal(summary.get("errors"), [], "scenario dossiers errors")
+        self.verify_artifact_map(as_dict(summary.get("artifacts")), "scenario dossiers")
+        self.verify_artifact_map(
+            as_dict(summary.get("source_artifacts")),
+            "scenario dossiers source artifacts",
+        )
+
+        artifact_json = self.resolve_existing_file(
+            as_dict(summary.get("artifacts")).get("scenario_dossiers_json"),
+            "scenario dossiers JSON",
+        )
+        if artifact_json:
+            artifact_data = self.read_json_file(artifact_json, "scenario dossiers JSON")
+            self.expect_equal(artifact_data, summary, "scenario dossiers artifact payload")
+            self.expect_equal(
+                artifact_data.get("scenario_dossiers_schema_version"),
+                EXPECTED_SCENARIO_DOSSIERS_SCHEMA,
+                "scenario dossiers artifact schema version",
+            )
+
+        dossiers = [
+            dossier
+            for dossier in as_list(summary.get("dossiers"))
+            if isinstance(dossier, dict)
+        ]
+        self.expect_equal(len(dossiers), EXPECTED_SCENARIO_COUNT, "scenario dossiers rows")
+        dossier_ids = {dossier.get("scenario_id") for dossier in dossiers}
+        debug_ids = {entry.get("scenario_id") for entry in debug_entries}
+        self.expect_equal(dossier_ids, EXPECTED_SCENARIOS, "scenario dossier scenario ids")
+        self.expect_equal(dossier_ids, debug_ids, "scenario dossiers match debug index")
+
+        route_by_scenario = {
+            route.get("primary_scenario_id"): route
+            for route in investigation_routes
+            if isinstance(route.get("primary_scenario_id"), str)
+        }
+        expected_failure_ids = {
+            entry.get("scenario_id")
+            for entry in debug_entries
+            if entry.get("role") == "expected_failure_fixture"
+        }
+        healthy_ids = {
+            dossier.get("scenario_id")
+            for dossier in dossiers
+            if dossier.get("health") == "healthy"
+        }
+        self.expect_equal(
+            len(healthy_ids),
+            EXPECTED_PASS_SCENARIO_COUNT,
+            "scenario dossiers healthy ids",
+        )
+
+        for dossier in dossiers:
+            scenario_id = dossier.get("scenario_id")
+            label = f"scenario dossier {scenario_id}"
+            self.expect_nonempty_string(scenario_id, f"{label} scenario_id")
+            self.expect_nonempty_string(dossier.get("role"), f"{label} role")
+            self.expect_nonempty_string(dossier.get("health"), f"{label} health")
+            self.expect_nonempty_string(dossier.get("summary"), f"{label} summary")
+            self.expect_nonempty_list(dossier.get("replay_args"), f"{label} replay_args")
+            self.expect_nonempty_list(
+                dossier.get("signal_family_ids"),
+                f"{label} signal_family_ids",
+            )
+            self.expect_nonempty_list(dossier.get("signal_families"), f"{label} signal_families")
+            self.expect_nonempty_list(dossier.get("next_actions"), f"{label} next_actions")
+
+            start_artifacts = as_dict(dossier.get("start_artifacts"))
+            for artifact_name in ("triage_json", "telemetry_json", "report_md"):
+                self.expect_existing_file(
+                    start_artifacts.get(artifact_name),
+                    f"{label} start artifact {artifact_name}",
+                )
+            if scenario_id in expected_failure_ids:
+                self.expect_nonempty_string(dossier.get("focus_domain"), f"{label} focus_domain")
+                self.expect_nonempty_list(dossier.get("failed_probe_ids"), f"{label} failed_probe_ids")
+                route = as_dict(dossier.get("route"))
+                expected_route = as_dict(route_by_scenario.get(scenario_id))
+                self.expect_equal(
+                    route.get("route_id"),
+                    expected_route.get("route_id"),
+                    f"{label} route_id",
+                )
+                self.expect_equal(
+                    route.get("rank"),
+                    expected_route.get("rank"),
+                    f"{label} route rank",
+                )
+                self.expect_existing_file(route.get("primary_artifact"), f"{label} route artifact")
+                self.expect_nonempty_list(route.get("suggested_commands"), f"{label} route commands")
+                self.expect_nonempty_list(route.get("source_files"), f"{label} route source files")
+                self.expect_nonempty_list(route.get("test_files"), f"{label} route test files")
+            else:
+                self.expect_equal(dossier.get("route"), None, f"{label} route")
+
+            for family in as_list(dossier.get("signal_families")):
+                if not isinstance(family, dict):
+                    self.errors.append(f"{label} signal families entries must be objects")
+                    continue
+                self.expect_nonempty_string(family.get("id"), f"{label} signal family id")
+                self.expect_nonempty_list(
+                    family.get("telemetry_paths"),
+                    f"{label} signal telemetry_paths",
+                )
+                self.expect_nonempty_string(
+                    family.get("first_artifact"),
+                    f"{label} signal first_artifact",
+                )
+
     def verify_comparison(self, comparison_value: Any) -> None:
         if comparison_value is None:
             return
@@ -1126,6 +1278,7 @@ def main() -> int:
             f"telemetry_catalog={summary['telemetry_catalog_probes']}:{summary['telemetry_catalog_event_kinds']} "
             f"code_map={summary['code_map_domains']} "
             f"investigation_routes={summary['investigation_routes']} "
+            f"scenario_dossiers={summary['scenario_dossiers']}:{summary['actionable_dossiers']} "
             f"comparison={summary['comparison_verdict'] or '-'} "
             f"replay={summary['replay_scenario'] or '-'}"
         )

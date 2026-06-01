@@ -113,7 +113,11 @@ first artifact to open, and replay/test commands an automated debugger should
 use next. The wrapper then writes `diagnostic-investigation-plan.json` and
 `diagnostic-investigation-plan.md`, which join the ranked hypotheses, debug
 index rows, code-map entries, primary artifacts, replay commands, and ordered
-handoff steps into executable debug routes. When `--compare-suite-dir <DIR>` is supplied, it also writes
+handoff steps into executable debug routes. It also writes
+`diagnostic-scenario-dossiers.json` and `diagnostic-scenario-dossiers.md`, which
+pre-join each scenario's health, failed probes, start artifacts, replay args,
+telemetry signal families, route, source files, tests, and next actions for
+scenario-id-first automated debugging. When `--compare-suite-dir <DIR>` is supplied, it also writes
 `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`. The root scenario-suite files are
 `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
@@ -155,7 +159,10 @@ domain to open the relevant emulator files, nearby regression tests, and focused
 replay command without guessing where that domain lives in the repository. The
 investigation plan is the executable routing layer: start with
 `top_route`, open its primary artifact, replay the scenario, inspect the mapped
-source/search terms, and run the listed narrow tests. The optional comparison artifact compares two observability suites by
+source/search terms, and run the listed narrow tests. When an automated debugger
+already knows the scenario id, start with the scenario dossiers instead of
+manually joining the debug index, telemetry catalog, code map, and route table.
+The optional comparison artifact compares two observability suites by
 scenario health/focus/probes/scores and hypothesis rank/score changes, then
 reports matched, changed, or regressed verdicts with replay args and current-run
 artifact pointers for any regression. Use `--fail-on-comparison-regression`
@@ -227,8 +234,8 @@ uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
 To validate the full observability wrapper output that AI tooling consumes,
 including the debug index, aggregate analysis, coverage ledger, diagnostic code
-map, telemetry catalog, diagnostic investigation plan, optional cross-run
-comparison, focused replay evidence, and `observability-run.json`, run:
+map, telemetry catalog, diagnostic investigation plan, scenario dossiers,
+optional cross-run comparison, focused replay evidence, and `observability-run.json`, run:
 
 ```powershell
 python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
@@ -289,7 +296,8 @@ evidence without replaying the cartridge again.
 `diagnostic-coverage-ledger.json`, `diagnostic-coverage-ledger.md`,
 `diagnostic-telemetry-catalog.json`, `diagnostic-telemetry-catalog.md`,
 `diagnostic-code-map.json`, `diagnostic-code-map.md`,
-`diagnostic-investigation-plan.json`, and `diagnostic-investigation-plan.md`.
+`diagnostic-investigation-plan.json`, `diagnostic-investigation-plan.md`,
+`diagnostic-scenario-dossiers.json`, and `diagnostic-scenario-dossiers.md`.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
