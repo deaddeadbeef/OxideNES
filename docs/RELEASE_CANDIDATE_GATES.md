@@ -20,7 +20,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
   `cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/scenario-suite --no-stdout`
 - The diagnostic scenario suite verifier passes:
   `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite`
-- The diagnostic observability runner passes and writes `observability-run.json`, `observability-run.md`, `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`, and focused `replay-runs/<scenario>/` evidence:
+- The diagnostic observability runner passes and writes `observability-run.json`, `observability-run.md`, `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, `diagnostic-observability-analysis.md`, and focused `replay-runs/<scenario>/` evidence:
   `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`
 - GitHub Actions CI is green on Windows, Linux, macOS, rustfmt, clippy, security audit, IP compliance, and diagnostic bundle jobs.
 
@@ -34,8 +34,9 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - Diagnostic bundles include a bounded decoded instruction trace tail with diagnostic cartridge symbols so failed headless runs preserve the final opcode-boundary CPU/RAM context for automated triage.
 - Diagnostic scenario suites include the pass baseline, a non-default input-mask pass fixture, intentional joypad, CPU, PPU, mapper, DMA, APU, and timeout fixtures with expected-vs-actual debug-focus contracts, per-clause contract-match breakdowns, root baseline-comparison summaries, single-scenario replay args, a suite-level attention queue, plus `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and `scenario-suite-observer.md` indexes for automated regression triage.
 - Diagnostic observability runs add `diagnostic-debug-index.jsonl` and `diagnostic-debug-index.md` as root one-row-per-scenario indexes for AI routing before opening per-scenario telemetry.
+- Diagnostic observability runs add `diagnostic-observability-analysis.json` and `diagnostic-observability-analysis.md` as aggregate ranked subsystem/domain hypotheses for automated debuggers.
 - `python scripts/verify_diagnostic_suite.py --suite-dir target/diagnostics/scenario-suite` validates the uploaded scenario-suite artifact contract before release evidence is accepted.
-- `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite` records the command status, git commit, verifier summary, debug-index status and entry count, first AI next action, focused replay status, expected-vs-actual replay exit/health/focus checks, and artifact pointers for debugging handoff.
+- `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite` records the command status, git commit, verifier summary, debug-index status and entry count, analysis status and hypothesis count, first AI next action, focused replay status, expected-vs-actual replay exit/health/focus checks, and artifact pointers for debugging handoff.
 - `telemetry.json` includes actual and expected joypad masks for both controller ports, and the diagnostic cartridge exercises `$4016` and `$4017` serial reads, configurable expected masks, mid-stream strobe reset, and strobe-high hold behavior.
 - `telemetry.json` includes OAM DMA start/end, active-cycle, first active-cycle parity, and DMC-overlap telemetry proving the transfer completed within the expected 513-514 CPU-cycle bucket while a phase-specific 3-cycle or 4-cycle DMC sample-DMA stall bucket was serviced during the OAM stall window.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.

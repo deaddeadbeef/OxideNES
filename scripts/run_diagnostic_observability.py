@@ -8,14 +8,16 @@ import json
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 RUN_SCHEMA_VERSION = 1
 REPLAY_RUN_SCHEMA_VERSION = 1
 DEBUG_INDEX_SCHEMA_VERSION = 1
+OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
 
 
@@ -72,6 +74,26 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def load_jsonl(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    entries: list[dict[str, Any]] = []
+    errors: list[str] = []
+    if not path.is_file():
+        return entries, [f"missing JSONL artifact: {path}"]
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as error:
+            errors.append(f"{path}:{line_number}: {error}")
+            continue
+        if isinstance(value, dict):
+            entries.append(value)
+        else:
+            errors.append(f"{path}:{line_number}: expected JSON object")
+    return entries, errors
+
+
 def as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -80,12 +102,17 @@ def as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def as_int(value: Any, default: int = 0) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
 def artifact_paths(
     suite_dir: Path,
     summary_json: Path,
     summary_md: Path,
     replay_summary: dict[str, Any] | None,
     debug_index_summary: dict[str, Any] | None,
+    observability_analysis: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
         "suite_dir": str(suite_dir),
@@ -102,6 +129,9 @@ def artifact_paths(
             artifacts[artifact_name] = str(path)
     if debug_index_summary:
         for name, path in debug_index_summary.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if observability_analysis:
+        for name, path in observability_analysis.get("artifacts", {}).items():
             artifacts[name] = str(path)
     return artifacts
 
@@ -138,6 +168,13 @@ def debug_index_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "debug_index_jsonl": str(suite_dir / "diagnostic-debug-index.jsonl"),
         "debug_index_report": str(suite_dir / "diagnostic-debug-index.md"),
+    }
+
+
+def observability_analysis_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "observability_analysis_json": str(suite_dir / "diagnostic-observability-analysis.json"),
+        "observability_analysis_report": str(suite_dir / "diagnostic-observability-analysis.md"),
     }
 
 
@@ -377,6 +414,394 @@ def write_debug_index(suite_dir: Path) -> dict[str, Any]:
     }
 
 
+def unique_strings(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def entry_focus_domain(entry: dict[str, Any]) -> str | None:
+    focus = as_dict(entry.get("debug_focus"))
+    failure = as_dict(entry.get("failure"))
+    domain = focus.get("focus_domain") or failure.get("likely_domain")
+    return domain if isinstance(domain, str) and domain else None
+
+
+def entry_focus_subsystem(entry: dict[str, Any]) -> str | None:
+    focus = as_dict(entry.get("debug_focus"))
+    subsystem = focus.get("focus_subsystem")
+    if isinstance(subsystem, str) and subsystem:
+        return subsystem
+    domain = entry_focus_domain(entry)
+    if domain and "." in domain:
+        return domain.split(".", 1)[0]
+    return domain
+
+
+def entry_failed_probe_ids(entry: dict[str, Any]) -> list[str]:
+    focus = as_dict(entry.get("debug_focus"))
+    return unique_strings(as_list(focus.get("failed_probe_ids")))
+
+
+def entry_primary_artifact(entry: dict[str, Any]) -> str | None:
+    next_action = as_dict(entry.get("next_action"))
+    artifact = next_action.get("primary_artifact") or as_dict(entry.get("artifacts")).get(
+        "triage_json"
+    )
+    return artifact if isinstance(artifact, str) and artifact else None
+
+
+def entry_debug_anchor(entry: dict[str, Any]) -> dict[str, Any]:
+    focus = as_dict(entry.get("debug_focus"))
+    terminal = as_dict(focus.get("terminal_instruction"))
+    last_event = as_dict(focus.get("last_event")) or as_dict(entry.get("event_tail_last"))
+    if terminal:
+        return {
+            "kind": "terminal_instruction",
+            "pc_hex": terminal.get("pc_hex"),
+            "instruction": terminal.get("instruction"),
+            "symbol": terminal.get("symbol"),
+            "cycle": terminal.get("cycle"),
+            "frame": terminal.get("frame"),
+        }
+    if last_event:
+        return {
+            "kind": "last_event",
+            "event_kind": last_event.get("kind"),
+            "pc_hex": last_event.get("pc_hex"),
+            "cycle": last_event.get("cycle"),
+            "frame": last_event.get("frame"),
+            "note": last_event.get("note"),
+        }
+    return {"kind": "missing"}
+
+
+def entry_analysis_score(entry: dict[str, Any]) -> int:
+    score = min(as_int(entry.get("comparison_difference_count")), 50)
+    health = entry.get("health")
+    failed_probe_count = len(entry_failed_probe_ids(entry))
+    if health and health != "healthy":
+        score += 50
+    if health == "timed_out":
+        score += 20
+    if health == "host_validation_failed":
+        score += 15
+    if entry.get("comparison_passed") is False:
+        score += 10
+    if entry.get("contract_all_matched") is False:
+        score += 40
+    if entry.get("expectation_met") is False:
+        score += 40
+    score += min(failed_probe_count, 5) * 3
+    return score
+
+
+def scenario_analysis_brief(entry: dict[str, Any]) -> dict[str, Any]:
+    focus = as_dict(entry.get("debug_focus"))
+    failure = as_dict(entry.get("failure"))
+    next_action = as_dict(entry.get("next_action"))
+    top_difference = as_dict(entry.get("top_difference"))
+    return {
+        "scenario_id": entry.get("scenario_id"),
+        "title": entry.get("title"),
+        "role": entry.get("role"),
+        "outcome": entry.get("outcome"),
+        "health": entry.get("health"),
+        "score": entry_analysis_score(entry),
+        "focus_subsystem": entry_focus_subsystem(entry),
+        "focus_domain": entry_focus_domain(entry),
+        "failure_kind": focus.get("failure_kind") or failure.get("kind"),
+        "failure_code_hex": focus.get("failure_code_hex") or failure.get("failure_code_hex"),
+        "failed_probe_ids": entry_failed_probe_ids(entry),
+        "debug_anchor": entry_debug_anchor(entry),
+        "top_difference": {
+            "path": top_difference.get("path"),
+            "category": top_difference.get("category"),
+            "summary": top_difference.get("summary"),
+        },
+        "primary_artifact": entry_primary_artifact(entry),
+        "replay_args": as_list(entry.get("replay_args")),
+        "next_action": {
+            "priority": next_action.get("priority"),
+            "action_type": next_action.get("action_type"),
+            "evidence": as_list(next_action.get("evidence")),
+        },
+    }
+
+
+def count_by(
+    entries: list[dict[str, Any]],
+    field_name: str,
+    value_fn: Callable[[dict[str, Any]], Any],
+) -> list[dict[str, Any]]:
+    values_by_scenario: list[tuple[str, str]] = []
+    for entry in entries:
+        value = value_fn(entry)
+        if value in (None, ""):
+            continue
+        values_by_scenario.append((str(entry.get("scenario_id")), str(value)))
+    counts = Counter(value for _, value in values_by_scenario)
+    rows: list[dict[str, Any]] = []
+    for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        rows.append(
+            {
+                field_name: value,
+                "count": count,
+                "scenario_ids": [
+                    scenario_id
+                    for scenario_id, scenario_value in values_by_scenario
+                    if scenario_value == value
+                ],
+            }
+        )
+    return rows
+
+
+def build_ranked_hypotheses(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    actionable = [
+        entry
+        for entry in entries
+        if entry.get("health") != "healthy" or as_dict(entry.get("next_action")).get("action_type")
+    ]
+    for entry in actionable:
+        domain = entry_focus_domain(entry) or entry_focus_subsystem(entry) or "unfocused"
+        grouped.setdefault(domain, []).append(entry)
+
+    hypotheses: list[dict[str, Any]] = []
+    for domain, domain_entries in grouped.items():
+        scenario_briefs = sorted(
+            [scenario_analysis_brief(entry) for entry in domain_entries],
+            key=lambda brief: (-as_int(brief.get("score")), str(brief.get("scenario_id"))),
+        )
+        score = max(as_int(brief.get("score")) for brief in scenario_briefs) + (
+            len(scenario_briefs) - 1
+        ) * 5
+        contract_matched = all(entry.get("contract_all_matched") is True for entry in domain_entries)
+        has_focus = all(entry_focus_domain(entry) for entry in domain_entries)
+        confidence = "high" if contract_matched and has_focus else "medium"
+        first = scenario_briefs[0]
+        hypotheses.append(
+            {
+                "rank": 0,
+                "score": score,
+                "confidence": confidence,
+                "focus_domain": domain,
+                "focus_subsystem": entry_focus_subsystem(domain_entries[0]),
+                "scenario_count": len(domain_entries),
+                "scenario_ids": [brief.get("scenario_id") for brief in scenario_briefs],
+                "healths": unique_strings([entry.get("health") for entry in domain_entries]),
+                "failure_kinds": unique_strings(
+                    [brief.get("failure_kind") for brief in scenario_briefs]
+                ),
+                "failed_probe_ids": unique_strings(
+                    [
+                        probe_id
+                        for brief in scenario_briefs
+                        for probe_id in as_list(brief.get("failed_probe_ids"))
+                    ]
+                ),
+                "primary_artifacts": unique_strings(
+                    [brief.get("primary_artifact") for brief in scenario_briefs]
+                ),
+                "suggested_next_action": {
+                    "scenario_id": first.get("scenario_id"),
+                    "open_artifact": first.get("primary_artifact"),
+                    "debug_anchor": first.get("debug_anchor"),
+                    "replay_args": first.get("replay_args"),
+                },
+                "evidence": scenario_briefs,
+            }
+        )
+
+    hypotheses.sort(
+        key=lambda hypothesis: (
+            -as_int(hypothesis.get("score")),
+            str(hypothesis.get("focus_domain")),
+        )
+    )
+    for index, hypothesis in enumerate(hypotheses, start=1):
+        hypothesis["rank"] = index
+    return hypotheses
+
+
+def build_observability_analysis(
+    suite_dir: Path, debug_index_summary: dict[str, Any] | None, repo_root: Path
+) -> dict[str, Any]:
+    paths = observability_analysis_paths(suite_dir)
+    debug_paths = debug_index_summary.get("artifacts", {}) if debug_index_summary else {}
+    debug_index_path = Path(
+        debug_paths.get("debug_index_jsonl")
+        or debug_index_paths(suite_dir)["debug_index_jsonl"]
+    )
+    entries, errors = load_jsonl(debug_index_path)
+    if debug_index_summary and debug_index_summary.get("status") != "passed":
+        errors.extend(
+            f"debug index failed: {error}"
+            for error in as_list(debug_index_summary.get("errors"))
+        )
+    if not entries:
+        errors.append("debug index has no scenario entries")
+    ranked_hypotheses = build_ranked_hypotheses(entries)
+    scenario_priority = sorted(
+        [scenario_analysis_brief(entry) for entry in entries],
+        key=lambda brief: (-as_int(brief.get("score")), str(brief.get("scenario_id"))),
+    )
+    health_counts = count_by(entries, "health", lambda entry: entry.get("health"))
+    role_counts = count_by(entries, "role", lambda entry: entry.get("role"))
+    outcome_counts = count_by(entries, "outcome", lambda entry: entry.get("outcome"))
+    focus_domain_counts = count_by(entries, "focus_domain", entry_focus_domain)
+    focus_subsystem_counts = count_by(entries, "focus_subsystem", entry_focus_subsystem)
+    coverage_gap_counts = Counter(
+        gap_id
+        for entry in entries
+        for gap_id in as_list(entry.get("coverage_gap_ids"))
+        if isinstance(gap_id, str) and gap_id
+    )
+    return {
+        "observability_analysis_schema_version": OBSERVABILITY_ANALYSIS_SCHEMA_VERSION,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "git": git_metadata(repo_root),
+        "source_artifacts": {
+            "debug_index_jsonl": str(debug_index_path),
+            "debug_index_report": debug_paths.get("debug_index_report")
+            or debug_index_paths(suite_dir)["debug_index_report"],
+        },
+        "artifacts": paths,
+        "scenario_count": len(entries),
+        "actionable_scenario_count": len(
+            [
+                entry
+                for entry in entries
+                if entry.get("health") != "healthy"
+                or as_dict(entry.get("next_action")).get("action_type")
+            ]
+        ),
+        "baseline_scenario_ids": [
+            entry.get("scenario_id")
+            for entry in entries
+            if entry.get("health") == "healthy"
+            and entry.get("role") in {"baseline", "expected_pass_fixture"}
+        ],
+        "health_counts": health_counts,
+        "role_counts": role_counts,
+        "outcome_counts": outcome_counts,
+        "focus_domain_counts": focus_domain_counts,
+        "focus_subsystem_counts": focus_subsystem_counts,
+        "coverage_gap_counts": [
+            {"coverage_gap_id": gap_id, "count": count}
+            for gap_id, count in sorted(
+                coverage_gap_counts.items(), key=lambda item: (-item[1], item[0])
+            )
+        ],
+        "hypothesis_count": len(ranked_hypotheses),
+        "ranked_hypotheses": ranked_hypotheses,
+        "scenario_priority": scenario_priority,
+        "errors": errors,
+        "ai_handoff": [
+            "Start with ranked_hypotheses[0] when choosing the highest-signal subsystem/domain to inspect.",
+            "Use suggested_next_action.replay_args to regenerate the focused scenario before opening raw telemetry.",
+            "Use scenario_priority for per-scenario ordering when multiple domains tie or the aggregate hypothesis is too broad.",
+        ],
+    }
+
+
+def write_observability_analysis_markdown(path: Path, analysis: dict[str, Any]) -> None:
+    top = (
+        as_dict(as_list(analysis.get("ranked_hypotheses"))[0])
+        if analysis.get("ranked_hypotheses")
+        else {}
+    )
+    lines = [
+        "# Diagnostic Observability Analysis",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {analysis.get('status')} |",
+        f"| Generated at UTC | {analysis.get('generated_at_utc')} |",
+        f"| Git commit | {analysis.get('git', {}).get('short_commit', '')} |",
+        f"| Scenario count | {analysis.get('scenario_count')} |",
+        f"| Actionable scenarios | {analysis.get('actionable_scenario_count')} |",
+        f"| Hypotheses | {analysis.get('hypothesis_count')} |",
+        f"| Top focus domain | {top.get('focus_domain', '-')} |",
+        "",
+        "## Ranked Hypotheses",
+        "",
+        "| Rank | Score | Confidence | Focus domain | Subsystem | Scenarios | Failed probes | Open first |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for hypothesis in as_list(analysis.get("ranked_hypotheses")):
+        if not isinstance(hypothesis, dict):
+            continue
+        next_action = as_dict(hypothesis.get("suggested_next_action"))
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                hypothesis.get("rank"),
+                hypothesis.get("score"),
+                hypothesis.get("confidence"),
+                markdown_cell(str(hypothesis.get("focus_domain") or "-")),
+                markdown_cell(str(hypothesis.get("focus_subsystem") or "-")),
+                markdown_cell(
+                    ",".join(str(value) for value in as_list(hypothesis.get("scenario_ids")))
+                ),
+                markdown_cell(
+                    ",".join(
+                        str(value) for value in as_list(hypothesis.get("failed_probe_ids"))
+                    )
+                ),
+                markdown_cell(str(next_action.get("open_artifact") or "-")),
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Health Counts",
+            "",
+            "| Health | Count | Scenarios |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for row in as_list(analysis.get("health_counts")):
+        if isinstance(row, dict):
+            lines.append(
+                "| {} | {} | {} |".format(
+                    row.get("health"),
+                    row.get("count"),
+                    markdown_cell(
+                        ",".join(str(value) for value in as_list(row.get("scenario_ids")))
+                    ),
+                )
+            )
+
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(analysis.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if analysis.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(analysis.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_observability_analysis(
+    suite_dir: Path, debug_index_summary: dict[str, Any] | None, repo_root: Path
+) -> dict[str, Any]:
+    analysis = build_observability_analysis(suite_dir, debug_index_summary, repo_root)
+    artifacts = as_dict(analysis.get("artifacts"))
+    json_path = Path(str(artifacts["observability_analysis_json"]))
+    report_path = Path(str(artifacts["observability_analysis_report"]))
+    json_path.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_observability_analysis_markdown(report_path, analysis)
+    return analysis
+
+
 def scenarios_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     scenarios = manifest.get("scenarios")
     if not isinstance(scenarios, list):
@@ -595,6 +1020,7 @@ def build_run_summary(
     verify_command: dict[str, Any] | None,
     verification_summary: dict[str, Any],
     debug_index_summary: dict[str, Any] | None,
+    observability_analysis: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
 ) -> dict[str, Any]:
@@ -611,6 +1037,8 @@ def build_run_summary(
         status = "failed"
     if debug_index_summary and debug_index_summary.get("status") != "passed":
         status = "failed"
+    if observability_analysis and observability_analysis.get("status") != "passed":
+        status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
         status = "failed"
 
@@ -624,6 +1052,7 @@ def build_run_summary(
         "commands": commands,
         "verification": verification_summary,
         "debug_index": debug_index_summary,
+        "analysis": observability_analysis,
         "replay": replay_summary,
         "suite": suite,
         "artifacts": artifact_paths(
@@ -632,9 +1061,11 @@ def build_run_summary(
             summary_md,
             replay_summary,
             debug_index_summary,
+            observability_analysis,
         ),
         "ai_handoff": [
             "Start with suite.first_next_action and open its primary_artifact.",
+            "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
             "Use debug_index.artifacts.debug_index_jsonl for one-row-per-scenario routing before raw telemetry.",
             "Use replay.artifacts.bundle_triage_json for the focused replay evidence of the selected scenario.",
             "Use scenario-suite-observer.json for ordered next actions and compact observations.",
@@ -694,6 +1125,22 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Entries | {debug_index.get('entry_count', '-')} |",
             f"| JSONL | {debug_index.get('artifacts', {}).get('debug_index_jsonl', '-')} |",
             f"| Report | {debug_index.get('artifacts', {}).get('debug_index_report', '-')} |",
+        ]
+    )
+    analysis = summary.get("analysis") or {}
+    top_hypothesis = as_dict(as_list(analysis.get("ranked_hypotheses"))[0]) if analysis else {}
+    lines.extend(
+        [
+            "",
+            "## Observability Analysis",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {analysis.get('status', '-')} |",
+            f"| Hypotheses | {analysis.get('hypothesis_count', '-')} |",
+            f"| Top focus domain | {top_hypothesis.get('focus_domain', '-')} |",
+            f"| JSON | {analysis.get('artifacts', {}).get('observability_analysis_json', '-')} |",
+            f"| Report | {analysis.get('artifacts', {}).get('observability_analysis_report', '-')} |",
         ]
     )
     replay = summary.get("replay") or {}
@@ -818,6 +1265,7 @@ def main() -> int:
     verify_command: dict[str, Any] | None = None
     verification_summary: dict[str, Any] = {}
     debug_index_summary: dict[str, Any] | None = None
+    observability_analysis: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
         verify_argv = [
@@ -831,6 +1279,9 @@ def main() -> int:
         if not command_failed(verify_command) and verify_command["stdout_tail"]:
             verification_summary = json.loads("\n".join(verify_command["stdout_tail"]))
             debug_index_summary = write_debug_index(suite_dir)
+            observability_analysis = write_observability_analysis(
+                suite_dir, debug_index_summary, repo_root
+            )
             if not args.skip_replay:
                 manifest = load_json(suite_dir / "scenario-suite.json")
                 observer = load_json(suite_dir / "scenario-suite-observer.json")
@@ -868,6 +1319,7 @@ def main() -> int:
         verify_command,
         verification_summary,
         debug_index_summary,
+        observability_analysis,
         replay_summary,
         repo_root,
     )
@@ -892,6 +1344,12 @@ def main() -> int:
             debug_note = (
                 f" debug_index={debug_index.get('entry_count')}:{debug_index.get('status')}"
             )
+        analysis = summary.get("analysis") or {}
+        analysis_note = ""
+        if analysis:
+            analysis_note = (
+                f" analysis={analysis.get('hypothesis_count')}:{analysis.get('status')}"
+            )
         replay = summary.get("replay") or {}
         replay_note = ""
         if replay:
@@ -902,7 +1360,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{replay_note}"
+            f"{debug_note}{analysis_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 
