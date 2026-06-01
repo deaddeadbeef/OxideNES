@@ -119,6 +119,12 @@ def artifact_paths(
         "diagnostic_telemetry_catalog_report": str(suite_dir / "diagnostic-telemetry-catalog.md"),
         "diagnostic_ai_index_json": str(suite_dir / "diagnostic-ai-observability-index.json"),
         "diagnostic_ai_index_report": str(suite_dir / "diagnostic-ai-observability-index.md"),
+        "diagnostic_ai_coverage_gap_plan_json": str(
+            suite_dir / "diagnostic-ai-coverage-gap-plan.json"
+        ),
+        "diagnostic_ai_coverage_gap_plan_report": str(
+            suite_dir / "diagnostic-ai-coverage-gap-plan.md"
+        ),
         "diagnostic_ai_query_smoke_json": str(suite_dir / "diagnostic-ai-query-smoke.json"),
         "diagnostic_ai_query_smoke_report": str(suite_dir / "diagnostic-ai-query-smoke.md"),
         "diagnostic_ai_diagnosis_smoke_json": str(
@@ -231,6 +237,7 @@ def build_summary(
     top_route_check = load_json(top_route_path) if str(top_route_path) else {}
     scenario_dossiers = load_json(suite_dir / "diagnostic-scenario-dossiers.json")
     ai_index = load_json(suite_dir / "diagnostic-ai-observability-index.json")
+    ai_coverage_gap_plan = load_json(suite_dir / "diagnostic-ai-coverage-gap-plan.json")
     ai_query_smoke = load_json(suite_dir / "diagnostic-ai-query-smoke.json")
     ai_diagnosis_smoke = load_json(suite_dir / "diagnostic-ai-diagnosis-smoke.json")
     ai_fix_handoff_smoke = load_json(suite_dir / "diagnostic-ai-fix-handoff-smoke.json")
@@ -266,6 +273,8 @@ def build_summary(
         errors.append("scenario dossiers status is not passed")
     if ai_index.get("status") != "passed":
         errors.append("diagnostic AI index status is not passed")
+    if ai_coverage_gap_plan.get("status") != "passed":
+        errors.append("diagnostic AI coverage gap plan status is not passed")
     if ai_query_smoke.get("status") != "passed":
         errors.append("diagnostic AI query smoke status is not passed")
     if ai_diagnosis_smoke.get("status") != "passed":
@@ -336,6 +345,31 @@ def build_summary(
             "only_happy_paths": as_dict(ai_index.get("summary")).get("only_happy_paths"),
             "top_route_focus_domain": as_dict(ai_index.get("summary")).get(
                 "top_route_focus_domain"
+            ),
+        },
+        "ai_coverage_gap_plan": {
+            "status": ai_coverage_gap_plan.get("status"),
+            "gap_count": as_dict(ai_coverage_gap_plan.get("summary")).get("gap_count"),
+            "ready_gap_count": as_dict(ai_coverage_gap_plan.get("summary")).get(
+                "ready_gap_count"
+            ),
+            "mapped_gap_count": as_dict(ai_coverage_gap_plan.get("summary")).get(
+                "mapped_gap_count"
+            ),
+            "source_anchor_gap_count": as_dict(
+                ai_coverage_gap_plan.get("summary")
+            ).get("source_anchor_gap_count"),
+            "test_anchor_gap_count": as_dict(ai_coverage_gap_plan.get("summary")).get(
+                "test_anchor_gap_count"
+            ),
+            "telemetry_signal_gap_count": as_dict(
+                ai_coverage_gap_plan.get("summary")
+            ).get("telemetry_signal_gap_count"),
+            "validation_command_count": as_dict(
+                ai_coverage_gap_plan.get("summary")
+            ).get("validation_command_count"),
+            "only_happy_paths": as_dict(ai_coverage_gap_plan.get("summary")).get(
+                "only_happy_paths"
             ),
         },
         "ai_query": {
@@ -715,6 +749,7 @@ def build_summary(
             "Read this e2e report first to decide whether the diagnostic corpus is accepted.",
             "If status is failed, inspect errors and the failed command tails before opening telemetry.",
             "If status is passed, use diagnostic_ai_index_json as the compact joined index before opening larger artifacts.",
+            "Use diagnostic_ai_coverage_gap_plan_json when expanding the diagnostic cartridge with the next missing coverage fixture.",
             "Use diagnostic_ai_query_smoke_json to prove the AI index supports deterministic route, scenario, probe, and coverage queries.",
             "Use diagnostic_ai_diagnosis_smoke_json to prove an AI-selected route can regenerate replay evidence and mapped narrow-test results.",
             "Use diagnostic_ai_fix_handoff_smoke_json to resolve the selected route into source/test line anchors and fix-loop commands.",
@@ -738,6 +773,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     observability = as_dict(summary.get("observability"))
     routes = as_dict(summary.get("routes"))
     ai_index = as_dict(summary.get("ai_index"))
+    ai_coverage_gap_plan = as_dict(summary.get("ai_coverage_gap_plan"))
     ai_query = as_dict(summary.get("ai_query"))
     ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
     ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
@@ -804,6 +840,19 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Failed probe ids | {ai_index.get('failed_probe_ids')} |",
         f"| Only happy paths | {ai_index.get('only_happy_paths')} |",
         f"| Top route focus domain | {ai_index.get('top_route_focus_domain')} |",
+        "",
+        "## AI Coverage Gap Plan",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_coverage_gap_plan.get('status')} |",
+        f"| Ready gaps | {ai_coverage_gap_plan.get('ready_gap_count')}/{ai_coverage_gap_plan.get('gap_count')} |",
+        f"| Mapped gaps | {ai_coverage_gap_plan.get('mapped_gap_count')} |",
+        f"| Source anchors | {ai_coverage_gap_plan.get('source_anchor_gap_count')} |",
+        f"| Test anchors | {ai_coverage_gap_plan.get('test_anchor_gap_count')} |",
+        f"| Telemetry signal mappings | {ai_coverage_gap_plan.get('telemetry_signal_gap_count')} |",
+        f"| Validation commands | {ai_coverage_gap_plan.get('validation_command_count')} |",
+        f"| Only happy paths | {ai_coverage_gap_plan.get('only_happy_paths')} |",
         "",
         "## AI Query",
         "",
@@ -1173,6 +1222,26 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "build_diagnostic_ai_coverage_gap_plan",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_coverage_gap_plan.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.md"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(skipped_command("build_diagnostic_ai_coverage_gap_plan", "AI index failed"))
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "query_diagnostic_ai_index_smoke",
                 [
                     sys.executable,
@@ -1185,7 +1254,7 @@ def main() -> int:
             )
         )
     else:
-        commands.append(skipped_command("query_diagnostic_ai_index_smoke", "AI index failed"))
+        commands.append(skipped_command("query_diagnostic_ai_index_smoke", "AI coverage gap plan failed"))
 
     if command_passed(commands[-1]):
         commands.append(
@@ -1487,6 +1556,7 @@ def main() -> int:
         ai_debug_packet_verification = as_dict(summary.get("ai_debug_packet_verification"))
         ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
         ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
+        ai_coverage_gap_plan = as_dict(summary.get("ai_coverage_gap_plan"))
         ai_session_plan = as_dict(summary.get("ai_session_plan"))
         ai_session_smoke = as_dict(summary.get("ai_session_smoke"))
         ai_session_smoke_matrix = as_dict(summary.get("ai_session_smoke_matrix"))
@@ -1498,6 +1568,7 @@ def main() -> int:
             f"scenarios={observability.get('scenario_count')} "
             f"dossiers={observability.get('scenario_dossiers')}:{observability.get('actionable_dossiers')} "
             f"routes={routes.get('matrix_passed_route_count')}:{routes.get('top_route_verified')} "
+            f"ai_gap_plan={ai_coverage_gap_plan.get('status')}:{ai_coverage_gap_plan.get('ready_gap_count')}/{ai_coverage_gap_plan.get('gap_count')} "
             f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')} "
             f"fix_handoff={ai_fix_handoff.get('status')}:{ai_fix_handoff.get('source_match_count')} "
             f"ai_route_matrix={ai_route_matrix.get('status')}:{ai_route_matrix.get('passed_route_count')}/{ai_route_matrix.get('route_count')} "

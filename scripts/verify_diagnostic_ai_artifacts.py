@@ -15,6 +15,7 @@ AI_ARTIFACT_VERIFICATION_SCHEMA_VERSION = 1
 EXPECTED_SCENARIO_COUNT = 18
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 16
 EXPECTED_FOCUS_DOMAIN_COUNT = 16
+EXPECTED_COVERAGE_GAP_COUNT = 6
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -173,6 +174,7 @@ def artifact_value(*values: Any) -> str:
 def input_artifacts(
     suite_dir: Path,
     ai_index: dict[str, Any],
+    ai_coverage_gap_plan: dict[str, Any],
     ai_query: dict[str, Any],
     ai_diagnosis: dict[str, Any],
     ai_fix_handoff: dict[str, Any],
@@ -191,6 +193,7 @@ def input_artifacts(
     check_ai_debug_packet_matrix: bool,
 ) -> dict[str, str]:
     index_artifacts = as_dict(ai_index.get("artifacts"))
+    coverage_gap_plan_artifacts = as_dict(ai_coverage_gap_plan.get("artifacts"))
     query_artifacts = as_dict(ai_query.get("artifacts"))
     diagnosis_artifacts = as_dict(ai_diagnosis.get("artifacts"))
     fix_artifacts = as_dict(ai_fix_handoff.get("artifacts"))
@@ -214,6 +217,14 @@ def input_artifacts(
         "diagnostic_ai_index_report": artifact_value(
             index_artifacts.get("diagnostic_ai_index_report"),
             str(suite_dir / "diagnostic-ai-observability-index.md"),
+        ),
+        "diagnostic_ai_coverage_gap_plan_json": artifact_value(
+            coverage_gap_plan_artifacts.get("diagnostic_ai_coverage_gap_plan_json"),
+            str(suite_dir / "diagnostic-ai-coverage-gap-plan.json"),
+        ),
+        "diagnostic_ai_coverage_gap_plan_report": artifact_value(
+            coverage_gap_plan_artifacts.get("diagnostic_ai_coverage_gap_plan_report"),
+            str(suite_dir / "diagnostic-ai-coverage-gap-plan.md"),
         ),
         "diagnostic_ai_query_smoke_json": artifact_value(
             query_artifacts.get("diagnostic_ai_query_smoke_json"),
@@ -724,6 +735,7 @@ def build_summary(
 ) -> dict[str, Any]:
     suite_dir = args.suite_dir
     ai_index_path = suite_dir / "diagnostic-ai-observability-index.json"
+    ai_coverage_gap_plan_path = suite_dir / "diagnostic-ai-coverage-gap-plan.json"
     ai_query_path = suite_dir / "diagnostic-ai-query-smoke.json"
     ai_diagnosis_path = suite_dir / "diagnostic-ai-diagnosis-smoke.json"
     ai_fix_handoff_path = suite_dir / "diagnostic-ai-fix-handoff-smoke.json"
@@ -740,6 +752,7 @@ def build_summary(
     e2e_report_path = suite_dir / "diagnostic-e2e-report.json"
 
     ai_index = load_json(ai_index_path)
+    ai_coverage_gap_plan = load_json(ai_coverage_gap_plan_path)
     ai_query = load_json(ai_query_path)
     ai_diagnosis = load_json(ai_diagnosis_path)
     ai_fix_handoff = load_json(ai_fix_handoff_path)
@@ -760,6 +773,7 @@ def build_summary(
     )
     source_artifacts = [
         ai_index,
+        ai_coverage_gap_plan,
         ai_query,
         ai_diagnosis,
         ai_fix_handoff,
@@ -777,6 +791,7 @@ def build_summary(
     artifacts_to_check = input_artifacts(
         suite_dir,
         ai_index,
+        ai_coverage_gap_plan,
         ai_query,
         ai_diagnosis,
         ai_fix_handoff,
@@ -816,6 +831,7 @@ def build_summary(
 
     for path_name, payload in (
         ("diagnostic_ai_index", ai_index),
+        ("diagnostic_ai_coverage_gap_plan", ai_coverage_gap_plan),
         ("diagnostic_ai_query_smoke", ai_query),
         ("diagnostic_ai_diagnosis_smoke", ai_diagnosis),
         ("diagnostic_ai_fix_handoff_smoke", ai_fix_handoff),
@@ -935,6 +951,10 @@ def build_summary(
         )
 
     index_summary = as_dict(ai_index.get("summary"))
+    coverage_gap_plan_summary = as_dict(ai_coverage_gap_plan.get("summary"))
+    coverage_gap_plan_gaps = [
+        row for row in as_list(ai_coverage_gap_plan.get("gaps")) if isinstance(row, dict)
+    ]
     query_summary = as_dict(ai_query.get("summary"))
     coverage = as_dict(ai_index.get("coverage_limits"))
     add_check(
@@ -972,6 +992,54 @@ def build_summary(
         bool(as_list(coverage.get("coverage_gaps"))),
         coverage.get("known_gap_count"),
     )
+    if ai_coverage_gap_plan or check_e2e_report:
+        weak_gap_rows = [
+            row.get("gap_id")
+            for row in coverage_gap_plan_gaps
+            if row.get("ready_for_test_design") is not True
+            or not row.get("suggested_next_test")
+            or not as_list(row.get("mapped_focus_domains"))
+            or not as_list(row.get("source_files"))
+            or not as_list(row.get("test_files"))
+            or not as_list(row.get("telemetry_signals"))
+            or not as_list(row.get("acceptance_commands"))
+        ]
+        add_check(
+            checks,
+            errors,
+            "coverage_gap_plan_counts",
+            coverage_gap_plan_summary.get("gap_count") == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("expected_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("known_gap_count")
+            == coverage.get("known_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and len(coverage_gap_plan_gaps) == EXPECTED_COVERAGE_GAP_COUNT,
+            coverage_gap_plan_summary,
+        )
+        add_check(
+            checks,
+            errors,
+            "coverage_gap_plan_not_happy_path_only",
+            coverage_gap_plan_summary.get("only_happy_paths") is False,
+            coverage_gap_plan_summary.get("only_happy_paths"),
+        )
+        add_check(
+            checks,
+            errors,
+            "coverage_gap_plan_all_gaps_ready",
+            coverage_gap_plan_summary.get("ready_gap_count") == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("mapped_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("source_anchor_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("test_anchor_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and coverage_gap_plan_summary.get("telemetry_signal_gap_count")
+            == EXPECTED_COVERAGE_GAP_COUNT
+            and not weak_gap_rows,
+            {"summary": coverage_gap_plan_summary, "weak_gap_rows": weak_gap_rows},
+        )
     localization_summary = as_dict(ai_localization_eval.get("summary"))
     if ai_localization_eval or check_e2e_report:
         add_check(
@@ -1769,6 +1837,21 @@ def build_summary(
             ),
             as_dict(e2e_report.get("ai_query")),
         )
+        e2e_coverage_gap_plan = as_dict(e2e_report.get("ai_coverage_gap_plan"))
+        if ai_coverage_gap_plan:
+            add_check(
+                checks,
+                errors,
+                "e2e_ai_coverage_gap_plan_matches",
+                e2e_coverage_gap_plan.get("status") == ai_coverage_gap_plan.get("status")
+                and e2e_coverage_gap_plan.get("gap_count")
+                == coverage_gap_plan_summary.get("gap_count")
+                and e2e_coverage_gap_plan.get("ready_gap_count")
+                == coverage_gap_plan_summary.get("ready_gap_count")
+                and e2e_coverage_gap_plan.get("telemetry_signal_gap_count")
+                == coverage_gap_plan_summary.get("telemetry_signal_gap_count"),
+                e2e_coverage_gap_plan,
+            )
         add_check(
             checks,
             errors,
@@ -1975,6 +2058,28 @@ def build_summary(
             "top_route_scenario": identity.get("scenario_id"),
             "top_route_focus_domain": identity.get("focus_domain"),
             "top_route_probe": identity.get("probe_id"),
+            "ai_coverage_gap_plan_status": ai_coverage_gap_plan.get("status"),
+            "ai_coverage_gap_plan_gap_count": coverage_gap_plan_summary.get(
+                "gap_count"
+            ),
+            "ai_coverage_gap_plan_ready_gap_count": coverage_gap_plan_summary.get(
+                "ready_gap_count"
+            ),
+            "ai_coverage_gap_plan_mapped_gap_count": coverage_gap_plan_summary.get(
+                "mapped_gap_count"
+            ),
+            "ai_coverage_gap_plan_source_anchor_gap_count": coverage_gap_plan_summary.get(
+                "source_anchor_gap_count"
+            ),
+            "ai_coverage_gap_plan_test_anchor_gap_count": coverage_gap_plan_summary.get(
+                "test_anchor_gap_count"
+            ),
+            "ai_coverage_gap_plan_telemetry_signal_gap_count": coverage_gap_plan_summary.get(
+                "telemetry_signal_gap_count"
+            ),
+            "ai_coverage_gap_plan_validation_command_count": coverage_gap_plan_summary.get(
+                "validation_command_count"
+            ),
             "source_match_count": as_dict(ai_fix_handoff.get("source_scan")).get(
                 "source_match_count"
             ),
@@ -2153,6 +2258,7 @@ def build_summary(
         "ai_handoff": [
             "Use this verifier before trusting a downloaded diagnostic scenario-suite artifact for automated debugging.",
             "A passed verifier proves the AI index, query smoke, diagnosis smoke, and fix handoff agree on route, scenario, focus domain, and probe.",
+            "When diagnostic-ai-coverage-gap-plan.json is present, this verifier also proves known coverage gaps are mapped to current source/test anchors, telemetry signals, and validation commands.",
             "When diagnostic-ai-route-matrix.json is present, this verifier also proves every AI route can regenerate diagnosis and fix-handoff artifacts.",
             "When diagnostic-ai-debug-packet.json is present, this verifier also proves the selected route has a relocatable packet with digest-checked evidence and source/test context.",
             "When diagnostic-ai-debug-packet-matrix.json is present, this verifier also proves every AI route has a relocatable packet with source/test context.",
@@ -2234,6 +2340,13 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Top scenario | {markdown_cell(totals.get('top_route_scenario'))} |",
         f"| Top focus domain | {markdown_cell(totals.get('top_route_focus_domain'))} |",
         f"| Top probe | {markdown_cell(totals.get('top_route_probe'))} |",
+        f"| AI coverage gap plan | {totals.get('ai_coverage_gap_plan_status')} |",
+        f"| AI coverage ready gaps | {totals.get('ai_coverage_gap_plan_ready_gap_count')}/{totals.get('ai_coverage_gap_plan_gap_count')} |",
+        f"| AI coverage mapped gaps | {totals.get('ai_coverage_gap_plan_mapped_gap_count')} |",
+        f"| AI coverage source anchors | {totals.get('ai_coverage_gap_plan_source_anchor_gap_count')} |",
+        f"| AI coverage test anchors | {totals.get('ai_coverage_gap_plan_test_anchor_gap_count')} |",
+        f"| AI coverage telemetry mappings | {totals.get('ai_coverage_gap_plan_telemetry_signal_gap_count')} |",
+        f"| AI coverage validation commands | {totals.get('ai_coverage_gap_plan_validation_command_count')} |",
         f"| Fix handoff test matches | {totals.get('test_match_count')} |",
         "",
         "## Automation Readiness",

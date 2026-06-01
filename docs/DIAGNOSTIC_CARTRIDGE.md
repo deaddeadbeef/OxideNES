@@ -111,7 +111,11 @@ suite root. The same command also writes
 `diagnostic-ai-observability-index.json` and
 `diagnostic-ai-observability-index.md`, a compact joined index across the
 scenario dossiers, route table, telemetry catalog, coverage ledger, and route
-evidence verifier. It also writes `diagnostic-ai-query-smoke.json` and
+evidence verifier. It also writes `diagnostic-ai-coverage-gap-plan.json` and
+`diagnostic-ai-coverage-gap-plan.md`, turning the six known coverage gaps into
+ranked test-design handoffs with current source/test anchors, telemetry
+signals, and validation commands. This keeps the gaps explicit and does not
+claim they are fixed. It also writes `diagnostic-ai-query-smoke.json` and
 `diagnostic-ai-query-smoke.md`, proving that the index can answer deterministic
 summary, top-route, scenario, focus-domain, probe, and coverage queries. It then
 writes `diagnostic-ai-diagnosis-smoke.json` and
@@ -150,15 +154,29 @@ with the selected focus domain and probe. It then writes
 proving every accepted startup plan route can be executed by the same automated
 consumer path. It then writes
 `diagnostic-ai-artifact-verification.json` and
-`diagnostic-ai-artifact-verification.md`, proving the AI index, query smoke,
-diagnosis smoke, fix handoff, AI route matrix, AI debug packet, packet
-self-verification, all-route AI debug packet matrix, localization evaluation,
-session plan, session smoke, and session smoke matrix agree on route identities, artifact paths, and stop
+`diagnostic-ai-artifact-verification.md`, proving the AI index, AI coverage gap
+plan, query smoke, diagnosis smoke, fix handoff, AI route matrix, AI debug
+packet, packet self-verification, all-route AI debug packet matrix,
+localization evaluation, session plan, session smoke, and session smoke matrix
+agree on route identities, artifact paths, and stop
 conditions. Start with the e2e report to decide whether the diagnostic corpus
-is trusted, then use the AI artifact verification, AI session smoke matrix, AI
-session smoke, AI session plan, AI debug packet matrix, AI debug packet, AI
-route matrix, AI index, query CLI, diagnosis runner, or fix handoff before
-opening full telemetry.
+is trusted, then use the AI artifact verification, AI coverage gap plan, AI
+session smoke matrix, AI session smoke, AI session plan, AI debug packet
+matrix, AI debug packet, AI route matrix, AI index, query CLI, diagnosis
+runner, or fix handoff before opening full telemetry.
+
+To build only the AI coverage-gap plan from an accepted observability suite,
+run:
+
+```powershell
+python scripts/build_diagnostic_ai_coverage_gap_plan.py --suite-dir target/diagnostics/scenario-suite
+```
+
+The builder writes `diagnostic-ai-coverage-gap-plan.json` and
+`diagnostic-ai-coverage-gap-plan.md`. Each known gap is mapped to the closest
+focus domains, source files, tests, diagnostic files, telemetry signals, and
+acceptance commands so the next cartridge fixture can be designed from one
+artifact without overstating current coverage.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -543,7 +561,13 @@ evidence without replaying the cartridge again.
 `run_diagnostic_e2e.py` additionally writes `diagnostic-e2e-report.json`,
 `diagnostic-e2e-report.md`, `diagnostic-ai-observability-index.json`, and
 `diagnostic-ai-observability-index.md` after the observability and route
-evidence gates finish. It then runs `query_diagnostic_ai_index.py smoke` and
+evidence gates finish. It then runs
+`build_diagnostic_ai_coverage_gap_plan.py` and writes
+`diagnostic-ai-coverage-gap-plan.json` plus
+`diagnostic-ai-coverage-gap-plan.md`, proving the known coverage gaps are
+ranked, mapped to current source/test anchors, linked to telemetry signals, and
+ready for the next cartridge test-design pass. It then runs
+`query_diagnostic_ai_index.py smoke` and
 writes `diagnostic-ai-query-smoke.json` plus `diagnostic-ai-query-smoke.md`.
 It also runs `run_diagnostic_ai_diagnosis.py` for the top route and writes
 `diagnostic-ai-diagnosis-smoke.json` plus
@@ -594,8 +618,11 @@ It then runs `verify_diagnostic_ai_artifacts.py` and writes
 is internally consistent before automated debugger or fix loops consume it.
 The AI index is the smallest single artifact for automated debuggers that need
 to join scenario health, failed probes, start-artifact pointers, replay
-arguments, mapped source files, narrow tests, and known coverage limits. The
-query smoke proves the accepted artifact can be interrogated by scenario id,
+arguments, mapped source files, narrow tests, and known coverage limits. The AI
+coverage gap plan is the first artifact to open when extending the diagnostic
+cartridge itself: it keeps known missing fixture classes explicit, mapped to
+current code/tests, and backed by concrete telemetry and validation commands.
+The query smoke proves the accepted artifact can be interrogated by scenario id,
 focus domain, failed probe id, top route, and coverage posture. The diagnosis
 smoke proves one selected route can be regenerated into fresh telemetry and
 bounded test results without hand-joining the underlying artifacts. The fix
@@ -615,11 +642,11 @@ The AI session smoke proves the selected startup contract can drive replay and
 narrow-test execution before a debugger edits emulator code.
 The AI session smoke matrix proves that same executable startup contract for
 every accepted route, not only the top route.
-The AI artifact verification proves the uploaded bundle can be trusted as a coherent
-graph before an automated debugger starts
-making emulator changes, and its `automation_readiness` section gives automated
-agents one compact route-by-route readiness map after a CI artifact is
-downloaded.
+The AI artifact verification proves the uploaded bundle can be trusted as a
+coherent graph before an automated debugger starts making emulator changes,
+including the coverage gap plan's ready/mapped gap counts. Its
+`automation_readiness` section gives automated agents one compact
+route-by-route readiness map after a CI artifact is downloaded.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
