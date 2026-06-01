@@ -117,10 +117,12 @@ summary, top-route, scenario, focus-domain, probe, and coverage queries. It then
 writes `diagnostic-ai-diagnosis-smoke.json` and
 `diagnostic-ai-diagnosis-smoke.md`, proving the accepted AI index can select a
 route, regenerate a focused replay bundle, run the mapped narrow tests, and
-emit a compact diagnosis handoff. Start with the e2e report to decide whether
-the diagnostic corpus is trusted, then use the AI index, query CLI, or diagnosis
-runner to choose a scenario card, failed probe, or focus-domain route before
-opening full telemetry.
+emit a compact diagnosis handoff. It also writes
+`diagnostic-ai-fix-handoff-smoke.json` and
+`diagnostic-ai-fix-handoff-smoke.md`, proving the selected route can be resolved
+into source/test line anchors and fix-loop commands. Start with the e2e report
+to decide whether the diagnostic corpus is trusted, then use the AI index, query
+CLI, diagnosis runner, or fix handoff before opening full telemetry.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -151,6 +153,20 @@ narrow tests, and writes `diagnostic-ai-diagnosis.json` plus
 handle. The JSON report joins the selected scenario, probe, route, source files,
 test files, search terms, fresh replay artifacts, stop conditions, and ordered
 next actions so an AI debugger can start from a single compact artifact.
+
+To convert a passed diagnosis into source/test anchors for an automated fix
+loop, run:
+
+```powershell
+python scripts/build_diagnostic_ai_fix_handoff.py --suite-dir target/diagnostics/scenario-suite
+```
+
+By default this consumes the e2e `diagnostic-ai-diagnosis-smoke.json`. Use
+`--diagnosis-json <FILE>` to target a custom diagnosis run. It writes
+`diagnostic-ai-fix-handoff.json` plus `diagnostic-ai-fix-handoff.md`, including
+bounded source and test line matches for the selected search terms, mapped
+narrow-test commands, replay commands, verification commands, stop conditions,
+and a fix loop that tells an AI debugger what to inspect before editing.
 
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
@@ -364,14 +380,20 @@ writes `diagnostic-ai-query-smoke.json` plus `diagnostic-ai-query-smoke.md`.
 It also runs `run_diagnostic_ai_diagnosis.py` for the top route and writes
 `diagnostic-ai-diagnosis-smoke.json` plus
 `diagnostic-ai-diagnosis-smoke.md`, proving the compact index can drive an
-end-to-end replay/test diagnosis handoff.
+end-to-end replay/test diagnosis handoff. It then runs
+`build_diagnostic_ai_fix_handoff.py` and writes
+`diagnostic-ai-fix-handoff-smoke.json` plus
+`diagnostic-ai-fix-handoff-smoke.md`, proving the selected route has concrete
+source/test anchors and bounded fix commands.
 The AI index is the smallest single artifact for automated debuggers that need
 to join scenario health, failed probes, start-artifact pointers, replay
 arguments, mapped source files, narrow tests, and known coverage limits. The
 query smoke proves the accepted artifact can be interrogated by scenario id,
 focus domain, failed probe id, top route, and coverage posture. The diagnosis
 smoke proves one selected route can be regenerated into fresh telemetry and
-bounded test results without hand-joining the underlying artifacts.
+bounded test results without hand-joining the underlying artifacts. The fix
+handoff smoke proves that diagnosis can be translated into code-inspection
+anchors and exact regression commands.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
