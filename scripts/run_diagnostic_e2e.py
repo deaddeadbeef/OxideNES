@@ -459,6 +459,18 @@ def build_summary(
             "probe_id": as_dict(ai_artifact_verification.get("summary")).get(
                 "top_route_probe"
             ),
+            "automation_readiness_status": as_dict(
+                ai_artifact_verification.get("summary")
+            ).get("automation_readiness_status"),
+            "automation_ready_route_count": as_dict(
+                ai_artifact_verification.get("summary")
+            ).get("automation_ready_route_count"),
+            "automation_route_count": as_dict(ai_artifact_verification.get("summary")).get(
+                "automation_route_count"
+            ),
+            "automation_not_ready_route_count": as_dict(
+                ai_artifact_verification.get("summary")
+            ).get("automation_not_ready_route_count"),
         },
         "top_route": {
             "route_id": top_route.get("route_id"),
@@ -481,6 +493,7 @@ def build_summary(
             "Use diagnostic_ai_debug_packet_json when an automated debugger needs one relocatable packet for the selected route.",
             "Use diagnostic_ai_debug_packet_matrix_json to prove every AI route can be packaged into a relocatable debug packet with source/test context.",
             "Use diagnostic_ai_artifact_verification_json to prove the AI-facing artifact graph is internally consistent before automated fixes.",
+            "Use diagnostic_ai_artifact_verification_json automation_readiness when an automated debugger needs one compact route-by-route readiness map.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
             "Use route_evidence_verification_json to prove the investigation routes can regenerate focused replay evidence.",
         ],
@@ -652,6 +665,9 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Scenario | {ai_artifact_verification.get('scenario_id')} |",
         f"| Focus domain | {ai_artifact_verification.get('focus_domain')} |",
         f"| Probe | {ai_artifact_verification.get('probe_id')} |",
+        f"| Automation readiness | {ai_artifact_verification.get('automation_readiness_status')} |",
+        f"| Automation-ready routes | {ai_artifact_verification.get('automation_ready_route_count')}/{ai_artifact_verification.get('automation_route_count')} |",
+        f"| Automation not-ready routes | {ai_artifact_verification.get('automation_not_ready_route_count')} |",
         "",
         "## Commands",
         "",
@@ -1039,6 +1055,7 @@ def main() -> int:
             f"ai_route_matrix={ai_route_matrix.get('status')}:{ai_route_matrix.get('passed_route_count')}/{ai_route_matrix.get('route_count')} "
             f"ai_debug_packet={ai_debug_packet.get('status')}:{ai_debug_packet.get('file_count')} "
             f"ai_debug_packet_matrix={ai_debug_packet_matrix.get('status')}:{ai_debug_packet_matrix.get('passed_route_count')}/{ai_debug_packet_matrix.get('route_count')} "
+            f"ai_readiness={ai_artifact_verification.get('automation_readiness_status')}:{ai_artifact_verification.get('automation_ready_route_count')}/{ai_artifact_verification.get('automation_route_count')} "
             f"ai_artifacts={ai_artifact_verification.get('status')}:{ai_artifact_verification.get('missing_artifact_count')}"
         )
     return int(summary["recommended_exit_code"])
