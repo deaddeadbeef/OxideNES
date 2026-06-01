@@ -19,6 +19,7 @@ REPLAY_RUN_SCHEMA_VERSION = 1
 DEBUG_INDEX_SCHEMA_VERSION = 1
 OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
 OBSERVABILITY_COMPARISON_SCHEMA_VERSION = 1
+DIAGNOSTIC_COVERAGE_LEDGER_SCHEMA_VERSION = 1
 DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION = 1
 INVESTIGATION_PLAN_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
@@ -257,6 +258,7 @@ def artifact_paths(
     replay_summary: dict[str, Any] | None,
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    diagnostic_coverage_ledger: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
@@ -279,6 +281,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if observability_analysis:
         for name, path in observability_analysis.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if diagnostic_coverage_ledger:
+        for name, path in diagnostic_coverage_ledger.get("artifacts", {}).items():
             artifacts[name] = str(path)
     if diagnostic_code_map:
         for name, path in diagnostic_code_map.get("artifacts", {}).items():
@@ -331,6 +336,13 @@ def observability_analysis_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "observability_analysis_json": str(suite_dir / "diagnostic-observability-analysis.json"),
         "observability_analysis_report": str(suite_dir / "diagnostic-observability-analysis.md"),
+    }
+
+
+def diagnostic_coverage_ledger_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "diagnostic_coverage_ledger_json": str(suite_dir / "diagnostic-coverage-ledger.json"),
+        "diagnostic_coverage_ledger_report": str(suite_dir / "diagnostic-coverage-ledger.md"),
     }
 
 
@@ -981,6 +993,377 @@ def write_observability_analysis(
     json_path.write_text(json.dumps(analysis, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_observability_analysis_markdown(report_path, analysis)
     return analysis
+
+
+def focus_domain_subsystem(focus_domain: Any) -> str:
+    if not isinstance(focus_domain, str) or not focus_domain:
+        return "unknown"
+    if "." in focus_domain:
+        return focus_domain.split(".", 1)[0]
+    return focus_domain
+
+
+def scenario_telemetry_path(suite_dir: Path, scenario: dict[str, Any]) -> Path | None:
+    telemetry_json = as_dict(scenario.get("artifacts")).get("telemetry_json")
+    if not isinstance(telemetry_json, str) or not telemetry_json:
+        return None
+    return artifact_path(suite_dir, telemetry_json)
+
+
+def suite_artifact_text(suite_dir: Path, value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return str(artifact_path(suite_dir, value))
+
+
+def build_diagnostic_coverage_ledger(suite_dir: Path) -> dict[str, Any]:
+    manifest = load_json(suite_dir / "scenario-suite.json")
+    observer = load_json(suite_dir / "scenario-suite-observer.json")
+    scenarios = [scenario for scenario in as_list(manifest.get("scenarios")) if isinstance(scenario, dict)]
+    observations = [
+        observation
+        for observation in as_list(observer.get("observations"))
+        if isinstance(observation, dict)
+    ]
+    observations_by_id = {
+        observation.get("scenario_id"): observation
+        for observation in observations
+        if isinstance(observation.get("scenario_id"), str)
+    }
+    scenarios_by_id = {
+        scenario.get("id"): scenario
+        for scenario in scenarios
+        if isinstance(scenario.get("id"), str)
+    }
+    baseline_id = manifest.get("baseline_scenario_id")
+    baseline_scenario_id = baseline_id if isinstance(baseline_id, str) and baseline_id else "pass"
+    baseline_scenario = as_dict(scenarios_by_id.get(baseline_scenario_id))
+    baseline_telemetry_path = scenario_telemetry_path(suite_dir, baseline_scenario)
+    baseline_telemetry = load_json(baseline_telemetry_path) if baseline_telemetry_path else {}
+    baseline_analysis = as_dict(baseline_telemetry.get("analysis"))
+    baseline_coverage = as_dict(baseline_analysis.get("coverage"))
+    coverage_gaps = [
+        gap
+        for gap in as_list(baseline_analysis.get("coverage_gaps"))
+        if isinstance(gap, dict)
+    ]
+
+    errors: list[str] = []
+    if not manifest:
+        errors.append(f"missing scenario-suite.json in {suite_dir}")
+    if not observer:
+        errors.append(f"missing scenario-suite-observer.json in {suite_dir}")
+    if baseline_telemetry_path is None or not baseline_telemetry_path.is_file():
+        errors.append(f"missing baseline telemetry for {baseline_scenario_id}")
+    if not baseline_telemetry:
+        errors.append(f"invalid baseline telemetry for {baseline_scenario_id}")
+
+    positive_scenarios = [scenario for scenario in scenarios if scenario.get("expected_passed") is True]
+    negative_scenarios = [scenario for scenario in scenarios if scenario.get("expected_passed") is False]
+    if not positive_scenarios:
+        errors.append("coverage ledger requires at least one expected-pass scenario")
+    if not negative_scenarios:
+        errors.append("coverage ledger requires at least one expected-failure scenario")
+    if not coverage_gaps:
+        errors.append("coverage ledger requires baseline analysis.coverage_gaps")
+
+    role_counts = Counter(
+        observation.get("role")
+        for observation in observations
+        if isinstance(observation.get("role"), str)
+    )
+    failure_kind_counts = Counter(
+        scenario.get("failure_kind") or scenario.get("expected_health") or "unknown"
+        for scenario in negative_scenarios
+    )
+    test_subsystem_by_id = {
+        test.get("id"): test.get("subsystem")
+        for test in as_list(baseline_telemetry.get("tests"))
+        if isinstance(test, dict)
+        and isinstance(test.get("id"), int)
+        and isinstance(test.get("subsystem"), str)
+    }
+    negative_focus_domains = unique_strings(
+        [
+            scenario.get("expected_focus_domain") or scenario.get("actual_focus_domain")
+            for scenario in negative_scenarios
+        ]
+    )
+    negative_by_subsystem = Counter(
+        str(
+            test_subsystem_by_id.get(
+                scenario.get("expected_focus_test_id") or scenario.get("actual_focus_test_id")
+            )
+            or focus_domain_subsystem(
+                scenario.get("expected_focus_domain") or scenario.get("actual_focus_domain")
+            )
+        )
+        for scenario in negative_scenarios
+    )
+
+    negative_by_test_id: dict[int, list[str]] = {}
+    for scenario in negative_scenarios:
+        focus_test_id = scenario.get("expected_focus_test_id") or scenario.get("actual_focus_test_id")
+        if isinstance(focus_test_id, int) and isinstance(scenario.get("id"), str):
+            negative_by_test_id.setdefault(focus_test_id, []).append(str(scenario["id"]))
+
+    tests: list[dict[str, Any]] = []
+    for test in as_list(baseline_telemetry.get("tests")):
+        if not isinstance(test, dict):
+            continue
+        test_id = test.get("id")
+        mapped_scenarios = sorted(negative_by_test_id.get(test_id, [])) if isinstance(test_id, int) else []
+        tests.append(
+            {
+                "id": test_id,
+                "name": test.get("name"),
+                "subsystem": test.get("subsystem"),
+                "tier": test.get("tier"),
+                "intent": test.get("intent"),
+                "expected_observations": as_list(test.get("expected_observations")),
+                "result_addr": test.get("result_addr"),
+                "baseline_passed": test.get("passed"),
+                "negative_scenario_ids": mapped_scenarios,
+                "has_negative_fixture": bool(mapped_scenarios),
+            }
+        )
+    if not tests:
+        errors.append("coverage ledger requires baseline telemetry tests")
+
+    subsystem_rows: list[dict[str, Any]] = []
+    for row in as_list(baseline_coverage.get("subsystem_summary")):
+        if not isinstance(row, dict):
+            continue
+        subsystem = row.get("subsystem")
+        negative_count = negative_by_subsystem.get(str(subsystem), 0)
+        subsystem_rows.append(
+            {
+                **row,
+                "negative_fixture_count": negative_count,
+                "has_negative_fixture": negative_count > 0,
+            }
+        )
+    for subsystem, count in sorted(negative_by_subsystem.items()):
+        if not any(row.get("subsystem") == subsystem for row in subsystem_rows):
+            subsystem_rows.append(
+                {
+                    "subsystem": subsystem,
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "negative_fixture_count": count,
+                    "has_negative_fixture": True,
+                }
+            )
+
+    negative_fixtures = []
+    for scenario in negative_scenarios:
+        scenario_id = scenario.get("id")
+        observation = as_dict(observations_by_id.get(scenario_id))
+        scenario_artifacts = as_dict(scenario.get("artifacts"))
+        negative_fixtures.append(
+            {
+                "scenario_id": scenario_id,
+                "title": scenario.get("title"),
+                "purpose": scenario.get("purpose"),
+                "expected_health": scenario.get("expected_health"),
+                "expected_focus_domain": scenario.get("expected_focus_domain"),
+                "expected_focus_test_id": scenario.get("expected_focus_test_id"),
+                "failure_kind": scenario.get("failure_kind"),
+                "failed_probe_ids": as_list(scenario.get("failed_probe_ids")),
+                "replay_args": as_list(scenario.get("replay_args")),
+                "primary_artifact": suite_artifact_text(
+                    suite_dir,
+                    observation.get("next_artifact") or scenario_artifacts.get("triage_json"),
+                ),
+                "telemetry_json": suite_artifact_text(
+                    suite_dir, scenario_artifacts.get("telemetry_json")
+                ),
+                "comparison_json": suite_artifact_text(
+                    suite_dir, scenario_artifacts.get("comparison_json")
+                ),
+            }
+        )
+
+    artifacts = diagnostic_coverage_ledger_paths(suite_dir)
+    artifacts.update(
+        {
+            "baseline_telemetry_json": str(baseline_telemetry_path) if baseline_telemetry_path else "",
+            "scenario_suite_json": str(suite_dir / "scenario-suite.json"),
+            "scenario_suite_observer_json": str(suite_dir / "scenario-suite-observer.json"),
+        }
+    )
+
+    return {
+        "diagnostic_coverage_ledger_schema_version": DIAGNOSTIC_COVERAGE_LEDGER_SCHEMA_VERSION,
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "suite_dir": str(suite_dir),
+        "telemetry_schema_version": baseline_telemetry.get("schema_version"),
+        "scenario_suite_schema_version": manifest.get("scenario_suite_schema_version"),
+        "observer_schema_version": observer.get("observer_schema_version"),
+        "baseline_scenario_id": baseline_scenario_id,
+        "test_count": len(tests),
+        "scenario_count": len(scenarios),
+        "happy_path_scenario_count": len(positive_scenarios),
+        "negative_fixture_count": len(negative_scenarios),
+        "known_gap_count": len(coverage_gaps),
+        "coverage_posture": {
+            "only_happy_paths": len(negative_scenarios) == 0,
+            "happy_path_scenario_ids": [
+                str(scenario.get("id"))
+                for scenario in positive_scenarios
+                if isinstance(scenario.get("id"), str)
+            ],
+            "negative_fixture_scenario_ids": [
+                str(scenario.get("id"))
+                for scenario in negative_scenarios
+                if isinstance(scenario.get("id"), str)
+            ],
+            "summary": (
+                f"{len(positive_scenarios)} expected-pass scenario(s), "
+                f"{len(negative_scenarios)} expected-failure fixture(s), "
+                f"{len(tests)} cartridge test(s), and {len(coverage_gaps)} known gap(s)."
+            ),
+        },
+        "role_counts": dict(sorted(role_counts.items())),
+        "failure_kind_counts": dict(sorted(failure_kind_counts.items())),
+        "negative_focus_domains": sorted(negative_focus_domains),
+        "subsystem_coverage": subsystem_rows,
+        "tier_coverage": as_list(baseline_coverage.get("tier_summary")),
+        "tests": tests,
+        "negative_fixtures": negative_fixtures,
+        "coverage_gaps": coverage_gaps,
+        "errors": errors,
+        "artifacts": artifacts,
+        "ai_handoff": [
+            "Read this ledger when auditing whether the cartridge only covers happy paths.",
+            "Use tests to see every baseline cartridge assertion and negative_scenario_ids to find paired failure fixtures.",
+            "Use negative_fixtures to replay intentional failures and inspect their expected focus domains.",
+            "Use coverage_gaps before claiming broad emulator compatibility beyond this cartridge.",
+        ],
+    }
+
+
+def write_diagnostic_coverage_ledger_markdown(path: Path, ledger: dict[str, Any]) -> None:
+    posture = as_dict(ledger.get("coverage_posture"))
+    lines = [
+        "# Diagnostic Coverage Ledger",
+        "",
+        "## Verdict",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ledger.get('status')} |",
+        f"| Only happy paths | {posture.get('only_happy_paths')} |",
+        f"| Cartridge tests | {ledger.get('test_count')} |",
+        f"| Expected-pass scenarios | {ledger.get('happy_path_scenario_count')} |",
+        f"| Expected-failure fixtures | {ledger.get('negative_fixture_count')} |",
+        f"| Known gaps | {ledger.get('known_gap_count')} |",
+        f"| Summary | {markdown_cell(str(posture.get('summary', '')))} |",
+        "",
+        "## Subsystem Coverage",
+        "",
+        "| Subsystem | Tests | Passed | Negative Fixtures |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for row in as_list(ledger.get("subsystem_coverage")):
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            f"| {row.get('subsystem')} | {row.get('total')} | {row.get('passed')} | {row.get('negative_fixture_count')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Tier Coverage",
+            "",
+            "| Tier | Tests | Passed |",
+            "| --- | ---: | ---: |",
+        ]
+    )
+    for row in as_list(ledger.get("tier_coverage")):
+        if not isinstance(row, dict):
+            continue
+        lines.append(f"| {row.get('tier')} | {row.get('total')} | {row.get('passed')} |")
+
+    lines.extend(
+        [
+            "",
+            "## Cartridge Tests",
+            "",
+            "| ID | Name | Subsystem | Tier | Negative Fixtures |",
+            "| ---: | --- | --- | --- | --- |",
+        ]
+    )
+    for test in as_list(ledger.get("tests")):
+        if not isinstance(test, dict):
+            continue
+        negative_ids = ", ".join(str(value) for value in as_list(test.get("negative_scenario_ids"))) or "-"
+        lines.append(
+            f"| {test.get('id')} | {test.get('name')} | {test.get('subsystem')} | {test.get('tier')} | {negative_ids} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Negative Fixtures",
+            "",
+            "| Scenario | Expected Health | Focus Domain | Focus Test | Failure Kind |",
+            "| --- | --- | --- | ---: | --- |",
+        ]
+    )
+    for fixture in as_list(ledger.get("negative_fixtures")):
+        if not isinstance(fixture, dict):
+            continue
+        lines.append(
+            "| "
+            f"{fixture.get('scenario_id')} | "
+            f"{fixture.get('expected_health')} | "
+            f"{fixture.get('expected_focus_domain')} | "
+            f"{fixture.get('expected_focus_test_id')} | "
+            f"{fixture.get('failure_kind')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Known Coverage Gaps",
+            "",
+            "| ID | Subsystem | Missing Coverage | Suggested Next Test |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for gap in as_list(ledger.get("coverage_gaps")):
+        if not isinstance(gap, dict):
+            continue
+        lines.append(
+            "| "
+            f"{gap.get('id')} | "
+            f"{gap.get('subsystem')} | "
+            f"{markdown_cell(str(gap.get('missing_coverage', '')))} | "
+            f"{markdown_cell(str(gap.get('suggested_next_test', '')))} |"
+        )
+
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(ledger.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if ledger.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(ledger.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_diagnostic_coverage_ledger(suite_dir: Path) -> dict[str, Any]:
+    ledger = build_diagnostic_coverage_ledger(suite_dir)
+    artifacts = as_dict(ledger.get("artifacts"))
+    json_path = Path(str(artifacts["diagnostic_coverage_ledger_json"]))
+    report_path = Path(str(artifacts["diagnostic_coverage_ledger_report"]))
+    json_path.write_text(json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_diagnostic_coverage_ledger_markdown(report_path, ledger)
+    return ledger
 
 
 def path_records(repo_root: Path, paths: list[str]) -> list[dict[str, Any]]:
@@ -2290,6 +2673,7 @@ def build_run_summary(
     verification_summary: dict[str, Any],
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    diagnostic_coverage_ledger: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
     investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
@@ -2311,6 +2695,8 @@ def build_run_summary(
         status = "failed"
     if observability_analysis and observability_analysis.get("status") != "passed":
         status = "failed"
+    if diagnostic_coverage_ledger and diagnostic_coverage_ledger.get("status") != "passed":
+        status = "failed"
     if diagnostic_code_map and diagnostic_code_map.get("status") != "passed":
         status = "failed"
     if investigation_plan and investigation_plan.get("status") != "passed":
@@ -2331,6 +2717,7 @@ def build_run_summary(
         "verification": verification_summary,
         "debug_index": debug_index_summary,
         "analysis": observability_analysis,
+        "coverage_ledger": diagnostic_coverage_ledger,
         "code_map": diagnostic_code_map,
         "investigation_plan": investigation_plan,
         "comparison": observability_comparison,
@@ -2343,6 +2730,7 @@ def build_run_summary(
             replay_summary,
             debug_index_summary,
             observability_analysis,
+            diagnostic_coverage_ledger,
             diagnostic_code_map,
             investigation_plan,
             observability_comparison,
@@ -2350,6 +2738,7 @@ def build_run_summary(
         "ai_handoff": [
             "Start with investigation_plan.top_route and follow routes[0].handoff_steps in order.",
             "Use suite.first_next_action when inspecting the base scenario-suite observer.",
+            "Use coverage_ledger to audit happy-path versus negative-fixture coverage and known gaps.",
             "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
             "Use code_map.focus_domains to jump from a focus domain to source files, tests, and replay commands.",
             "Use comparison.regressions first when --compare-suite-dir is supplied.",
@@ -2428,6 +2817,23 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Top focus domain | {top_hypothesis.get('focus_domain', '-')} |",
             f"| JSON | {analysis.get('artifacts', {}).get('observability_analysis_json', '-')} |",
             f"| Report | {analysis.get('artifacts', {}).get('observability_analysis_report', '-')} |",
+        ]
+    )
+    coverage_ledger = summary.get("coverage_ledger") or {}
+    lines.extend(
+        [
+            "",
+            "## Coverage Ledger",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {coverage_ledger.get('status', '-')} |",
+            f"| Cartridge tests | {coverage_ledger.get('test_count', '-')} |",
+            f"| Expected-pass scenarios | {coverage_ledger.get('happy_path_scenario_count', '-')} |",
+            f"| Expected-failure fixtures | {coverage_ledger.get('negative_fixture_count', '-')} |",
+            f"| Known gaps | {coverage_ledger.get('known_gap_count', '-')} |",
+            f"| JSON | {coverage_ledger.get('artifacts', {}).get('diagnostic_coverage_ledger_json', '-')} |",
+            f"| Report | {coverage_ledger.get('artifacts', {}).get('diagnostic_coverage_ledger_report', '-')} |",
         ]
     )
     code_map = summary.get("code_map") or {}
@@ -2615,6 +3021,7 @@ def main() -> int:
     verification_summary: dict[str, Any] = {}
     debug_index_summary: dict[str, Any] | None = None
     observability_analysis: dict[str, Any] | None = None
+    diagnostic_coverage_ledger: dict[str, Any] | None = None
     diagnostic_code_map: dict[str, Any] | None = None
     investigation_plan: dict[str, Any] | None = None
     observability_comparison: dict[str, Any] | None = None
@@ -2634,6 +3041,7 @@ def main() -> int:
             observability_analysis = write_observability_analysis(
                 suite_dir, debug_index_summary, repo_root
             )
+            diagnostic_coverage_ledger = write_diagnostic_coverage_ledger(suite_dir)
             diagnostic_code_map = write_diagnostic_code_map(
                 suite_dir, debug_index_summary, repo_root
             )
@@ -2691,6 +3099,7 @@ def main() -> int:
         verification_summary,
         debug_index_summary,
         observability_analysis,
+        diagnostic_coverage_ledger,
         diagnostic_code_map,
         investigation_plan,
         observability_comparison,
@@ -2724,6 +3133,15 @@ def main() -> int:
             analysis_note = (
                 f" analysis={analysis.get('hypothesis_count')}:{analysis.get('status')}"
             )
+        coverage_ledger = summary.get("coverage_ledger") or {}
+        coverage_note = ""
+        if coverage_ledger:
+            coverage_note = (
+                " coverage_ledger="
+                f"{coverage_ledger.get('test_count')}:"
+                f"{coverage_ledger.get('negative_fixture_count')}:"
+                f"{coverage_ledger.get('status')}"
+            )
         code_map = summary.get("code_map") or {}
         code_map_note = ""
         if code_map:
@@ -2752,7 +3170,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
+            f"{debug_note}{analysis_note}{coverage_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 
