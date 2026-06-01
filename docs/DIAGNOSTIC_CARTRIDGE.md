@@ -97,6 +97,20 @@ and telemetry catalog, optionally compares the run against a prior observability
 python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
 ```
 
+For a single local acceptance command that runs the full uploaded-artifact gate,
+including observability generation, observability verification, all-route replay
+matrix, top-route replay with narrow tests, route evidence verification, and one
+root acceptance report, run:
+
+```powershell
+python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite
+```
+
+This writes `diagnostic-e2e-report.json` and `diagnostic-e2e-report.md` at the
+suite root. Start there when an automated reviewer needs to decide whether the
+diagnostic corpus is trusted before opening telemetry, dossiers, route evidence,
+or replay bundles.
+
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
 `diagnostic-observability-analysis.md` alongside the generated scenario-suite
@@ -231,6 +245,9 @@ The verifier checks the root schema versions, observer next actions,
 observations, Markdown sections, and every artifact path referenced by the
 manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
+CI and release workflows run `run_diagnostic_e2e.py` for the current suite so
+the uploaded `oxidenes-diagnostic-scenario-suite` includes both the underlying
+observability and route artifacts plus the root e2e acceptance report.
 
 To validate the full observability wrapper output that AI tooling consumes,
 including the debug index, aggregate analysis, coverage ledger, diagnostic code
@@ -298,6 +315,9 @@ evidence without replaying the cartridge again.
 `diagnostic-code-map.json`, `diagnostic-code-map.md`,
 `diagnostic-investigation-plan.json`, `diagnostic-investigation-plan.md`,
 `diagnostic-scenario-dossiers.json`, and `diagnostic-scenario-dossiers.md`.
+`run_diagnostic_e2e.py` additionally writes `diagnostic-e2e-report.json` and
+`diagnostic-e2e-report.md` after the observability and route evidence gates
+finish.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
