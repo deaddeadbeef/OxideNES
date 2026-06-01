@@ -39,14 +39,19 @@ FOCUS_DOMAIN_CODE_MAP = {
         "description": "APU status register and channel-enable behavior observed through $4015.",
         "source_files": ["src/apu.rs", "src/bus.rs"],
         "test_files": ["tests/apu_tests.rs"],
-        "search_terms": ["read_status", "write_status", "$4015", "apu_status_register"],
+        "search_terms": ["0x4015", "status", "pub fn read", "self.apu.read"],
     },
     "cpu.addressing.zero_page_x_wrap": {
         "subsystem": "cpu",
         "description": "6502 zero-page indexed addressing wraparound for reads and writes.",
         "source_files": ["src/cpu.rs"],
         "test_files": ["tests/cpu_tests.rs"],
-        "search_terms": ["zero_page", "zero page", "LDA $FF,X", "STA $FF,X"],
+        "search_terms": [
+            "AddressingMode::ZeroPageX",
+            "wrapping_add(self.x)",
+            "AddressingMode::ZeroPage",
+            "cpu_zero_page_index_wrap",
+        ],
     },
     "cpu.control_flow.indirect_jmp_page_wrap": {
         "subsystem": "cpu",
@@ -74,7 +79,7 @@ FOCUS_DOMAIN_CODE_MAP = {
         "description": "Player-1 $4016 strobe-high repeated-read hold behavior.",
         "source_files": ["src/joypad.rs", "src/bus.rs"],
         "test_files": ["tests/joypad_tests.rs"],
-        "search_terms": ["strobe_high", "$4016", "A button", "joypad_strobe_high_hold"],
+        "search_terms": ["strobe", "button_index", "button_status", "joypad1.write"],
     },
     "joypad.strobe_reset": {
         "subsystem": "joypad",
@@ -130,21 +135,21 @@ FOCUS_DOMAIN_CODE_MAP = {
         "description": "Non-palette PPUDATA read buffering and address auto-increment.",
         "source_files": ["src/ppu.rs", "src/bus.rs"],
         "test_files": ["tests/ppu_tests.rs"],
-        "search_terms": ["read_buffer", "PPUDATA", "$2007", "ppu_read_buffer"],
+        "search_terms": ["ppu_data_buffer", "0x2007", "pub fn cpu_read", "self.ppu.cpu_read"],
     },
     "ppu.registers.ppudata_increment_32": {
         "subsystem": "ppu",
         "description": "PPUCTRL bit-2 PPUDATA increment-by-32 behavior.",
         "source_files": ["src/ppu.rs", "src/bus.rs"],
         "test_files": ["tests/ppu_tests.rs"],
-        "search_terms": ["increment_32", "PPUCTRL", "PPUDATA", "$2020"],
+        "search_terms": ["self.ctrl & 0x04", "wrapping_add", "0x2007", "pub fn cpu_write"],
     },
     "ppu.registers.status_latch_reset": {
         "subsystem": "ppu",
         "description": "PPUSTATUS read side effect that resets the PPUADDR/PPUSCROLL write latch.",
         "source_files": ["src/ppu.rs", "src/bus.rs"],
         "test_files": ["tests/ppu_tests.rs"],
-        "search_terms": ["status_latch", "PPUSTATUS", "PPUADDR", "write latch"],
+        "search_terms": ["addr_latch", "self.w = false", "0x2002", "0x2006"],
     },
 }
 

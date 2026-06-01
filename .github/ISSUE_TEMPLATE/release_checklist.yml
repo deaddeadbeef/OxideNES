@@ -62,11 +62,13 @@ body:
           required: true
         - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including coverage-ledger counts/gaps, telemetry-catalog signal/probe/event/trace mappings, code-map source/test paths, investigation-plan routes, scenario-dossier joins, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI query smoke, AI diagnosis smoke, AI fix-handoff smoke, and AI artifact verification, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI query smoke, AI diagnosis smoke, AI fix-handoff smoke, AI route matrix, and AI artifact verification, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic AI artifact verifier passes against the completed e2e suite, including `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report`.
+        - label: Diagnostic AI artifact verifier passes against the completed e2e suite, including `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report --require-ai-route-matrix`.
           required: true
         - label: Diagnostic AI index query smoke passes, including `python scripts/query_diagnostic_ai_index.py --suite-dir target/diagnostics/scenario-suite smoke`.
+          required: true
+        - label: Diagnostic AI route matrix passes for every AI focus-domain route, including `python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
         - label: Diagnostic AI diagnosis runner passes and writes route replay evidence plus mapped narrow-test results, including `python scripts/run_diagnostic_ai_diagnosis.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
