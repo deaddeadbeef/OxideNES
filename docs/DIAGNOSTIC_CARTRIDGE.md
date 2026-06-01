@@ -241,6 +241,19 @@ route has copied replay evidence, a packet-local verification result,
 digest-checked packet files, source context, test context, matching route
 identity, and passed packet stop conditions.
 
+To score localization quality across the accepted scenario suite, run:
+
+```powershell
+python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnostics/scenario-suite
+```
+
+This writes `diagnostic-ai-localization-eval.json` plus
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 18
+scenarios match their expected health and focus-domain contracts, the 16
+intentional negative fixtures are not being reduced to happy-path evidence, and
+each negative fixture has route evidence, source/test anchors, packet
+self-verification, and a perfect localization score.
+
 To validate the AI-facing artifact graph directly, run:
 
 ```powershell
@@ -255,9 +268,10 @@ include a selected-route packet with digest-checked copied evidence and source
 context, and `--require-ai-debug-packet-matrix` when the bundle should include
 all-route packet coverage. The verifier checks that the AI index, query smoke,
 diagnosis smoke, fix handoff, AI route matrix, AI debug packet, AI debug packet
-matrix, packet self-verification, and optional e2e summary all passed, agree on
-route identities, include the expected non-happy-path coverage counts, preserve
-source/test anchors, and still point to present artifacts after a CI bundle is
+matrix, packet self-verification, localization evaluation, and optional e2e
+summary all passed, agree on route identities, include the expected
+non-happy-path coverage counts, preserve source/test anchors, and still point
+to present artifacts after a CI bundle is
 downloaded to a different directory. It also writes
 `automation_readiness.routes`, a compact per-route map that tells an automated
 debugger whether each route has replay evidence,
@@ -496,7 +510,12 @@ self-verifiable after it is copied away from the suite. It then runs
 `diagnostic-ai-debug-packet-matrix.json` plus
 `diagnostic-ai-debug-packet-matrix.md`, proving every accepted AI route can be
 consumed as a relocatable packet with copied evidence, source/test context, and
-packet-local verification evidence.
+packet-local verification evidence. It then runs
+`evaluate_diagnostic_ai_localization.py` and writes
+`diagnostic-ai-localization-eval.json` plus
+`diagnostic-ai-localization-eval.md`, scoring whether every scenario matches
+its expected health/focus-domain contract and whether every negative fixture
+has route evidence, source/test anchors, and packet self-verification.
 It then runs `verify_diagnostic_ai_artifacts.py` and writes
 `diagnostic-ai-artifact-verification.json` plus
 `diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
@@ -516,7 +535,10 @@ evidence, replay telemetry, source/test context, and fix commands. The packet
 self-verifier proves that the selected packet is internally consistent after it is
 copied away from the suite. The AI debug packet matrix proves that every route
 has the same packet-level handoff quality instead of only the top route. The AI
-artifact verification proves the uploaded bundle can be trusted as a coherent
+localization evaluation proves the corpus is not only present but scoring at
+the expected localization quality across healthy controls and intentional
+negative fixtures. The AI artifact verification proves the uploaded bundle can
+be trusted as a coherent
 graph before an automated debugger starts
 making emulator changes, and its `automation_readiness` section gives automated
 agents one compact route-by-route readiness map after a CI artifact is

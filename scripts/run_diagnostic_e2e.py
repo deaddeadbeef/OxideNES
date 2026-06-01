@@ -151,6 +151,12 @@ def artifact_paths(
             suite_dir / "diagnostic-ai-debug-packet-matrix.md"
         ),
         "diagnostic_ai_debug_packet_matrix_dir": str(suite_dir / "ai-debug-packet-matrix"),
+        "diagnostic_ai_localization_eval_json": str(
+            suite_dir / "diagnostic-ai-localization-eval.json"
+        ),
+        "diagnostic_ai_localization_eval_report": str(
+            suite_dir / "diagnostic-ai-localization-eval.md"
+        ),
         "diagnostic_ai_artifact_verification_json": str(
             suite_dir / "diagnostic-ai-artifact-verification.json"
         ),
@@ -213,6 +219,7 @@ def build_summary(
         suite_dir / "diagnostic-ai-debug-packet-verification.json"
     )
     ai_debug_packet_matrix = load_json(suite_dir / "diagnostic-ai-debug-packet-matrix.json")
+    ai_localization_eval = load_json(suite_dir / "diagnostic-ai-localization-eval.json")
     ai_artifact_verification = load_json(
         suite_dir / "diagnostic-ai-artifact-verification.json"
     )
@@ -249,6 +256,8 @@ def build_summary(
         errors.append("diagnostic AI debug packet verification status is not passed")
     if ai_debug_packet_matrix.get("status") != "passed":
         errors.append("diagnostic AI debug packet matrix status is not passed")
+    if ai_localization_eval.get("status") != "passed":
+        errors.append("diagnostic AI localization evaluation status is not passed")
     if ai_artifact_verification.get("status") != "passed":
         errors.append("diagnostic AI artifact verification status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
@@ -488,6 +497,42 @@ def build_summary(
                 "test_window_count"
             ),
         },
+        "ai_localization_eval": {
+            "status": ai_localization_eval.get("status"),
+            "scenario_count": as_dict(ai_localization_eval.get("summary")).get(
+                "scenario_count"
+            ),
+            "passed_scenario_count": as_dict(ai_localization_eval.get("summary")).get(
+                "passed_scenario_count"
+            ),
+            "negative_fixture_count": as_dict(ai_localization_eval.get("summary")).get(
+                "negative_fixture_count"
+            ),
+            "only_happy_paths": as_dict(ai_localization_eval.get("summary")).get(
+                "only_happy_paths"
+            ),
+            "focus_domain_match_count": as_dict(ai_localization_eval.get("summary")).get(
+                "focus_domain_match_count"
+            ),
+            "route_ready_count": as_dict(ai_localization_eval.get("summary")).get(
+                "route_ready_count"
+            ),
+            "packet_self_verified_count": as_dict(
+                ai_localization_eval.get("summary")
+            ).get("packet_self_verified_count"),
+            "source_anchor_scenario_count": as_dict(
+                ai_localization_eval.get("summary")
+            ).get("source_anchor_scenario_count"),
+            "test_anchor_scenario_count": as_dict(
+                ai_localization_eval.get("summary")
+            ).get("test_anchor_scenario_count"),
+            "average_score": as_dict(ai_localization_eval.get("summary")).get(
+                "average_score"
+            ),
+            "minimum_score": as_dict(ai_localization_eval.get("summary")).get(
+                "minimum_score"
+            ),
+        },
         "ai_artifact_verification": {
             "status": ai_artifact_verification.get("status"),
             "check_count": as_dict(ai_artifact_verification.get("summary")).get("check_count"),
@@ -549,6 +594,7 @@ def build_summary(
             "Use diagnostic_ai_debug_packet_json when an automated debugger needs one relocatable packet for the selected route.",
             "Use diagnostic_ai_debug_packet_verification_json to prove the selected packet is valid from packet-local files and digests.",
             "Use diagnostic_ai_debug_packet_matrix_json to prove every AI route can be packaged into a relocatable debug packet with source/test context.",
+            "Use diagnostic_ai_localization_eval_json to score whether expected health, focus-domain, route, source/test, and packet evidence localize across the scenario corpus.",
             "Use diagnostic_ai_artifact_verification_json to prove the AI-facing artifact graph is internally consistent before automated fixes.",
             "Use diagnostic_ai_artifact_verification_json automation_readiness when an automated debugger needs one compact route-by-route readiness map.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
@@ -568,6 +614,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     ai_debug_packet = as_dict(summary.get("ai_debug_packet"))
     ai_debug_packet_verification = as_dict(summary.get("ai_debug_packet_verification"))
     ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
+    ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
     ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
@@ -727,6 +774,22 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Packet verifier digest mismatches | {ai_debug_packet_matrix.get('packet_verifier_digest_mismatch_count')} |",
         f"| Source windows | {ai_debug_packet_matrix.get('source_window_count')} |",
         f"| Test windows | {ai_debug_packet_matrix.get('test_window_count')} |",
+        "",
+        "## AI Localization Evaluation",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_localization_eval.get('status')} |",
+        f"| Scenarios | {ai_localization_eval.get('passed_scenario_count')}/{ai_localization_eval.get('scenario_count')} |",
+        f"| Negative fixtures | {ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Only happy paths | {ai_localization_eval.get('only_happy_paths')} |",
+        f"| Focus-domain matches | {ai_localization_eval.get('focus_domain_match_count')}/{ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Route-ready fixtures | {ai_localization_eval.get('route_ready_count')}/{ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Packet self-verified fixtures | {ai_localization_eval.get('packet_self_verified_count')}/{ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Source anchors | {ai_localization_eval.get('source_anchor_scenario_count')}/{ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Test anchors | {ai_localization_eval.get('test_anchor_scenario_count')}/{ai_localization_eval.get('negative_fixture_count')} |",
+        f"| Average score | {ai_localization_eval.get('average_score')} |",
+        f"| Minimum score | {ai_localization_eval.get('minimum_score')} |",
         "",
         "## AI Artifact Verification",
         "",
@@ -1108,6 +1171,31 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "evaluate_diagnostic_ai_localization",
+                [
+                    sys.executable,
+                    script_path("evaluate_diagnostic_ai_localization.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-localization-eval.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-localization-eval.md"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command(
+                "evaluate_diagnostic_ai_localization",
+                "AI debug packet matrix failed",
+            )
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "verify_diagnostic_ai_artifacts",
                 [
                     sys.executable,
@@ -1125,7 +1213,7 @@ def main() -> int:
         commands.append(
             skipped_command(
                 "verify_diagnostic_ai_artifacts",
-                "AI debug packet matrix failed",
+                "AI localization evaluation failed",
             )
         )
 
@@ -1144,6 +1232,7 @@ def main() -> int:
         ai_debug_packet = as_dict(summary.get("ai_debug_packet"))
         ai_debug_packet_verification = as_dict(summary.get("ai_debug_packet_verification"))
         ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
+        ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
         ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
         print(
             "Diagnostic e2e report "
@@ -1158,6 +1247,7 @@ def main() -> int:
             f"ai_debug_packet={ai_debug_packet.get('status')}:{ai_debug_packet.get('file_count')} "
             f"ai_packet_verify={ai_debug_packet_verification.get('status')}:{ai_debug_packet_verification.get('passed_check_count')}/{ai_debug_packet_verification.get('check_count')} "
             f"ai_debug_packet_matrix={ai_debug_packet_matrix.get('status')}:{ai_debug_packet_matrix.get('passed_route_count')}/{ai_debug_packet_matrix.get('route_count')} "
+            f"ai_localization={ai_localization_eval.get('status')}:{ai_localization_eval.get('passed_scenario_count')}/{ai_localization_eval.get('scenario_count')} "
             f"ai_readiness={ai_artifact_verification.get('automation_readiness_status')}:{ai_artifact_verification.get('automation_ready_route_count')}/{ai_artifact_verification.get('automation_route_count')} "
             f"ai_artifacts={ai_artifact_verification.get('status')}:{ai_artifact_verification.get('missing_artifact_count')}"
         )
