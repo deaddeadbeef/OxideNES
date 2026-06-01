@@ -239,9 +239,19 @@ its replay command into `route-checks/<route>/replay-bundle/`, runs the route's
 narrow diagnostic/subsystem test commands, and writes
 `diagnostic-route-check.json` plus `diagnostic-route-check.md`. Use
 `--rank`, `--route-id`, `--focus-domain`, or `--scenario-id` to execute a
-specific route. CI and release workflows run this command after the
-observability verifier so uploaded scenario-suite artifacts include a fresh
-route-check proof for the highest-ranked debug route.
+specific route. To prove every generated route can regenerate focused replay
+evidence, run:
+
+```powershell
+python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --all-routes --skip-tests --output-dir target/diagnostics/scenario-suite/route-replay-matrix
+```
+
+This writes `diagnostic-route-matrix.json` and `diagnostic-route-matrix.md`
+alongside per-route `diagnostic-route-check.json`, `diagnostic-route-check.md`,
+and `replay-bundle/` directories. CI and release workflows run this all-route
+replay matrix after the observability verifier, then run the top-route command
+with narrow tests so uploaded scenario-suite artifacts include both broad
+route-replay proof and a full highest-ranked debug-route proof.
 
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
