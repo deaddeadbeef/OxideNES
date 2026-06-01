@@ -256,15 +256,19 @@ route-replay proof and a full highest-ranked debug-route proof.
 To validate the route evidence contract after those commands complete, run:
 
 ```powershell
-python scripts/verify_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --require-matrix --require-top-route --expect-matrix-tests-skipped
+python scripts/verify_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --require-matrix --require-top-route --expect-matrix-tests-skipped --write-summary
 ```
 
 This verifier checks the route matrix schema/counts, every per-route replay
 bundle referenced by the matrix, the top-route full check, expected-vs-actual
 health/focus matches, required replay artifacts, and narrow-test command
-results. CI and release workflows run it before uploading the scenario-suite
-artifact so automated consumers can trust the accepted route evidence without
-replaying the cartridge again.
+results. With `--write-summary` it also writes
+`diagnostic-route-evidence-verification.json` and
+`diagnostic-route-evidence-verification.md` at the scenario-suite root with the
+accepted verdict, matrix/top-route artifact pointers, verifier configuration,
+errors, and AI handoff notes. CI and release workflows run it before uploading
+the scenario-suite artifact so automated consumers can trust the accepted route
+evidence without replaying the cartridge again.
 
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
