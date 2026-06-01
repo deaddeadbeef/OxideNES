@@ -386,6 +386,16 @@ struct DiagnosticTriageDma {
     oam_dma_first_active_cycle_parity: Option<&'static str>,
     oam_dma_start_test_name: Option<&'static str>,
     oam_dma_end_test_name: Option<&'static str>,
+    oam_dma_transfer_count: usize,
+    oam_dma_total_active_cycles: u64,
+    oam_dma_active_cycle_buckets: Vec<u64>,
+    oam_dma_active_cycle_parities: Vec<&'static str>,
+    oam_dma_phase_matrix_expected_total_transfers: usize,
+    oam_dma_phase_matrix_expected_test_transfers: usize,
+    oam_dma_phase_matrix_test_transfer_count: usize,
+    oam_dma_phase_matrix_has_even_start: bool,
+    oam_dma_phase_matrix_has_odd_start: bool,
+    oam_dma_phase_matrix_passed: bool,
     dmc_dma_fetches_observed: u64,
     dmc_dma_fetches_during_oam_dma: u64,
     dmc_dma_expected_min_oam_overlap_fetches: u64,
@@ -1800,7 +1810,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(23),
+            expected_focus_test_id: Some(24),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1816,7 +1826,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(23),
+            expected_focus_test_id: Some(24),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1858,6 +1868,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::HostValidationFailed,
             expected_focus_test_id: Some(5),
             expected_focus_domain: Some("dma.oam_transfer"),
+        },
+        DiagnosticScenarioSpec {
+            id: "dma_phase_matrix_fault",
+            title: "Intentional OAM DMA phase-matrix assertion failure",
+            purpose: "Failure-localization fixture for paired odd/even OAM DMA start-phase regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::DmaPhaseMatrix),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(24),
+            expected_focus_domain: Some("dma.oam_phase_matrix"),
         },
         DiagnosticScenarioSpec {
             id: "apu_status_fault",
@@ -2242,6 +2265,22 @@ fn diagnostic_triage_report(
             oam_dma_first_active_cycle_parity: telemetry.dma.oam_dma_first_active_cycle_parity,
             oam_dma_start_test_name: telemetry.dma.oam_dma_start_test_name,
             oam_dma_end_test_name: telemetry.dma.oam_dma_end_test_name,
+            oam_dma_transfer_count: telemetry.dma.oam_dma_transfer_count,
+            oam_dma_total_active_cycles: telemetry.dma.oam_dma_total_active_cycles,
+            oam_dma_active_cycle_buckets: telemetry.dma.oam_dma_active_cycle_buckets.clone(),
+            oam_dma_active_cycle_parities: telemetry.dma.oam_dma_active_cycle_parities.clone(),
+            oam_dma_phase_matrix_expected_total_transfers: telemetry
+                .dma
+                .oam_dma_phase_matrix_expected_total_transfers,
+            oam_dma_phase_matrix_expected_test_transfers: telemetry
+                .dma
+                .oam_dma_phase_matrix_expected_test_transfers,
+            oam_dma_phase_matrix_test_transfer_count: telemetry
+                .dma
+                .oam_dma_phase_matrix_test_transfer_count,
+            oam_dma_phase_matrix_has_even_start: telemetry.dma.oam_dma_phase_matrix_has_even_start,
+            oam_dma_phase_matrix_has_odd_start: telemetry.dma.oam_dma_phase_matrix_has_odd_start,
+            oam_dma_phase_matrix_passed: telemetry.dma.oam_dma_phase_matrix_passed,
             dmc_dma_fetches_observed: telemetry.dma.dmc_dma_fetches_observed,
             dmc_dma_fetches_during_oam_dma: telemetry.dma.dmc_dma_fetches_during_oam_dma,
             dmc_dma_expected_min_oam_overlap_fetches: telemetry

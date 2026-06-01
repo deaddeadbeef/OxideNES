@@ -231,7 +231,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 18 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 19 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -285,8 +285,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 20
-scenarios match their expected health and focus-domain contracts, the 18
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 21
+scenarios match their expected health and focus-domain contracts, the 19
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -298,7 +298,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 18 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 19 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -381,6 +381,7 @@ scenario-id-first automated debugging. When `--compare-suite-dir <DIR>` is suppl
 `scenario-suite-observer.md`. The suite also writes one full bundle per
 scenario: `pass`, `input_mask_matrix_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
+`dma_phase_matrix_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
 `cpu_addressing_matrix_fault`, `input_port_matrix_fault`, `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -432,6 +433,9 @@ corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
 assertion reads them, while `dma_oam_transfer_fault` corrupts the host-observed
 OAM DMA source byte before `$4014` and `apu_status_fault` disables `$4015`
 just before the cartridge reads the APU status register.
+`dma_phase_matrix_fault` stops the paired OAM DMA phase-matrix test before its
+second cartridge-triggered transfer, proving odd/even start-phase regressions
+localize to `dma.oam_phase_matrix`.
 `mapper2_bank_switch_fault` switches the UXROM bank select back to bank 0 just
 before the bank-1 sentinel read, proving mapper PRG bank-switch regressions
 localize to `mapper.uxrom.prg_bank_switch`.
@@ -470,7 +474,7 @@ active cartridge test. The suite can prove CPU addressing, CPU control-flow,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
 joypad masks, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
-host-observation, APU status, PPU assertion, and PPU progress-timeout failure
+host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion, and PPU progress-timeout failure
 localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -608,7 +612,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 18 accepted AI routes into deterministic debugger startup plans
+turning all 19 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -937,6 +941,13 @@ asserts all eight serial bits for `$4016` and `$4017` against configured masks,
 exposes `input_port_matrix` telemetry and a `joypad.input_port_matrix.results`
 probe, and localizes combined input-port regressions to
 `joypad.input_port_matrix`.
+
+Schema version `33` adds the `oam_dma_phase_matrix` edge-case cartridge test
+plus the `dma_phase_matrix_fault` scenario-suite fixture. The generated
+cartridge triggers two additional `$4014` OAM DMA transfers, host telemetry
+records per-transfer active-cycle buckets and start parities, and the
+`dma.oam_phase_matrix` probe verifies the accepted run covers both 513-cycle
+and 514-cycle OAM DMA phases.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

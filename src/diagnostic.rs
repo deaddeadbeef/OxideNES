@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 32;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 33;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v32";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v33";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -77,6 +77,7 @@ const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
 const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
+const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
 const CPU_ADDRESSING_MATRIX_ABS_X_NO_CROSS_ADDR: u16 = 0x0240;
 const CPU_ADDRESSING_MATRIX_ABS_X_PAGE_CROSS_ADDR: u16 = 0x0241;
@@ -93,6 +94,11 @@ const INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_FIRST_ADDR: u16 = 0x024A;
 const INPUT_PORT_MATRIX_JOYPAD2_OVERREAD_SECOND_ADDR: u16 = 0x024B;
 const INPUT_PORT_MATRIX_CASE_COUNT_ADDR: u16 = 0x024C;
 const INPUT_PORT_MATRIX_EXPECTED_CASE_COUNT: u8 = 24;
+const DMA_PHASE_MATRIX_CASE_COUNT_ADDR: u16 = 0x024D;
+const DMA_PHASE_MATRIX_CONTROL_ADDR: u16 = 0x024E;
+const DMA_PHASE_MATRIX_TEST_ID: u8 = 24;
+const DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS: usize = 2;
+const DMA_PHASE_MATRIX_EXPECTED_TOTAL_TRANSFERS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -376,6 +382,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "$4016 and $4017 strobe-high reads repeatedly expose each port's configured A bit",
             "$4016 and $4017 serial reads match the configured expected masks for all eight buttons",
             "$4016 and $4017 reads after the eighth button return 1",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 24,
+        name: "oam_dma_phase_matrix",
+        subsystem: DiagnosticSubsystem::Dma,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Trigger paired OAM DMA transfers so host telemetry proves both odd and even start-phase cycle buckets.",
+        expected_observations: &[
+            "two additional OAM DMA transfers are started by the diagnostic cartridge",
+            "host telemetry observes both 513-cycle and 514-cycle OAM DMA buckets across odd/even start phases",
         ],
     },
 ];
@@ -805,6 +822,24 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect joypad 2 bit order, index advancement, and shared strobe behavior across a complete serial sequence.",
     },
     DiagnosticFailureSpec {
+        code: 0x83,
+        test_id: 24,
+        assertion: "OAM DMA phase matrix reaches the second cartridge-triggered transfer",
+        expected: "two OAM DMA transfers are triggered by the phase-matrix test",
+        observed: "the phase-matrix test stopped before the second OAM DMA transfer",
+        likely_domain: "dma.oam_phase_matrix",
+        remediation_hint: "Inspect OAM DMA scheduling around consecutive $4014 writes and the host phase-matrix telemetry.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x84,
+        test_id: 24,
+        assertion: "OAM DMA phase matrix records its expected case count",
+        expected: "phase-matrix case count reaches two transfers",
+        observed: "the phase-matrix case count did not reach the expected transfer count",
+        likely_domain: "dma.oam_phase_matrix",
+        remediation_hint: "Inspect the diagnostic cartridge's consecutive DMA trigger path before debugging host telemetry.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -1013,10 +1048,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "dma_cycle_timing",
         subsystem: "dma",
-        risk: "The cartridge validates OAM contents and host-observed OAM DMA stall length, but not all DMA interactions.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, stalls CPU execution for a 513-514 cycle bucket, records first active-cycle parity, observes DMC sample DMA during the OAM stall window, and validates the phase-specific 3-4 cycle DMC stall bucket.",
-        missing_coverage: "Alternate odd/even OAM start-phase fixtures, multiple DMC overlap positions inside one transfer, and deeper CPU/APU interleaving across repeated DMA bursts.",
-        suggested_next_test: "Add paired OAM DMA fixtures that force both CPU start parities and compare DMC overlap placement near the beginning, middle, and end of the OAM transfer.",
+        risk: "The cartridge validates OAM contents and both host-observed OAM DMA stall-length phases, but not all DMA interactions.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, and the phase-specific 3-4 cycle DMC stall bucket is validated.",
+        missing_coverage: "Multiple DMC overlap positions inside one transfer, repeated DMA burst trains, and deeper CPU/APU interleaving across long-running DMA sequences.",
+        suggested_next_test: "Extend the DMA matrix with DMC overlap placement near the beginning, middle, and end of OAM transfers plus repeated burst trains.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -1059,6 +1094,7 @@ pub enum DiagnosticFaultInjection {
     CpuIndirectJmpPageWrap,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
+    DmaPhaseMatrix,
     InputPortMatrix,
     JoypadStrobeHighHold,
     JoypadStrobeReset,
@@ -1072,12 +1108,13 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 15] = [
+    pub const ALL: [DiagnosticFaultInjection; 16] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
+        DiagnosticFaultInjection::DmaPhaseMatrix,
         DiagnosticFaultInjection::InputPortMatrix,
         DiagnosticFaultInjection::JoypadStrobeHighHold,
         DiagnosticFaultInjection::JoypadStrobeReset,
@@ -1097,6 +1134,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
+            DiagnosticFaultInjection::DmaPhaseMatrix => "dma_phase_matrix",
             DiagnosticFaultInjection::InputPortMatrix => "input_port_matrix",
             DiagnosticFaultInjection::JoypadStrobeHighHold => "joypad_strobe_high_hold",
             DiagnosticFaultInjection::JoypadStrobeReset => "joypad_strobe_reset",
@@ -1121,6 +1159,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
+            DiagnosticFaultInjection::DmaPhaseMatrix => DMA_PHASE_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::InputPortMatrix => INPUT_PORT_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::JoypadStrobeHighHold => JOYPAD_STROBE_HIGH_HOLD_FAULT_LABEL,
             DiagnosticFaultInjection::JoypadStrobeReset => JOYPAD_STROBE_RESET_FAULT_LABEL,
@@ -1492,6 +1531,16 @@ pub struct DmaTelemetry {
     pub oam_dma_start_test_name: Option<&'static str>,
     pub oam_dma_end_test: Option<u8>,
     pub oam_dma_end_test_name: Option<&'static str>,
+    pub oam_dma_transfer_count: usize,
+    pub oam_dma_total_active_cycles: u64,
+    pub oam_dma_active_cycle_buckets: Vec<u64>,
+    pub oam_dma_active_cycle_parities: Vec<&'static str>,
+    pub oam_dma_phase_matrix_expected_total_transfers: usize,
+    pub oam_dma_phase_matrix_expected_test_transfers: usize,
+    pub oam_dma_phase_matrix_test_transfer_count: usize,
+    pub oam_dma_phase_matrix_has_even_start: bool,
+    pub oam_dma_phase_matrix_has_odd_start: bool,
+    pub oam_dma_phase_matrix_passed: bool,
     pub dmc_dma_fetches_observed: u64,
     pub dmc_dma_fetches_during_oam_dma: u64,
     pub dmc_dma_expected_min_oam_overlap_fetches: u64,
@@ -1761,6 +1810,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut frames = 0u64;
     let mut audio_sample_count = 0usize;
     let mut audio_peak_abs = 0.0f32;
+    let mut diagnostic_render_frame = None;
     let mut events = Vec::new();
     let mut last_status = read_ram_byte(&mut bus, STATUS_ADDR);
     let mut last_current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
@@ -1830,6 +1880,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
 
         if bus.ppu.frame_complete() {
             frames += 1;
+            maybe_capture_diagnostic_render_frame(
+                &mut diagnostic_render_frame,
+                current_test,
+                &bus.ppu.frame_data,
+            );
             bus.apu.end_frame();
             let samples = bus.apu.drain_samples();
             audio_sample_count += samples.len();
@@ -1934,6 +1989,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
 
             if bus.ppu.frame_complete() {
                 frames += 1;
+                maybe_capture_diagnostic_render_frame(
+                    &mut diagnostic_render_frame,
+                    current_test,
+                    &bus.ppu.frame_data,
+                );
                 bus.apu.end_frame();
                 let samples = bus.apu.drain_samples();
                 audio_sample_count += samples.len();
@@ -1962,7 +2022,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let test_results = test_telemetry(&ram);
     let dma = dma_observation.telemetry();
     let oam = oam_telemetry(&bus.ppu.oam_data);
-    let frame = frame_telemetry(&bus.ppu.frame_data);
+    let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let mut host_failures = host_validate(HostValidationInput {
@@ -2552,6 +2612,27 @@ fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
             .dma
             .oam_dma_first_active_cycle_parity
             .unwrap_or("none")
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Transfer count / total active cycles | {} / {} |",
+        telemetry.dma.oam_dma_transfer_count, telemetry.dma.oam_dma_total_active_cycles
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Phase matrix transfers / expected | {} / {} |",
+        telemetry.dma.oam_dma_phase_matrix_test_transfer_count,
+        telemetry.dma.oam_dma_phase_matrix_expected_test_transfers
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Phase matrix parity coverage | even={} odd={} buckets={:?} |",
+        telemetry.dma.oam_dma_phase_matrix_has_even_start,
+        telemetry.dma.oam_dma_phase_matrix_has_odd_start,
+        telemetry.dma.oam_dma_active_cycle_buckets
     )
     .expect("write report");
     writeln!(
@@ -3198,7 +3279,7 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
 }
 
 #[derive(Debug, Default)]
-struct DmaObservation {
+struct OamDmaTransferObservation {
     oam_dma_start_cycle: Option<u64>,
     oam_dma_end_cycle: Option<u64>,
     oam_dma_first_active_cycle: Option<u64>,
@@ -3206,6 +3287,35 @@ struct DmaObservation {
     oam_dma_active_cycles: u64,
     oam_dma_start_test: Option<u8>,
     oam_dma_end_test: Option<u8>,
+}
+
+impl OamDmaTransferObservation {
+    fn start(cycle: u64, current_test: u8) -> Self {
+        Self {
+            oam_dma_start_cycle: Some(cycle),
+            oam_dma_start_test: known_test_id(current_test),
+            ..Self::default()
+        }
+    }
+
+    fn observe_active_cycle(&mut self, cycle: u64) {
+        if self.oam_dma_first_active_cycle.is_none() {
+            self.oam_dma_first_active_cycle = Some(cycle);
+            self.oam_dma_first_active_cycle_even = Some(cycle.is_multiple_of(2));
+        }
+        self.oam_dma_active_cycles += 1;
+    }
+
+    fn complete(&mut self, cycle: u64, current_test: u8) {
+        self.oam_dma_end_cycle = Some(cycle);
+        self.oam_dma_end_test = known_test_id(current_test);
+    }
+}
+
+#[derive(Debug, Default)]
+struct DmaObservation {
+    oam_dma_transfers: Vec<OamDmaTransferObservation>,
+    current_oam_dma_transfer: Option<OamDmaTransferObservation>,
     dmc_dma_fetches_observed: u64,
     dmc_dma_fetches_during_oam_dma: u64,
     dmc_dma_first_fetch_cycle: Option<u64>,
@@ -3241,27 +3351,11 @@ struct DmaTickObservation<'a> {
 
 impl DmaObservation {
     fn observe_tick(&mut self, tick: DmaTickObservation<'_>) {
-        if tick.active_before {
-            if self.oam_dma_first_active_cycle.is_none() {
-                self.oam_dma_first_active_cycle = Some(tick.cycle);
-                self.oam_dma_first_active_cycle_even = Some(tick.cycle.is_multiple_of(2));
-            }
-            self.oam_dma_active_cycles += 1;
-        }
-        if tick.dmc_stall_before {
-            if tick.active_before {
-                self.dmc_dma_queued_during_oam_dma_cycles += 1;
-            } else {
-                self.dmc_dma_stall_cycles += 1;
-                if self.oam_dma_end_cycle.is_some() {
-                    self.dmc_dma_stall_cycles_after_oam_dma += 1;
-                }
-            }
-        }
-
-        if !tick.active_before && tick.active_after && self.oam_dma_start_cycle.is_none() {
-            self.oam_dma_start_cycle = Some(tick.cycle);
-            self.oam_dma_start_test = known_test_id(tick.current_test);
+        if !tick.active_before && tick.active_after {
+            self.current_oam_dma_transfer = Some(OamDmaTransferObservation::start(
+                tick.cycle,
+                tick.current_test,
+            ));
             tick.events.push(event_telemetry(EventTelemetryInput {
                 cycle: tick.cycle,
                 frame: tick.frame,
@@ -3275,9 +3369,30 @@ impl DmaObservation {
             }));
         }
 
-        if tick.active_before && !tick.active_after && self.oam_dma_end_cycle.is_none() {
-            self.oam_dma_end_cycle = Some(tick.cycle);
-            self.oam_dma_end_test = known_test_id(tick.current_test);
+        if tick.active_before {
+            if self.current_oam_dma_transfer.is_none() {
+                self.current_oam_dma_transfer = Some(OamDmaTransferObservation::default());
+            }
+            if let Some(transfer) = self.current_oam_dma_transfer.as_mut() {
+                transfer.observe_active_cycle(tick.cycle);
+            }
+        }
+        if tick.dmc_stall_before {
+            if tick.active_before {
+                self.dmc_dma_queued_during_oam_dma_cycles += 1;
+            } else {
+                self.dmc_dma_stall_cycles += 1;
+                if !self.oam_dma_transfers.is_empty() {
+                    self.dmc_dma_stall_cycles_after_oam_dma += 1;
+                }
+            }
+        }
+
+        if tick.active_before && !tick.active_after {
+            if let Some(mut transfer) = self.current_oam_dma_transfer.take() {
+                transfer.complete(tick.cycle, tick.current_test);
+                self.oam_dma_transfers.push(transfer);
+            }
             tick.events.push(event_telemetry(EventTelemetryInput {
                 cycle: tick.cycle,
                 frame: tick.frame,
@@ -3349,23 +3464,79 @@ impl DmaObservation {
     }
 
     fn telemetry(&self) -> DmaTelemetry {
+        let first_transfer = self
+            .oam_dma_transfers
+            .first()
+            .or(self.current_oam_dma_transfer.as_ref());
+        let oam_dma_transfer_count = self.oam_dma_transfers.len();
+        let oam_dma_total_active_cycles = self
+            .oam_dma_transfers
+            .iter()
+            .map(|transfer| transfer.oam_dma_active_cycles)
+            .sum();
+        let oam_dma_active_cycle_buckets: Vec<u64> = self
+            .oam_dma_transfers
+            .iter()
+            .map(|transfer| transfer.oam_dma_active_cycles)
+            .collect();
+        let oam_dma_active_cycle_parities: Vec<&'static str> = self
+            .oam_dma_transfers
+            .iter()
+            .filter_map(|transfer| transfer.oam_dma_first_active_cycle_even)
+            .map(cycle_parity_label)
+            .collect();
+        let oam_dma_phase_matrix_test_transfer_count = self
+            .oam_dma_transfers
+            .iter()
+            .filter(|transfer| transfer.oam_dma_start_test == Some(DMA_PHASE_MATRIX_TEST_ID))
+            .count();
+        let oam_dma_phase_matrix_has_even_start = oam_dma_active_cycle_parities.contains(&"even");
+        let oam_dma_phase_matrix_has_odd_start = oam_dma_active_cycle_parities.contains(&"odd");
+        let oam_dma_phase_matrix_buckets_in_range = self.oam_dma_transfers.iter().all(|transfer| {
+            transfer.oam_dma_active_cycles >= OAM_DMA_EXPECTED_MIN_CYCLES
+                && transfer.oam_dma_active_cycles <= OAM_DMA_EXPECTED_MAX_CYCLES
+        });
+
         DmaTelemetry {
-            oam_dma_observed: self.oam_dma_start_cycle.is_some(),
-            oam_dma_completed: self.oam_dma_start_cycle.is_some()
-                && self.oam_dma_end_cycle.is_some(),
-            oam_dma_active_cycles: self.oam_dma_active_cycles,
+            oam_dma_observed: first_transfer.is_some(),
+            oam_dma_completed: !self.oam_dma_transfers.is_empty(),
+            oam_dma_active_cycles: first_transfer
+                .map(|transfer| transfer.oam_dma_active_cycles)
+                .unwrap_or_default(),
             oam_dma_expected_min_cycles: OAM_DMA_EXPECTED_MIN_CYCLES,
             oam_dma_expected_max_cycles: OAM_DMA_EXPECTED_MAX_CYCLES,
-            oam_dma_start_cycle: self.oam_dma_start_cycle,
-            oam_dma_end_cycle: self.oam_dma_end_cycle,
-            oam_dma_first_active_cycle: self.oam_dma_first_active_cycle,
-            oam_dma_first_active_cycle_parity: self
-                .oam_dma_first_active_cycle_even
+            oam_dma_start_cycle: first_transfer.and_then(|transfer| transfer.oam_dma_start_cycle),
+            oam_dma_end_cycle: first_transfer.and_then(|transfer| transfer.oam_dma_end_cycle),
+            oam_dma_first_active_cycle: first_transfer
+                .and_then(|transfer| transfer.oam_dma_first_active_cycle),
+            oam_dma_first_active_cycle_parity: first_transfer
+                .and_then(|transfer| transfer.oam_dma_first_active_cycle_even)
                 .map(cycle_parity_label),
-            oam_dma_start_test: self.oam_dma_start_test,
-            oam_dma_start_test_name: self.oam_dma_start_test.and_then(test_name),
-            oam_dma_end_test: self.oam_dma_end_test,
-            oam_dma_end_test_name: self.oam_dma_end_test.and_then(test_name),
+            oam_dma_start_test: first_transfer.and_then(|transfer| transfer.oam_dma_start_test),
+            oam_dma_start_test_name: first_transfer
+                .and_then(|transfer| transfer.oam_dma_start_test)
+                .and_then(test_name),
+            oam_dma_end_test: first_transfer.and_then(|transfer| transfer.oam_dma_end_test),
+            oam_dma_end_test_name: first_transfer
+                .and_then(|transfer| transfer.oam_dma_end_test)
+                .and_then(test_name),
+            oam_dma_transfer_count,
+            oam_dma_total_active_cycles,
+            oam_dma_active_cycle_buckets,
+            oam_dma_active_cycle_parities,
+            oam_dma_phase_matrix_expected_total_transfers:
+                DMA_PHASE_MATRIX_EXPECTED_TOTAL_TRANSFERS,
+            oam_dma_phase_matrix_expected_test_transfers: DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS,
+            oam_dma_phase_matrix_test_transfer_count,
+            oam_dma_phase_matrix_has_even_start,
+            oam_dma_phase_matrix_has_odd_start,
+            oam_dma_phase_matrix_passed: oam_dma_transfer_count
+                >= DMA_PHASE_MATRIX_EXPECTED_TOTAL_TRANSFERS
+                && oam_dma_phase_matrix_test_transfer_count
+                    >= DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS
+                && oam_dma_phase_matrix_has_even_start
+                && oam_dma_phase_matrix_has_odd_start
+                && oam_dma_phase_matrix_buckets_in_range,
             dmc_dma_fetches_observed: self.dmc_dma_fetches_observed,
             dmc_dma_fetches_during_oam_dma: self.dmc_dma_fetches_during_oam_dma,
             dmc_dma_expected_min_oam_overlap_fetches: DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES,
@@ -3516,6 +3687,18 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.dma.oam_dma_active_cycles,
             input.dma.oam_dma_expected_min_cycles,
             input.dma.oam_dma_expected_max_cycles
+        ));
+    }
+    if !input.dma.oam_dma_phase_matrix_passed {
+        failures.push(format!(
+            "OAM DMA phase matrix incomplete: transfers {}/{}, test transfers {}/{}, even={}, odd={}, buckets={:?}",
+            input.dma.oam_dma_transfer_count,
+            input.dma.oam_dma_phase_matrix_expected_total_transfers,
+            input.dma.oam_dma_phase_matrix_test_transfer_count,
+            input.dma.oam_dma_phase_matrix_expected_test_transfers,
+            input.dma.oam_dma_phase_matrix_has_even_start,
+            input.dma.oam_dma_phase_matrix_has_odd_start,
+            input.dma.oam_dma_active_cycle_buckets
         ));
     }
     if input.dma.dmc_dma_fetches_during_oam_dma < input.dma.dmc_dma_expected_min_oam_overlap_fetches
@@ -3783,6 +3966,35 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     push_probe(
         &mut probes,
         ProbeTelemetryRecord {
+            id: "dma.oam_phase_matrix".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(DMA_PHASE_MATRIX_TEST_ID),
+            test_name: test_name(DMA_PHASE_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.dma.oam_dma_phase_matrix_passed),
+            description:
+                "Host-observed OAM DMA phase matrix covers both odd and even start-phase cycle buckets"
+                    .to_string(),
+            expected: format!(
+                "total OAM DMA transfers >= {}, phase-matrix transfers >= {}, both even and odd starts, each bucket {}..={}",
+                input.dma.oam_dma_phase_matrix_expected_total_transfers,
+                input.dma.oam_dma_phase_matrix_expected_test_transfers,
+                input.dma.oam_dma_expected_min_cycles,
+                input.dma.oam_dma_expected_max_cycles
+            ),
+            observed: format!(
+                "transfers {}, phase transfers {}, parities {:?}, buckets {:?}",
+                input.dma.oam_dma_transfer_count,
+                input.dma.oam_dma_phase_matrix_test_transfer_count,
+                input.dma.oam_dma_active_cycle_parities,
+                input.dma.oam_dma_active_cycle_buckets
+            ),
+            likely_domain: "dma.oam_phase_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
             id: "dma.dmc_oam_overlap".to_string(),
             source: DiagnosticProbeSource::HostObservation,
             subsystem: Some(DiagnosticSubsystem::Dma),
@@ -4045,6 +4257,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.joypad_strobe_high_hold();
     program.cpu_addressing_mode_matrix();
     program.input_port_serial_matrix();
+    program.oam_dma_phase_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -4781,6 +4994,46 @@ impl DiagnosticProgram {
         self.pass_test(23);
     }
 
+    fn oam_dma_phase_matrix(&mut self) {
+        self.begin_test(DMA_PHASE_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
+        self.asm.sta_abs(DMA_PHASE_MATRIX_CONTROL_ADDR);
+
+        let first_dma = self.unique_label("dma_phase_first_transfer");
+        self.asm.cmp_imm(0x00);
+        self.asm.beq(&first_dma);
+        self.asm
+            .label(&first_dma)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x4014);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(DMA_PHASE_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        let second_dma = self.unique_label("dma_phase_second_transfer");
+        self.asm.lda_abs(DMA_PHASE_MATRIX_CONTROL_ADDR);
+        self.asm.cmp_imm(0x00);
+        self.asm.beq(&second_dma);
+        self.asm.lda_imm(0x83);
+        self.asm.sta_zp(FAILURE_CODE_ADDR);
+        self.asm.jmp_label("fail");
+        self.asm
+            .label(&second_dma)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x4014);
+        self.asm
+            .lda_imm(DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS as u8);
+        self.asm.sta_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
+        self.asm.lda_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS as u8, 0x84);
+        self.pass_test(DMA_PHASE_MATRIX_TEST_ID);
+    }
+
     fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
         for index in 0..8 {
             self.asm.lda_abs(addr);
@@ -5231,6 +5484,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::DmaOamTransfer => {
             bus.cpu_write(0x0300, 0xFF);
+        }
+        DiagnosticFaultInjection::DmaPhaseMatrix => {
+            bus.cpu_write(DMA_PHASE_MATRIX_CONTROL_ADDR, 0x01);
         }
         DiagnosticFaultInjection::InputPortMatrix => {
             bus.joypad2.set_button_pressed(JoypadButton::Start, false);
@@ -6232,6 +6488,20 @@ fn oam_telemetry(oam: &[u8; 256]) -> OamTelemetry {
     }
 }
 
+fn maybe_capture_diagnostic_render_frame(
+    retained_frame: &mut Option<FrameTelemetry>,
+    current_test: u8,
+    frame: &[u32],
+) {
+    if retained_frame.is_some() || current_test != 10 {
+        return;
+    }
+    let telemetry = frame_telemetry(frame);
+    if telemetry.unique_colors >= 2 {
+        *retained_frame = Some(telemetry);
+    }
+}
+
 fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
     let mut bytes = Vec::with_capacity(frame.len() * 4);
     let mut colors = BTreeSet::new();
@@ -6338,6 +6608,14 @@ fn compare_dma(
         &["dma", "oam_dma_first_active_cycle_parity"][..],
         &["dma", "oam_dma_start_test_name"][..],
         &["dma", "oam_dma_end_test_name"][..],
+        &["dma", "oam_dma_transfer_count"][..],
+        &["dma", "oam_dma_total_active_cycles"][..],
+        &["dma", "oam_dma_active_cycle_buckets"][..],
+        &["dma", "oam_dma_active_cycle_parities"][..],
+        &["dma", "oam_dma_phase_matrix_test_transfer_count"][..],
+        &["dma", "oam_dma_phase_matrix_has_even_start"][..],
+        &["dma", "oam_dma_phase_matrix_has_odd_start"][..],
+        &["dma", "oam_dma_phase_matrix_passed"][..],
         &["dma", "dmc_dma_fetches_during_oam_dma"][..],
         &["dma", "dmc_dma_oam_overlap_observed"][..],
         &["dma", "dmc_dma_first_oam_overlap_test_name"][..],

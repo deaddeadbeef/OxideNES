@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 32
+EXPECTED_TELEMETRY_SCHEMA = 33
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -21,6 +21,7 @@ EXPECTED_SCENARIOS = {
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
+    "dma_phase_matrix_fault",
     "apu_status_fault",
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
@@ -86,7 +87,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            18,
+            19,
             "analysis baseline_divergence_count",
         )
 
@@ -136,13 +137,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            18,
+            19,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 18, "observer next_actions count")
+        self.expect_equal(len(actions), 19, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -177,6 +178,7 @@ class SuiteVerifier:
             "joypad1_mismatch",
             "joypad2_mismatch",
             "dma_oam_transfer_fault",
+            "dma_phase_matrix_fault",
             "apu_status_fault",
             "cpu_zero_page_wrap_fault",
             "cpu_indirect_jmp_fault",
@@ -217,7 +219,7 @@ class SuiteVerifier:
         )
         evidence = self.expect_list(timeout.get("evidence"), "timeout observer evidence")
         self.expect_in(
-            "comparison_difference_count=122",
+            "comparison_difference_count=135",
             evidence,
             "timeout observer evidence",
         )
@@ -563,6 +565,40 @@ class SuiteVerifier:
             "DMA observer evidence",
         )
 
+        dma_phase = by_scenario.get("dma_phase_matrix_fault")
+        if not isinstance(dma_phase, dict):
+            self.errors.append("missing observer action for dma_phase_matrix_fault")
+            return
+
+        self.expect_equal(
+            dma_phase.get("priority"),
+            "known_divergence",
+            "DMA phase observer action priority",
+        )
+        self.expect_equal(
+            dma_phase.get("action_type"),
+            "inspect_known_divergence",
+            "DMA phase observer action type",
+        )
+        self.expect_equal(
+            dma_phase.get("primary_artifact"),
+            "dma_phase_matrix_fault/comparison.json",
+            "DMA phase observer primary_artifact",
+        )
+        dma_phase_evidence = self.expect_list(
+            dma_phase.get("evidence"), "DMA phase observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=dma.oam_phase_matrix",
+            dma_phase_evidence,
+            "DMA phase observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.24.result",
+            dma_phase_evidence,
+            "DMA phase observer evidence",
+        )
+
         apu = by_scenario.get("apu_status_fault")
         if not isinstance(apu, dict):
             self.errors.append("missing observer action for apu_status_fault")
@@ -801,7 +837,7 @@ class SuiteVerifier:
             )
             self.expect_equal(
                 timeout.get("comparison_difference_count"),
-                122,
+                135,
                 "timeout observer comparison_difference_count",
             )
             self.expect_equal(
@@ -841,6 +877,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for dma_oam_transfer_fault")
+
+        dma_phase = by_scenario.get("dma_phase_matrix_fault")
+        if isinstance(dma_phase, dict):
+            self.expect_equal(
+                dma_phase.get("role"),
+                "expected_failure_fixture",
+                "DMA phase observer role",
+            )
+            self.expect_equal(
+                dma_phase.get("outcome"),
+                "expected_baseline_divergence",
+                "DMA phase observer outcome",
+            )
+            self.expect_equal(
+                dma_phase.get("health"),
+                "cartridge_assertion_failed",
+                "DMA phase observer health",
+            )
+            self.expect_equal(
+                dma_phase.get("focus_domain"),
+                "dma.oam_phase_matrix",
+                "DMA phase observer focus_domain",
+            )
+            self.expect_equal(
+                dma_phase.get("next_artifact"),
+                "dma_phase_matrix_fault/comparison.json",
+                "DMA phase observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for dma_phase_matrix_fault")
 
         apu = by_scenario.get("apu_status_fault")
         if isinstance(apu, dict):

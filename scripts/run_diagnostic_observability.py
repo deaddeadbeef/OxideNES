@@ -79,6 +79,19 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/bus_tests.rs", "tests/ppu_tests.rs"],
         "search_terms": ["oam_dma", "DMC", "$4014", "dma_oam_transfer"],
     },
+    "dma.oam_phase_matrix": {
+        "subsystem": "dma",
+        "description": "Paired OAM DMA transfers that exercise odd/even start-phase stall buckets.",
+        "source_files": ["src/bus.rs", "src/cpu.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/bus_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "oam_dma_phase_matrix",
+            "dma_phase_matrix",
+            "dma_active",
+            "$4014",
+            "oam_dma_active_cycle_buckets",
+        ],
+    },
     "emulator.progress_or_infinite_loop": {
         "subsystem": "emulator",
         "description": "Headless diagnostic progress, timeout, reset, and terminal loop detection.",
@@ -184,6 +197,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
     "dma_oam_transfer_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure",
+    "dma_phase_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_phase_matrix_failure",
     "joypad1_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad_failure",
     "joypad2_mismatch": "generated_diagnostic_cartridge_localizes_intentional_joypad2_failure",
     "input_port_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_input_port_matrix_failure",
