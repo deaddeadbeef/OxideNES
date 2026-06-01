@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 33;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 34;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v33";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v34";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -73,6 +73,7 @@ const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
     "ppu_horizontal_nametable_mirroring_before_first_mirror_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
+const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
 const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
@@ -99,6 +100,11 @@ const DMA_PHASE_MATRIX_CONTROL_ADDR: u16 = 0x024E;
 const DMA_PHASE_MATRIX_TEST_ID: u8 = 24;
 const DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS: usize = 2;
 const DMA_PHASE_MATRIX_EXPECTED_TOTAL_TRANSFERS: usize = 3;
+const PPU_SPRITE_ZERO_HIT_STATUS_ADDR: u16 = 0x024F;
+const PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR: u16 = 0x0250;
+const PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT: u8 = 0x40;
+const PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT: u8 = 1;
+const PPU_SPRITE_ZERO_HIT_TEST_ID: u8 = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -393,6 +399,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "two additional OAM DMA transfers are started by the diagnostic cartridge",
             "host telemetry observes both 513-cycle and 514-cycle OAM DMA buckets across odd/even start phases",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 25,
+        name: "ppu_sprite_zero_hit",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify deterministic sprite/background overlap sets PPUSTATUS sprite-zero-hit.",
+        expected_observations: &[
+            "solid background tile 2 and sprite 0 tile 2 overlap at a visible pixel",
+            "PPUSTATUS bit 6 remains set after the next completed frame",
         ],
     },
 ];
@@ -840,6 +857,15 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect the diagnostic cartridge's consecutive DMA trigger path before debugging host telemetry.",
     },
     DiagnosticFailureSpec {
+        code: 0x85,
+        test_id: 25,
+        assertion: "PPUSTATUS reports sprite-zero-hit after sprite/background overlap",
+        expected: "PPUSTATUS bit 6 is set after sprite 0 overlaps a non-transparent background pixel",
+        observed: "PPUSTATUS sprite-zero-hit bit was not set after the deterministic overlap scene",
+        likely_domain: "ppu.sprite_zero_hit",
+        remediation_hint: "Inspect sprite evaluation, background/sprite pixel muxing, and PPUSTATUS bit-6 lifetime across vblank.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -1025,8 +1051,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, NMI delivery, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Sprite evaluation, sprite/background priority, scrolling seams, vblank timing, and per-dot rendering behavior.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, NMI delivery, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Sprite/background priority, sprite overflow edge cases, scrolling seams, vblank timing, and per-dot rendering behavior.",
         suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
     },
     DiagnosticCoverageGapSpec {
@@ -1102,13 +1128,14 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuSpriteZeroHit,
     PpuStatusLatchReset,
     PpuVramIncrement32,
     PpuVramReadBuffer,
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 16] = [
+    pub const ALL: [DiagnosticFaultInjection; 17] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
@@ -1122,6 +1149,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::Mapper2PrgRam,
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuSpriteZeroHit,
         DiagnosticFaultInjection::PpuStatusLatchReset,
         DiagnosticFaultInjection::PpuVramIncrement32,
         DiagnosticFaultInjection::PpuVramReadBuffer,
@@ -1142,6 +1170,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuSpriteZeroHit => "ppu_sprite_zero_hit",
             DiagnosticFaultInjection::PpuStatusLatchReset => "ppu_status_latch_reset",
             DiagnosticFaultInjection::PpuVramIncrement32 => "ppu_vram_increment_32",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
@@ -1167,6 +1196,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuSpriteZeroHit => PPU_SPRITE_ZERO_HIT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuStatusLatchReset => PPU_STATUS_LATCH_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramIncrement32 => PPU_VRAM_INCREMENT_32_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramReadBuffer => PPU_READ_BUFFER_FAULT_LABEL,
@@ -1188,6 +1218,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
+    pub ppu_sprite_zero_hit: PpuSpriteZeroHitTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
     pub timeline: Vec<TestTimelineTelemetry>,
@@ -1489,6 +1520,17 @@ pub struct InputPortMatrixTelemetry {
     pub joypad2_overread_first_hex: String,
     pub joypad2_overread_second: u8,
     pub joypad2_overread_second_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PpuSpriteZeroHitTelemetry {
+    pub expected_status_bit: u8,
+    pub expected_status_bit_hex: String,
+    pub observed_status_bit: u8,
+    pub observed_status_bit_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub passed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2025,6 +2067,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
+    let ppu_sprite_zero_hit = ppu_sprite_zero_hit_telemetry(&ram);
     let mut host_failures = host_validate(HostValidationInput {
         status,
         timeout,
@@ -2032,6 +2075,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -2055,6 +2099,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -2107,6 +2152,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         input_port_matrix,
+        ppu_sprite_zero_hit,
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
             nmi_count: ram[NMI_COUNT_ADDR as usize],
@@ -2336,6 +2382,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_coverage_gaps_section(&mut report, telemetry);
+    write_ppu_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_instruction_trace_section(&mut report, telemetry);
@@ -2556,6 +2603,34 @@ fn write_coverage_gaps_section(report: &mut String, telemetry: &DiagnosticTeleme
         )
         .expect("write report");
     }
+    writeln!(report).expect("write report");
+}
+
+fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## PPU Pixel Pipeline").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Sprite-zero-hit status bit / expected | {} / {} |",
+        telemetry.ppu_sprite_zero_hit.observed_status_bit_hex,
+        telemetry.ppu_sprite_zero_hit.expected_status_bit_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-zero-hit cases / expected | {} / {} |",
+        telemetry.ppu_sprite_zero_hit.observed_case_count,
+        telemetry.ppu_sprite_zero_hit.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-zero-hit passed | {} |",
+        telemetry.ppu_sprite_zero_hit.passed
+    )
+    .expect("write report");
     writeln!(report).expect("write report");
 }
 
@@ -3583,6 +3658,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3599,6 +3675,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -3665,6 +3742,14 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.input_port_matrix.joypad2_overread_second_hex,
             input.input_port_matrix.observed_case_count,
             input.input_port_matrix.expected_case_count
+        ));
+    }
+    if !input.ppu_sprite_zero_hit.passed {
+        failures.push(format!(
+            "PPU sprite-zero-hit mismatch: status bit {}, cases {}/{}",
+            input.ppu_sprite_zero_hit.observed_status_bit_hex,
+            input.ppu_sprite_zero_hit.observed_case_count,
+            input.ppu_sprite_zero_hit.expected_case_count
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -3893,6 +3978,32 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.input_port_matrix.expected_case_count
             ),
             likely_domain: "joypad.input_port_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.sprite_zero_hit.status".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_SPRITE_ZERO_HIT_TEST_ID),
+            test_name: test_name(PPU_SPRITE_ZERO_HIT_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_sprite_zero_hit.passed),
+            description:
+                "Cartridge-observed PPUSTATUS sprite-zero-hit bit is retained in host telemetry"
+                    .to_string(),
+            expected: format!(
+                "sprite-zero-hit status bit {} and cases {}",
+                input.ppu_sprite_zero_hit.expected_status_bit_hex,
+                input.ppu_sprite_zero_hit.expected_case_count
+            ),
+            observed: format!(
+                "sprite-zero-hit status bit {}, cases {}/{}",
+                input.ppu_sprite_zero_hit.observed_status_bit_hex,
+                input.ppu_sprite_zero_hit.observed_case_count,
+                input.ppu_sprite_zero_hit.expected_case_count
+            ),
+            likely_domain: "ppu.sprite_zero_hit".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -4258,6 +4369,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_addressing_mode_matrix();
     program.input_port_serial_matrix();
     program.oam_dma_phase_matrix();
+    program.ppu_sprite_zero_hit();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -5034,6 +5146,100 @@ impl DiagnosticProgram {
         self.pass_test(DMA_PHASE_MATRIX_TEST_ID);
     }
 
+    fn ppu_sprite_zero_hit(&mut self) {
+        self.begin_test(PPU_SPRITE_ZERO_HIT_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_SPRITE_ZERO_HIT_STATUS_ADDR);
+        self.asm.sta_abs(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x42);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x0F);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x11);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x16);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        self.asm.lda_imm(0x10);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_imm(0x10);
+        self.asm.sta_abs(0x2004);
+
+        self.asm
+            .label(PPU_SPRITE_ZERO_HIT_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_imm(0x18);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("sprite_zero_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("sprite_zero_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT);
+        self.asm.sta_abs(PPU_SPRITE_ZERO_HIT_STATUS_ADDR);
+        self.expect_a_eq(PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT, 0x85);
+        self.asm.lda_imm(PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        self.asm.lda_abs(0x0300);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_abs(0x0301);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_abs(0x0302);
+        self.asm.sta_abs(0x2004);
+        self.asm.lda_abs(0x0303);
+        self.asm.sta_abs(0x2004);
+        self.pass_test(PPU_SPRITE_ZERO_HIT_TEST_ID);
+    }
+
     fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
         for index in 0..8 {
             self.asm.lda_abs(addr);
@@ -5346,6 +5552,10 @@ fn build_chr_rom() -> Vec<u8> {
         };
         chr[16 + 8 + row] = 0;
     }
+    for row in 0..8 {
+        chr[32 + row] = 0xFF;
+        chr[32 + 8 + row] = 0;
+    }
 
     chr
 }
@@ -5512,6 +5722,10 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
         }
+        DiagnosticFaultInjection::PpuSpriteZeroHit => {
+            bus.cpu_write(0x2003, 0x01);
+            bus.cpu_write(0x2004, 0x00);
+        }
         DiagnosticFaultInjection::PpuStatusLatchReset => {
             bus.cpu_write(0x2006, 0x20);
         }
@@ -5614,6 +5828,21 @@ fn input_port_matrix_telemetry(ram: &[u8], config: &DiagnosticConfig) -> InputPo
         joypad2_overread_first_hex: hex_byte(joypad2_overread_first),
         joypad2_overread_second,
         joypad2_overread_second_hex: hex_byte(joypad2_overread_second),
+    }
+}
+
+fn ppu_sprite_zero_hit_telemetry(ram: &[u8]) -> PpuSpriteZeroHitTelemetry {
+    let observed_status_bit = ram[(PPU_SPRITE_ZERO_HIT_STATUS_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR & 0x07FF) as usize];
+    PpuSpriteZeroHitTelemetry {
+        expected_status_bit: PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT,
+        expected_status_bit_hex: hex_byte(PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT),
+        observed_status_bit,
+        observed_status_bit_hex: hex_byte(observed_status_bit),
+        expected_case_count: PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        passed: observed_status_bit == PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT
+            && observed_case_count == PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT,
     }
 }
 
@@ -6888,6 +7117,9 @@ fn compare_observation_checksums(
     for path in [
         &["cartridge", "rom_hash"][..],
         &["oam", "checksum"][..],
+        &["ppu_sprite_zero_hit", "observed_status_bit"][..],
+        &["ppu_sprite_zero_hit", "observed_case_count"][..],
+        &["ppu_sprite_zero_hit", "passed"][..],
         &["frame", "checksum"][..],
         &["frame", "unique_colors"][..],
         &["audio", "sample_count"][..],

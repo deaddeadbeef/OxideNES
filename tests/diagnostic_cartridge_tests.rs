@@ -43,10 +43,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 24);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 25);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("oam_dma_phase_matrix")
+        Some("ppu_sprite_zero_hit")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -66,7 +66,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("oam_dma_phase_matrix")
+        Some("ppu_sprite_zero_hit")
     );
     assert_eq!(
         telemetry
@@ -89,7 +89,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 6));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 7));
     assert!(telemetry
         .analysis
         .coverage
@@ -178,6 +178,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && failure.test_name == Some("oam_dma_phase_matrix")
             && failure.likely_domain == "dma.oam_phase_matrix"
     }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0x85
+            && failure.test_name == Some("ppu_sprite_zero_hit")
+            && failure.likely_domain == "ppu.sprite_zero_hit"
+    }));
     assert_eq!(telemetry.tests.len(), DIAGNOSTIC_TESTS.len());
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "cpu_branch_page_crossing"
@@ -247,6 +252,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && test.intent.contains("odd and even start-phase")
             && test.passed
     }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "ppu_sprite_zero_hit"
+            && test.intent.contains("sprite/background overlap")
+            && test.passed
+    }));
     assert!(telemetry.cpu_addressing_matrix.passed);
     assert_eq!(telemetry.cpu_addressing_matrix.observed_case_count, 3);
     assert_eq!(
@@ -294,6 +304,17 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "joypad.input_port_matrix.results"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "joypad.input_port_matrix"
+    }));
+    assert!(telemetry.ppu_sprite_zero_hit.passed);
+    assert_eq!(
+        telemetry.ppu_sprite_zero_hit.observed_status_bit_hex,
+        "0x40"
+    );
+    assert_eq!(telemetry.ppu_sprite_zero_hit.observed_case_count, 1);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.sprite_zero_hit.status"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.sprite_zero_hit"
     }));
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0x81");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x28");
@@ -522,11 +543,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | oam_dma_phase_matrix (24) |"));
+    assert!(report.contains("| Focus test | ppu_sprite_zero_hit (25) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
     assert!(report.contains("| mapper_banking_runtime | cartridge |"));
+    assert!(report.contains("## PPU Pixel Pipeline"));
+    assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x40 / 0x40 |"));
     assert!(report.contains("## DMA Timing"));
     assert!(report.contains("| OAM DMA completed | true |"));
     assert!(report.contains("| Active cycles / expected |"));
@@ -541,7 +564,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
     assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
-    assert!(report.contains("| Slowest test | ppu_nmi_and_render_frame"));
+    assert!(report.contains("| Slowest test | ppu_sprite_zero_hit"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | passed |"));
     assert!(report.contains("| 11 | joypad2_strobe_shift | joypad | integration | passed |"));
     assert!(report.contains("| 12 | cpu_zero_page_index_wrap | cpu | edge_case | passed |"));
@@ -561,6 +584,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 22 | cpu_addressing_mode_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("| 23 | input_port_serial_matrix | joypad | edge_case | passed |"));
     assert!(report.contains("| 24 | oam_dma_phase_matrix | dma | edge_case | passed |"));
+    assert!(report.contains("| 25 | ppu_sprite_zero_hit | ppu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -586,10 +610,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
     assert!(telemetry.verdict.passed);
     assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 24);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 25);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("oam_dma_phase_matrix")
+        Some("ppu_sprite_zero_hit")
     );
     assert_eq!(telemetry.input.joypad1_mask_hex, "0xAA");
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0xAA");
@@ -738,7 +762,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_failure() {
 
     assert_eq!(telemetry.analysis.timing.started_tests, 7);
     assert_eq!(telemetry.analysis.timing.ended_tests, 7);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 17);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 18);
     let failing_timeline = telemetry
         .timeline
         .iter()
@@ -850,7 +874,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 24);
+    assert_eq!(telemetry.verdict.current_test, 25);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -1000,6 +1024,81 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_phase_matrix_failure
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_zero_hit_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuSpriteZeroHit),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU sprite-zero-hit failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_sprite_zero_hit")
+    );
+    assert_eq!(telemetry.verdict.current_test, 25);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("ppu_sprite_zero_hit")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x85);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU sprite-zero-hit localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 25);
+    assert_eq!(failure.test_name, Some("ppu_sprite_zero_hit"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0x85");
+    assert_eq!(failure.likely_domain, "ppu.sprite_zero_hit");
+    assert!(failure.assertion.contains("sprite-zero-hit"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::CartridgeAssertionFailed
+    );
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(telemetry.analysis.failing_test, Some("ppu_sprite_zero_hit"));
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.sprite_zero_hit")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 25);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.sprite_zero_hit")
+    );
+    assert_eq!(
+        telemetry.ppu_sprite_zero_hit.observed_status_bit_hex,
+        "0x00"
+    );
+    assert_eq!(telemetry.ppu_sprite_zero_hit.observed_case_count, 0);
+    assert!(!telemetry.ppu_sprite_zero_hit.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.25.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(25)
+            && probe.likely_domain == "ppu.sprite_zero_hit"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 25);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 25);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_sprite_zero_hit (25) |"));
+    assert!(report.contains("| Focus domain | ppu.sprite_zero_hit |"));
+    assert!(report.contains("| Likely domain | ppu.sprite_zero_hit |"));
+    assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x00 / 0x40 |"));
+    assert!(report.contains("| 25 | ppu_sprite_zero_hit | ppu | edge_case | failed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::ApuStatusRegister),
@@ -1060,7 +1159,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 6);
     assert_eq!(telemetry.analysis.timing.ended_tests, 6);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 18);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 19);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1131,7 +1230,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failu
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 12);
     assert_eq!(telemetry.analysis.timing.ended_tests, 12);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 12);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 13);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1205,7 +1304,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 13);
     assert_eq!(telemetry.analysis.timing.ended_tests, 13);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 11);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 12);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1276,7 +1375,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_fa
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 22);
     assert_eq!(telemetry.analysis.timing.ended_tests, 22);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1350,7 +1449,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_input_port_matrix_failur
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 23);
     assert_eq!(telemetry.analysis.timing.ended_tests, 23);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1421,7 +1520,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 14);
     assert_eq!(telemetry.analysis.timing.ended_tests, 14);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 10);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 11);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1503,7 +1602,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_bank_switch_fail
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 15);
     assert_eq!(telemetry.analysis.timing.ended_tests, 15);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 9);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 10);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1582,7 +1681,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_mapper2_prg_ram_failure(
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 16);
     assert_eq!(telemetry.analysis.timing.ended_tests, 16);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 8);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 9);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1664,7 +1763,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nametable_mirroring_
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 17);
     assert_eq!(telemetry.analysis.timing.ended_tests, 17);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 7);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 8);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1743,7 +1842,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_reset_fail
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 18);
     assert_eq!(telemetry.analysis.timing.ended_tests, 18);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 6);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 7);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1816,7 +1915,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad_strobe_high_hold_
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 21);
     assert_eq!(telemetry.analysis.timing.ended_tests, 21);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1887,7 +1986,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_vram_increment_32_fa
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 19);
     assert_eq!(telemetry.analysis.timing.ended_tests, 19);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 6);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -1959,7 +2058,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_status_latch_reset_f
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 20);
     assert_eq!(telemetry.analysis.timing.ended_tests, 20);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -2151,7 +2250,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 24 |"));
+    assert!(report.contains("| Not started tests | 25 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }
