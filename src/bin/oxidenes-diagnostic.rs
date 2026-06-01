@@ -14,8 +14,8 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 7;
-const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 1;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 8;
+const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -132,6 +132,7 @@ struct DiagnosticScenarioSuiteObserverAction {
     summary: String,
     primary_artifact: String,
     supporting_artifacts: Vec<String>,
+    replay_args: Vec<String>,
     evidence: Vec<String>,
 }
 
@@ -152,6 +153,7 @@ struct DiagnosticScenarioSuiteObserverObservation {
     comparison_difference_count: usize,
     top_difference_path: Option<String>,
     next_artifact: String,
+    replay_args: Vec<String>,
     bundle_manifest: String,
     triage_json: String,
     comparison_json: String,
@@ -188,6 +190,7 @@ struct DiagnosticScenarioSuiteEntry {
     contract: DiagnosticScenarioSuiteContract,
     expectation_met: bool,
     config: DiagnosticBundleConfig,
+    replay_args: Vec<String>,
     artifacts: DiagnosticScenarioSuiteArtifacts,
 }
 
@@ -656,6 +659,13 @@ fn run() -> Result<bool, String> {
                 config.expected_joypad2_mask = parse_byte(&value)?;
                 config_overridden = true;
             }
+            "--fault-injection" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--fault-injection requires a fault name".to_string())?;
+                config.fault_injection = Some(parse_fault_injection(&value)?);
+                config_overridden = true;
+            }
             "--no-stdout" => {
                 print_stdout = false;
             }
@@ -803,8 +813,21 @@ fn print_help() {
     println!("    --expect-joypad1 <BYTE>  Override the joypad-1 mask expected by the cartridge");
     println!("    --joypad2 <BYTE>     Override joypad-2 mask, decimal or 0x-prefixed hex");
     println!("    --expect-joypad2 <BYTE>  Override the joypad-2 mask expected by the cartridge");
+    println!("    --fault-injection <NAME> Inject a named diagnostic fault fixture");
     println!("    --no-stdout          Do not print telemetry JSON to stdout");
     println!("    -h, --help           Show this help");
+}
+
+fn parse_fault_injection(value: &str) -> Result<DiagnosticFaultInjection, String> {
+    DiagnosticFaultInjection::parse(value).ok_or_else(|| {
+        let names = DiagnosticFaultInjection::ALL
+            .iter()
+            .copied()
+            .map(DiagnosticFaultInjection::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("invalid --fault-injection value: {value}; expected one of: {names}")
+    })
 }
 
 fn parse_byte(value: &str) -> Result<u8, String> {
@@ -952,6 +975,12 @@ fn observer_next_actions(
         .collect::<Vec<_>>();
 
     if actions.is_empty() {
+        let replay_args = manifest
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == manifest.baseline_scenario_id)
+            .map(|scenario| scenario.replay_args.clone())
+            .unwrap_or_default();
         return vec![DiagnosticScenarioSuiteObserverAction {
             priority: "info",
             action_type: "archive_clean_suite",
@@ -962,6 +991,7 @@ fn observer_next_actions(
                 "scenario-suite.md".to_string(),
                 "scenario-suite-observer.md".to_string(),
             ],
+            replay_args,
             evidence: vec![format!(
                 "scenario_count={}; contract_mismatch_count=0; baseline_divergence_count=0",
                 manifest.scenario_count
@@ -1009,6 +1039,7 @@ fn observer_action(
         summary,
         primary_artifact: item.next_artifact.clone(),
         supporting_artifacts,
+        replay_args: scenario.replay_args.clone(),
         evidence: observer_action_evidence(item),
     }
 }
@@ -1066,6 +1097,7 @@ fn observer_observations(
                 .first()
                 .map(|difference| difference.path.clone()),
             next_artifact: observer_scenario_next_artifact(scenario),
+            replay_args: scenario.replay_args.clone(),
             bundle_manifest: scenario.artifacts.bundle_manifest.clone(),
             triage_json: scenario.artifacts.triage_json.clone(),
             comparison_json: scenario.artifacts.comparison_json.clone(),
@@ -1137,6 +1169,7 @@ fn scenario_suite_observer_ai_handoff() -> Vec<String> {
     vec![
         "Start with next_actions; critical items are regressions, known_divergence items are intentional fixture drilldowns.".to_string(),
         "Use observations to identify the scenario role, outcome, health, focus domain, failed probes, and first artifact to open.".to_string(),
+        "Use replay_args to regenerate one scenario bundle before loading the full suite when a fixture needs live confirmation.".to_string(),
         "Open primary_artifact before telemetry_json unless the action evidence says raw events or instruction trace context is required.".to_string(),
     ]
 }
@@ -1419,6 +1452,21 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
     .expect("write report");
 
     writeln!(report).expect("write report");
+    writeln!(report, "## Replay Commands").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Scenario | Args |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    for scenario in &manifest.scenarios {
+        writeln!(
+            report,
+            "| {} | {} |",
+            scenario.id,
+            format_replay_args(&scenario.replay_args)
+        )
+        .expect("write report");
+    }
+
+    writeln!(report).expect("write report");
     writeln!(report, "## Baseline Comparison Matrix").expect("write report");
     writeln!(report).expect("write report");
     writeln!(
@@ -1545,6 +1593,21 @@ fn format_scenario_suite_observer_report(
     }
 
     writeln!(report).expect("write report");
+    writeln!(report, "## Replay Commands").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Scenario | Args |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    for observation in &observer.observations {
+        writeln!(
+            report,
+            "| {} | {} |",
+            observation.scenario_id,
+            format_replay_args(&observation.replay_args)
+        )
+        .expect("write report");
+    }
+
+    writeln!(report).expect("write report");
     writeln!(report, "## Artifact Hints").expect("write report");
     writeln!(report).expect("write report");
     writeln!(report, "| Path | Kind | Purpose |").expect("write report");
@@ -1599,6 +1662,10 @@ fn markdown_cell(value: &str) -> String {
     value.replace('|', r"\|").replace(['\r', '\n'], " ")
 }
 
+fn format_replay_args(args: &[String]) -> String {
+    markdown_cell(&args.join(" "))
+}
+
 fn write_scenario_bundle(
     suite_dir: &Path,
     spec: &DiagnosticScenarioSpec,
@@ -1612,6 +1679,7 @@ fn write_scenario_bundle(
     let scenario_passed = telemetry.verdict.passed && comparison.passed;
     let bundle_dir = suite_dir.join(spec.id);
     let config = diagnostic_bundle_config(&spec.config);
+    let replay_args = scenario_replay_args(spec.id, &spec.config);
 
     write_bundle(
         &bundle_dir,
@@ -1681,6 +1749,7 @@ fn write_scenario_bundle(
         contract,
         expectation_met,
         config,
+        replay_args,
         artifacts: DiagnosticScenarioSuiteArtifacts {
             bundle_manifest: format!("{}/manifest.json", spec.id),
             triage_json: format!("{}/triage.json", spec.id),
@@ -1691,6 +1760,34 @@ fn write_scenario_bundle(
             diagnostic_rom: format!("{}/diagnostic.nes", spec.id),
         },
     })
+}
+
+fn scenario_replay_args(scenario_id: &str, config: &DiagnosticConfig) -> Vec<String> {
+    let mut args = vec![
+        "cargo".to_string(),
+        "run".to_string(),
+        "--bin".to_string(),
+        "oxidenes-diagnostic".to_string(),
+        "--".to_string(),
+        "--bundle-dir".to_string(),
+        format!("target/diagnostics/replay/{scenario_id}"),
+        "--max-cycles".to_string(),
+        config.max_cpu_cycles.to_string(),
+        "--joypad1".to_string(),
+        hex_byte(config.joypad1_mask),
+        "--expect-joypad1".to_string(),
+        hex_byte(config.expected_joypad1_mask),
+        "--joypad2".to_string(),
+        hex_byte(config.joypad2_mask),
+        "--expect-joypad2".to_string(),
+        hex_byte(config.expected_joypad2_mask),
+    ];
+    if let Some(fault) = config.fault_injection {
+        args.push("--fault-injection".to_string());
+        args.push(fault.as_str().to_string());
+    }
+    args.push("--no-stdout".to_string());
+    args
 }
 
 fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
@@ -1944,6 +2041,7 @@ fn scenario_suite_ai_handoff() -> Vec<String> {
         "Start with scenario-suite-observer.json next_actions, then use scenario-suite.json analysis.attention_queue when full scenario contract detail is needed.".to_string(),
         "Use each scenario contract object to see whether pass state, health, focus test, or focus domain caused an expectation mismatch.".to_string(),
         "Use pass/ as the known-good baseline bundle; every scenario bundle includes comparison.json against that baseline.".to_string(),
+        "Use each scenario replay_args array to regenerate a single bundle without regenerating the full scenario suite.".to_string(),
         "For failures, open each scenario triage.json debug_focus before loading telemetry.json, report.md, or comparison.json.".to_string(),
     ]
 }

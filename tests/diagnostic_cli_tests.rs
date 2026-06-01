@@ -79,6 +79,64 @@ fn diagnostic_cli_bundle_includes_baseline_comparison() {
 }
 
 #[test]
+fn diagnostic_cli_can_replay_named_fault_fixture() {
+    let bundle_dir = temp_dir("bundle-fault-replay");
+
+    let status = Command::new(diagnostic_bin())
+        .arg("--bundle-dir")
+        .arg(&bundle_dir)
+        .arg("--fault-injection")
+        .arg("joypad_strobe_high_hold")
+        .arg("--no-stdout")
+        .status()
+        .expect("fault replay diagnostic command should run");
+
+    assert_eq!(status.code(), Some(1));
+    assert_bundle_artifacts_with_config(
+        &bundle_dir,
+        false,
+        false,
+        "0x28",
+        Some("joypad_strobe_high_hold"),
+    );
+    let triage = read_json(&bundle_dir.join("triage.json"));
+    assert_eq!(
+        triage["input"]["fault_injection"],
+        Value::String("joypad_strobe_high_hold".to_string())
+    );
+    assert_eq!(
+        triage["health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(triage["debug_focus"]["focus_test_id"], Value::from(21));
+    assert_eq!(
+        triage["debug_focus"]["focus_domain"],
+        Value::String("joypad.strobe_high_hold".to_string())
+    );
+    assert_eq!(
+        triage["failure"]["likely_domain"],
+        Value::String("joypad.strobe_high_hold".to_string())
+    );
+
+    fs::remove_dir_all(&bundle_dir).expect("bundle temp dir should be removable");
+}
+
+#[test]
+fn diagnostic_cli_rejects_unknown_fault_fixture() {
+    let output = Command::new(diagnostic_bin())
+        .arg("--fault-injection")
+        .arg("not_a_fault")
+        .arg("--no-stdout")
+        .output()
+        .expect("invalid fault diagnostic command should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("invalid --fault-injection value: not_a_fault"));
+    assert!(stderr.contains("joypad_strobe_high_hold"));
+}
+
+#[test]
 fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let suite_dir = temp_dir("scenario-suite");
 
@@ -91,7 +149,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(7));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(8));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(30));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
@@ -395,8 +453,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             .is_some_and(|text| text.contains("scenario-suite-observer.json"))));
 
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
-    assert_eq!(observer["observer_schema_version"], Value::from(1));
-    assert_eq!(observer["scenario_suite_schema_version"], Value::from(7));
+    assert_eq!(observer["observer_schema_version"], Value::from(2));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(8));
     assert_eq!(observer["telemetry_schema_version"], Value::from(30));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
@@ -515,6 +573,15 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             == &Value::String(
                 "failed_probe_ids=cartridge.status.pass,cartridge.test.21.result".to_string()
             )));
+    assert_replay_args_contains(&joypad_hold_action["replay_args"], "--fault-injection");
+    assert_replay_args_contains(
+        &joypad_hold_action["replay_args"],
+        "joypad_strobe_high_hold",
+    );
+    assert_replay_args_contains(
+        &joypad_hold_action["replay_args"],
+        "target/diagnostics/replay/joypad_strobe_high_hold_fault",
+    );
     let ppu_increment_32_action =
         find_observer_action(observer_actions, "ppu_vram_increment_32_fault");
     assert_eq!(
@@ -723,6 +790,14 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         input_matrix_observation["next_artifact"],
         Value::String("input_mask_matrix_pass/triage.json".to_string())
     );
+    assert_replay_args_contains(&input_matrix_observation["replay_args"], "--joypad1");
+    assert_replay_args_contains(&input_matrix_observation["replay_args"], "0xAA");
+    assert_replay_args_contains(&input_matrix_observation["replay_args"], "--expect-joypad2");
+    assert_replay_args_contains(&input_matrix_observation["replay_args"], "0x55");
+    assert_replay_args_contains(
+        &input_matrix_observation["replay_args"],
+        "target/diagnostics/replay/input_mask_matrix_pass",
+    );
     let timeout_observation = find_observer_observation(observations, "timeout_cycle_limit");
     assert_eq!(
         timeout_observation["role"],
@@ -868,6 +943,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         joypad_hold_observation["next_artifact"],
         Value::String("joypad_strobe_high_hold_fault/comparison.json".to_string())
+    );
+    assert_replay_args_contains(&joypad_hold_observation["replay_args"], "--fault-injection");
+    assert_replay_args_contains(
+        &joypad_hold_observation["replay_args"],
+        "joypad_strobe_high_hold",
     );
     let ppu_increment_32_observation =
         find_observer_observation(observations, "ppu_vram_increment_32_fault");
@@ -1051,6 +1131,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| mapper2_prg_ram_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_ram |"));
     assert!(observer_report.contains("| ppu_nmi_timeout_fault | expected_failure_fixture | expected_baseline_divergence | timed_out | ppu.nmi |"));
     assert!(observer_report.contains("| cpu_indirect_jmp_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
+    assert!(observer_report.contains("## Replay Commands"));
+    assert!(observer_report.contains("target/diagnostics/replay/joypad_strobe_high_hold_fault"));
     assert!(observer_report.contains("## Artifact Hints"));
     assert!(observer_report.contains("scenario-suite.json"));
 
@@ -1127,6 +1209,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| ppu_nmi_timeout_fault | true | true | true | true | true |"));
     assert!(suite_report.contains("| timeout_cycle_limit | true | true | true | true | true |"));
     assert!(suite_report.contains("## AI Drilldown"));
+    assert!(suite_report.contains("## Replay Commands"));
+    assert!(suite_report.contains("target/diagnostics/replay/input_mask_matrix_pass"));
     assert!(suite_report.contains("## Baseline Comparison Matrix"));
     assert!(suite_report.contains("| pass | true | 0 | 0 | 0 | 0 | - |"));
     assert!(suite_report.contains("| joypad1_mismatch | false |"));
@@ -1170,6 +1254,9 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         pass["artifacts"]["triage_json"],
         Value::String("pass/triage.json".to_string())
     );
+    assert_replay_args_contains(&pass["replay_args"], "target/diagnostics/replay/pass");
+    assert_replay_args_contains(&pass["replay_args"], "--bundle-dir");
+    assert_replay_args_contains(&pass["replay_args"], "--no-stdout");
     assert_bundle_artifacts(&suite_dir.join("pass"), true, true);
 
     let input_matrix = find_scenario(scenarios, "input_mask_matrix_pass");
@@ -1198,6 +1285,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         input_matrix["config"]["expected_joypad2_mask_hex"],
         Value::String("0x55".to_string())
     );
+    assert_replay_args_contains(&input_matrix["replay_args"], "--joypad1");
+    assert_replay_args_contains(&input_matrix["replay_args"], "0xAA");
+    assert_replay_args_contains(&input_matrix["replay_args"], "--expect-joypad2");
+    assert_replay_args_contains(&input_matrix["replay_args"], "0x55");
     assert_bundle_artifacts_with_config(
         &suite_dir.join("input_mask_matrix_pass"),
         true,
@@ -2198,6 +2289,16 @@ fn assert_manifest_artifact(bundle_dir: &Path, artifacts: &[Value], path: &str, 
         .expect("sha256 should be a string");
     assert_eq!(digest.len(), 64);
     assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
+}
+
+fn assert_replay_args_contains(args: &Value, expected: &str) {
+    assert!(
+        args.as_array()
+            .expect("replay_args should be an array")
+            .iter()
+            .any(|arg| arg == &Value::String(expected.to_string())),
+        "replay_args should contain {expected}"
+    );
 }
 
 fn find_scenario<'a>(scenarios: &'a [Value], id: &str) -> &'a Value {

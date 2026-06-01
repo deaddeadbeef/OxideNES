@@ -911,6 +911,22 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
+    pub const ALL: [DiagnosticFaultInjection; 13] = [
+        DiagnosticFaultInjection::ApuStatusRegister,
+        DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
+        DiagnosticFaultInjection::CpuZeroPageIndexWrap,
+        DiagnosticFaultInjection::DmaOamTransfer,
+        DiagnosticFaultInjection::JoypadStrobeHighHold,
+        DiagnosticFaultInjection::JoypadStrobeReset,
+        DiagnosticFaultInjection::Mapper2PrgBankSwitch,
+        DiagnosticFaultInjection::Mapper2PrgRam,
+        DiagnosticFaultInjection::PpuNametableMirroring,
+        DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuStatusLatchReset,
+        DiagnosticFaultInjection::PpuVramIncrement32,
+        DiagnosticFaultInjection::PpuVramReadBuffer,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
@@ -927,6 +943,10 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::PpuVramIncrement32 => "ppu_vram_increment_32",
             DiagnosticFaultInjection::PpuVramReadBuffer => "ppu_vram_read_buffer",
         }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|fault| fault.as_str() == value)
     }
 
     fn injection_label(self) -> &'static str {
