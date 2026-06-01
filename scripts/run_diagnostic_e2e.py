@@ -121,6 +121,12 @@ def artifact_paths(
         "diagnostic_ai_index_report": str(suite_dir / "diagnostic-ai-observability-index.md"),
         "diagnostic_ai_query_smoke_json": str(suite_dir / "diagnostic-ai-query-smoke.json"),
         "diagnostic_ai_query_smoke_report": str(suite_dir / "diagnostic-ai-query-smoke.md"),
+        "diagnostic_ai_diagnosis_smoke_json": str(
+            suite_dir / "diagnostic-ai-diagnosis-smoke.json"
+        ),
+        "diagnostic_ai_diagnosis_smoke_report": str(
+            suite_dir / "diagnostic-ai-diagnosis-smoke.md"
+        ),
         "investigation_plan_json": str(suite_dir / "diagnostic-investigation-plan.json"),
         "investigation_plan_report": str(suite_dir / "diagnostic-investigation-plan.md"),
         "route_evidence_verification_json": str(
@@ -169,6 +175,7 @@ def build_summary(
     scenario_dossiers = load_json(suite_dir / "diagnostic-scenario-dossiers.json")
     ai_index = load_json(suite_dir / "diagnostic-ai-observability-index.json")
     ai_query_smoke = load_json(suite_dir / "diagnostic-ai-query-smoke.json")
+    ai_diagnosis_smoke = load_json(suite_dir / "diagnostic-ai-diagnosis-smoke.json")
 
     artifacts = artifact_paths(suite_dir, summary_json, summary_report, route_verification)
     artifact_presence = existing_artifact_map(artifacts)
@@ -190,6 +197,8 @@ def build_summary(
         errors.append("diagnostic AI index status is not passed")
     if ai_query_smoke.get("status") != "passed":
         errors.append("diagnostic AI query smoke status is not passed")
+    if ai_diagnosis_smoke.get("status") != "passed":
+        errors.append("diagnostic AI diagnosis smoke status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
     if missing:
         errors.append(f"missing artifacts: {', '.join(missing)}")
@@ -250,6 +259,21 @@ def build_summary(
             "top_route_probe": as_dict(ai_query_smoke.get("summary")).get("top_route_probe"),
             "check_count": len(as_list(ai_query_smoke.get("checks"))),
         },
+        "ai_diagnosis": {
+            "status": ai_diagnosis_smoke.get("status"),
+            "route_id": as_dict(ai_diagnosis_smoke.get("selection")).get("route_id"),
+            "scenario_id": as_dict(ai_diagnosis_smoke.get("selection")).get("scenario_id"),
+            "focus_domain": as_dict(ai_diagnosis_smoke.get("selection")).get("focus_domain"),
+            "probe_id": as_dict(ai_diagnosis_smoke.get("selection")).get("probe_id"),
+            "replay_status": as_dict(ai_diagnosis_smoke.get("route_check")).get(
+                "replay_status"
+            ),
+            "tests_status": as_dict(ai_diagnosis_smoke.get("route_check")).get("tests_status"),
+            "test_command_count": as_dict(ai_diagnosis_smoke.get("route_check")).get(
+                "test_command_count"
+            ),
+            "stop_condition_count": len(as_list(ai_diagnosis_smoke.get("stop_conditions"))),
+        },
         "top_route": {
             "route_id": top_route.get("route_id"),
             "focus_domain": top_route.get("focus_domain"),
@@ -265,6 +289,7 @@ def build_summary(
             "If status is failed, inspect errors and the failed command tails before opening telemetry.",
             "If status is passed, use diagnostic_ai_index_json as the compact joined index before opening larger artifacts.",
             "Use diagnostic_ai_query_smoke_json to prove the AI index supports deterministic route, scenario, probe, and coverage queries.",
+            "Use diagnostic_ai_diagnosis_smoke_json to prove an AI-selected route can regenerate replay evidence and mapped narrow-test results.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
             "Use route_evidence_verification_json to prove the investigation routes can regenerate focused replay evidence.",
         ],
@@ -276,6 +301,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     routes = as_dict(summary.get("routes"))
     ai_index = as_dict(summary.get("ai_index"))
     ai_query = as_dict(summary.get("ai_query"))
+    ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
         "# Diagnostic E2E Report",
@@ -341,6 +367,20 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Top route scenario | {ai_query.get('top_route_scenario')} |",
         f"| Top route focus domain | {ai_query.get('top_route_focus_domain')} |",
         f"| Top route probe | {ai_query.get('top_route_probe')} |",
+        "",
+        "## AI Diagnosis",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_diagnosis.get('status')} |",
+        f"| Route id | {ai_diagnosis.get('route_id')} |",
+        f"| Scenario | {ai_diagnosis.get('scenario_id')} |",
+        f"| Focus domain | {ai_diagnosis.get('focus_domain')} |",
+        f"| Probe | {ai_diagnosis.get('probe_id')} |",
+        f"| Replay status | {ai_diagnosis.get('replay_status')} |",
+        f"| Tests status | {ai_diagnosis.get('tests_status')} |",
+        f"| Test commands | {ai_diagnosis.get('test_command_count')} |",
+        f"| Stop conditions | {ai_diagnosis.get('stop_condition_count')} |",
         "",
         "## Commands",
         "",
@@ -544,6 +584,32 @@ def main() -> int:
     else:
         commands.append(skipped_command("query_diagnostic_ai_index_smoke", "AI index failed"))
 
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
+                "run_diagnostic_ai_diagnosis_smoke",
+                [
+                    sys.executable,
+                    script_path("run_diagnostic_ai_diagnosis.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--output-dir",
+                    str(suite_dir / "ai-diagnosis-smoke"),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-diagnosis-smoke.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-diagnosis-smoke.md"),
+                    "--cargo",
+                    args.cargo,
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command("run_diagnostic_ai_diagnosis_smoke", "AI query smoke failed")
+        )
+
     summary = build_summary(suite_dir, summary_json, summary_report, commands, repo_root)
     summary_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_markdown(summary_report, summary)
@@ -553,13 +619,15 @@ def main() -> int:
     else:
         observability = as_dict(summary.get("observability"))
         routes = as_dict(summary.get("routes"))
+        ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
         print(
             "Diagnostic e2e report "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_report} "
             f"scenarios={observability.get('scenario_count')} "
             f"dossiers={observability.get('scenario_dossiers')}:{observability.get('actionable_dossiers')} "
-            f"routes={routes.get('matrix_passed_route_count')}:{routes.get('top_route_verified')}"
+            f"routes={routes.get('matrix_passed_route_count')}:{routes.get('top_route_verified')} "
+            f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')}"
         )
     return int(summary["recommended_exit_code"])
 
