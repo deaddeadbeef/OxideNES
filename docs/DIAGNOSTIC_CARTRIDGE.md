@@ -120,9 +120,14 @@ route, regenerate a focused replay bundle, run the mapped narrow tests, and
 emit a compact diagnosis handoff. It also writes
 `diagnostic-ai-fix-handoff-smoke.json` and
 `diagnostic-ai-fix-handoff-smoke.md`, proving the selected route can be resolved
-into source/test line anchors and fix-loop commands. Start with the e2e report
-to decide whether the diagnostic corpus is trusted, then use the AI index, query
-CLI, diagnosis runner, or fix handoff before opening full telemetry.
+into source/test line anchors and fix-loop commands. It then writes
+`diagnostic-ai-artifact-verification.json` and
+`diagnostic-ai-artifact-verification.md`, proving the AI index, query smoke,
+diagnosis smoke, and fix handoff agree on the selected route, scenario, focus
+domain, probe, artifact paths, and stop conditions. Start with the e2e report
+to decide whether the diagnostic corpus is trusted, then use the AI artifact
+verification, AI index, query CLI, diagnosis runner, or fix handoff before
+opening full telemetry.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -167,6 +172,19 @@ By default this consumes the e2e `diagnostic-ai-diagnosis-smoke.json`. Use
 bounded source and test line matches for the selected search terms, mapped
 narrow-test commands, replay commands, verification commands, stop conditions,
 and a fix loop that tells an AI debugger what to inspect before editing.
+
+To validate the AI-facing artifact graph directly, run:
+
+```powershell
+python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report
+```
+
+Use `--require-e2e-report` when validating a completed local or downloaded CI
+artifact after `diagnostic-e2e-report.json` exists. The verifier checks that the
+AI index, query smoke, diagnosis smoke, fix handoff, and optional e2e summary
+all passed, agree on the top route identity, include the expected non-happy-path
+coverage counts, preserve source/test anchors, and still point to present
+artifacts after a CI bundle is downloaded to a different directory.
 
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
@@ -384,7 +402,11 @@ end-to-end replay/test diagnosis handoff. It then runs
 `build_diagnostic_ai_fix_handoff.py` and writes
 `diagnostic-ai-fix-handoff-smoke.json` plus
 `diagnostic-ai-fix-handoff-smoke.md`, proving the selected route has concrete
-source/test anchors and bounded fix commands.
+source/test anchors and bounded fix commands. It then runs
+`verify_diagnostic_ai_artifacts.py` and writes
+`diagnostic-ai-artifact-verification.json` plus
+`diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
+is internally consistent before automated debugger or fix loops consume it.
 The AI index is the smallest single artifact for automated debuggers that need
 to join scenario health, failed probes, start-artifact pointers, replay
 arguments, mapped source files, narrow tests, and known coverage limits. The
@@ -393,7 +415,9 @@ focus domain, failed probe id, top route, and coverage posture. The diagnosis
 smoke proves one selected route can be regenerated into fresh telemetry and
 bounded test results without hand-joining the underlying artifacts. The fix
 handoff smoke proves that diagnosis can be translated into code-inspection
-anchors and exact regression commands.
+anchors and exact regression commands. The AI artifact verification proves the
+uploaded bundle can be trusted as a coherent graph before an automated debugger
+starts making emulator changes.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
