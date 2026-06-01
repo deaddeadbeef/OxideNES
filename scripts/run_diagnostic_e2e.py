@@ -127,6 +127,12 @@ def artifact_paths(
         "diagnostic_ai_diagnosis_smoke_report": str(
             suite_dir / "diagnostic-ai-diagnosis-smoke.md"
         ),
+        "diagnostic_ai_fix_handoff_smoke_json": str(
+            suite_dir / "diagnostic-ai-fix-handoff-smoke.json"
+        ),
+        "diagnostic_ai_fix_handoff_smoke_report": str(
+            suite_dir / "diagnostic-ai-fix-handoff-smoke.md"
+        ),
         "investigation_plan_json": str(suite_dir / "diagnostic-investigation-plan.json"),
         "investigation_plan_report": str(suite_dir / "diagnostic-investigation-plan.md"),
         "route_evidence_verification_json": str(
@@ -176,6 +182,7 @@ def build_summary(
     ai_index = load_json(suite_dir / "diagnostic-ai-observability-index.json")
     ai_query_smoke = load_json(suite_dir / "diagnostic-ai-query-smoke.json")
     ai_diagnosis_smoke = load_json(suite_dir / "diagnostic-ai-diagnosis-smoke.json")
+    ai_fix_handoff_smoke = load_json(suite_dir / "diagnostic-ai-fix-handoff-smoke.json")
 
     artifacts = artifact_paths(suite_dir, summary_json, summary_report, route_verification)
     artifact_presence = existing_artifact_map(artifacts)
@@ -199,6 +206,8 @@ def build_summary(
         errors.append("diagnostic AI query smoke status is not passed")
     if ai_diagnosis_smoke.get("status") != "passed":
         errors.append("diagnostic AI diagnosis smoke status is not passed")
+    if ai_fix_handoff_smoke.get("status") != "passed":
+        errors.append("diagnostic AI fix handoff smoke status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
     if missing:
         errors.append(f"missing artifacts: {', '.join(missing)}")
@@ -274,6 +283,32 @@ def build_summary(
             ),
             "stop_condition_count": len(as_list(ai_diagnosis_smoke.get("stop_conditions"))),
         },
+        "ai_fix_handoff": {
+            "status": ai_fix_handoff_smoke.get("status"),
+            "route_id": as_dict(ai_fix_handoff_smoke.get("selection")).get("route_id"),
+            "scenario_id": as_dict(ai_fix_handoff_smoke.get("selection")).get("scenario_id"),
+            "focus_domain": as_dict(ai_fix_handoff_smoke.get("selection")).get(
+                "focus_domain"
+            ),
+            "probe_id": as_dict(ai_fix_handoff_smoke.get("selection")).get("probe_id"),
+            "source_file_count": as_dict(ai_fix_handoff_smoke.get("source_scan")).get(
+                "source_file_count"
+            ),
+            "source_match_count": as_dict(ai_fix_handoff_smoke.get("source_scan")).get(
+                "source_match_count"
+            ),
+            "test_file_count": as_dict(ai_fix_handoff_smoke.get("test_scan")).get(
+                "test_file_count"
+            ),
+            "narrow_test_command_count": len(
+                as_list(
+                    as_dict(ai_fix_handoff_smoke.get("fix_commands")).get(
+                        "narrow_test_commands"
+                    )
+                )
+            ),
+            "stop_condition_count": len(as_list(ai_fix_handoff_smoke.get("stop_conditions"))),
+        },
         "top_route": {
             "route_id": top_route.get("route_id"),
             "focus_domain": top_route.get("focus_domain"),
@@ -290,6 +325,7 @@ def build_summary(
             "If status is passed, use diagnostic_ai_index_json as the compact joined index before opening larger artifacts.",
             "Use diagnostic_ai_query_smoke_json to prove the AI index supports deterministic route, scenario, probe, and coverage queries.",
             "Use diagnostic_ai_diagnosis_smoke_json to prove an AI-selected route can regenerate replay evidence and mapped narrow-test results.",
+            "Use diagnostic_ai_fix_handoff_smoke_json to resolve the selected route into source/test line anchors and fix-loop commands.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
             "Use route_evidence_verification_json to prove the investigation routes can regenerate focused replay evidence.",
         ],
@@ -302,6 +338,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     ai_index = as_dict(summary.get("ai_index"))
     ai_query = as_dict(summary.get("ai_query"))
     ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
+    ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
         "# Diagnostic E2E Report",
@@ -381,6 +418,21 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Tests status | {ai_diagnosis.get('tests_status')} |",
         f"| Test commands | {ai_diagnosis.get('test_command_count')} |",
         f"| Stop conditions | {ai_diagnosis.get('stop_condition_count')} |",
+        "",
+        "## AI Fix Handoff",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_fix_handoff.get('status')} |",
+        f"| Route id | {ai_fix_handoff.get('route_id')} |",
+        f"| Scenario | {ai_fix_handoff.get('scenario_id')} |",
+        f"| Focus domain | {ai_fix_handoff.get('focus_domain')} |",
+        f"| Probe | {ai_fix_handoff.get('probe_id')} |",
+        f"| Source files | {ai_fix_handoff.get('source_file_count')} |",
+        f"| Source matches | {ai_fix_handoff.get('source_match_count')} |",
+        f"| Test files | {ai_fix_handoff.get('test_file_count')} |",
+        f"| Narrow test commands | {ai_fix_handoff.get('narrow_test_command_count')} |",
+        f"| Stop conditions | {ai_fix_handoff.get('stop_condition_count')} |",
         "",
         "## Commands",
         "",
@@ -610,6 +662,30 @@ def main() -> int:
             skipped_command("run_diagnostic_ai_diagnosis_smoke", "AI query smoke failed")
         )
 
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
+                "build_diagnostic_ai_fix_handoff_smoke",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_fix_handoff.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--diagnosis-json",
+                    str(suite_dir / "diagnostic-ai-diagnosis-smoke.json"),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-fix-handoff-smoke.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-fix-handoff-smoke.md"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command("build_diagnostic_ai_fix_handoff_smoke", "AI diagnosis smoke failed")
+        )
+
     summary = build_summary(suite_dir, summary_json, summary_report, commands, repo_root)
     summary_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_markdown(summary_report, summary)
@@ -620,6 +696,7 @@ def main() -> int:
         observability = as_dict(summary.get("observability"))
         routes = as_dict(summary.get("routes"))
         ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
+        ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
         print(
             "Diagnostic e2e report "
             f"{summary['status']}: suite={suite_dir} "
@@ -627,7 +704,8 @@ def main() -> int:
             f"scenarios={observability.get('scenario_count')} "
             f"dossiers={observability.get('scenario_dossiers')}:{observability.get('actionable_dossiers')} "
             f"routes={routes.get('matrix_passed_route_count')}:{routes.get('top_route_verified')} "
-            f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')}"
+            f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')} "
+            f"fix_handoff={ai_fix_handoff.get('status')}:{ai_fix_handoff.get('source_match_count')}"
         )
     return int(summary["recommended_exit_code"])
 
