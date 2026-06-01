@@ -240,7 +240,10 @@ diagnosis smoke, fix handoff, AI route matrix, AI debug packet, AI debug packet
 matrix, and optional e2e summary all passed, agree on route identities, include
 the expected non-happy-path coverage counts, preserve source/test anchors, and
 still point to present artifacts after a CI bundle is downloaded to a different
-directory.
+directory. It also writes `automation_readiness.routes`, a compact per-route
+map that tells an automated debugger whether each route has replay evidence,
+diagnosis, fix handoff, narrow tests, source/test anchors, and a debug packet
+with context windows.
 
 The observability wrapper writes `diagnostic-debug-index.jsonl`,
 `diagnostic-debug-index.md`, `diagnostic-observability-analysis.json`, and
@@ -489,7 +492,9 @@ evidence, replay telemetry, source/test context, and fix commands. The AI debug
 packet matrix proves that every route has the same packet-level handoff quality
 instead of only the top route. The AI artifact verification proves the uploaded
 bundle can be trusted as a coherent graph before an automated debugger starts
-making emulator changes.
+making emulator changes, and its `automation_readiness` section gives automated
+agents one compact route-by-route readiness map after a CI artifact is
+downloaded.
 With
 `--compare-suite-dir <DIR>` it also writes `diagnostic-observability-comparison.json` and
 `diagnostic-observability-comparison.md`, and with
