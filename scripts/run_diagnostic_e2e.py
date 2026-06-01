@@ -135,6 +135,9 @@ def artifact_paths(
         ),
         "diagnostic_ai_route_matrix_json": str(suite_dir / "diagnostic-ai-route-matrix.json"),
         "diagnostic_ai_route_matrix_report": str(suite_dir / "diagnostic-ai-route-matrix.md"),
+        "diagnostic_ai_debug_packet_json": str(suite_dir / "diagnostic-ai-debug-packet.json"),
+        "diagnostic_ai_debug_packet_report": str(suite_dir / "diagnostic-ai-debug-packet.md"),
+        "diagnostic_ai_debug_packet_dir": str(suite_dir / "ai-debug-packet"),
         "diagnostic_ai_artifact_verification_json": str(
             suite_dir / "diagnostic-ai-artifact-verification.json"
         ),
@@ -192,6 +195,7 @@ def build_summary(
     ai_diagnosis_smoke = load_json(suite_dir / "diagnostic-ai-diagnosis-smoke.json")
     ai_fix_handoff_smoke = load_json(suite_dir / "diagnostic-ai-fix-handoff-smoke.json")
     ai_route_matrix = load_json(suite_dir / "diagnostic-ai-route-matrix.json")
+    ai_debug_packet = load_json(suite_dir / "diagnostic-ai-debug-packet.json")
     ai_artifact_verification = load_json(
         suite_dir / "diagnostic-ai-artifact-verification.json"
     )
@@ -222,6 +226,8 @@ def build_summary(
         errors.append("diagnostic AI fix handoff smoke status is not passed")
     if ai_route_matrix.get("status") != "passed":
         errors.append("diagnostic AI route matrix status is not passed")
+    if ai_debug_packet.get("status") != "passed":
+        errors.append("diagnostic AI debug packet status is not passed")
     if ai_artifact_verification.get("status") != "passed":
         errors.append("diagnostic AI artifact verification status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
@@ -353,6 +359,27 @@ def build_summary(
                 "missing_artifact_count"
             ),
         },
+        "ai_debug_packet": {
+            "status": ai_debug_packet.get("status"),
+            "route_id": as_dict(ai_debug_packet.get("selection")).get("route_id"),
+            "scenario_id": as_dict(ai_debug_packet.get("selection")).get("scenario_id"),
+            "focus_domain": as_dict(ai_debug_packet.get("selection")).get(
+                "focus_domain"
+            ),
+            "probe_id": as_dict(ai_debug_packet.get("selection")).get("probe_id"),
+            "file_count": as_dict(ai_debug_packet.get("packet_manifest")).get(
+                "file_count"
+            ),
+            "missing_required_file_count": as_dict(
+                ai_debug_packet.get("packet_manifest")
+            ).get("missing_required_file_count"),
+            "source_window_count": as_dict(ai_debug_packet.get("context_summary")).get(
+                "source_window_count"
+            ),
+            "test_window_count": as_dict(ai_debug_packet.get("context_summary")).get(
+                "test_window_count"
+            ),
+        },
         "ai_artifact_verification": {
             "status": ai_artifact_verification.get("status"),
             "check_count": as_dict(ai_artifact_verification.get("summary")).get("check_count"),
@@ -399,6 +426,7 @@ def build_summary(
             "Use diagnostic_ai_diagnosis_smoke_json to prove an AI-selected route can regenerate replay evidence and mapped narrow-test results.",
             "Use diagnostic_ai_fix_handoff_smoke_json to resolve the selected route into source/test line anchors and fix-loop commands.",
             "Use diagnostic_ai_route_matrix_json to prove every AI route can regenerate diagnosis and fix-handoff artifacts.",
+            "Use diagnostic_ai_debug_packet_json when an automated debugger needs one relocatable packet for the selected route.",
             "Use diagnostic_ai_artifact_verification_json to prove the AI-facing artifact graph is internally consistent before automated fixes.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
             "Use route_evidence_verification_json to prove the investigation routes can regenerate focused replay evidence.",
@@ -414,6 +442,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
     ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
     ai_route_matrix = as_dict(summary.get("ai_route_matrix"))
+    ai_debug_packet = as_dict(summary.get("ai_debug_packet"))
     ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
@@ -523,6 +552,20 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Test failures | {ai_route_matrix.get('test_failure_count')} |",
         f"| Source-match failures | {ai_route_matrix.get('source_match_failure_count')} |",
         f"| Missing artifacts | {ai_route_matrix.get('missing_artifact_count')} |",
+        "",
+        "## AI Debug Packet",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_debug_packet.get('status')} |",
+        f"| Route id | {ai_debug_packet.get('route_id')} |",
+        f"| Scenario | {ai_debug_packet.get('scenario_id')} |",
+        f"| Focus domain | {ai_debug_packet.get('focus_domain')} |",
+        f"| Probe | {ai_debug_packet.get('probe_id')} |",
+        f"| Packet files | {ai_debug_packet.get('file_count')} |",
+        f"| Missing required files | {ai_debug_packet.get('missing_required_file_count')} |",
+        f"| Source windows | {ai_debug_packet.get('source_window_count')} |",
+        f"| Test windows | {ai_debug_packet.get('test_window_count')} |",
         "",
         "## AI Artifact Verification",
         "",
@@ -822,6 +865,33 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "build_diagnostic_ai_debug_packet",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_debug_packet.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--output-dir",
+                    str(suite_dir / "ai-debug-packet"),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-debug-packet.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-debug-packet.md"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command(
+                "build_diagnostic_ai_debug_packet",
+                "AI route matrix failed",
+            )
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "verify_diagnostic_ai_artifacts",
                 [
                     sys.executable,
@@ -829,6 +899,7 @@ def main() -> int:
                     "--suite-dir",
                     str(suite_dir),
                     "--require-ai-route-matrix",
+                    "--require-ai-debug-packet",
                 ],
                 repo_root,
             )
@@ -837,7 +908,7 @@ def main() -> int:
         commands.append(
             skipped_command(
                 "verify_diagnostic_ai_artifacts",
-                "AI route matrix failed",
+                "AI debug packet failed",
             )
         )
 
@@ -853,6 +924,7 @@ def main() -> int:
         ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
         ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
         ai_route_matrix = as_dict(summary.get("ai_route_matrix"))
+        ai_debug_packet = as_dict(summary.get("ai_debug_packet"))
         ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
         print(
             "Diagnostic e2e report "
@@ -864,6 +936,7 @@ def main() -> int:
             f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')} "
             f"fix_handoff={ai_fix_handoff.get('status')}:{ai_fix_handoff.get('source_match_count')} "
             f"ai_route_matrix={ai_route_matrix.get('status')}:{ai_route_matrix.get('passed_route_count')}/{ai_route_matrix.get('route_count')} "
+            f"ai_debug_packet={ai_debug_packet.get('status')}:{ai_debug_packet.get('file_count')} "
             f"ai_artifacts={ai_artifact_verification.get('status')}:{ai_artifact_verification.get('missing_artifact_count')}"
         )
     return int(summary["recommended_exit_code"])

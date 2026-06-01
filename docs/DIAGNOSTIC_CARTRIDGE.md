@@ -124,13 +124,16 @@ into source/test line anchors and fix-loop commands. It then writes
 `diagnostic-ai-route-matrix.json` and `diagnostic-ai-route-matrix.md`, proving
 every AI focus-domain route can regenerate a diagnosis, replay evidence, mapped
 narrow-test results, source/test anchors, and fix-loop commands. It then writes
-`diagnostic-ai-artifact-verification.json` and
+`diagnostic-ai-debug-packet.json`, `diagnostic-ai-debug-packet.md`, and
+`ai-debug-packet/`, packaging the selected route's compact evidence, replay
+telemetry, source/test context windows, and fix commands into one relocatable
+AI handoff. It then writes `diagnostic-ai-artifact-verification.json` and
 `diagnostic-ai-artifact-verification.md`, proving the AI index, query smoke,
-diagnosis smoke, fix handoff, and AI route matrix agree on route identities,
-artifact paths, and stop conditions. Start with the e2e report to decide
-whether the diagnostic corpus is trusted, then use the AI artifact verification,
-AI route matrix, AI index, query CLI, diagnosis runner, or fix handoff before
-opening full telemetry.
+diagnosis smoke, fix handoff, AI route matrix, and AI debug packet agree on
+route identities, artifact paths, and stop conditions. Start with the e2e
+report to decide whether the diagnostic corpus is trusted, then use the AI
+artifact verification, AI debug packet, AI route matrix, AI index, query CLI,
+diagnosis runner, or fix handoff before opening full telemetry.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -189,17 +192,35 @@ under `ai-route-matrix/<route>/`. A passed matrix means all 16 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
+To package a selected route into one relocatable AI debugger handoff, run:
+
+```powershell
+python scripts/build_diagnostic_ai_debug_packet.py --suite-dir target/diagnostics/scenario-suite
+```
+
+By default this consumes the e2e top-route diagnosis and fix handoff. Use
+`--route-id <ID>` to package any route from `diagnostic-ai-route-matrix.json`,
+or `--diagnosis-json` and `--fix-handoff-json` for custom runs. It writes
+`diagnostic-ai-debug-packet.json`, `diagnostic-ai-debug-packet.md`, and
+`ai-debug-packet/`, including digest-checked copies of the compact AI index,
+query smoke, selected diagnosis, fix handoff, route-check evidence, replay
+triage, full replay telemetry, replay report, generated cartridge, and a
+`source-context.json` file with bounded source/test windows around the mapped
+line anchors.
+
 To validate the AI-facing artifact graph directly, run:
 
 ```powershell
-python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report --require-ai-route-matrix
+python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report --require-ai-route-matrix --require-ai-debug-packet
 ```
 
 Use `--require-e2e-report` when validating a completed local or downloaded CI
 artifact after `diagnostic-e2e-report.json` exists, and
 `--require-ai-route-matrix` when the bundle should include all-route AI
-diagnosis coverage. The verifier checks that the AI index, query smoke,
-diagnosis smoke, fix handoff, AI route matrix, and optional e2e summary all
+diagnosis coverage. Use `--require-ai-debug-packet` when the bundle should
+include a selected-route packet with digest-checked copied evidence and source
+context. The verifier checks that the AI index, query smoke, diagnosis smoke,
+fix handoff, AI route matrix, AI debug packet, and optional e2e summary all
 passed, agree on route identities, include the expected non-happy-path coverage
 counts, preserve source/test anchors, and still point to present artifacts after
 a CI bundle is downloaded to a different directory.
@@ -424,6 +445,10 @@ source/test anchors and bounded fix commands. It then runs
 `run_diagnostic_ai_route_matrix.py` and writes
 `diagnostic-ai-route-matrix.json` plus `diagnostic-ai-route-matrix.md`, proving
 every AI route can regenerate diagnosis and fix-handoff artifacts. It then runs
+`build_diagnostic_ai_debug_packet.py` and writes
+`diagnostic-ai-debug-packet.json`, `diagnostic-ai-debug-packet.md`, and
+`ai-debug-packet/`, proving the selected route can be consumed as one
+relocatable packet with copied evidence and source/test context. It then runs
 `verify_diagnostic_ai_artifacts.py` and writes
 `diagnostic-ai-artifact-verification.json` plus
 `diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
@@ -437,7 +462,9 @@ smoke proves one selected route can be regenerated into fresh telemetry and
 bounded test results without hand-joining the underlying artifacts. The fix
 handoff smoke proves that diagnosis can be translated into code-inspection
 anchors and exact regression commands. The AI route matrix proves the same
-diagnosis and fix-handoff path works for every focus-domain route. The AI
+diagnosis and fix-handoff path works for every focus-domain route. The AI debug
+packet gives an automated debugger one selected-route packet with compact
+evidence, replay telemetry, source/test context, and fix commands. The AI
 artifact verification proves the uploaded bundle can be trusted as a coherent
 graph before an automated debugger starts making emulator changes.
 With
