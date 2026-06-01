@@ -66,6 +66,8 @@ body:
           required: true
         - label: Diagnostic route-check runner passes for the top investigation route, including `python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
+        - label: Diagnostic route evidence verifier passes, including `python scripts/verify_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite --require-matrix --require-top-route --expect-matrix-tests-skipped`.
+          required: true
         - label: Diagnostic observability comparison passes without regressions when a prior suite is supplied, including `--compare-suite-dir` and `--fail-on-comparison-regression`.
           required: false
         - label: GitHub Actions are green on Windows, macOS, Linux, clippy, fmt, security audit, IP compliance, and diagnostic bundle jobs.
