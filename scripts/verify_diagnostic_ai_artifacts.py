@@ -183,6 +183,7 @@ def input_artifacts(
     ai_localization_eval: dict[str, Any],
     ai_session_plan: dict[str, Any],
     ai_session_smoke: dict[str, Any],
+    ai_session_smoke_matrix: dict[str, Any],
     e2e_report: dict[str, Any],
     check_e2e_report: bool,
     check_ai_route_matrix: bool,
@@ -202,6 +203,7 @@ def input_artifacts(
     localization_eval_artifacts = as_dict(ai_localization_eval.get("artifacts"))
     session_plan_artifacts = as_dict(ai_session_plan.get("artifacts"))
     session_smoke_artifacts = as_dict(ai_session_smoke.get("artifacts"))
+    session_smoke_matrix_artifacts = as_dict(ai_session_smoke_matrix.get("artifacts"))
     e2e_artifacts = as_dict(e2e_report.get("artifacts"))
 
     artifacts = {
@@ -389,6 +391,29 @@ def input_artifacts(
                 "diagnostic_ai_session_smoke_report": artifact_value(
                     session_smoke_artifacts.get("diagnostic_ai_session_smoke_report"),
                     str(suite_dir / "diagnostic-ai-session-smoke.md"),
+                ),
+            }
+        )
+    if ai_session_smoke_matrix or check_e2e_report:
+        artifacts.update(
+            {
+                "diagnostic_ai_session_smoke_matrix_json": artifact_value(
+                    session_smoke_matrix_artifacts.get(
+                        "diagnostic_ai_session_smoke_matrix_json"
+                    ),
+                    str(suite_dir / "diagnostic-ai-session-smoke-matrix.json"),
+                ),
+                "diagnostic_ai_session_smoke_matrix_report": artifact_value(
+                    session_smoke_matrix_artifacts.get(
+                        "diagnostic_ai_session_smoke_matrix_report"
+                    ),
+                    str(suite_dir / "diagnostic-ai-session-smoke-matrix.md"),
+                ),
+                "diagnostic_ai_session_smoke_matrix_dir": artifact_value(
+                    session_smoke_matrix_artifacts.get(
+                        "diagnostic_ai_session_smoke_matrix_dir"
+                    ),
+                    str(suite_dir / "ai-session-smoke-matrix"),
                 ),
             }
         )
@@ -711,6 +736,7 @@ def build_summary(
     ai_localization_eval_path = suite_dir / "diagnostic-ai-localization-eval.json"
     ai_session_plan_path = suite_dir / "diagnostic-ai-session-plan.json"
     ai_session_smoke_path = suite_dir / "diagnostic-ai-session-smoke.json"
+    ai_session_smoke_matrix_path = suite_dir / "diagnostic-ai-session-smoke-matrix.json"
     e2e_report_path = suite_dir / "diagnostic-e2e-report.json"
 
     ai_index = load_json(ai_index_path)
@@ -724,6 +750,7 @@ def build_summary(
     ai_localization_eval = load_json(ai_localization_eval_path)
     ai_session_plan = load_json(ai_session_plan_path)
     ai_session_smoke = load_json(ai_session_smoke_path)
+    ai_session_smoke_matrix = load_json(ai_session_smoke_matrix_path)
     e2e_report = load_json(e2e_report_path)
     check_e2e_report = args.require_e2e_report or bool(e2e_report)
     check_ai_route_matrix = args.require_ai_route_matrix or bool(ai_route_matrix)
@@ -743,6 +770,7 @@ def build_summary(
         ai_localization_eval,
         ai_session_plan,
         ai_session_smoke,
+        ai_session_smoke_matrix,
         e2e_report,
     ]
     original_dirs = original_suite_dirs(suite_dir, source_artifacts)
@@ -759,6 +787,7 @@ def build_summary(
         ai_localization_eval,
         ai_session_plan,
         ai_session_smoke,
+        ai_session_smoke_matrix,
         e2e_report,
         check_e2e_report,
         check_ai_route_matrix,
@@ -896,6 +925,14 @@ def build_summary(
             ai_session_smoke.get("status") == "passed",
             ai_session_smoke.get("status"),
         )
+    if check_e2e_report or ai_session_smoke_matrix:
+        add_check(
+            checks,
+            errors,
+            "diagnostic_ai_session_smoke_matrix_passed",
+            ai_session_smoke_matrix.get("status") == "passed",
+            ai_session_smoke_matrix.get("status"),
+        )
 
     index_summary = as_dict(ai_index.get("summary"))
     query_summary = as_dict(ai_query.get("summary"))
@@ -952,6 +989,10 @@ def build_summary(
     ]
     session_smoke_summary = as_dict(ai_session_smoke.get("summary"))
     session_smoke_selection = as_dict(ai_session_smoke.get("selection"))
+    session_smoke_matrix_summary = as_dict(ai_session_smoke_matrix.get("summary"))
+    session_smoke_matrix_routes = [
+        row for row in as_list(ai_session_smoke_matrix.get("routes")) if isinstance(row, dict)
+    ]
     top_route_identity = top_identity(ai_index, ai_query)
     if ai_session_plan or check_e2e_report:
         add_check(
@@ -1096,6 +1137,103 @@ def build_summary(
             == session_smoke_summary.get("stop_condition_count")
             and as_int(session_smoke_summary.get("stop_condition_count")) >= 1,
             session_smoke_summary,
+        )
+    if ai_session_smoke_matrix or check_e2e_report:
+        session_routes_by_id = {
+            row.get("route_id"): row
+            for row in session_plan_routes
+            if isinstance(row.get("route_id"), str)
+        }
+        matrix_routes_by_id = {
+            row.get("route_id"): row
+            for row in session_smoke_matrix_routes
+            if isinstance(row.get("route_id"), str)
+        }
+        missing_matrix_routes = [
+            route_id
+            for route_id in session_routes_by_id
+            if route_id not in matrix_routes_by_id
+        ]
+        identity_mismatches = []
+        weak_rows = []
+        missing_row_artifacts = []
+        for route_id, session_row in session_routes_by_id.items():
+            matrix_row = as_dict(matrix_routes_by_id.get(route_id))
+            row_summary = as_dict(matrix_row.get("summary"))
+            if (
+                matrix_row
+                and (
+                    matrix_row.get("scenario_id") != session_row.get("scenario_id")
+                    or matrix_row.get("focus_domain") != session_row.get("focus_domain")
+                    or matrix_row.get("probe_id") != session_row.get("probe_id")
+                )
+            ):
+                identity_mismatches.append(route_id)
+            if (
+                not matrix_row
+                or matrix_row.get("status") != "passed"
+                or row_summary.get("read_order_present_count")
+                != row_summary.get("read_order_artifact_count")
+                or as_int(row_summary.get("read_order_artifact_count")) < 9
+                or row_summary.get("replay_passed_count")
+                != row_summary.get("replay_command_count")
+                or as_int(row_summary.get("replay_command_count")) < 1
+                or row_summary.get("narrow_test_passed_count")
+                != row_summary.get("narrow_test_command_count")
+                or as_int(row_summary.get("narrow_test_command_count")) < 1
+                or as_int(row_summary.get("verification_command_count")) < 1
+                or row_summary.get("stop_condition_passed_count")
+                != row_summary.get("stop_condition_count")
+                or as_int(row_summary.get("stop_condition_count")) < 1
+            ):
+                weak_rows.append(route_id)
+            row_artifacts = as_dict(matrix_row.get("artifacts"))
+            for artifact_name in (
+                "diagnostic_ai_session_smoke_json",
+                "diagnostic_ai_session_smoke_report",
+            ):
+                if not artifact_exists(
+                    suite_dir,
+                    original_dirs,
+                    artifact_name,
+                    row_artifacts.get(artifact_name),
+                ):
+                    missing_row_artifacts.append(f"{route_id}:{artifact_name}")
+        add_check(
+            checks,
+            errors,
+            "session_smoke_matrix_route_count",
+            session_smoke_matrix_summary.get("route_count")
+            == EXPECTED_ACTIONABLE_SCENARIO_COUNT
+            and session_smoke_matrix_summary.get("passed_route_count")
+            == EXPECTED_ACTIONABLE_SCENARIO_COUNT
+            and session_smoke_matrix_summary.get("failed_route_count") == 0
+            and len(session_smoke_matrix_routes) == EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            session_smoke_matrix_summary,
+        )
+        add_check(
+            checks,
+            errors,
+            "session_smoke_matrix_routes_match_plan",
+            not missing_matrix_routes and not identity_mismatches,
+            {
+                "missing_matrix_routes": missing_matrix_routes,
+                "identity_mismatches": identity_mismatches,
+            },
+        )
+        add_check(
+            checks,
+            errors,
+            "session_smoke_matrix_all_rows_executable",
+            not weak_rows,
+            weak_rows,
+        )
+        add_check(
+            checks,
+            errors,
+            "session_smoke_matrix_row_artifacts_present",
+            not missing_row_artifacts,
+            missing_row_artifacts,
         )
     if ai_session_plan or check_e2e_report:
         add_check(
@@ -1777,6 +1915,24 @@ def build_summary(
                 == session_smoke_summary.get("narrow_test_passed_count"),
                 e2e_session_smoke,
             )
+        e2e_session_smoke_matrix = as_dict(e2e_report.get("ai_session_smoke_matrix"))
+        if ai_session_smoke_matrix:
+            add_check(
+                checks,
+                errors,
+                "e2e_ai_session_smoke_matrix_matches",
+                e2e_session_smoke_matrix.get("status")
+                == ai_session_smoke_matrix.get("status")
+                and e2e_session_smoke_matrix.get("route_count")
+                == session_smoke_matrix_summary.get("route_count")
+                and e2e_session_smoke_matrix.get("passed_route_count")
+                == session_smoke_matrix_summary.get("passed_route_count")
+                and e2e_session_smoke_matrix.get("replay_passed_count")
+                == session_smoke_matrix_summary.get("replay_passed_count")
+                and e2e_session_smoke_matrix.get("narrow_test_passed_count")
+                == session_smoke_matrix_summary.get("narrow_test_passed_count"),
+                e2e_session_smoke_matrix,
+            )
 
     missing_artifacts = [
         record["name"]
@@ -1949,6 +2105,37 @@ def build_summary(
             "ai_session_smoke_verification_command_count": session_smoke_summary.get(
                 "verification_command_count"
             ),
+            "ai_session_smoke_matrix_status": ai_session_smoke_matrix.get("status"),
+            "ai_session_smoke_matrix_route_count": session_smoke_matrix_summary.get(
+                "route_count"
+            ),
+            "ai_session_smoke_matrix_passed_route_count": session_smoke_matrix_summary.get(
+                "passed_route_count"
+            ),
+            "ai_session_smoke_matrix_failed_route_count": session_smoke_matrix_summary.get(
+                "failed_route_count"
+            ),
+            "ai_session_smoke_matrix_read_order_present_count": session_smoke_matrix_summary.get(
+                "read_order_present_count"
+            ),
+            "ai_session_smoke_matrix_read_order_artifact_count": session_smoke_matrix_summary.get(
+                "read_order_artifact_count"
+            ),
+            "ai_session_smoke_matrix_replay_passed_count": session_smoke_matrix_summary.get(
+                "replay_passed_count"
+            ),
+            "ai_session_smoke_matrix_replay_command_count": session_smoke_matrix_summary.get(
+                "replay_command_count"
+            ),
+            "ai_session_smoke_matrix_narrow_test_passed_count": session_smoke_matrix_summary.get(
+                "narrow_test_passed_count"
+            ),
+            "ai_session_smoke_matrix_narrow_test_command_count": session_smoke_matrix_summary.get(
+                "narrow_test_command_count"
+            ),
+            "ai_session_smoke_matrix_verification_command_count": session_smoke_matrix_summary.get(
+                "verification_command_count"
+            ),
             "automation_readiness_status": readiness.get("status"),
             "automation_ready_route_count": readiness.get("ready_route_count"),
             "automation_route_count": readiness.get("route_count"),
@@ -1972,6 +2159,7 @@ def build_summary(
             "When diagnostic-ai-localization-eval.json is present, this verifier also proves the scenario corpus localizes expected health, focus domains, routes, anchors, and packets.",
             "When diagnostic-ai-session-plan.json is present, this verifier also proves every AI route has a deterministic debug startup plan.",
             "When diagnostic-ai-session-smoke.json is present, this verifier also proves the selected startup plan can be executed by an automated consumer.",
+            "When diagnostic-ai-session-smoke-matrix.json is present, this verifier also proves every startup plan route can be executed by an automated consumer.",
             "Use automation_readiness.routes as the compact per-route map for automated debugger startup after this verifier passes.",
             "Use --require-e2e-report when validating a completed CI artifact after diagnostic-e2e-report.json has been written.",
             "If this verifier fails, repair the artifact graph before asking an AI debugger to edit emulator code.",
@@ -2032,6 +2220,13 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| AI session smoke replay commands | {totals.get('ai_session_smoke_replay_passed_count')}/{totals.get('ai_session_smoke_replay_command_count')} |",
         f"| AI session smoke narrow tests | {totals.get('ai_session_smoke_narrow_test_passed_count')}/{totals.get('ai_session_smoke_narrow_test_command_count')} |",
         f"| AI session smoke verification commands | {totals.get('ai_session_smoke_verification_command_count')} |",
+        f"| AI session smoke matrix | {totals.get('ai_session_smoke_matrix_status')} |",
+        f"| AI session smoke matrix routes | {totals.get('ai_session_smoke_matrix_passed_route_count')}/{totals.get('ai_session_smoke_matrix_route_count')} |",
+        f"| AI session smoke matrix failed routes | {totals.get('ai_session_smoke_matrix_failed_route_count')} |",
+        f"| AI session smoke matrix read-order artifacts | {totals.get('ai_session_smoke_matrix_read_order_present_count')}/{totals.get('ai_session_smoke_matrix_read_order_artifact_count')} |",
+        f"| AI session smoke matrix replay commands | {totals.get('ai_session_smoke_matrix_replay_passed_count')}/{totals.get('ai_session_smoke_matrix_replay_command_count')} |",
+        f"| AI session smoke matrix narrow tests | {totals.get('ai_session_smoke_matrix_narrow_test_passed_count')}/{totals.get('ai_session_smoke_matrix_narrow_test_command_count')} |",
+        f"| AI session smoke matrix verification commands | {totals.get('ai_session_smoke_matrix_verification_command_count')} |",
         f"| Automation readiness | {totals.get('automation_readiness_status')} |",
         f"| Automation-ready routes | {totals.get('automation_ready_route_count')}/{totals.get('automation_route_count')} |",
         f"| Automation not-ready routes | {totals.get('automation_not_ready_route_count')} |",

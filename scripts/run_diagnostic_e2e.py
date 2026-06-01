@@ -169,6 +169,15 @@ def artifact_paths(
         "diagnostic_ai_session_smoke_report": str(
             suite_dir / "diagnostic-ai-session-smoke.md"
         ),
+        "diagnostic_ai_session_smoke_matrix_json": str(
+            suite_dir / "diagnostic-ai-session-smoke-matrix.json"
+        ),
+        "diagnostic_ai_session_smoke_matrix_report": str(
+            suite_dir / "diagnostic-ai-session-smoke-matrix.md"
+        ),
+        "diagnostic_ai_session_smoke_matrix_dir": str(
+            suite_dir / "ai-session-smoke-matrix"
+        ),
         "diagnostic_ai_artifact_verification_json": str(
             suite_dir / "diagnostic-ai-artifact-verification.json"
         ),
@@ -234,6 +243,7 @@ def build_summary(
     ai_localization_eval = load_json(suite_dir / "diagnostic-ai-localization-eval.json")
     ai_session_plan = load_json(suite_dir / "diagnostic-ai-session-plan.json")
     ai_session_smoke = load_json(suite_dir / "diagnostic-ai-session-smoke.json")
+    ai_session_smoke_matrix = load_json(suite_dir / "diagnostic-ai-session-smoke-matrix.json")
     ai_artifact_verification = load_json(
         suite_dir / "diagnostic-ai-artifact-verification.json"
     )
@@ -276,6 +286,8 @@ def build_summary(
         errors.append("diagnostic AI session plan status is not passed")
     if ai_session_smoke.get("status") != "passed":
         errors.append("diagnostic AI session smoke status is not passed")
+    if ai_session_smoke_matrix.get("status") != "passed":
+        errors.append("diagnostic AI session smoke matrix status is not passed")
     if ai_artifact_verification.get("status") != "passed":
         errors.append("diagnostic AI artifact verification status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
@@ -610,6 +622,45 @@ def build_summary(
                 "verification_command_count"
             ),
         },
+        "ai_session_smoke_matrix": {
+            "status": ai_session_smoke_matrix.get("status"),
+            "route_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "route_count"
+            ),
+            "passed_route_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "passed_route_count"
+            ),
+            "failed_route_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "failed_route_count"
+            ),
+            "read_order_present_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("read_order_present_count"),
+            "read_order_artifact_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("read_order_artifact_count"),
+            "replay_passed_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "replay_passed_count"
+            ),
+            "replay_command_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "replay_command_count"
+            ),
+            "narrow_test_passed_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("narrow_test_passed_count"),
+            "narrow_test_command_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("narrow_test_command_count"),
+            "verification_command_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("verification_command_count"),
+            "stop_condition_passed_count": as_dict(
+                ai_session_smoke_matrix.get("summary")
+            ).get("stop_condition_passed_count"),
+            "stop_condition_count": as_dict(ai_session_smoke_matrix.get("summary")).get(
+                "stop_condition_count"
+            ),
+        },
         "ai_artifact_verification": {
             "status": ai_artifact_verification.get("status"),
             "check_count": as_dict(ai_artifact_verification.get("summary")).get("check_count"),
@@ -674,6 +725,7 @@ def build_summary(
             "Use diagnostic_ai_localization_eval_json to score whether expected health, focus-domain, route, source/test, and packet evidence localize across the scenario corpus.",
             "Use diagnostic_ai_session_plan_json as the deterministic route-by-route startup plan for automated debugging sessions.",
             "Use diagnostic_ai_session_smoke_json to prove the selected session-plan route is executable by an automated consumer.",
+            "Use diagnostic_ai_session_smoke_matrix_json to prove every session-plan route is executable by an automated consumer.",
             "Use diagnostic_ai_artifact_verification_json to prove the AI-facing artifact graph is internally consistent before automated fixes.",
             "Use diagnostic_ai_artifact_verification_json automation_readiness when an automated debugger needs one compact route-by-route readiness map.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
@@ -696,6 +748,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
     ai_session_plan = as_dict(summary.get("ai_session_plan"))
     ai_session_smoke = as_dict(summary.get("ai_session_smoke"))
+    ai_session_smoke_matrix = as_dict(summary.get("ai_session_smoke_matrix"))
     ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
@@ -898,6 +951,19 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Replay commands | {ai_session_smoke.get('replay_passed_count')}/{ai_session_smoke.get('replay_command_count')} |",
         f"| Narrow-test commands | {ai_session_smoke.get('narrow_test_passed_count')}/{ai_session_smoke.get('narrow_test_command_count')} |",
         f"| Verification commands | {ai_session_smoke.get('verification_command_count')} |",
+        "",
+        "## AI Session Smoke Matrix",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_session_smoke_matrix.get('status')} |",
+        f"| Routes | {ai_session_smoke_matrix.get('passed_route_count')}/{ai_session_smoke_matrix.get('route_count')} |",
+        f"| Failed routes | {ai_session_smoke_matrix.get('failed_route_count')} |",
+        f"| Read-order artifacts | {ai_session_smoke_matrix.get('read_order_present_count')}/{ai_session_smoke_matrix.get('read_order_artifact_count')} |",
+        f"| Replay commands | {ai_session_smoke_matrix.get('replay_passed_count')}/{ai_session_smoke_matrix.get('replay_command_count')} |",
+        f"| Narrow-test commands | {ai_session_smoke_matrix.get('narrow_test_passed_count')}/{ai_session_smoke_matrix.get('narrow_test_command_count')} |",
+        f"| Verification commands | {ai_session_smoke_matrix.get('verification_command_count')} |",
+        f"| Stop conditions | {ai_session_smoke_matrix.get('stop_condition_passed_count')}/{ai_session_smoke_matrix.get('stop_condition_count')} |",
         "",
         "## AI Artifact Verification",
         "",
@@ -1357,6 +1423,33 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "run_diagnostic_ai_session_smoke_matrix",
+                [
+                    sys.executable,
+                    script_path("run_diagnostic_ai_session_smoke_matrix.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-session-smoke-matrix.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-session-smoke-matrix.md"),
+                    "--matrix-dir",
+                    str(suite_dir / "ai-session-smoke-matrix"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command(
+                "run_diagnostic_ai_session_smoke_matrix",
+                "AI session smoke failed",
+            )
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "verify_diagnostic_ai_artifacts",
                 [
                     sys.executable,
@@ -1374,7 +1467,7 @@ def main() -> int:
         commands.append(
             skipped_command(
                 "verify_diagnostic_ai_artifacts",
-                "AI session smoke failed",
+                "AI session smoke matrix failed",
             )
         )
 
@@ -1396,6 +1489,7 @@ def main() -> int:
         ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
         ai_session_plan = as_dict(summary.get("ai_session_plan"))
         ai_session_smoke = as_dict(summary.get("ai_session_smoke"))
+        ai_session_smoke_matrix = as_dict(summary.get("ai_session_smoke_matrix"))
         ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
         print(
             "Diagnostic e2e report "
@@ -1413,6 +1507,7 @@ def main() -> int:
             f"ai_localization={ai_localization_eval.get('status')}:{ai_localization_eval.get('passed_scenario_count')}/{ai_localization_eval.get('scenario_count')} "
             f"ai_session_plan={ai_session_plan.get('status')}:{ai_session_plan.get('ready_route_count')}/{ai_session_plan.get('route_count')} "
             f"ai_session_smoke={ai_session_smoke.get('status')}:{ai_session_smoke.get('replay_passed_count')}/{ai_session_smoke.get('replay_command_count')}:{ai_session_smoke.get('narrow_test_passed_count')}/{ai_session_smoke.get('narrow_test_command_count')} "
+            f"ai_session_matrix={ai_session_smoke_matrix.get('status')}:{ai_session_smoke_matrix.get('passed_route_count')}/{ai_session_smoke_matrix.get('route_count')} "
             f"ai_readiness={ai_artifact_verification.get('automation_readiness_status')}:{ai_artifact_verification.get('automation_ready_route_count')}/{ai_artifact_verification.get('automation_route_count')} "
             f"ai_artifacts={ai_artifact_verification.get('status')}:{ai_artifact_verification.get('missing_artifact_count')}"
         )
