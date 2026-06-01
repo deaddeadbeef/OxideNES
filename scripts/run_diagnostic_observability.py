@@ -15,6 +15,7 @@ from typing import Any
 
 RUN_SCHEMA_VERSION = 1
 REPLAY_RUN_SCHEMA_VERSION = 1
+DEBUG_INDEX_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
 
 
@@ -71,11 +72,20 @@ def load_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
 def artifact_paths(
     suite_dir: Path,
     summary_json: Path,
     summary_md: Path,
     replay_summary: dict[str, Any] | None,
+    debug_index_summary: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
         "suite_dir": str(suite_dir),
@@ -90,6 +100,9 @@ def artifact_paths(
         for name, path in replay_summary.get("artifacts", {}).items():
             artifact_name = name if name.startswith("replay_") else f"replay_{name}"
             artifacts[artifact_name] = str(path)
+    if debug_index_summary:
+        for name, path in debug_index_summary.get("artifacts", {}).items():
+            artifacts[name] = str(path)
     return artifacts
 
 
@@ -119,6 +132,249 @@ def suite_summary(suite_dir: Path) -> dict[str, Any]:
 
 def command_failed(command: dict[str, Any]) -> bool:
     return command.get("exit_code") != 0
+
+
+def debug_index_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "debug_index_jsonl": str(suite_dir / "diagnostic-debug-index.jsonl"),
+        "debug_index_report": str(suite_dir / "diagnostic-debug-index.md"),
+    }
+
+
+def compact_instruction(value: Any) -> dict[str, Any] | None:
+    instruction = as_dict(value)
+    if not instruction:
+        return None
+    return {
+        "sequence": instruction.get("sequence"),
+        "cycle": instruction.get("cycle"),
+        "frame": instruction.get("frame"),
+        "current_test": instruction.get("current_test"),
+        "current_test_name": instruction.get("current_test_name"),
+        "pc_hex": instruction.get("pc_hex"),
+        "instruction": instruction.get("instruction"),
+        "symbol": instruction.get("symbol"),
+        "status_hex": instruction.get("status_hex"),
+        "failure_code_hex": instruction.get("failure_code_hex"),
+    }
+
+
+def compact_event(value: Any) -> dict[str, Any] | None:
+    event = as_dict(value)
+    if not event:
+        return None
+    return {
+        "kind": event.get("kind"),
+        "cycle": event.get("cycle"),
+        "frame": event.get("frame"),
+        "status_hex": event.get("status_hex"),
+        "current_test": event.get("current_test"),
+        "current_test_name": event.get("current_test_name"),
+        "pc_hex": event.get("pc_hex"),
+        "note": event.get("note"),
+    }
+
+
+def first_top_difference(comparison: dict[str, Any]) -> dict[str, Any] | None:
+    top_differences = as_list(comparison.get("top_differences"))
+    first = as_dict(top_differences[0]) if top_differences else {}
+    if not first:
+        return None
+    return {
+        "severity": first.get("severity"),
+        "category": first.get("category"),
+        "path": first.get("path"),
+        "summary": first.get("summary"),
+    }
+
+
+def artifact_path(suite_dir: Path, relative_path: Any) -> Path:
+    return suite_dir / str(relative_path)
+
+
+def build_debug_index_entries(suite_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    manifest = load_json(suite_dir / "scenario-suite.json")
+    observer = load_json(suite_dir / "scenario-suite-observer.json")
+    actions_by_id = {
+        action.get("scenario_id"): action
+        for action in as_list(observer.get("next_actions"))
+        if isinstance(action, dict)
+    }
+    observations_by_id = {
+        observation.get("scenario_id"): observation
+        for observation in as_list(observer.get("observations"))
+        if isinstance(observation, dict)
+    }
+    entries: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for scenario in as_list(manifest.get("scenarios")):
+        if not isinstance(scenario, dict):
+            continue
+        scenario_id = scenario.get("id")
+        if not isinstance(scenario_id, str):
+            errors.append("scenario without string id in scenario-suite.json")
+            continue
+        artifacts = as_dict(scenario.get("artifacts"))
+        triage_path = artifacts.get("triage_json")
+        triage = load_json(artifact_path(suite_dir, triage_path)) if triage_path else {}
+        if not triage:
+            errors.append(f"{scenario_id}: missing or invalid triage artifact")
+
+        focus = as_dict(triage.get("debug_focus"))
+        failure = as_dict(triage.get("failure"))
+        probes = as_dict(triage.get("probes"))
+        timing = as_dict(triage.get("timing"))
+        event_tail = as_list(triage.get("event_tail"))
+        comparison = as_dict(scenario.get("comparison"))
+        action = as_dict(actions_by_id.get(scenario_id))
+        observation = as_dict(observations_by_id.get(scenario_id))
+        entry = {
+            "debug_index_schema_version": DEBUG_INDEX_SCHEMA_VERSION,
+            "scenario_id": scenario_id,
+            "title": scenario.get("title"),
+            "role": observation.get("role"),
+            "outcome": observation.get("outcome"),
+            "expected_passed": scenario.get("expected_passed"),
+            "actual_passed": scenario.get("actual_passed"),
+            "expectation_met": scenario.get("expectation_met"),
+            "contract_all_matched": as_dict(scenario.get("contract")).get("all_matched"),
+            "comparison_passed": comparison.get("passed"),
+            "comparison_difference_count": comparison.get("difference_count"),
+            "top_difference": first_top_difference(comparison),
+            "health": triage.get("health"),
+            "summary": triage.get("summary"),
+            "current_test": as_dict(triage.get("current_test")),
+            "debug_focus": {
+                "health": focus.get("health"),
+                "focus_test_id": focus.get("focus_test_id"),
+                "focus_test_name": focus.get("focus_test_name"),
+                "focus_subsystem": focus.get("focus_subsystem"),
+                "focus_domain": focus.get("focus_domain"),
+                "failure_kind": focus.get("failure_kind"),
+                "failure_code_hex": focus.get("failure_code_hex"),
+                "failed_probe_ids": as_list(focus.get("failed_probe_ids")),
+                "skipped_probe_count": focus.get("skipped_probe_count"),
+                "last_event": compact_event(focus.get("last_event")),
+                "terminal_instruction": compact_instruction(focus.get("terminal_instruction")),
+                "last_test_instruction": compact_instruction(focus.get("last_test_instruction")),
+            },
+            "failure": {
+                "kind": failure.get("kind"),
+                "test_id": failure.get("test_id"),
+                "test_name": failure.get("test_name"),
+                "subsystem": failure.get("subsystem"),
+                "tier": failure.get("tier"),
+                "failure_code_hex": failure.get("failure_code_hex"),
+                "assertion": failure.get("assertion"),
+                "expected": failure.get("expected"),
+                "observed": failure.get("observed"),
+                "likely_domain": failure.get("likely_domain"),
+                "remediation_hint": failure.get("remediation_hint"),
+            },
+            "input": as_dict(triage.get("input")),
+            "probes": {
+                "total": probes.get("total_probes"),
+                "passed": probes.get("passed_probes"),
+                "failed": probes.get("failed_probes"),
+                "skipped": probes.get("skipped_probes"),
+                "first_failed_probe": probes.get("first_failed_probe"),
+            },
+            "coverage_gap_ids": [
+                gap.get("id") for gap in as_list(triage.get("coverage_gaps")) if isinstance(gap, dict)
+            ],
+            "timing": {
+                "cpu_cycles": timing.get("cpu_cycles"),
+                "frames": timing.get("frames"),
+                "timeout": timing.get("timeout"),
+            },
+            "event_tail_last": compact_event(event_tail[-1]) if event_tail else None,
+            "next_action": {
+                "priority": action.get("priority"),
+                "action_type": action.get("action_type"),
+                "primary_artifact": action.get("primary_artifact"),
+                "evidence": as_list(action.get("evidence")),
+            },
+            "replay_args": as_list(scenario.get("replay_args")),
+            "artifacts": artifacts,
+        }
+        if not entry["debug_focus"]["terminal_instruction"] and not entry["debug_focus"]["last_event"]:
+            errors.append(f"{scenario_id}: missing terminal instruction or last-event debug anchor")
+        entries.append(entry)
+
+    return entries, errors
+
+
+def write_debug_index_markdown(path: Path, entries: list[dict[str, Any]]) -> None:
+    lines = [
+        "# Diagnostic Debug Index",
+        "",
+        "| Scenario | Role | Health | Focus domain | Failure kind | Failed probes | Terminal instruction | Top difference | Next artifact |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for entry in entries:
+        focus = as_dict(entry.get("debug_focus"))
+        terminal = as_dict(focus.get("terminal_instruction"))
+        top_difference = as_dict(entry.get("top_difference"))
+        next_action = as_dict(entry.get("next_action"))
+        terminal_label = " ".join(
+            part
+            for part in (
+                str(terminal.get("pc_hex") or ""),
+                str(terminal.get("instruction") or ""),
+                str(terminal.get("symbol") or ""),
+            )
+            if part
+        )
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                entry.get("scenario_id"),
+                entry.get("role") or "-",
+                entry.get("health") or "-",
+                focus.get("focus_domain") or "-",
+                focus.get("failure_kind") or "-",
+                markdown_cell(",".join(focus.get("failed_probe_ids") or []) or "-"),
+                markdown_cell(terminal_label or "-"),
+                markdown_cell(str(top_difference.get("path") or "-")),
+                next_action.get("primary_artifact") or as_dict(entry.get("artifacts")).get("triage_json"),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## AI Handoff",
+            "",
+            "- Read this index first when choosing a scenario or debug anchor.",
+            "- Use `terminal_instruction` and `last_event` before loading full telemetry.",
+            "- Use `replay_args` to regenerate one scenario when the indexed focus needs live confirmation.",
+        ]
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_debug_index(suite_dir: Path) -> dict[str, Any]:
+    paths = debug_index_paths(suite_dir)
+    entries, errors = build_debug_index_entries(suite_dir)
+    jsonl_path = Path(paths["debug_index_jsonl"])
+    report_path = Path(paths["debug_index_report"])
+    jsonl_path.write_text(
+        "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in entries),
+        encoding="utf-8",
+    )
+    write_debug_index_markdown(report_path, entries)
+    scenario_ids = [entry.get("scenario_id") for entry in entries]
+    return {
+        "debug_index_schema_version": DEBUG_INDEX_SCHEMA_VERSION,
+        "status": "passed" if not errors else "failed",
+        "entry_count": len(entries),
+        "scenario_ids": scenario_ids,
+        "errors": errors,
+        "artifacts": paths,
+        "ai_handoff": [
+            "Use diagnostic-debug-index.jsonl for one-row-per-scenario routing before opening per-scenario telemetry.",
+            "Use diagnostic-debug-index.md for a compact human-readable scenario matrix in CI artifacts.",
+        ],
+    }
 
 
 def scenarios_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -338,6 +594,7 @@ def build_run_summary(
     generate_command: dict[str, Any],
     verify_command: dict[str, Any] | None,
     verification_summary: dict[str, Any],
+    debug_index_summary: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
 ) -> dict[str, Any]:
@@ -352,6 +609,8 @@ def build_run_summary(
     status = "passed"
     if command_failed(generate_command) or verify_command is None or command_failed(verify_command):
         status = "failed"
+    if debug_index_summary and debug_index_summary.get("status") != "passed":
+        status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
         status = "failed"
 
@@ -364,11 +623,19 @@ def build_run_summary(
         "git": git_metadata(repo_root),
         "commands": commands,
         "verification": verification_summary,
+        "debug_index": debug_index_summary,
         "replay": replay_summary,
         "suite": suite,
-        "artifacts": artifact_paths(suite_dir, summary_json, summary_md, replay_summary),
+        "artifacts": artifact_paths(
+            suite_dir,
+            summary_json,
+            summary_md,
+            replay_summary,
+            debug_index_summary,
+        ),
         "ai_handoff": [
             "Start with suite.first_next_action and open its primary_artifact.",
+            "Use debug_index.artifacts.debug_index_jsonl for one-row-per-scenario routing before raw telemetry.",
             "Use replay.artifacts.bundle_triage_json for the focused replay evidence of the selected scenario.",
             "Use scenario-suite-observer.json for ordered next actions and compact observations.",
             "Use scenario-suite.json only when full contract details are needed.",
@@ -415,6 +682,20 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         lines.append(
             f"| {command.get('name')} | {command.get('exit_code')} | {command.get('duration_seconds')} |"
         )
+    debug_index = summary.get("debug_index") or {}
+    lines.extend(
+        [
+            "",
+            "## Debug Index",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {debug_index.get('status', '-')} |",
+            f"| Entries | {debug_index.get('entry_count', '-')} |",
+            f"| JSONL | {debug_index.get('artifacts', {}).get('debug_index_jsonl', '-')} |",
+            f"| Report | {debug_index.get('artifacts', {}).get('debug_index_report', '-')} |",
+        ]
+    )
     replay = summary.get("replay") or {}
     lines.extend(
         [
@@ -536,6 +817,7 @@ def main() -> int:
     generate_command = run_command(generate_argv, repo_root)
     verify_command: dict[str, Any] | None = None
     verification_summary: dict[str, Any] = {}
+    debug_index_summary: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
         verify_argv = [
@@ -548,6 +830,7 @@ def main() -> int:
         verify_command = run_command(verify_argv, repo_root)
         if not command_failed(verify_command) and verify_command["stdout_tail"]:
             verification_summary = json.loads("\n".join(verify_command["stdout_tail"]))
+            debug_index_summary = write_debug_index(suite_dir)
             if not args.skip_replay:
                 manifest = load_json(suite_dir / "scenario-suite.json")
                 observer = load_json(suite_dir / "scenario-suite-observer.json")
@@ -584,6 +867,7 @@ def main() -> int:
         generate_command,
         verify_command,
         verification_summary,
+        debug_index_summary,
         replay_summary,
         repo_root,
     )
@@ -602,6 +886,12 @@ def main() -> int:
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
+        debug_index = summary.get("debug_index") or {}
+        debug_note = ""
+        if debug_index:
+            debug_note = (
+                f" debug_index={debug_index.get('entry_count')}:{debug_index.get('status')}"
+            )
         replay = summary.get("replay") or {}
         replay_note = ""
         if replay:
@@ -612,7 +902,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{replay_note}"
+            f"{debug_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 

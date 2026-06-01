@@ -89,16 +89,18 @@ cargo run --bin oxidenes-diagnostic -- --scenario-suite-dir target/diagnostics/s
 
 For the full local observability loop, use the wrapper that generates the
 scenario suite, runs the verifier, replays one selected scenario from its
-`replay_args`, and writes `observability-run.json` plus `observability-run.md`
-into the suite directory:
+`replay_args`, writes a root debug index, and writes `observability-run.json`
+plus `observability-run.md` into the suite directory:
 
 ```powershell
 python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite
 ```
 
-The scenario suite writes `scenario-suite.json`, `scenario-suite.md`,
-`scenario-suite-observer.json`, and `scenario-suite-observer.md` at the root,
-plus one full bundle per scenario: `pass`, `input_mask_matrix_pass`,
+The observability wrapper writes `diagnostic-debug-index.jsonl` and
+`diagnostic-debug-index.md` alongside the generated scenario-suite root files:
+`scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
+`scenario-suite-observer.md`. The suite also writes one full bundle per
+scenario: `pass`, `input_mask_matrix_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
 `ppu_read_buffer_fault`, `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -115,7 +117,11 @@ probe ids, per-scenario baseline comparison summaries, explicit contract-match
 breakdowns, single-scenario `replay_args`, a suite-level attention queue, and
 artifact paths. The observer JSON mirrors the replay arguments on next actions
 and observations so an AI debugger can regenerate one bundle before loading the
-full telemetry corpus. The
+full telemetry corpus. The debug index adds one compact row per scenario with
+the scenario role and outcome, health, focus domain, failure kind, failed probe
+ids, terminal instruction or last event, top comparison difference, replay args,
+and the first artifact to open. Use it as the first routing table when comparing
+scenarios, choosing a replay, or handing a corpus to an automated debugger. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -175,14 +181,16 @@ observations, Markdown sections, and every artifact path referenced by the
 manifest or observer report. CI and release workflows run this verifier before
 uploading the scenario-suite artifact through `run_diagnostic_observability.py`.
 
-`run_diagnostic_observability.py` also writes focused replay evidence under
-`replay-runs/<scenario>/` by default. The replay summary records the source
-`replay_args`, effective command, expected and actual exit code, expected and
-actual health/focus values, required bundle-artifact presence, and paths to the
-focused bundle's `manifest.json`, `triage.json`, `telemetry.json`, `report.md`,
-and `diagnostic.nes`. Use `--replay-scenario <ID>` to target a specific
-scenario, `--replay-output-dir <DIR>` to place the focused evidence elsewhere,
-or `--skip-replay` when only suite generation and verification are needed.
+`run_diagnostic_observability.py` also writes the root
+`diagnostic-debug-index.jsonl` and `diagnostic-debug-index.md` files, then
+writes focused replay evidence under `replay-runs/<scenario>/` by default. The
+replay summary records the source `replay_args`, effective command, expected
+and actual exit code, expected and actual health/focus values, required
+bundle-artifact presence, and paths to the focused bundle's `manifest.json`,
+`triage.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`. Use
+`--replay-scenario <ID>` to target a specific scenario,
+`--replay-output-dir <DIR>` to place the focused evidence elsewhere, or
+`--skip-replay` when only suite generation and verification are needed.
 
 ## Coverage
 
