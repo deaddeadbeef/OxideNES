@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 34;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 35;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v34";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v35";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -73,6 +73,7 @@ const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
     "ppu_horizontal_nametable_mirroring_before_first_mirror_read";
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
+const PPU_SPRITE_OVERFLOW_FAULT_LABEL: &str = "ppu_sprite_overflow_before_render_enable";
 const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
@@ -105,6 +106,12 @@ const PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR: u16 = 0x0250;
 const PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT: u8 = 0x40;
 const PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT: u8 = 1;
 const PPU_SPRITE_ZERO_HIT_TEST_ID: u8 = 25;
+const PPU_SPRITE_OVERFLOW_STATUS_ADDR: u16 = 0x0251;
+const PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR: u16 = 0x0252;
+const PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT: u8 = 0x20;
+const PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT: u8 = 1;
+const PPU_SPRITE_OVERFLOW_TEST_ID: u8 = 26;
+const PPU_SPRITE_OVERFLOW_RESTORE_BYTES: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -410,6 +417,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "solid background tile 2 and sprite 0 tile 2 overlap at a visible pixel",
             "PPUSTATUS bit 6 remains set after the next completed frame",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 26,
+        name: "ppu_sprite_overflow",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify nine in-range sprites on one scanline set PPUSTATUS sprite-overflow.",
+        expected_observations: &[
+            "nine synthetic sprite entries share one visible scanline",
+            "PPUSTATUS bit 5 remains set after sprite evaluation completes",
         ],
     },
 ];
@@ -866,6 +884,15 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect sprite evaluation, background/sprite pixel muxing, and PPUSTATUS bit-6 lifetime across vblank.",
     },
     DiagnosticFailureSpec {
+        code: 0x86,
+        test_id: 26,
+        assertion: "PPUSTATUS reports sprite overflow after nine sprites share one scanline",
+        expected: "PPUSTATUS bit 5 is set after sprite evaluation sees more than eight in-range sprites",
+        observed: "PPUSTATUS sprite-overflow bit was not set after the deterministic overflow scene",
+        likely_domain: "ppu.sprite_overflow",
+        remediation_hint: "Inspect secondary OAM sprite evaluation, overflow-bit setting, and PPUSTATUS bit-5 lifetime across vblank.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -1051,8 +1078,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, NMI delivery, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Sprite/background priority, sprite overflow edge cases, scrolling seams, vblank timing, and per-dot rendering behavior.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, NMI delivery, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Sprite/background priority, scrolling seams, vblank timing, sprite overflow hardware-bug false positives/negatives, and per-dot rendering behavior.",
         suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
     },
     DiagnosticCoverageGapSpec {
@@ -1128,6 +1155,7 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuSpriteOverflow,
     PpuSpriteZeroHit,
     PpuStatusLatchReset,
     PpuVramIncrement32,
@@ -1135,7 +1163,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 17] = [
+    pub const ALL: [DiagnosticFaultInjection; 18] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
@@ -1149,6 +1177,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::Mapper2PrgRam,
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuSpriteOverflow,
         DiagnosticFaultInjection::PpuSpriteZeroHit,
         DiagnosticFaultInjection::PpuStatusLatchReset,
         DiagnosticFaultInjection::PpuVramIncrement32,
@@ -1170,6 +1199,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuSpriteOverflow => "ppu_sprite_overflow",
             DiagnosticFaultInjection::PpuSpriteZeroHit => "ppu_sprite_zero_hit",
             DiagnosticFaultInjection::PpuStatusLatchReset => "ppu_status_latch_reset",
             DiagnosticFaultInjection::PpuVramIncrement32 => "ppu_vram_increment_32",
@@ -1196,6 +1226,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuSpriteOverflow => PPU_SPRITE_OVERFLOW_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteZeroHit => PPU_SPRITE_ZERO_HIT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuStatusLatchReset => PPU_STATUS_LATCH_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramIncrement32 => PPU_VRAM_INCREMENT_32_FAULT_LABEL,
@@ -1218,6 +1249,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
+    pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
     pub ppu_sprite_zero_hit: PpuSpriteZeroHitTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
@@ -1530,6 +1562,18 @@ pub struct PpuSpriteZeroHitTelemetry {
     pub observed_status_bit_hex: String,
     pub expected_case_count: u8,
     pub observed_case_count: u8,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PpuSpriteOverflowTelemetry {
+    pub expected_status_bit: u8,
+    pub expected_status_bit_hex: String,
+    pub observed_status_bit: u8,
+    pub observed_status_bit_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub restored_oam_byte_count: u16,
     pub passed: bool,
 }
 
@@ -2067,6 +2111,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
+    let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
     let ppu_sprite_zero_hit = ppu_sprite_zero_hit_telemetry(&ram);
     let mut host_failures = host_validate(HostValidationInput {
         status,
@@ -2075,6 +2120,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
@@ -2099,6 +2145,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
@@ -2152,6 +2199,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         input_port_matrix,
+        ppu_sprite_overflow,
         ppu_sprite_zero_hit,
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
@@ -2629,6 +2677,32 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Sprite-zero-hit passed | {} |",
         telemetry.ppu_sprite_zero_hit.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow status bit / expected | {} / {} |",
+        telemetry.ppu_sprite_overflow.observed_status_bit_hex,
+        telemetry.ppu_sprite_overflow.expected_status_bit_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow cases / expected | {} / {} |",
+        telemetry.ppu_sprite_overflow.observed_case_count,
+        telemetry.ppu_sprite_overflow.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow restored OAM bytes | {} |",
+        telemetry.ppu_sprite_overflow.restored_oam_byte_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow passed | {} |",
+        telemetry.ppu_sprite_overflow.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -3658,6 +3732,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -3675,6 +3750,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -3750,6 +3826,14 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_sprite_zero_hit.observed_status_bit_hex,
             input.ppu_sprite_zero_hit.observed_case_count,
             input.ppu_sprite_zero_hit.expected_case_count
+        ));
+    }
+    if !input.ppu_sprite_overflow.passed {
+        failures.push(format!(
+            "PPU sprite-overflow mismatch: status bit {}, cases {}/{}",
+            input.ppu_sprite_overflow.observed_status_bit_hex,
+            input.ppu_sprite_overflow.observed_case_count,
+            input.ppu_sprite_overflow.expected_case_count
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -4004,6 +4088,33 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.ppu_sprite_zero_hit.expected_case_count
             ),
             likely_domain: "ppu.sprite_zero_hit".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.sprite_overflow.status".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_SPRITE_OVERFLOW_TEST_ID),
+            test_name: test_name(PPU_SPRITE_OVERFLOW_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_sprite_overflow.passed),
+            description:
+                "Cartridge-observed PPUSTATUS sprite-overflow bit is retained in host telemetry"
+                    .to_string(),
+            expected: format!(
+                "sprite-overflow status bit {} and cases {}",
+                input.ppu_sprite_overflow.expected_status_bit_hex,
+                input.ppu_sprite_overflow.expected_case_count
+            ),
+            observed: format!(
+                "sprite-overflow status bit {}, cases {}/{}, restored OAM bytes {}",
+                input.ppu_sprite_overflow.observed_status_bit_hex,
+                input.ppu_sprite_overflow.observed_case_count,
+                input.ppu_sprite_overflow.expected_case_count,
+                input.ppu_sprite_overflow.restored_oam_byte_count
+            ),
+            likely_domain: "ppu.sprite_overflow".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -4370,6 +4481,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.input_port_serial_matrix();
     program.oam_dma_phase_matrix();
     program.ppu_sprite_zero_hit();
+    program.ppu_sprite_overflow();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -5227,17 +5339,95 @@ impl DiagnosticProgram {
         self.expect_a_eq(PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT, 0x85);
         self.asm.lda_imm(PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT);
         self.asm.sta_abs(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR);
+        self.restore_oam_prefix_from_dma_source(4);
+        self.pass_test(PPU_SPRITE_ZERO_HIT_TEST_ID);
+    }
+
+    fn ppu_sprite_overflow(&mut self) {
+        self.begin_test(PPU_SPRITE_OVERFLOW_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_SPRITE_OVERFLOW_STATUS_ADDR);
+        self.asm.sta_abs(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x2003);
-        self.asm.lda_abs(0x0300);
-        self.asm.sta_abs(0x2004);
-        self.asm.lda_abs(0x0301);
-        self.asm.sta_abs(0x2004);
-        self.asm.lda_abs(0x0302);
-        self.asm.sta_abs(0x2004);
-        self.asm.lda_abs(0x0303);
-        self.asm.sta_abs(0x2004);
-        self.pass_test(PPU_SPRITE_ZERO_HIT_TEST_ID);
+        for sprite_index in 0..9u8 {
+            let x = 0x20 + sprite_index * 8;
+            self.write_oam_bytes(&[0x30, 0x02, 0x00, x]);
+        }
+
+        self.asm
+            .label(PPU_SPRITE_OVERFLOW_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_imm(0x18);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("sprite_overflow_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("sprite_overflow_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        let overflow_fail = self.unique_label("sprite_overflow_fail");
+        let overflow_ok = self.unique_label("sprite_overflow_ok");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
+        self.asm.sta_abs(PPU_SPRITE_OVERFLOW_STATUS_ADDR);
+        self.asm.cmp_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
+        self.asm.bne(&overflow_fail);
+        self.asm.jmp_label(&overflow_ok);
+
+        self.asm
+            .label(&overflow_fail)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0x86);
+        self.asm.sta_zp(FAILURE_CODE_ADDR);
+        self.restore_oam_prefix_from_dma_source(PPU_SPRITE_OVERFLOW_RESTORE_BYTES);
+        self.asm.jmp_label("fail");
+
+        self.asm
+            .label(&overflow_ok)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR);
+        self.restore_oam_prefix_from_dma_source(PPU_SPRITE_OVERFLOW_RESTORE_BYTES);
+        self.pass_test(PPU_SPRITE_OVERFLOW_TEST_ID);
+    }
+
+    fn write_oam_bytes(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.asm.lda_imm(byte);
+            self.asm.sta_abs(0x2004);
+        }
+    }
+
+    fn restore_oam_prefix_from_dma_source(&mut self, byte_count: usize) {
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        for offset in 0..byte_count {
+            self.asm.lda_abs(0x0300 + offset as u16);
+            self.asm.sta_abs(0x2004);
+        }
     }
 
     fn expect_serial_bits_from_mask(&mut self, addr: u16, expected_mask_addr: u8, fail_base: u8) {
@@ -5722,6 +5912,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
         }
+        DiagnosticFaultInjection::PpuSpriteOverflow => {
+            bus.ppu.oam_data[32..].fill(0xF0);
+        }
         DiagnosticFaultInjection::PpuSpriteZeroHit => {
             bus.cpu_write(0x2003, 0x01);
             bus.cpu_write(0x2004, 0x00);
@@ -5843,6 +6036,22 @@ fn ppu_sprite_zero_hit_telemetry(ram: &[u8]) -> PpuSpriteZeroHitTelemetry {
         observed_case_count,
         passed: observed_status_bit == PPU_SPRITE_ZERO_HIT_EXPECTED_STATUS_BIT
             && observed_case_count == PPU_SPRITE_ZERO_HIT_EXPECTED_CASE_COUNT,
+    }
+}
+
+fn ppu_sprite_overflow_telemetry(ram: &[u8]) -> PpuSpriteOverflowTelemetry {
+    let observed_status_bit = ram[(PPU_SPRITE_OVERFLOW_STATUS_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR & 0x07FF) as usize];
+    PpuSpriteOverflowTelemetry {
+        expected_status_bit: PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT,
+        expected_status_bit_hex: hex_byte(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT),
+        observed_status_bit,
+        observed_status_bit_hex: hex_byte(observed_status_bit),
+        expected_case_count: PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        restored_oam_byte_count: PPU_SPRITE_OVERFLOW_RESTORE_BYTES as u16,
+        passed: observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT
+            && observed_case_count == PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT,
     }
 }
 
@@ -7120,6 +7329,9 @@ fn compare_observation_checksums(
         &["ppu_sprite_zero_hit", "observed_status_bit"][..],
         &["ppu_sprite_zero_hit", "observed_case_count"][..],
         &["ppu_sprite_zero_hit", "passed"][..],
+        &["ppu_sprite_overflow", "observed_status_bit"][..],
+        &["ppu_sprite_overflow", "observed_case_count"][..],
+        &["ppu_sprite_overflow", "passed"][..],
         &["frame", "checksum"][..],
         &["frame", "unique_colors"][..],
         &["audio", "sample_count"][..],
