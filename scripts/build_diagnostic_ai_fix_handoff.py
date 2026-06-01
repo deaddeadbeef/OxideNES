@@ -12,6 +12,7 @@ from typing import Any
 
 FIX_HANDOFF_SCHEMA_VERSION = 1
 DEFAULT_MAX_MATCHES_PER_FILE = 24
+DIAGNOSTIC_TEST_CONTEXT_FILE = "tests/diagnostic_cartridge_tests.rs"
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -45,6 +46,10 @@ def markdown_cell(value: Any) -> str:
 
 def sorted_unique(values: list[Any]) -> list[str]:
     return sorted({value for value in values if isinstance(value, str) and value})
+
+
+def test_context_files(paths: list[str]) -> list[str]:
+    return sorted_unique([*paths, DIAGNOSTIC_TEST_CONTEXT_FILE])
 
 
 def command_text(command: dict[str, Any]) -> str:
@@ -333,7 +338,7 @@ def build_summary(
         ),
     }
     source_files = as_str_list(evidence.get("source_files"))
-    test_files = as_str_list(evidence.get("test_files"))
+    test_files = test_context_files(as_str_list(evidence.get("test_files")))
     search_terms = as_str_list(evidence.get("search_terms"))
     source_scan = scan_paths(repo_root, source_files, search_terms, args.max_matches_per_file)
     test_scan = scan_paths(
@@ -370,6 +375,8 @@ def build_summary(
         errors.append(f"missing test file: {path}")
     if total_matches(source_scan) < 1:
         errors.append("source scan did not find any search-term matches")
+    if total_matches(test_scan) < 1:
+        errors.append("test scan did not find any search-term matches")
     if not narrow_test_commands:
         errors.append("diagnosis evidence is missing narrow test commands")
     if route_check.get("replay_status") != "passed":
@@ -443,6 +450,11 @@ def build_summary(
                 "name": "source_search_matches_found",
                 "passed": total_matches(source_scan) > 0,
                 "detail": total_matches(source_scan),
+            },
+            {
+                "name": "test_search_matches_found",
+                "passed": total_matches(test_scan) > 0,
+                "detail": total_matches(test_scan),
             },
             {
                 "name": "narrow_test_commands_present",

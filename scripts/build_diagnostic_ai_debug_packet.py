@@ -185,6 +185,10 @@ def default_fix_handoff_json(args: argparse.Namespace) -> Path:
     return args.suite_dir / "diagnostic-ai-fix-handoff-smoke.json"
 
 
+def route_matrix_json_path(args: argparse.Namespace) -> Path:
+    return args.route_matrix_json or args.suite_dir / "diagnostic-ai-route-matrix.json"
+
+
 def route_matrix_paths(
     args: argparse.Namespace,
     route_matrix: dict[str, Any],
@@ -208,8 +212,11 @@ def route_matrix_paths(
 
 
 def resolve_inputs(args: argparse.Namespace) -> tuple[Path, Path, dict[str, Any]]:
-    route_matrix = load_json(args.suite_dir / "diagnostic-ai-route-matrix.json")
-    original_suite_dirs = unique_strings([str(args.suite_dir), route_matrix.get("suite_dir")])
+    route_matrix_path = route_matrix_json_path(args)
+    route_matrix = load_json(route_matrix_path)
+    original_suite_dirs = unique_strings(
+        [str(args.suite_dir), str(route_matrix_path.parent), route_matrix.get("suite_dir")]
+    )
     matrix_diagnosis, matrix_fix = route_matrix_paths(args, route_matrix, original_suite_dirs)
     diagnosis_json = args.diagnosis_json or matrix_diagnosis or default_diagnosis_json(args)
     fix_handoff_json = args.fix_handoff_json or matrix_fix or default_fix_handoff_json(args)
@@ -362,7 +369,7 @@ def packet_copy_specs(
     def resolved(value: Any) -> Path | None:
         return resolve_artifact_path(args.suite_dir, original_suite_dirs, value)
 
-    route_matrix_path = args.suite_dir / "diagnostic-ai-route-matrix.json"
+    route_matrix_path = route_matrix_json_path(args)
     route_matrix_required = bool(route_matrix)
     return [
         ("ai_index_json", suite_file("diagnostic-ai-observability-index.json"), "index/diagnostic-ai-observability-index.json", True),
@@ -400,6 +407,7 @@ def build_summary(
     original_suite_dirs = unique_strings(
         [
             str(args.suite_dir),
+            str(route_matrix_json_path(args).parent),
             diagnosis.get("suite_dir"),
             fix_handoff.get("suite_dir"),
             route_matrix.get("suite_dir"),
@@ -612,6 +620,11 @@ def parse_args() -> argparse.Namespace:
         help="Directory produced by scripts/run_diagnostic_e2e.py.",
     )
     parser.add_argument("--route-id", help="Route id to package from diagnostic-ai-route-matrix.json.")
+    parser.add_argument(
+        "--route-matrix-json",
+        type=Path,
+        help="Explicit route matrix JSON. Defaults to diagnostic-ai-route-matrix.json inside --suite-dir.",
+    )
     parser.add_argument("--diagnosis-json", type=Path, help="Explicit diagnosis JSON to package.")
     parser.add_argument("--fix-handoff-json", type=Path, help="Explicit fix-handoff JSON to package.")
     parser.add_argument(
