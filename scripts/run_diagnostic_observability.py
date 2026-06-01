@@ -18,6 +18,7 @@ RUN_SCHEMA_VERSION = 1
 REPLAY_RUN_SCHEMA_VERSION = 1
 DEBUG_INDEX_SCHEMA_VERSION = 1
 OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
+OBSERVABILITY_COMPARISON_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
 
 
@@ -113,6 +114,7 @@ def artifact_paths(
     replay_summary: dict[str, Any] | None,
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    observability_comparison: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
         "suite_dir": str(suite_dir),
@@ -132,6 +134,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if observability_analysis:
         for name, path in observability_analysis.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if observability_comparison:
+        for name, path in observability_comparison.get("artifacts", {}).items():
             artifacts[name] = str(path)
     return artifacts
 
@@ -175,6 +180,17 @@ def observability_analysis_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "observability_analysis_json": str(suite_dir / "diagnostic-observability-analysis.json"),
         "observability_analysis_report": str(suite_dir / "diagnostic-observability-analysis.md"),
+    }
+
+
+def observability_comparison_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "observability_comparison_json": str(
+            suite_dir / "diagnostic-observability-comparison.json"
+        ),
+        "observability_comparison_report": str(
+            suite_dir / "diagnostic-observability-comparison.md"
+        ),
     }
 
 
@@ -802,6 +818,469 @@ def write_observability_analysis(
     return analysis
 
 
+def load_observability_snapshot(suite_dir: Path) -> dict[str, Any]:
+    analysis_path = suite_dir / "diagnostic-observability-analysis.json"
+    debug_index_path = suite_dir / "diagnostic-debug-index.jsonl"
+    errors: list[str] = []
+    analysis = load_json(analysis_path)
+    if not analysis:
+        errors.append(f"missing or invalid observability analysis: {analysis_path}")
+    debug_entries, debug_errors = load_jsonl(debug_index_path)
+    errors.extend(debug_errors)
+    expected_count = analysis.get("scenario_count")
+    if isinstance(expected_count, int) and expected_count != len(debug_entries):
+        errors.append(
+            f"{suite_dir}: analysis scenario_count={expected_count} "
+            f"but debug-index entries={len(debug_entries)}"
+        )
+    return {
+        "suite_dir": str(suite_dir),
+        "analysis": analysis,
+        "debug_entries": debug_entries,
+        "errors": errors,
+        "artifacts": {
+            "observability_analysis_json": str(analysis_path),
+            "debug_index_jsonl": str(debug_index_path),
+        },
+    }
+
+
+def entries_by_scenario_id(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(entry.get("scenario_id")): entry
+        for entry in entries
+        if isinstance(entry.get("scenario_id"), str)
+    }
+
+
+def hypotheses_by_domain(analysis: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(hypothesis.get("focus_domain")): hypothesis
+        for hypothesis in as_list(analysis.get("ranked_hypotheses"))
+        if isinstance(hypothesis, dict) and isinstance(hypothesis.get("focus_domain"), str)
+    }
+
+
+def health_severity(health: Any) -> int:
+    order = {
+        None: 0,
+        "healthy": 0,
+        "cartridge_assertion_failed": 2,
+        "host_validation_failed": 2,
+        "timed_out": 3,
+    }
+    return order.get(health, 1)
+
+
+def sorted_strings(values: list[Any]) -> list[str]:
+    return sorted(unique_strings(values))
+
+
+def compare_failed_probe_ids(
+    baseline_entry: dict[str, Any] | None, current_entry: dict[str, Any] | None
+) -> tuple[list[str], list[str], list[str]]:
+    baseline = set(entry_failed_probe_ids(baseline_entry or {}))
+    current = set(entry_failed_probe_ids(current_entry or {}))
+    return (
+        sorted(current),
+        sorted(current - baseline),
+        sorted(baseline - current),
+    )
+
+
+def compare_scenario(
+    scenario_id: str,
+    baseline_entry: dict[str, Any] | None,
+    current_entry: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if baseline_entry is None:
+        failed_probe_ids, added_probe_ids, _ = compare_failed_probe_ids(None, current_entry)
+        return {
+            "scenario_id": scenario_id,
+            "classification": "added",
+            "change_kinds": ["scenario_added"],
+            "baseline_present": False,
+            "current_present": True,
+            "baseline_health": None,
+            "current_health": current_entry.get("health") if current_entry else None,
+            "baseline_focus_domain": None,
+            "current_focus_domain": entry_focus_domain(current_entry or {}),
+            "score_delta": entry_analysis_score(current_entry or {}),
+            "current_score": entry_analysis_score(current_entry or {}),
+            "failed_probe_ids": failed_probe_ids,
+            "failed_probe_ids_added": added_probe_ids,
+            "failed_probe_ids_removed": [],
+            "current_primary_artifact": entry_primary_artifact(current_entry or {}),
+            "current_replay_args": as_list((current_entry or {}).get("replay_args")),
+            "current_debug_anchor": entry_debug_anchor(current_entry or {}),
+        }
+    if current_entry is None:
+        failed_probe_ids, _, removed_probe_ids = compare_failed_probe_ids(baseline_entry, None)
+        return {
+            "scenario_id": scenario_id,
+            "classification": "regression",
+            "change_kinds": ["scenario_removed"],
+            "baseline_present": True,
+            "current_present": False,
+            "baseline_health": baseline_entry.get("health"),
+            "current_health": None,
+            "baseline_focus_domain": entry_focus_domain(baseline_entry),
+            "current_focus_domain": None,
+            "score_delta": -entry_analysis_score(baseline_entry),
+            "baseline_score": entry_analysis_score(baseline_entry),
+            "failed_probe_ids": [],
+            "failed_probe_ids_added": [],
+            "failed_probe_ids_removed": removed_probe_ids or failed_probe_ids,
+            "current_primary_artifact": None,
+            "current_replay_args": [],
+            "current_debug_anchor": {"kind": "missing"},
+        }
+
+    baseline_score = entry_analysis_score(baseline_entry)
+    current_score = entry_analysis_score(current_entry)
+    baseline_failure = as_dict(baseline_entry.get("debug_focus")).get("failure_kind")
+    current_failure = as_dict(current_entry.get("debug_focus")).get("failure_kind")
+    baseline_top_difference = as_dict(baseline_entry.get("top_difference")).get("path")
+    current_top_difference = as_dict(current_entry.get("top_difference")).get("path")
+    failed_probe_ids, added_probe_ids, removed_probe_ids = compare_failed_probe_ids(
+        baseline_entry, current_entry
+    )
+    change_kinds: list[str] = []
+    if baseline_entry.get("health") != current_entry.get("health"):
+        change_kinds.append("health_changed")
+    if entry_focus_domain(baseline_entry) != entry_focus_domain(current_entry):
+        change_kinds.append("focus_domain_changed")
+    if baseline_failure != current_failure:
+        change_kinds.append("failure_kind_changed")
+    if added_probe_ids or removed_probe_ids:
+        change_kinds.append("failed_probe_ids_changed")
+    if baseline_top_difference != current_top_difference:
+        change_kinds.append("top_difference_changed")
+    if baseline_score != current_score:
+        change_kinds.append("score_changed")
+
+    classification = "unchanged"
+    if change_kinds:
+        classification = "drift"
+    if current_entry.get("expectation_met") is False or current_entry.get("contract_all_matched") is False:
+        classification = "regression"
+    elif baseline_entry.get("health") == "healthy" and current_entry.get("health") != "healthy":
+        classification = "regression"
+    elif health_severity(current_entry.get("health")) > health_severity(baseline_entry.get("health")):
+        classification = "regression"
+    elif baseline_entry.get("health") != "healthy" and current_entry.get("health") == "healthy":
+        classification = "improvement"
+
+    return {
+        "scenario_id": scenario_id,
+        "classification": classification,
+        "change_kinds": change_kinds,
+        "baseline_present": True,
+        "current_present": True,
+        "baseline_health": baseline_entry.get("health"),
+        "current_health": current_entry.get("health"),
+        "baseline_focus_domain": entry_focus_domain(baseline_entry),
+        "current_focus_domain": entry_focus_domain(current_entry),
+        "baseline_failure_kind": baseline_failure,
+        "current_failure_kind": current_failure,
+        "baseline_top_difference_path": baseline_top_difference,
+        "current_top_difference_path": current_top_difference,
+        "baseline_score": baseline_score,
+        "current_score": current_score,
+        "score_delta": current_score - baseline_score,
+        "failed_probe_ids": failed_probe_ids,
+        "failed_probe_ids_added": added_probe_ids,
+        "failed_probe_ids_removed": removed_probe_ids,
+        "current_primary_artifact": entry_primary_artifact(current_entry),
+        "current_replay_args": as_list(current_entry.get("replay_args")),
+        "current_debug_anchor": entry_debug_anchor(current_entry),
+    }
+
+
+def compare_hypothesis(
+    focus_domain: str,
+    baseline_hypothesis: dict[str, Any] | None,
+    current_hypothesis: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if baseline_hypothesis is None:
+        return {
+            "focus_domain": focus_domain,
+            "classification": "added",
+            "baseline_present": False,
+            "current_present": True,
+            "baseline_rank": None,
+            "current_rank": current_hypothesis.get("rank") if current_hypothesis else None,
+            "rank_delta": None,
+            "baseline_score": None,
+            "current_score": current_hypothesis.get("score") if current_hypothesis else None,
+            "score_delta": current_hypothesis.get("score") if current_hypothesis else None,
+            "scenario_ids_added": as_list((current_hypothesis or {}).get("scenario_ids")),
+            "scenario_ids_removed": [],
+        }
+    if current_hypothesis is None:
+        return {
+            "focus_domain": focus_domain,
+            "classification": "removed",
+            "baseline_present": True,
+            "current_present": False,
+            "baseline_rank": baseline_hypothesis.get("rank"),
+            "current_rank": None,
+            "rank_delta": None,
+            "baseline_score": baseline_hypothesis.get("score"),
+            "current_score": None,
+            "score_delta": -as_int(baseline_hypothesis.get("score")),
+            "scenario_ids_added": [],
+            "scenario_ids_removed": as_list(baseline_hypothesis.get("scenario_ids")),
+        }
+
+    baseline_scenarios = set(str(value) for value in as_list(baseline_hypothesis.get("scenario_ids")))
+    current_scenarios = set(str(value) for value in as_list(current_hypothesis.get("scenario_ids")))
+    score_delta = as_int(current_hypothesis.get("score")) - as_int(baseline_hypothesis.get("score"))
+    rank_delta = as_int(current_hypothesis.get("rank")) - as_int(baseline_hypothesis.get("rank"))
+    classification = "unchanged"
+    if (
+        score_delta
+        or rank_delta
+        or baseline_scenarios != current_scenarios
+        or baseline_hypothesis.get("confidence") != current_hypothesis.get("confidence")
+    ):
+        classification = "changed"
+    return {
+        "focus_domain": focus_domain,
+        "classification": classification,
+        "baseline_present": True,
+        "current_present": True,
+        "baseline_rank": baseline_hypothesis.get("rank"),
+        "current_rank": current_hypothesis.get("rank"),
+        "rank_delta": rank_delta,
+        "baseline_score": baseline_hypothesis.get("score"),
+        "current_score": current_hypothesis.get("score"),
+        "score_delta": score_delta,
+        "baseline_confidence": baseline_hypothesis.get("confidence"),
+        "current_confidence": current_hypothesis.get("confidence"),
+        "scenario_ids_added": sorted(current_scenarios - baseline_scenarios),
+        "scenario_ids_removed": sorted(baseline_scenarios - current_scenarios),
+    }
+
+
+def comparison_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = Counter(str(row.get("classification")) for row in rows)
+    return {
+        "added": counts.get("added", 0),
+        "removed": counts.get("removed", 0),
+        "regression": counts.get("regression", 0),
+        "improvement": counts.get("improvement", 0),
+        "drift": counts.get("drift", 0),
+        "changed": counts.get("changed", 0),
+        "unchanged": counts.get("unchanged", 0),
+    }
+
+
+def scenario_comparison_sort_key(row: dict[str, Any]) -> tuple[int, str]:
+    priority = {
+        "regression": 0,
+        "removed": 1,
+        "added": 2,
+        "improvement": 3,
+        "drift": 4,
+        "unchanged": 5,
+    }
+    return (priority.get(str(row.get("classification")), 9), str(row.get("scenario_id")))
+
+
+def build_observability_comparison(
+    baseline_suite_dir: Path,
+    current_suite_dir: Path,
+    fail_on_regression: bool,
+    repo_root: Path,
+) -> dict[str, Any]:
+    paths = observability_comparison_paths(current_suite_dir)
+    baseline = load_observability_snapshot(baseline_suite_dir)
+    current = load_observability_snapshot(current_suite_dir)
+    errors = [
+        f"baseline: {error}" for error in as_list(baseline.get("errors"))
+    ] + [f"current: {error}" for error in as_list(current.get("errors"))]
+
+    baseline_entries = entries_by_scenario_id(as_list(baseline.get("debug_entries")))
+    current_entries = entries_by_scenario_id(as_list(current.get("debug_entries")))
+    scenario_ids = sorted(set(baseline_entries) | set(current_entries))
+    scenario_changes = [
+        compare_scenario(
+            scenario_id,
+            baseline_entries.get(scenario_id),
+            current_entries.get(scenario_id),
+        )
+        for scenario_id in scenario_ids
+    ]
+    scenario_changes.sort(key=scenario_comparison_sort_key)
+    scenario_counts = comparison_counts(scenario_changes)
+
+    baseline_hypotheses = hypotheses_by_domain(as_dict(baseline.get("analysis")))
+    current_hypotheses = hypotheses_by_domain(as_dict(current.get("analysis")))
+    focus_domains = sorted(set(baseline_hypotheses) | set(current_hypotheses))
+    hypothesis_changes = [
+        compare_hypothesis(
+            focus_domain,
+            baseline_hypotheses.get(focus_domain),
+            current_hypotheses.get(focus_domain),
+        )
+        for focus_domain in focus_domains
+    ]
+    hypothesis_changes.sort(
+        key=lambda row: (
+            0 if row.get("classification") != "unchanged" else 1,
+            str(row.get("focus_domain")),
+        )
+    )
+    hypothesis_counts = comparison_counts(hypothesis_changes)
+
+    regression_count = scenario_counts["regression"]
+    changed_count = len(
+        [row for row in scenario_changes if row.get("classification") != "unchanged"]
+    )
+    verdict = "matched"
+    if regression_count:
+        verdict = "regressed"
+    elif changed_count or hypothesis_counts["changed"] or hypothesis_counts["added"] or hypothesis_counts["removed"]:
+        verdict = "changed"
+    if errors:
+        verdict = "invalid"
+    status = "failed" if errors or (fail_on_regression and regression_count) else "passed"
+
+    return {
+        "observability_comparison_schema_version": OBSERVABILITY_COMPARISON_SCHEMA_VERSION,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": status,
+        "verdict": verdict,
+        "recommended_exit_code": 0 if status == "passed" else 1,
+        "fail_on_regression": fail_on_regression,
+        "git": git_metadata(repo_root),
+        "baseline": {
+            "suite_dir": str(baseline_suite_dir),
+            "scenario_count": as_dict(baseline.get("analysis")).get("scenario_count"),
+            "hypothesis_count": as_dict(baseline.get("analysis")).get("hypothesis_count"),
+            "artifacts": baseline.get("artifacts"),
+        },
+        "current": {
+            "suite_dir": str(current_suite_dir),
+            "scenario_count": as_dict(current.get("analysis")).get("scenario_count"),
+            "hypothesis_count": as_dict(current.get("analysis")).get("hypothesis_count"),
+            "artifacts": current.get("artifacts"),
+        },
+        "artifacts": paths,
+        "scenario_change_counts": scenario_counts,
+        "hypothesis_change_counts": hypothesis_counts,
+        "regression_count": regression_count,
+        "changed_scenario_count": changed_count,
+        "scenario_changes": scenario_changes,
+        "regressions": [
+            row for row in scenario_changes if row.get("classification") == "regression"
+        ],
+        "hypothesis_changes": hypothesis_changes,
+        "errors": errors,
+        "ai_handoff": [
+            "Start with regressions before inspecting drift or hypothesis rank changes.",
+            "Use scenario_changes.current_replay_args to regenerate the current focused scenario.",
+            "Use current_primary_artifact for the first current-run artifact to open.",
+            "If verdict is changed without regressions, inspect hypothesis_changes for rank or coverage drift.",
+        ],
+    }
+
+
+def write_observability_comparison_markdown(path: Path, comparison: dict[str, Any]) -> None:
+    lines = [
+        "# Diagnostic Observability Comparison",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {comparison.get('status')} |",
+        f"| Verdict | {comparison.get('verdict')} |",
+        f"| Generated at UTC | {comparison.get('generated_at_utc')} |",
+        f"| Git commit | {comparison.get('git', {}).get('short_commit', '')} |",
+        f"| Baseline suite | {comparison.get('baseline', {}).get('suite_dir')} |",
+        f"| Current suite | {comparison.get('current', {}).get('suite_dir')} |",
+        f"| Regressions | {comparison.get('regression_count')} |",
+        f"| Changed scenarios | {comparison.get('changed_scenario_count')} |",
+        "",
+        "## Scenario Changes",
+        "",
+        "| Class | Scenario | Health | Focus domain | Score delta | Failed probes added | Open current |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in as_list(comparison.get("scenario_changes")):
+        if not isinstance(row, dict) or row.get("classification") == "unchanged":
+            continue
+        health = f"{row.get('baseline_health') or '-'} -> {row.get('current_health') or '-'}"
+        domain = (
+            f"{row.get('baseline_focus_domain') or '-'} -> "
+            f"{row.get('current_focus_domain') or '-'}"
+        )
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} | {} |".format(
+                row.get("classification"),
+                row.get("scenario_id"),
+                markdown_cell(health),
+                markdown_cell(domain),
+                row.get("score_delta"),
+                markdown_cell(",".join(str(value) for value in as_list(row.get("failed_probe_ids_added")))),
+                markdown_cell(str(row.get("current_primary_artifact") or "-")),
+            )
+        )
+    if not [row for row in as_list(comparison.get("scenario_changes")) if isinstance(row, dict) and row.get("classification") != "unchanged"]:
+        lines.append("| unchanged | - | - | - | 0 | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## Hypothesis Changes",
+            "",
+            "| Class | Focus domain | Rank delta | Score delta | Scenarios added | Scenarios removed |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for row in as_list(comparison.get("hypothesis_changes")):
+        if not isinstance(row, dict) or row.get("classification") == "unchanged":
+            continue
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} |".format(
+                row.get("classification"),
+                markdown_cell(str(row.get("focus_domain") or "-")),
+                row.get("rank_delta") if row.get("rank_delta") is not None else "-",
+                row.get("score_delta") if row.get("score_delta") is not None else "-",
+                markdown_cell(",".join(str(value) for value in as_list(row.get("scenario_ids_added")))),
+                markdown_cell(",".join(str(value) for value in as_list(row.get("scenario_ids_removed")))),
+            )
+        )
+    if not [row for row in as_list(comparison.get("hypothesis_changes")) if isinstance(row, dict) and row.get("classification") != "unchanged"]:
+        lines.append("| unchanged | - | - | 0 | - | - |")
+
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(comparison.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if comparison.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(comparison.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_observability_comparison(
+    baseline_suite_dir: Path,
+    current_suite_dir: Path,
+    fail_on_regression: bool,
+    repo_root: Path,
+) -> dict[str, Any]:
+    comparison = build_observability_comparison(
+        baseline_suite_dir, current_suite_dir, fail_on_regression, repo_root
+    )
+    artifacts = as_dict(comparison.get("artifacts"))
+    json_path = Path(str(artifacts["observability_comparison_json"]))
+    report_path = Path(str(artifacts["observability_comparison_report"]))
+    json_path.write_text(json.dumps(comparison, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_observability_comparison_markdown(report_path, comparison)
+    return comparison
+
+
 def scenarios_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     scenarios = manifest.get("scenarios")
     if not isinstance(scenarios, list):
@@ -1021,6 +1500,7 @@ def build_run_summary(
     verification_summary: dict[str, Any],
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
+    observability_comparison: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
 ) -> dict[str, Any]:
@@ -1039,6 +1519,8 @@ def build_run_summary(
         status = "failed"
     if observability_analysis and observability_analysis.get("status") != "passed":
         status = "failed"
+    if observability_comparison and observability_comparison.get("status") != "passed":
+        status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
         status = "failed"
 
@@ -1053,6 +1535,7 @@ def build_run_summary(
         "verification": verification_summary,
         "debug_index": debug_index_summary,
         "analysis": observability_analysis,
+        "comparison": observability_comparison,
         "replay": replay_summary,
         "suite": suite,
         "artifacts": artifact_paths(
@@ -1062,10 +1545,12 @@ def build_run_summary(
             replay_summary,
             debug_index_summary,
             observability_analysis,
+            observability_comparison,
         ),
         "ai_handoff": [
             "Start with suite.first_next_action and open its primary_artifact.",
             "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
+            "Use comparison.regressions first when --compare-suite-dir is supplied.",
             "Use debug_index.artifacts.debug_index_jsonl for one-row-per-scenario routing before raw telemetry.",
             "Use replay.artifacts.bundle_triage_json for the focused replay evidence of the selected scenario.",
             "Use scenario-suite-observer.json for ordered next actions and compact observations.",
@@ -1141,6 +1626,22 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Top focus domain | {top_hypothesis.get('focus_domain', '-')} |",
             f"| JSON | {analysis.get('artifacts', {}).get('observability_analysis_json', '-')} |",
             f"| Report | {analysis.get('artifacts', {}).get('observability_analysis_report', '-')} |",
+        ]
+    )
+    comparison = summary.get("comparison") or {}
+    lines.extend(
+        [
+            "",
+            "## Observability Comparison",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {comparison.get('status', '-')} |",
+            f"| Verdict | {comparison.get('verdict', '-')} |",
+            f"| Regressions | {comparison.get('regression_count', '-')} |",
+            f"| Changed scenarios | {comparison.get('changed_scenario_count', '-')} |",
+            f"| JSON | {comparison.get('artifacts', {}).get('observability_comparison_json', '-')} |",
+            f"| Report | {comparison.get('artifacts', {}).get('observability_comparison_report', '-')} |",
         ]
     )
     replay = summary.get("replay") or {}
@@ -1237,6 +1738,19 @@ def parse_args() -> argparse.Namespace:
         help="Skip the focused scenario replay after verifying the suite.",
     )
     parser.add_argument(
+        "--compare-suite-dir",
+        type=Path,
+        help=(
+            "Optional prior diagnostic observability suite to compare against the "
+            "newly generated suite."
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-comparison-regression",
+        action="store_true",
+        help="Return a failing exit code when --compare-suite-dir finds regressions.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print the observability run summary JSON to stdout.",
@@ -1266,6 +1780,7 @@ def main() -> int:
     verification_summary: dict[str, Any] = {}
     debug_index_summary: dict[str, Any] | None = None
     observability_analysis: dict[str, Any] | None = None
+    observability_comparison: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
         verify_argv = [
@@ -1282,6 +1797,13 @@ def main() -> int:
             observability_analysis = write_observability_analysis(
                 suite_dir, debug_index_summary, repo_root
             )
+            if args.compare_suite_dir:
+                observability_comparison = write_observability_comparison(
+                    args.compare_suite_dir,
+                    suite_dir,
+                    args.fail_on_comparison_regression,
+                    repo_root,
+                )
             if not args.skip_replay:
                 manifest = load_json(suite_dir / "scenario-suite.json")
                 observer = load_json(suite_dir / "scenario-suite-observer.json")
@@ -1320,6 +1842,7 @@ def main() -> int:
         verification_summary,
         debug_index_summary,
         observability_analysis,
+        observability_comparison,
         replay_summary,
         repo_root,
     )
@@ -1350,6 +1873,12 @@ def main() -> int:
             analysis_note = (
                 f" analysis={analysis.get('hypothesis_count')}:{analysis.get('status')}"
             )
+        comparison = summary.get("comparison") or {}
+        comparison_note = ""
+        if comparison:
+            comparison_note = (
+                f" comparison={comparison.get('verdict')}:{comparison.get('status')}"
+            )
         replay = summary.get("replay") or {}
         replay_note = ""
         if replay:
@@ -1360,7 +1889,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{replay_note}"
+            f"{debug_note}{analysis_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 
