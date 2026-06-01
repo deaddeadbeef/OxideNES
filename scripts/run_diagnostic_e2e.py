@@ -157,6 +157,12 @@ def artifact_paths(
         "diagnostic_ai_localization_eval_report": str(
             suite_dir / "diagnostic-ai-localization-eval.md"
         ),
+        "diagnostic_ai_session_plan_json": str(
+            suite_dir / "diagnostic-ai-session-plan.json"
+        ),
+        "diagnostic_ai_session_plan_report": str(
+            suite_dir / "diagnostic-ai-session-plan.md"
+        ),
         "diagnostic_ai_artifact_verification_json": str(
             suite_dir / "diagnostic-ai-artifact-verification.json"
         ),
@@ -220,6 +226,7 @@ def build_summary(
     )
     ai_debug_packet_matrix = load_json(suite_dir / "diagnostic-ai-debug-packet-matrix.json")
     ai_localization_eval = load_json(suite_dir / "diagnostic-ai-localization-eval.json")
+    ai_session_plan = load_json(suite_dir / "diagnostic-ai-session-plan.json")
     ai_artifact_verification = load_json(
         suite_dir / "diagnostic-ai-artifact-verification.json"
     )
@@ -258,6 +265,8 @@ def build_summary(
         errors.append("diagnostic AI debug packet matrix status is not passed")
     if ai_localization_eval.get("status") != "passed":
         errors.append("diagnostic AI localization evaluation status is not passed")
+    if ai_session_plan.get("status") != "passed":
+        errors.append("diagnostic AI session plan status is not passed")
     if ai_artifact_verification.get("status") != "passed":
         errors.append("diagnostic AI artifact verification status is not passed")
     missing = [name for name, present in artifact_presence.items() if not present]
@@ -533,6 +542,34 @@ def build_summary(
                 "minimum_score"
             ),
         },
+        "ai_session_plan": {
+            "status": ai_session_plan.get("status"),
+            "route_count": as_dict(ai_session_plan.get("summary")).get("route_count"),
+            "ready_route_count": as_dict(ai_session_plan.get("summary")).get(
+                "ready_route_count"
+            ),
+            "failed_route_count": as_dict(ai_session_plan.get("summary")).get(
+                "failed_route_count"
+            ),
+            "primary_route_id": as_dict(ai_session_plan.get("summary")).get(
+                "primary_route_id"
+            ),
+            "primary_scenario_id": as_dict(ai_session_plan.get("summary")).get(
+                "primary_scenario_id"
+            ),
+            "primary_focus_domain": as_dict(ai_session_plan.get("summary")).get(
+                "primary_focus_domain"
+            ),
+            "command_count": as_dict(ai_session_plan.get("summary")).get(
+                "command_count"
+            ),
+            "read_order_artifact_count": as_dict(ai_session_plan.get("summary")).get(
+                "read_order_artifact_count"
+            ),
+            "stop_condition_count": as_dict(ai_session_plan.get("summary")).get(
+                "stop_condition_count"
+            ),
+        },
         "ai_artifact_verification": {
             "status": ai_artifact_verification.get("status"),
             "check_count": as_dict(ai_artifact_verification.get("summary")).get("check_count"),
@@ -595,6 +632,7 @@ def build_summary(
             "Use diagnostic_ai_debug_packet_verification_json to prove the selected packet is valid from packet-local files and digests.",
             "Use diagnostic_ai_debug_packet_matrix_json to prove every AI route can be packaged into a relocatable debug packet with source/test context.",
             "Use diagnostic_ai_localization_eval_json to score whether expected health, focus-domain, route, source/test, and packet evidence localize across the scenario corpus.",
+            "Use diagnostic_ai_session_plan_json as the deterministic route-by-route startup plan for automated debugging sessions.",
             "Use diagnostic_ai_artifact_verification_json to prove the AI-facing artifact graph is internally consistent before automated fixes.",
             "Use diagnostic_ai_artifact_verification_json automation_readiness when an automated debugger needs one compact route-by-route readiness map.",
             "Use top_route for the highest-signal failure and scenario_dossiers_json for scenario-id-first debugging.",
@@ -615,6 +653,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     ai_debug_packet_verification = as_dict(summary.get("ai_debug_packet_verification"))
     ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
     ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
+    ai_session_plan = as_dict(summary.get("ai_session_plan"))
     ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
     top_route = as_dict(summary.get("top_route"))
     lines = [
@@ -791,6 +830,20 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Average score | {ai_localization_eval.get('average_score')} |",
         f"| Minimum score | {ai_localization_eval.get('minimum_score')} |",
         "",
+        "## AI Session Plan",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {ai_session_plan.get('status')} |",
+        f"| Ready routes | {ai_session_plan.get('ready_route_count')}/{ai_session_plan.get('route_count')} |",
+        f"| Failed routes | {ai_session_plan.get('failed_route_count')} |",
+        f"| Primary route | {ai_session_plan.get('primary_route_id')} |",
+        f"| Primary scenario | {ai_session_plan.get('primary_scenario_id')} |",
+        f"| Primary focus domain | {ai_session_plan.get('primary_focus_domain')} |",
+        f"| Commands | {ai_session_plan.get('command_count')} |",
+        f"| Read-order artifacts | {ai_session_plan.get('read_order_artifact_count')} |",
+        f"| Stop conditions | {ai_session_plan.get('stop_condition_count')} |",
+        "",
         "## AI Artifact Verification",
         "",
         "| Field | Value |",
@@ -881,6 +934,9 @@ def main() -> int:
     summary_json = args.summary_json or suite_dir / "diagnostic-e2e-report.json"
     summary_report = args.summary_report or suite_dir / "diagnostic-e2e-report.md"
     suite_dir.mkdir(parents=True, exist_ok=True)
+    for stale_output in (summary_json, summary_report):
+        if stale_output.exists():
+            stale_output.unlink()
 
     commands: list[dict[str, Any]] = []
     observability_argv = [
@@ -1196,6 +1252,31 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "build_diagnostic_ai_session_plan",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_session_plan.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-session-plan.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-session-plan.md"),
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command(
+                "build_diagnostic_ai_session_plan",
+                "AI localization evaluation failed",
+            )
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "verify_diagnostic_ai_artifacts",
                 [
                     sys.executable,
@@ -1213,7 +1294,7 @@ def main() -> int:
         commands.append(
             skipped_command(
                 "verify_diagnostic_ai_artifacts",
-                "AI localization evaluation failed",
+                "AI session plan failed",
             )
         )
 
@@ -1233,6 +1314,7 @@ def main() -> int:
         ai_debug_packet_verification = as_dict(summary.get("ai_debug_packet_verification"))
         ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
         ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
+        ai_session_plan = as_dict(summary.get("ai_session_plan"))
         ai_artifact_verification = as_dict(summary.get("ai_artifact_verification"))
         print(
             "Diagnostic e2e report "
@@ -1248,6 +1330,7 @@ def main() -> int:
             f"ai_packet_verify={ai_debug_packet_verification.get('status')}:{ai_debug_packet_verification.get('passed_check_count')}/{ai_debug_packet_verification.get('check_count')} "
             f"ai_debug_packet_matrix={ai_debug_packet_matrix.get('status')}:{ai_debug_packet_matrix.get('passed_route_count')}/{ai_debug_packet_matrix.get('route_count')} "
             f"ai_localization={ai_localization_eval.get('status')}:{ai_localization_eval.get('passed_scenario_count')}/{ai_localization_eval.get('scenario_count')} "
+            f"ai_session_plan={ai_session_plan.get('status')}:{ai_session_plan.get('ready_route_count')}/{ai_session_plan.get('route_count')} "
             f"ai_readiness={ai_artifact_verification.get('automation_readiness_status')}:{ai_artifact_verification.get('automation_ready_route_count')}/{ai_artifact_verification.get('automation_route_count')} "
             f"ai_artifacts={ai_artifact_verification.get('status')}:{ai_artifact_verification.get('missing_artifact_count')}"
         )

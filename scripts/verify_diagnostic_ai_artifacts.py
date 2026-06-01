@@ -181,6 +181,7 @@ def input_artifacts(
     ai_debug_packet_verification: dict[str, Any],
     ai_debug_packet_matrix: dict[str, Any],
     ai_localization_eval: dict[str, Any],
+    ai_session_plan: dict[str, Any],
     e2e_report: dict[str, Any],
     check_e2e_report: bool,
     check_ai_route_matrix: bool,
@@ -198,6 +199,7 @@ def input_artifacts(
     )
     debug_packet_matrix_artifacts = as_dict(ai_debug_packet_matrix.get("artifacts"))
     localization_eval_artifacts = as_dict(ai_localization_eval.get("artifacts"))
+    session_plan_artifacts = as_dict(ai_session_plan.get("artifacts"))
     e2e_artifacts = as_dict(e2e_report.get("artifacts"))
 
     artifacts = {
@@ -359,6 +361,19 @@ def input_artifacts(
                         "diagnostic_ai_localization_eval_report"
                     ),
                     str(suite_dir / "diagnostic-ai-localization-eval.md"),
+                ),
+            }
+        )
+    if ai_session_plan or check_e2e_report:
+        artifacts.update(
+            {
+                "diagnostic_ai_session_plan_json": artifact_value(
+                    session_plan_artifacts.get("diagnostic_ai_session_plan_json"),
+                    str(suite_dir / "diagnostic-ai-session-plan.json"),
+                ),
+                "diagnostic_ai_session_plan_report": artifact_value(
+                    session_plan_artifacts.get("diagnostic_ai_session_plan_report"),
+                    str(suite_dir / "diagnostic-ai-session-plan.md"),
                 ),
             }
         )
@@ -679,6 +694,7 @@ def build_summary(
     )
     ai_debug_packet_matrix_path = suite_dir / "diagnostic-ai-debug-packet-matrix.json"
     ai_localization_eval_path = suite_dir / "diagnostic-ai-localization-eval.json"
+    ai_session_plan_path = suite_dir / "diagnostic-ai-session-plan.json"
     e2e_report_path = suite_dir / "diagnostic-e2e-report.json"
 
     ai_index = load_json(ai_index_path)
@@ -690,6 +706,7 @@ def build_summary(
     ai_debug_packet_verification = load_json(ai_debug_packet_verification_path)
     ai_debug_packet_matrix = load_json(ai_debug_packet_matrix_path)
     ai_localization_eval = load_json(ai_localization_eval_path)
+    ai_session_plan = load_json(ai_session_plan_path)
     e2e_report = load_json(e2e_report_path)
     check_e2e_report = args.require_e2e_report or bool(e2e_report)
     check_ai_route_matrix = args.require_ai_route_matrix or bool(ai_route_matrix)
@@ -707,6 +724,7 @@ def build_summary(
         ai_debug_packet_verification,
         ai_debug_packet_matrix,
         ai_localization_eval,
+        ai_session_plan,
         e2e_report,
     ]
     original_dirs = original_suite_dirs(suite_dir, source_artifacts)
@@ -721,6 +739,7 @@ def build_summary(
         ai_debug_packet_verification,
         ai_debug_packet_matrix,
         ai_localization_eval,
+        ai_session_plan,
         e2e_report,
         check_e2e_report,
         check_ai_route_matrix,
@@ -842,6 +861,14 @@ def build_summary(
             ai_localization_eval.get("status") == "passed",
             ai_localization_eval.get("status"),
         )
+    if check_e2e_report or ai_session_plan:
+        add_check(
+            checks,
+            errors,
+            "diagnostic_ai_session_plan_passed",
+            ai_session_plan.get("status") == "passed",
+            ai_session_plan.get("status"),
+        )
 
     index_summary = as_dict(ai_index.get("summary"))
     query_summary = as_dict(ai_query.get("summary"))
@@ -891,6 +918,91 @@ def build_summary(
             and localization_summary.get("passed_scenario_count")
             == EXPECTED_SCENARIO_COUNT,
             localization_summary,
+        )
+    session_plan_summary = as_dict(ai_session_plan.get("summary"))
+    session_plan_routes = [
+        row for row in as_list(ai_session_plan.get("route_sessions")) if isinstance(row, dict)
+    ]
+    if ai_session_plan or check_e2e_report:
+        add_check(
+            checks,
+            errors,
+            "session_plan_route_count",
+            session_plan_summary.get("route_count") == EXPECTED_ACTIONABLE_SCENARIO_COUNT
+            and session_plan_summary.get("ready_route_count")
+            == EXPECTED_ACTIONABLE_SCENARIO_COUNT
+            and session_plan_summary.get("failed_route_count") == 0
+            and len(session_plan_routes) == EXPECTED_ACTIONABLE_SCENARIO_COUNT,
+            session_plan_summary,
+        )
+        add_check(
+            checks,
+            errors,
+            "session_plan_primary_route_matches_top_identity",
+            session_plan_summary.get("primary_route_id") == top_identity(ai_index, ai_query).get("route_id")
+            and session_plan_summary.get("primary_scenario_id")
+            == top_identity(ai_index, ai_query).get("scenario_id")
+            and session_plan_summary.get("primary_focus_domain")
+            == top_identity(ai_index, ai_query).get("focus_domain"),
+            session_plan_summary,
+        )
+        missing_command_routes = [
+            row.get("route_id")
+            for row in session_plan_routes
+            if not as_list(as_dict(row.get("commands")).get("replay"))
+            or not as_list(as_dict(row.get("commands")).get("narrow_tests"))
+            or not as_list(as_dict(row.get("commands")).get("verification"))
+        ]
+        add_check(
+            checks,
+            errors,
+            "session_plan_commands_present",
+            not missing_command_routes
+            and as_int(session_plan_summary.get("command_count"))
+            >= EXPECTED_ACTIONABLE_SCENARIO_COUNT * 3,
+            missing_command_routes,
+        )
+        missing_read_order_routes = [
+            row.get("route_id")
+            for row in session_plan_routes
+            if not as_list(row.get("read_order"))
+            or any(
+                not isinstance(entry, dict)
+                or not artifact_exists(
+                    suite_dir,
+                    original_dirs,
+                    str(entry.get("name") or "session_plan_read_order"),
+                    entry.get("path"),
+                )
+                for entry in as_list(row.get("read_order"))
+            )
+        ]
+        add_check(
+            checks,
+            errors,
+            "session_plan_read_order_artifacts_present",
+            not missing_read_order_routes
+            and as_int(session_plan_summary.get("read_order_artifact_count"))
+            >= EXPECTED_ACTIONABLE_SCENARIO_COUNT * 8,
+            missing_read_order_routes,
+        )
+        failed_stop_condition_routes = [
+            row.get("route_id")
+            for row in session_plan_routes
+            if not as_list(row.get("stop_conditions"))
+            or any(
+                not isinstance(condition, dict) or condition.get("passed") is not True
+                for condition in as_list(row.get("stop_conditions"))
+            )
+        ]
+        add_check(
+            checks,
+            errors,
+            "session_plan_stop_conditions_passed",
+            not failed_stop_condition_routes
+            and as_int(session_plan_summary.get("stop_condition_count"))
+            >= EXPECTED_ACTIONABLE_SCENARIO_COUNT * 3,
+            failed_stop_condition_routes,
         )
         add_check(
             checks,
@@ -1537,6 +1649,23 @@ def build_summary(
                 == localization_summary.get("average_score"),
                 e2e_localization_eval,
             )
+        e2e_session_plan = as_dict(e2e_report.get("ai_session_plan"))
+        if ai_session_plan:
+            add_check(
+                checks,
+                errors,
+                "e2e_ai_session_plan_matches",
+                e2e_session_plan.get("status") == ai_session_plan.get("status")
+                and e2e_session_plan.get("route_count")
+                == session_plan_summary.get("route_count")
+                and e2e_session_plan.get("ready_route_count")
+                == session_plan_summary.get("ready_route_count")
+                and e2e_session_plan.get("command_count")
+                == session_plan_summary.get("command_count")
+                and e2e_session_plan.get("primary_route_id")
+                == session_plan_summary.get("primary_route_id"),
+                e2e_session_plan,
+            )
 
     missing_artifacts = [
         record["name"]
@@ -1665,6 +1794,27 @@ def build_summary(
             "ai_localization_eval_minimum_score": localization_summary.get(
                 "minimum_score"
             ),
+            "ai_session_plan_status": ai_session_plan.get("status"),
+            "ai_session_plan_route_count": session_plan_summary.get("route_count"),
+            "ai_session_plan_ready_route_count": session_plan_summary.get(
+                "ready_route_count"
+            ),
+            "ai_session_plan_failed_route_count": session_plan_summary.get(
+                "failed_route_count"
+            ),
+            "ai_session_plan_primary_route_id": session_plan_summary.get(
+                "primary_route_id"
+            ),
+            "ai_session_plan_primary_scenario_id": session_plan_summary.get(
+                "primary_scenario_id"
+            ),
+            "ai_session_plan_command_count": session_plan_summary.get("command_count"),
+            "ai_session_plan_read_order_artifact_count": session_plan_summary.get(
+                "read_order_artifact_count"
+            ),
+            "ai_session_plan_stop_condition_count": session_plan_summary.get(
+                "stop_condition_count"
+            ),
             "automation_readiness_status": readiness.get("status"),
             "automation_ready_route_count": readiness.get("ready_route_count"),
             "automation_route_count": readiness.get("route_count"),
@@ -1686,6 +1836,7 @@ def build_summary(
             "When diagnostic-ai-debug-packet.json is present, this verifier also proves the selected route has a relocatable packet with digest-checked evidence and source/test context.",
             "When diagnostic-ai-debug-packet-matrix.json is present, this verifier also proves every AI route has a relocatable packet with source/test context.",
             "When diagnostic-ai-localization-eval.json is present, this verifier also proves the scenario corpus localizes expected health, focus domains, routes, anchors, and packets.",
+            "When diagnostic-ai-session-plan.json is present, this verifier also proves every AI route has a deterministic debug startup plan.",
             "Use automation_readiness.routes as the compact per-route map for automated debugger startup after this verifier passes.",
             "Use --require-e2e-report when validating a completed CI artifact after diagnostic-e2e-report.json has been written.",
             "If this verifier fails, repair the artifact graph before asking an AI debugger to edit emulator code.",
@@ -1732,6 +1883,14 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| AI localization packet self-verified fixtures | {totals.get('ai_localization_eval_packet_self_verified_count')}/{totals.get('ai_localization_eval_negative_fixture_count')} |",
         f"| AI localization average score | {totals.get('ai_localization_eval_average_score')} |",
         f"| AI localization minimum score | {totals.get('ai_localization_eval_minimum_score')} |",
+        f"| AI session plan | {totals.get('ai_session_plan_status')} |",
+        f"| AI session plan routes | {totals.get('ai_session_plan_ready_route_count')}/{totals.get('ai_session_plan_route_count')} |",
+        f"| AI session plan failed routes | {totals.get('ai_session_plan_failed_route_count')} |",
+        f"| AI session plan primary route | {totals.get('ai_session_plan_primary_route_id')} |",
+        f"| AI session plan primary scenario | {totals.get('ai_session_plan_primary_scenario_id')} |",
+        f"| AI session plan commands | {totals.get('ai_session_plan_command_count')} |",
+        f"| AI session plan read-order artifacts | {totals.get('ai_session_plan_read_order_artifact_count')} |",
+        f"| AI session plan stop conditions | {totals.get('ai_session_plan_stop_condition_count')} |",
         f"| Automation readiness | {totals.get('automation_readiness_status')} |",
         f"| Automation-ready routes | {totals.get('automation_ready_route_count')}/{totals.get('automation_route_count')} |",
         f"| Automation not-ready routes | {totals.get('automation_not_ready_route_count')} |",
