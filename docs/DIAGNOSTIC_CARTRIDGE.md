@@ -228,6 +228,21 @@ before uploading the current scenario-suite artifact so accepted diagnostic
 corpora have both valid base suite files and valid AI-facing observability
 summaries.
 
+To execute one generated investigation route end to end, run:
+
+```powershell
+python scripts/run_diagnostic_route.py --suite-dir target/diagnostics/scenario-suite
+```
+
+By default this selects `diagnostic-investigation-plan.json` `top_route`, runs
+its replay command into `route-checks/<route>/replay-bundle/`, runs the route's
+narrow diagnostic/subsystem test commands, and writes
+`diagnostic-route-check.json` plus `diagnostic-route-check.md`. Use
+`--rank`, `--route-id`, `--focus-domain`, or `--scenario-id` to execute a
+specific route. CI and release workflows run this command after the
+observability verifier so uploaded scenario-suite artifacts include a fresh
+route-check proof for the highest-ranked debug route.
+
 `run_diagnostic_observability.py` also writes the root
 `diagnostic-debug-index.jsonl`, `diagnostic-debug-index.md`,
 `diagnostic-observability-analysis.json`, and
