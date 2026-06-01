@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 35;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 36;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v35";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v36";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -74,6 +74,7 @@ const PPU_NAMETABLE_MIRRORING_FAULT_LABEL: &str =
 const PPU_NMI_TIMEOUT_FAULT_LABEL: &str = "ppu_nmi_render_frame_after_enable";
 const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_read";
 const PPU_SPRITE_OVERFLOW_FAULT_LABEL: &str = "ppu_sprite_overflow_before_render_enable";
+const PPU_SPRITE_PRIORITY_FAULT_LABEL: &str = "ppu_sprite_priority_before_render_enable";
 const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
@@ -112,6 +113,15 @@ const PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT: u8 = 0x20;
 const PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT: u8 = 1;
 const PPU_SPRITE_OVERFLOW_TEST_ID: u8 = 26;
 const PPU_SPRITE_OVERFLOW_RESTORE_BYTES: usize = 256;
+const PPU_SPRITE_PRIORITY_TEST_ID: u8 = 27;
+const PPU_SPRITE_PRIORITY_CASE_COUNT_ADDR: u16 = 0x0253;
+const PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT: u8 = 2;
+const PPU_SPRITE_PRIORITY_FRONT_SAMPLE_X: usize = 18;
+const PPU_SPRITE_PRIORITY_FRONT_SAMPLE_Y: usize = 18;
+const PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X: usize = 42;
+const PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y: usize = 18;
+const PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR: u32 = 0xB53120;
+const PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR: u32 = 0x64B0FF;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -428,6 +438,17 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         expected_observations: &[
             "nine synthetic sprite entries share one visible scanline",
             "PPUSTATUS bit 5 remains set after sprite evaluation completes",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: 27,
+        name: "ppu_sprite_priority_mux",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify sprite/background priority selects sprite pixels in front and background pixels when the sprite priority bit sends a sprite behind background.",
+        expected_observations: &[
+            "front-priority sprite sample uses the sprite palette color over a non-transparent background pixel",
+            "behind-priority sprite sample uses the background palette color over a non-transparent sprite pixel",
         ],
     },
 ];
@@ -1077,10 +1098,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
-        risk: "The cartridge catches gross PPU progress and palette behavior but does not prove detailed scanline/pixel correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, NMI delivery, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Sprite/background priority, scrolling seams, vblank timing, sprite overflow hardware-bug false positives/negatives, and per-dot rendering behavior.",
-        suggested_next_test: "Add deterministic background/sprite scenes with expected frame checksums and targeted sprite-priority probes.",
+        risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, NMI delivery, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Scrolling seams, vblank timing, sprite overflow hardware-bug false positives/negatives, and per-dot rendering behavior beyond targeted sprite-priority samples.",
+        suggested_next_test: "Add deterministic scrolling seam scenes with expected frame checksums and targeted vblank-timing probes.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1156,6 +1177,7 @@ pub enum DiagnosticFaultInjection {
     PpuNametableMirroring,
     PpuNmiTimeout,
     PpuSpriteOverflow,
+    PpuSpritePriority,
     PpuSpriteZeroHit,
     PpuStatusLatchReset,
     PpuVramIncrement32,
@@ -1163,7 +1185,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 18] = [
+    pub const ALL: [DiagnosticFaultInjection; 19] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
@@ -1178,6 +1200,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
         DiagnosticFaultInjection::PpuSpriteOverflow,
+        DiagnosticFaultInjection::PpuSpritePriority,
         DiagnosticFaultInjection::PpuSpriteZeroHit,
         DiagnosticFaultInjection::PpuStatusLatchReset,
         DiagnosticFaultInjection::PpuVramIncrement32,
@@ -1200,6 +1223,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
             DiagnosticFaultInjection::PpuSpriteOverflow => "ppu_sprite_overflow",
+            DiagnosticFaultInjection::PpuSpritePriority => "ppu_sprite_priority",
             DiagnosticFaultInjection::PpuSpriteZeroHit => "ppu_sprite_zero_hit",
             DiagnosticFaultInjection::PpuStatusLatchReset => "ppu_status_latch_reset",
             DiagnosticFaultInjection::PpuVramIncrement32 => "ppu_vram_increment_32",
@@ -1227,6 +1251,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteOverflow => PPU_SPRITE_OVERFLOW_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuSpritePriority => PPU_SPRITE_PRIORITY_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteZeroHit => PPU_SPRITE_ZERO_HIT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuStatusLatchReset => PPU_STATUS_LATCH_RESET_FAULT_LABEL,
             DiagnosticFaultInjection::PpuVramIncrement32 => PPU_VRAM_INCREMENT_32_FAULT_LABEL,
@@ -1250,6 +1275,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
+    pub ppu_sprite_priority: PpuSpritePriorityTelemetry,
     pub ppu_sprite_zero_hit: PpuSpriteZeroHitTelemetry,
     pub ram: RamTelemetry,
     pub tests: Vec<TestTelemetry>,
@@ -1577,6 +1603,25 @@ pub struct PpuSpriteOverflowTelemetry {
     pub passed: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PpuSpritePriorityTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub front_sample_x: usize,
+    pub front_sample_y: usize,
+    pub front_expected_color: u32,
+    pub front_expected_color_hex: String,
+    pub front_observed_color: u32,
+    pub front_observed_color_hex: String,
+    pub behind_sample_x: usize,
+    pub behind_sample_y: usize,
+    pub behind_expected_color: u32,
+    pub behind_expected_color_hex: String,
+    pub behind_observed_color: u32,
+    pub behind_observed_color_hex: String,
+    pub passed: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticRamWatchTelemetry {
     pub status: u8,
@@ -1897,6 +1942,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut audio_sample_count = 0usize;
     let mut audio_peak_abs = 0.0f32;
     let mut diagnostic_render_frame = None;
+    let mut ppu_sprite_priority_frame = None;
     let mut events = Vec::new();
     let mut last_status = read_ram_byte(&mut bus, STATUS_ADDR);
     let mut last_current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
@@ -1968,6 +2014,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             frames += 1;
             maybe_capture_diagnostic_render_frame(
                 &mut diagnostic_render_frame,
+                current_test,
+                &bus.ppu.frame_data,
+            );
+            maybe_capture_ppu_sprite_priority_frame(
+                &mut ppu_sprite_priority_frame,
                 current_test,
                 &bus.ppu.frame_data,
             );
@@ -2080,6 +2131,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     current_test,
                     &bus.ppu.frame_data,
                 );
+                maybe_capture_ppu_sprite_priority_frame(
+                    &mut ppu_sprite_priority_frame,
+                    current_test,
+                    &bus.ppu.frame_data,
+                );
                 bus.apu.end_frame();
                 let samples = bus.apu.drain_samples();
                 audio_sample_count += samples.len();
@@ -2112,6 +2168,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
+    let ppu_sprite_priority = ppu_sprite_priority_telemetry(
+        &ram,
+        ppu_sprite_priority_frame.as_ref(),
+        &bus.ppu.frame_data,
+    );
     let ppu_sprite_zero_hit = ppu_sprite_zero_hit_telemetry(&ram);
     let mut host_failures = host_validate(HostValidationInput {
         status,
@@ -2121,6 +2182,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
         ppu_sprite_overflow: &ppu_sprite_overflow,
+        ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
@@ -2146,6 +2208,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
         ppu_sprite_overflow: &ppu_sprite_overflow,
+        ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         dma: &dma,
         oam: &oam,
@@ -2200,6 +2263,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix,
         input_port_matrix,
         ppu_sprite_overflow,
+        ppu_sprite_priority,
         ppu_sprite_zero_hit,
         ram: RamTelemetry {
             signature: ram[SIGNATURE_ADDR as usize],
@@ -2703,6 +2767,37 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Sprite-overflow passed | {} |",
         telemetry.ppu_sprite_overflow.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-priority front sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_sprite_priority.front_sample_x,
+        telemetry.ppu_sprite_priority.front_sample_y,
+        telemetry.ppu_sprite_priority.front_observed_color_hex,
+        telemetry.ppu_sprite_priority.front_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-priority behind sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_sprite_priority.behind_sample_x,
+        telemetry.ppu_sprite_priority.behind_sample_y,
+        telemetry.ppu_sprite_priority.behind_observed_color_hex,
+        telemetry.ppu_sprite_priority.behind_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-priority cases / expected | {} / {} |",
+        telemetry.ppu_sprite_priority.observed_case_count,
+        telemetry.ppu_sprite_priority.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-priority passed | {} |",
+        telemetry.ppu_sprite_priority.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -3733,6 +3828,7 @@ struct HostValidationInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
+    ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -3751,6 +3847,7 @@ struct ProbeTelemetryInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
+    ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -3834,6 +3931,21 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_sprite_overflow.observed_status_bit_hex,
             input.ppu_sprite_overflow.observed_case_count,
             input.ppu_sprite_overflow.expected_case_count
+        ));
+    }
+    if !input.ppu_sprite_priority.passed {
+        failures.push(format!(
+            "PPU sprite-priority mismatch: front sample ({}, {}) {} expected {}, behind sample ({}, {}) {} expected {}, cases {}/{}",
+            input.ppu_sprite_priority.front_sample_x,
+            input.ppu_sprite_priority.front_sample_y,
+            input.ppu_sprite_priority.front_observed_color_hex,
+            input.ppu_sprite_priority.front_expected_color_hex,
+            input.ppu_sprite_priority.behind_sample_x,
+            input.ppu_sprite_priority.behind_sample_y,
+            input.ppu_sprite_priority.behind_observed_color_hex,
+            input.ppu_sprite_priority.behind_expected_color_hex,
+            input.ppu_sprite_priority.observed_case_count,
+            input.ppu_sprite_priority.expected_case_count
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -4115,6 +4227,38 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.ppu_sprite_overflow.restored_oam_byte_count
             ),
             likely_domain: "ppu.sprite_overflow".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.sprite_priority.samples".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_SPRITE_PRIORITY_TEST_ID),
+            test_name: test_name(PPU_SPRITE_PRIORITY_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_sprite_priority.passed),
+            description:
+                "Host-sampled frame pixels prove front-priority and behind-background sprite mux behavior"
+                    .to_string(),
+            expected: format!(
+                "front sample ({}, {}) {}, behind sample ({}, {}) {}, cases {}",
+                input.ppu_sprite_priority.front_sample_x,
+                input.ppu_sprite_priority.front_sample_y,
+                input.ppu_sprite_priority.front_expected_color_hex,
+                input.ppu_sprite_priority.behind_sample_x,
+                input.ppu_sprite_priority.behind_sample_y,
+                input.ppu_sprite_priority.behind_expected_color_hex,
+                input.ppu_sprite_priority.expected_case_count
+            ),
+            observed: format!(
+                "front sample {}, behind sample {}, cases {}/{}",
+                input.ppu_sprite_priority.front_observed_color_hex,
+                input.ppu_sprite_priority.behind_observed_color_hex,
+                input.ppu_sprite_priority.observed_case_count,
+                input.ppu_sprite_priority.expected_case_count
+            ),
+            likely_domain: "ppu.sprite_priority".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -4482,6 +4626,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.oam_dma_phase_matrix();
     program.ppu_sprite_zero_hit();
     program.ppu_sprite_overflow();
+    program.ppu_sprite_priority();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -5414,6 +5559,110 @@ impl DiagnosticProgram {
         self.pass_test(PPU_SPRITE_OVERFLOW_TEST_ID);
     }
 
+    fn ppu_sprite_priority(&mut self) {
+        self.begin_test(PPU_SPRITE_PRIORITY_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_SPRITE_PRIORITY_CASE_COUNT_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x42);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x45);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x23);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0xC0);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x0F);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x11);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x16);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        let clear_oam = self.unique_label("sprite_priority_clear_oam");
+        self.asm.ldx_imm(0x00);
+        self.asm
+            .label(&clear_oam)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(0xF0);
+        self.asm.sta_abs(0x2004);
+        self.asm.inx();
+        self.asm.bne(&clear_oam);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        self.write_oam_bytes(&[
+            0x10, 0x02, 0x00, 0x10, // sprite palette wins in front of background
+            0x10, 0x02, 0x20, 0x28, // priority bit sends sprite behind background
+        ]);
+
+        self.asm
+            .label(PPU_SPRITE_PRIORITY_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_SPRITE_PRIORITY_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_imm(0x18);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("sprite_priority_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("sprite_priority_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        self.restore_oam_prefix_from_dma_source(PPU_SPRITE_OVERFLOW_RESTORE_BYTES);
+        self.pass_test(PPU_SPRITE_PRIORITY_TEST_ID);
+    }
+
     fn write_oam_bytes(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             self.asm.lda_imm(byte);
@@ -5915,6 +6164,10 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::PpuSpriteOverflow => {
             bus.ppu.oam_data[32..].fill(0xF0);
         }
+        DiagnosticFaultInjection::PpuSpritePriority => {
+            bus.ppu.oam_data[2] = 0x20;
+            bus.ppu.oam_data[6] = 0x00;
+        }
         DiagnosticFaultInjection::PpuSpriteZeroHit => {
             bus.cpu_write(0x2003, 0x01);
             bus.cpu_write(0x2004, 0x00);
@@ -6052,6 +6305,46 @@ fn ppu_sprite_overflow_telemetry(ram: &[u8]) -> PpuSpriteOverflowTelemetry {
         restored_oam_byte_count: PPU_SPRITE_OVERFLOW_RESTORE_BYTES as u16,
         passed: observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT
             && observed_case_count == PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT,
+    }
+}
+
+fn ppu_sprite_priority_telemetry(
+    ram: &[u8],
+    captured_sample: Option<&PpuSpritePriorityFrameSample>,
+    final_frame: &[u32],
+) -> PpuSpritePriorityTelemetry {
+    let observed_case_count = ram[(PPU_SPRITE_PRIORITY_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let fallback_sample = PpuSpritePriorityFrameSample {
+        front_color: sample_frame_color(
+            final_frame,
+            PPU_SPRITE_PRIORITY_FRONT_SAMPLE_X,
+            PPU_SPRITE_PRIORITY_FRONT_SAMPLE_Y,
+        ),
+        behind_color: sample_frame_color(
+            final_frame,
+            PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X,
+            PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y,
+        ),
+    };
+    let sample = captured_sample.copied().unwrap_or(fallback_sample);
+    PpuSpritePriorityTelemetry {
+        expected_case_count: PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        front_sample_x: PPU_SPRITE_PRIORITY_FRONT_SAMPLE_X,
+        front_sample_y: PPU_SPRITE_PRIORITY_FRONT_SAMPLE_Y,
+        front_expected_color: PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR,
+        front_expected_color_hex: hex_color(PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR),
+        front_observed_color: sample.front_color,
+        front_observed_color_hex: hex_color(sample.front_color),
+        behind_sample_x: PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X,
+        behind_sample_y: PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y,
+        behind_expected_color: PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR,
+        behind_expected_color_hex: hex_color(PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR),
+        behind_observed_color: sample.behind_color,
+        behind_observed_color_hex: hex_color(sample.behind_color),
+        passed: observed_case_count == PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT
+            && sample.front_color == PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR
+            && sample.behind_color == PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR,
     }
 }
 
@@ -6926,6 +7219,12 @@ fn oam_telemetry(oam: &[u8; 256]) -> OamTelemetry {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PpuSpritePriorityFrameSample {
+    front_color: u32,
+    behind_color: u32,
+}
+
 fn maybe_capture_diagnostic_render_frame(
     retained_frame: &mut Option<FrameTelemetry>,
     current_test: u8,
@@ -6938,6 +7237,28 @@ fn maybe_capture_diagnostic_render_frame(
     if telemetry.unique_colors >= 2 {
         *retained_frame = Some(telemetry);
     }
+}
+
+fn maybe_capture_ppu_sprite_priority_frame(
+    retained_sample: &mut Option<PpuSpritePriorityFrameSample>,
+    current_test: u8,
+    frame: &[u32],
+) {
+    if current_test != PPU_SPRITE_PRIORITY_TEST_ID {
+        return;
+    }
+    *retained_sample = Some(PpuSpritePriorityFrameSample {
+        front_color: sample_frame_color(
+            frame,
+            PPU_SPRITE_PRIORITY_FRONT_SAMPLE_X,
+            PPU_SPRITE_PRIORITY_FRONT_SAMPLE_Y,
+        ),
+        behind_color: sample_frame_color(
+            frame,
+            PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X,
+            PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y,
+        ),
+    });
 }
 
 fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
@@ -6956,6 +7277,10 @@ fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
         unique_colors: colors.len(),
         nonzero_pixels,
     }
+}
+
+fn sample_frame_color(frame: &[u32], x: usize, y: usize) -> u32 {
+    frame.get(y * 256 + x).copied().unwrap_or(0)
 }
 
 fn test_name(id: u8) -> Option<&'static str> {
@@ -7332,6 +7657,10 @@ fn compare_observation_checksums(
         &["ppu_sprite_overflow", "observed_status_bit"][..],
         &["ppu_sprite_overflow", "observed_case_count"][..],
         &["ppu_sprite_overflow", "passed"][..],
+        &["ppu_sprite_priority", "front_observed_color"][..],
+        &["ppu_sprite_priority", "behind_observed_color"][..],
+        &["ppu_sprite_priority", "observed_case_count"][..],
+        &["ppu_sprite_priority", "passed"][..],
         &["frame", "checksum"][..],
         &["frame", "unique_colors"][..],
         &["audio", "sample_count"][..],
@@ -7801,6 +8130,10 @@ fn hex_byte(value: u8) -> String {
     format!("0x{value:02X}")
 }
 
+fn hex_color(value: u32) -> String {
+    format!("0x{value:06X}")
+}
+
 fn hash_bytes(bytes: &[u8]) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x00000100000001B3;
@@ -7921,7 +8254,11 @@ mod tests {
             .analysis
             .coverage_gaps
             .iter()
-            .any(|gap| gap.id == "ppu_pixel_pipeline" && gap.missing_coverage.contains("Sprite")));
+            .any(|gap| gap.id == "ppu_pixel_pipeline"
+                && gap.missing_coverage.contains("Scrolling seams")
+                && gap
+                    .current_coverage
+                    .contains("sprite/background priority pixel sampling")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(

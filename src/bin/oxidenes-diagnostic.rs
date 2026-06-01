@@ -1810,7 +1810,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             config: default.clone(),
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(26),
+            expected_focus_test_id: Some(27),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -1826,7 +1826,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(26),
+            expected_focus_test_id: Some(27),
             expected_focus_domain: None,
         },
         DiagnosticScenarioSpec {
@@ -2027,6 +2027,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(26),
             expected_focus_domain: Some("ppu.sprite_overflow"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_sprite_priority_fault",
+            title: "Intentional PPU sprite-priority host-observation failure",
+            purpose: "Failure-localization fixture for sprite/background priority pixel-mux regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuSpritePriority),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::HostValidationFailed,
+            expected_focus_test_id: Some(27),
+            expected_focus_domain: Some("ppu.sprite_priority"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",
