@@ -19,6 +19,13 @@ The defaults match the generated assertions: joypad 1 expects A + Right
 mask is useful for failure-localization smokes because the run still emits
 telemetry, triage JSON, and bundles before exiting `1`.
 
+Use `--fault-injection <NAME>` with `--bundle-dir` to replay a named
+intentional diagnostic fixture without regenerating the full scenario suite.
+The supported names match the scenario-suite fault labels, such as
+`joypad_strobe_high_hold`, `ppu_status_latch_reset`, and
+`cpu_indirect_jmp_page_wrap`. Unknown names are rejected with exit code `2` and
+the supported-name list.
+
 Use `--json <FILE>` for the full machine-readable telemetry envelope and
 `--report <FILE>` for a Markdown triage artifact built from the same run. The
 report contains the verdict, derived analysis, failure localization, coverage
@@ -104,7 +111,10 @@ an automated debugger can decide which artifact to open without traversing every
 bundle first. The root manifest records each scenario's expected runner exit
 code, expected health, expected focus test/domain, actual `debug_focus`, failed
 probe ids, per-scenario baseline comparison summaries, explicit contract-match
-breakdowns, a suite-level attention queue, and artifact paths. The
+breakdowns, single-scenario `replay_args`, a suite-level attention queue, and
+artifact paths. The observer JSON mirrors the replay arguments on next actions
+and observations so an AI debugger can regenerate one bundle before loading the
+full telemetry corpus. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -414,3 +424,9 @@ repeated `$4016` reads while strobe is high keep returning the configured A bit
 and that the first post-strobe-low serial read still starts at A. The intentional
 fault fixture localizes strobe-high hold regressions to
 `joypad.strobe_high_hold`.
+
+Scenario suite schema version `8` and observer schema version `2` add
+`replay_args` arrays for each scenario, observer action, and observation. These
+arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
+with the exact cycle, joypad, expected mask, and fault-injection settings needed
+to regenerate that one bundle.

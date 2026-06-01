@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 7
-EXPECTED_OBSERVER_SCHEMA = 1
+EXPECTED_SCENARIO_SUITE_SCHEMA = 8
+EXPECTED_OBSERVER_SCHEMA = 2
 EXPECTED_TELEMETRY_SCHEMA = 30
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
@@ -144,11 +144,16 @@ class SuiteVerifier:
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
+        self.verify_replay_args(manifest, observer)
         self.verify_artifact_paths(manifest, observer)
         self.expect_contains(suite_report, "## Attention Queue", "scenario-suite.md")
         self.expect_contains(suite_report, "## AI Drilldown", "scenario-suite.md")
+        self.expect_contains(suite_report, "## Replay Commands", "scenario-suite.md")
         self.expect_contains(observer_report, "## Next Actions", "scenario-suite-observer.md")
         self.expect_contains(observer_report, "## Observations", "scenario-suite-observer.md")
+        self.expect_contains(
+            observer_report, "## Replay Commands", "scenario-suite-observer.md"
+        )
         self.expect_contains(observer_report, "## Artifact Hints", "scenario-suite-observer.md")
 
         return {
@@ -1110,6 +1115,95 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_indirect_jmp_fault")
+
+    def verify_replay_args(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
+        scenarios = {
+            scenario.get("id"): scenario
+            for scenario in self.expect_list(manifest.get("scenarios"), "scenario-suite scenarios")
+            if isinstance(scenario, dict)
+        }
+        for scenario_id, scenario in scenarios.items():
+            if not isinstance(scenario_id, str):
+                continue
+            replay_args = self.expect_list(
+                scenario.get("replay_args"), f"{scenario_id} scenario replay_args"
+            )
+            self.expect_replay_args(scenario_id, replay_args, f"{scenario_id} scenario")
+
+        actions = {
+            action.get("scenario_id"): action
+            for action in self.expect_list(observer.get("next_actions"), "observer next_actions")
+            if isinstance(action, dict)
+        }
+        for scenario_id, action in actions.items():
+            if not isinstance(scenario_id, str):
+                continue
+            replay_args = self.expect_list(
+                action.get("replay_args"), f"{scenario_id} action replay_args"
+            )
+            self.expect_replay_args(scenario_id, replay_args, f"{scenario_id} action")
+
+        observations = {
+            observation.get("scenario_id"): observation
+            for observation in self.expect_list(
+                observer.get("observations"), "observer observations"
+            )
+            if isinstance(observation, dict)
+        }
+        for scenario_id, observation in observations.items():
+            if not isinstance(scenario_id, str):
+                continue
+            replay_args = self.expect_list(
+                observation.get("replay_args"), f"{scenario_id} observation replay_args"
+            )
+            self.expect_replay_args(scenario_id, replay_args, f"{scenario_id} observation")
+
+        input_matrix = scenarios.get("input_mask_matrix_pass")
+        if isinstance(input_matrix, dict):
+            replay_args = self.expect_list(
+                input_matrix.get("replay_args"), "input_mask_matrix_pass replay_args"
+            )
+            for token in ("--joypad1", "0xAA", "--expect-joypad2", "0x55"):
+                self.expect_in(token, replay_args, "input_mask_matrix_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_matrix_pass")
+
+        joypad_hold = scenarios.get("joypad_strobe_high_hold_fault")
+        if isinstance(joypad_hold, dict):
+            replay_args = self.expect_list(
+                joypad_hold.get("replay_args"), "joypad_strobe_high_hold_fault replay_args"
+            )
+            self.expect_in(
+                "--fault-injection",
+                replay_args,
+                "joypad_strobe_high_hold_fault replay_args",
+            )
+            self.expect_in(
+                "joypad_strobe_high_hold",
+                replay_args,
+                "joypad_strobe_high_hold_fault replay_args",
+            )
+        else:
+            self.errors.append("missing replay args check subject joypad_strobe_high_hold_fault")
+
+    def expect_replay_args(
+        self, scenario_id: str, replay_args: list[Any], label: str
+    ) -> None:
+        for token in (
+            "cargo",
+            "run",
+            "--bin",
+            "oxidenes-diagnostic",
+            "--",
+            "--bundle-dir",
+            "--no-stdout",
+        ):
+            self.expect_in(token, replay_args, f"{label} replay_args")
+        self.expect_in(
+            f"target/diagnostics/replay/{scenario_id}",
+            replay_args,
+            f"{label} replay bundle path",
+        )
 
     def verify_artifact_paths(self, manifest: dict[str, Any], observer: dict[str, Any]) -> None:
         root_artifacts = self.expect_dict(manifest.get("artifacts"), "scenario-suite artifacts")
