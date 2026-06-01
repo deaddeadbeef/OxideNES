@@ -20,6 +20,7 @@ DEBUG_INDEX_SCHEMA_VERSION = 1
 OBSERVABILITY_ANALYSIS_SCHEMA_VERSION = 1
 OBSERVABILITY_COMPARISON_SCHEMA_VERSION = 1
 DIAGNOSTIC_CODE_MAP_SCHEMA_VERSION = 1
+INVESTIGATION_PLAN_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
 
 DIAGNOSTIC_SUPPORT_FILES = [
@@ -257,6 +258,7 @@ def artifact_paths(
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
+    investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
 ) -> dict[str, str]:
     artifacts = {
@@ -280,6 +282,9 @@ def artifact_paths(
             artifacts[name] = str(path)
     if diagnostic_code_map:
         for name, path in diagnostic_code_map.get("artifacts", {}).items():
+            artifacts[name] = str(path)
+    if investigation_plan:
+        for name, path in investigation_plan.get("artifacts", {}).items():
             artifacts[name] = str(path)
     if observability_comparison:
         for name, path in observability_comparison.get("artifacts", {}).items():
@@ -333,6 +338,13 @@ def diagnostic_code_map_paths(suite_dir: Path) -> dict[str, str]:
     return {
         "diagnostic_code_map_json": str(suite_dir / "diagnostic-code-map.json"),
         "diagnostic_code_map_report": str(suite_dir / "diagnostic-code-map.md"),
+    }
+
+
+def investigation_plan_paths(suite_dir: Path) -> dict[str, str]:
+    return {
+        "investigation_plan_json": str(suite_dir / "diagnostic-investigation-plan.json"),
+        "investigation_plan_report": str(suite_dir / "diagnostic-investigation-plan.md"),
     }
 
 
@@ -1222,6 +1234,380 @@ def write_diagnostic_code_map(
     return code_map
 
 
+def code_map_by_focus_domain(code_map: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return {
+        str(entry.get("focus_domain")): entry
+        for entry in as_list(as_dict(code_map).get("focus_domains"))
+        if isinstance(entry, dict) and isinstance(entry.get("focus_domain"), str)
+    }
+
+
+def scenario_changes_by_id(comparison: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("scenario_id")): row
+        for row in as_list(as_dict(comparison).get("scenario_changes"))
+        if isinstance(row, dict) and isinstance(row.get("scenario_id"), str)
+    }
+
+
+def relative_artifact_path(suite_dir: Path, relative_path: Any) -> str | None:
+    if not isinstance(relative_path, str) or not relative_path:
+        return None
+    return str(suite_dir / relative_path)
+
+
+def investigation_start_artifacts(
+    suite_dir: Path, entry: dict[str, Any], primary_relative_path: str | None
+) -> dict[str, str]:
+    artifacts = as_dict(entry.get("artifacts"))
+    start_artifacts: dict[str, str] = {}
+    if primary_relative_path:
+        start_artifacts["primary_artifact"] = str(suite_dir / primary_relative_path)
+    for key in (
+        "triage_json",
+        "telemetry_json",
+        "report_md",
+        "comparison_json",
+        "bundle_manifest",
+    ):
+        path = relative_artifact_path(suite_dir, artifacts.get(key))
+        if path:
+            start_artifacts[key] = path
+    return start_artifacts
+
+
+def investigation_route_steps(route: dict[str, Any]) -> list[dict[str, Any]]:
+    start_artifacts = as_dict(route.get("start_artifacts"))
+    suggested_commands = as_list(route.get("suggested_commands"))
+    source_files = [
+        path.get("path")
+        for path in as_list(route.get("source_files"))
+        if isinstance(path, dict) and path.get("path")
+    ]
+    test_files = [
+        path.get("path")
+        for path in as_list(route.get("test_files"))
+        if isinstance(path, dict) and path.get("path")
+    ]
+    return [
+        {
+            "order": 1,
+            "action": "open_primary_artifact",
+            "artifact": start_artifacts.get("primary_artifact"),
+            "purpose": "Confirm the exact failed probe, focus test, and top comparison difference.",
+        },
+        {
+            "order": 2,
+            "action": "replay_scenario",
+            "command": suggested_commands[0] if suggested_commands else None,
+            "purpose": "Regenerate the focused bundle before editing emulator code.",
+        },
+        {
+            "order": 3,
+            "action": "inspect_source",
+            "paths": source_files,
+            "search_terms": as_list(route.get("search_terms")),
+            "purpose": "Read the mapped emulator implementation before touching diagnostic scaffolding.",
+        },
+        {
+            "order": 4,
+            "action": "run_regression_tests",
+            "commands": suggested_commands[1:],
+            "paths": test_files,
+            "purpose": "Run the narrow diagnostic and subsystem tests for this focus domain.",
+        },
+    ]
+
+
+def build_investigation_route(
+    rank: int,
+    hypothesis: dict[str, Any],
+    suite_dir: Path,
+    debug_entries: dict[str, dict[str, Any]],
+    code_entries: dict[str, dict[str, Any]],
+    comparison_changes: dict[str, dict[str, Any]],
+    replay_summary: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    errors: list[str] = []
+    focus_domain = str(hypothesis.get("focus_domain") or "")
+    code_entry = code_entries.get(focus_domain)
+    if not code_entry:
+        errors.append(f"missing code-map route for focus domain: {focus_domain}")
+        code_entry = {}
+    suggested = as_dict(hypothesis.get("suggested_next_action"))
+    scenario_ids = [str(value) for value in as_list(hypothesis.get("scenario_ids")) if value]
+    primary_scenario_id = str(suggested.get("scenario_id") or (scenario_ids[0] if scenario_ids else ""))
+    debug_entry = debug_entries.get(primary_scenario_id, {})
+    evidence_rows = [
+        row
+        for row in as_list(hypothesis.get("evidence"))
+        if isinstance(row, dict) and row.get("scenario_id") == primary_scenario_id
+    ]
+    evidence = as_dict(evidence_rows[0]) if evidence_rows else {}
+    primary_relative_path = (
+        entry_primary_artifact(debug_entry)
+        or str(code_entry.get("primary_artifact") or "")
+        or str(suggested.get("open_artifact") or "")
+    )
+    start_artifacts = investigation_start_artifacts(
+        suite_dir, debug_entry, primary_relative_path or None
+    )
+    first_artifact = start_artifacts.get("primary_artifact")
+    if not first_artifact:
+        errors.append(f"{focus_domain}: missing primary artifact")
+    elif not Path(first_artifact).is_file():
+        errors.append(f"{focus_domain}: missing primary artifact path {first_artifact}")
+
+    suggested_commands = as_list(code_entry.get("suggested_commands"))
+    if not suggested_commands:
+        errors.append(f"{focus_domain}: missing suggested commands")
+    replay_args = as_list(code_entry.get("replay_args")) or as_list(suggested.get("replay_args"))
+    route_replay: dict[str, Any] | None = None
+    if as_dict(replay_summary).get("scenario_id") == primary_scenario_id:
+        route_replay = {
+            "status": replay_summary.get("status"),
+            "artifacts": replay_summary.get("artifacts"),
+            "effective_replay_args": replay_summary.get("effective_replay_args"),
+            "exit_code_matches_expected": replay_summary.get("exit_code_matches_expected"),
+            "health_matches_expected": replay_summary.get("health_matches_expected"),
+            "focus_domain_matches_expected": replay_summary.get("focus_domain_matches_expected"),
+        }
+
+    next_action = as_dict(evidence.get("next_action")) or as_dict(debug_entry.get("next_action"))
+    why = unique_strings(
+        [
+            f"rank={rank} score={hypothesis.get('score')} confidence={hypothesis.get('confidence')}",
+            f"primary_scenario={primary_scenario_id}",
+            f"health={debug_entry.get('health') or ','.join(str(value) for value in as_list(hypothesis.get('healths')))}",
+            f"failed_probe_ids={','.join(entry_failed_probe_ids(debug_entry))}",
+            *[str(value) for value in as_list(next_action.get("evidence"))],
+        ]
+    )
+    route = {
+        "route_id": f"{rank:02d}-{focus_domain}",
+        "rank": rank,
+        "score": hypothesis.get("score"),
+        "confidence": hypothesis.get("confidence"),
+        "focus_domain": focus_domain,
+        "focus_subsystem": hypothesis.get("focus_subsystem")
+        or code_entry.get("focus_subsystem")
+        or entry_focus_subsystem(debug_entry),
+        "description": code_entry.get("description"),
+        "scenario_ids": scenario_ids,
+        "primary_scenario_id": primary_scenario_id,
+        "healths": as_list(hypothesis.get("healths")),
+        "failure_kinds": as_list(hypothesis.get("failure_kinds")),
+        "failed_probe_ids": unique_strings(
+            as_list(hypothesis.get("failed_probe_ids")) or entry_failed_probe_ids(debug_entry)
+        ),
+        "primary_artifact": first_artifact,
+        "primary_artifact_relative": primary_relative_path,
+        "start_artifacts": start_artifacts,
+        "debug_anchor": code_entry.get("debug_anchor")
+        or suggested.get("debug_anchor")
+        or entry_debug_anchor(debug_entry),
+        "replay_args": replay_args,
+        "suggested_commands": suggested_commands,
+        "source_files": as_list(code_entry.get("source_files")),
+        "test_files": as_list(code_entry.get("test_files")),
+        "diagnostic_files": as_list(code_entry.get("diagnostic_files")),
+        "search_terms": as_list(code_entry.get("search_terms")),
+        "comparison": comparison_changes.get(primary_scenario_id),
+        "focused_replay": route_replay,
+        "why_this_route": why,
+        "stop_conditions": [
+            "The focused replay no longer matches this route's focus domain.",
+            "The primary artifact no longer reports the expected failed probes.",
+            "The mapped narrow regression tests pass after the emulator edit.",
+        ],
+    }
+    route["handoff_steps"] = investigation_route_steps(route)
+    return route, errors
+
+
+def build_investigation_plan(
+    suite_dir: Path,
+    debug_index_summary: dict[str, Any] | None,
+    observability_analysis: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
+    observability_comparison: dict[str, Any] | None,
+    replay_summary: dict[str, Any] | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    paths = investigation_plan_paths(suite_dir)
+    errors: list[str] = []
+    if as_dict(observability_analysis).get("status") != "passed":
+        errors.append("observability analysis is not passed")
+    if as_dict(diagnostic_code_map).get("status") != "passed":
+        errors.append("diagnostic code map is not passed")
+    debug_paths = as_dict(debug_index_summary).get("artifacts", {})
+    debug_index_path = Path(
+        as_dict(debug_paths).get("debug_index_jsonl")
+        or debug_index_paths(suite_dir)["debug_index_jsonl"]
+    )
+    entries, debug_errors = load_jsonl(debug_index_path)
+    errors.extend(debug_errors)
+    debug_entries = entries_by_scenario_id(entries)
+    code_entries = code_map_by_focus_domain(diagnostic_code_map)
+    comparison_changes = scenario_changes_by_id(observability_comparison)
+
+    routes: list[dict[str, Any]] = []
+    for rank, hypothesis in enumerate(
+        as_list(as_dict(observability_analysis).get("ranked_hypotheses")), start=1
+    ):
+        if not isinstance(hypothesis, dict):
+            errors.append("ranked hypothesis entry is not an object")
+            continue
+        route, route_errors = build_investigation_route(
+            rank,
+            hypothesis,
+            suite_dir,
+            debug_entries,
+            code_entries,
+            comparison_changes,
+            replay_summary,
+        )
+        routes.append(route)
+        errors.extend(route_errors)
+    if not routes:
+        errors.append("investigation plan has no routes")
+
+    focus_domains = unique_strings([route.get("focus_domain") for route in routes])
+    top_route = routes[0] if routes else {}
+    source_artifacts = {
+        "debug_index_jsonl": str(debug_index_path),
+        "observability_analysis_json": as_dict(as_dict(observability_analysis).get("artifacts")).get(
+            "observability_analysis_json"
+        ),
+        "diagnostic_code_map_json": as_dict(as_dict(diagnostic_code_map).get("artifacts")).get(
+            "diagnostic_code_map_json"
+        ),
+    }
+    if observability_comparison:
+        source_artifacts["observability_comparison_json"] = as_dict(
+            observability_comparison.get("artifacts")
+        ).get("observability_comparison_json")
+    if replay_summary:
+        source_artifacts["replay_run_json"] = as_dict(replay_summary.get("artifacts")).get(
+            "replay_run_json"
+        )
+
+    return {
+        "investigation_plan_schema_version": INVESTIGATION_PLAN_SCHEMA_VERSION,
+        "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "status": "passed" if not errors else "failed",
+        "recommended_exit_code": 0 if not errors else 1,
+        "git": git_metadata(repo_root),
+        "suite_dir": str(suite_dir),
+        "source_artifacts": source_artifacts,
+        "artifacts": paths,
+        "route_count": len(routes),
+        "focus_domain_count": len(focus_domains),
+        "top_route": {
+            "route_id": top_route.get("route_id"),
+            "focus_domain": top_route.get("focus_domain"),
+            "primary_scenario_id": top_route.get("primary_scenario_id"),
+            "primary_artifact": top_route.get("primary_artifact"),
+            "replay_args": top_route.get("replay_args"),
+        },
+        "routes": routes,
+        "errors": errors,
+        "ai_handoff": [
+            "Start with top_route, then follow routes[0].handoff_steps in order.",
+            "Use primary_artifact and start_artifacts.triage_json before loading full telemetry.",
+            "Run replay_args or suggested_commands[0] to regenerate the focused bundle before editing code.",
+            "Inspect source_files and search_terms, then run the route's regression-test commands.",
+        ],
+    }
+
+
+def write_investigation_plan_markdown(path: Path, plan: dict[str, Any]) -> None:
+    top = as_dict(plan.get("top_route"))
+    lines = [
+        "# Diagnostic Investigation Plan",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {plan.get('status')} |",
+        f"| Generated at UTC | {plan.get('generated_at_utc')} |",
+        f"| Git commit | {plan.get('git', {}).get('short_commit', '')} |",
+        f"| Routes | {plan.get('route_count')} |",
+        f"| Focus domains | {plan.get('focus_domain_count')} |",
+        f"| Top focus domain | {top.get('focus_domain', '-')} |",
+        f"| Top scenario | {top.get('primary_scenario_id', '-')} |",
+        "",
+        "## Routes",
+        "",
+        "| Rank | Focus domain | Scenario | Health | Failed probes | Open first | Replay command | Source files | Test files |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for route in as_list(plan.get("routes")):
+        if not isinstance(route, dict):
+            continue
+        first_command = as_dict(as_list(route.get("suggested_commands"))[0]) if route.get("suggested_commands") else {}
+        lines.append(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                route.get("rank"),
+                markdown_cell(str(route.get("focus_domain") or "-")),
+                markdown_cell(str(route.get("primary_scenario_id") or "-")),
+                markdown_cell(",".join(str(value) for value in as_list(route.get("healths")))),
+                markdown_cell(
+                    ",".join(str(value) for value in as_list(route.get("failed_probe_ids")))
+                ),
+                markdown_cell(str(route.get("primary_artifact") or "-")),
+                markdown_cell(command_text(first_command) or "-"),
+                markdown_cell(
+                    ",".join(
+                        str(record.get("path"))
+                        for record in as_list(route.get("source_files"))
+                        if isinstance(record, dict)
+                    )
+                ),
+                markdown_cell(
+                    ",".join(
+                        str(record.get("path"))
+                        for record in as_list(route.get("test_files"))
+                        if isinstance(record, dict)
+                    )
+                ),
+            )
+        )
+    lines.extend(["", "## AI Handoff", ""])
+    for instruction in as_list(plan.get("ai_handoff")):
+        lines.append(f"- {instruction}")
+    if plan.get("errors"):
+        lines.extend(["", "## Errors", ""])
+        for error in as_list(plan.get("errors")):
+            lines.append(f"- {error}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_investigation_plan(
+    suite_dir: Path,
+    debug_index_summary: dict[str, Any] | None,
+    observability_analysis: dict[str, Any] | None,
+    diagnostic_code_map: dict[str, Any] | None,
+    observability_comparison: dict[str, Any] | None,
+    replay_summary: dict[str, Any] | None,
+    repo_root: Path,
+) -> dict[str, Any]:
+    plan = build_investigation_plan(
+        suite_dir,
+        debug_index_summary,
+        observability_analysis,
+        diagnostic_code_map,
+        observability_comparison,
+        replay_summary,
+        repo_root,
+    )
+    artifacts = as_dict(plan.get("artifacts"))
+    json_path = Path(str(artifacts["investigation_plan_json"]))
+    report_path = Path(str(artifacts["investigation_plan_report"]))
+    json_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_investigation_plan_markdown(report_path, plan)
+    return plan
+
+
 def load_observability_snapshot(suite_dir: Path) -> dict[str, Any]:
     analysis_path = suite_dir / "diagnostic-observability-analysis.json"
     debug_index_path = suite_dir / "diagnostic-debug-index.jsonl"
@@ -1905,6 +2291,7 @@ def build_run_summary(
     debug_index_summary: dict[str, Any] | None,
     observability_analysis: dict[str, Any] | None,
     diagnostic_code_map: dict[str, Any] | None,
+    investigation_plan: dict[str, Any] | None,
     observability_comparison: dict[str, Any] | None,
     replay_summary: dict[str, Any] | None,
     repo_root: Path,
@@ -1926,6 +2313,8 @@ def build_run_summary(
         status = "failed"
     if diagnostic_code_map and diagnostic_code_map.get("status") != "passed":
         status = "failed"
+    if investigation_plan and investigation_plan.get("status") != "passed":
+        status = "failed"
     if observability_comparison and observability_comparison.get("status") != "passed":
         status = "failed"
     if replay_summary and replay_summary.get("status") != "passed":
@@ -1943,6 +2332,7 @@ def build_run_summary(
         "debug_index": debug_index_summary,
         "analysis": observability_analysis,
         "code_map": diagnostic_code_map,
+        "investigation_plan": investigation_plan,
         "comparison": observability_comparison,
         "replay": replay_summary,
         "suite": suite,
@@ -1954,10 +2344,12 @@ def build_run_summary(
             debug_index_summary,
             observability_analysis,
             diagnostic_code_map,
+            investigation_plan,
             observability_comparison,
         ),
         "ai_handoff": [
-            "Start with suite.first_next_action and open its primary_artifact.",
+            "Start with investigation_plan.top_route and follow routes[0].handoff_steps in order.",
+            "Use suite.first_next_action when inspecting the base scenario-suite observer.",
             "Use analysis.ranked_hypotheses for ranked subsystem/domain hypotheses across the suite.",
             "Use code_map.focus_domains to jump from a focus domain to source files, tests, and replay commands.",
             "Use comparison.regressions first when --compare-suite-dir is supplied.",
@@ -2051,6 +2443,24 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"| Scenarios | {code_map.get('scenario_count', '-')} |",
             f"| JSON | {code_map.get('artifacts', {}).get('diagnostic_code_map_json', '-')} |",
             f"| Report | {code_map.get('artifacts', {}).get('diagnostic_code_map_report', '-')} |",
+        ]
+    )
+    investigation_plan = summary.get("investigation_plan") or {}
+    top_route = as_dict(investigation_plan.get("top_route"))
+    lines.extend(
+        [
+            "",
+            "## Investigation Plan",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Status | {investigation_plan.get('status', '-')} |",
+            f"| Routes | {investigation_plan.get('route_count', '-')} |",
+            f"| Focus domains | {investigation_plan.get('focus_domain_count', '-')} |",
+            f"| Top focus domain | {top_route.get('focus_domain', '-')} |",
+            f"| Top scenario | {top_route.get('primary_scenario_id', '-')} |",
+            f"| JSON | {investigation_plan.get('artifacts', {}).get('investigation_plan_json', '-')} |",
+            f"| Report | {investigation_plan.get('artifacts', {}).get('investigation_plan_report', '-')} |",
         ]
     )
     comparison = summary.get("comparison") or {}
@@ -2206,6 +2616,7 @@ def main() -> int:
     debug_index_summary: dict[str, Any] | None = None
     observability_analysis: dict[str, Any] | None = None
     diagnostic_code_map: dict[str, Any] | None = None
+    investigation_plan: dict[str, Any] | None = None
     observability_comparison: dict[str, Any] | None = None
     replay_summary: dict[str, Any] | None = None
     if not command_failed(generate_command):
@@ -2259,6 +2670,15 @@ def main() -> int:
                     encoding="utf-8",
                 )
                 write_replay_markdown(replay_md_path, replay_summary)
+            investigation_plan = write_investigation_plan(
+                suite_dir,
+                debug_index_summary,
+                observability_analysis,
+                diagnostic_code_map,
+                observability_comparison,
+                replay_summary,
+                repo_root,
+            )
 
     summary_json.parent.mkdir(parents=True, exist_ok=True)
     summary_md.parent.mkdir(parents=True, exist_ok=True)
@@ -2272,6 +2692,7 @@ def main() -> int:
         debug_index_summary,
         observability_analysis,
         diagnostic_code_map,
+        investigation_plan,
         observability_comparison,
         replay_summary,
         repo_root,
@@ -2309,6 +2730,12 @@ def main() -> int:
             code_map_note = (
                 f" code_map={code_map.get('focus_domain_count')}:{code_map.get('status')}"
             )
+        investigation = summary.get("investigation_plan") or {}
+        investigation_note = ""
+        if investigation:
+            investigation_note = (
+                f" investigation_plan={investigation.get('route_count')}:{investigation.get('status')}"
+            )
         comparison = summary.get("comparison") or {}
         comparison_note = ""
         if comparison:
@@ -2325,7 +2752,7 @@ def main() -> int:
             "Diagnostic observability run "
             f"{summary['status']}: suite={suite_dir} "
             f"summary_json={summary_json} summary_report={summary_md}"
-            f"{debug_note}{analysis_note}{code_map_note}{comparison_note}{replay_note}"
+            f"{debug_note}{analysis_note}{code_map_note}{investigation_note}{comparison_note}{replay_note}"
         )
     return int(summary["recommended_exit_code"])
 
