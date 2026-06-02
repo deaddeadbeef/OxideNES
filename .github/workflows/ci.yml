@@ -76,6 +76,35 @@ jobs:
           python scripts/run_diagnostic_e2e.py \
             --suite-dir target/diagnostics/ci-scenario-suite \
             "${comparison_args[@]}"
+      - name: Run diagnostic cartridge profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile_args=(
+            --output-dir target/diagnostics/ci-profile
+            --profile debug
+            --samples 3
+            --warmups 1
+            --skip-build
+            --max-regression-percent 50
+          )
+          prior_checkout="$RUNNER_TEMP/oxidenes-prior-checkout"
+          if [[ -n "${OXIDENES_COMPARE_REF:-}" && -f "$prior_checkout/scripts/profile_diagnostic_cartridge.py" ]]; then
+            (
+              cd "$prior_checkout"
+              python scripts/profile_diagnostic_cartridge.py \
+                --output-dir "$GITHUB_WORKSPACE/target/diagnostics/ci-prior-profile" \
+                --profile debug \
+                --samples 3 \
+                --warmups 1 \
+                --skip-build
+            )
+            profile_args+=(
+              --baseline-json target/diagnostics/ci-prior-profile/diagnostic-cartridge-profile.json
+              --fail-on-regression
+            )
+          fi
+          python scripts/profile_diagnostic_cartridge.py "${profile_args[@]}"
       - name: Upload diagnostic bundle
         if: always()
         uses: actions/upload-artifact@v4
@@ -92,12 +121,28 @@ jobs:
           path: target/diagnostics/ci-scenario-suite
           if-no-files-found: warn
           retention-days: 14
+      - name: Upload diagnostic profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-profile
+          path: target/diagnostics/ci-profile
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload prior diagnostic scenario suite
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oxidenes-diagnostic-prior-scenario-suite
           path: target/diagnostics/ci-prior-scenario-suite
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload prior diagnostic profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxidenes-diagnostic-prior-profile
+          path: target/diagnostics/ci-prior-profile
           if-no-files-found: ignore
           retention-days: 14
 

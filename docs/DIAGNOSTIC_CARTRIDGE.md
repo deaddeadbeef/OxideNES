@@ -96,6 +96,13 @@ tests. Use `--samples`, `--warmups`, `--profile debug`, `--binary`, or
 `--baseline-json <FILE> --fail-on-regression`; by default the comparison allows
 up to a 20% wall-time or throughput regression before failing.
 
+GitHub Actions CI and release diagnostic jobs also run a short debug-profile
+gate after the diagnostic e2e suite. When a prior checkout with the profiler is
+available, the job writes a prior profile, compares the current run against it,
+and fails on large throughput or wall-time regressions. The uploaded artifacts
+are named `oxidenes-diagnostic-profile` and
+`oxidenes-diagnostic-prior-profile`.
+
 To generate a reusable AI debugging corpus with both healthy and known-bad
 outcomes, write a diagnostic scenario suite:
 

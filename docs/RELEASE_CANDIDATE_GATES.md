@@ -59,6 +59,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - When a prior suite is available, the diagnostic observability comparison passes without regressions:
   `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite --compare-suite-dir target/diagnostics/prior-scenario-suite --fail-on-comparison-regression`
 - CI and release diagnostic-bundle jobs generate the prior suite from the pull request base SHA or previous push SHA when available, run the comparison gate, and upload `oxidenes-diagnostic-prior-scenario-suite` with the current `oxidenes-diagnostic-scenario-suite`.
+- CI and release diagnostic-bundle jobs run a short diagnostic cartridge profile gate, upload `oxidenes-diagnostic-profile`, and when a prior checkout already contains the profiler, compare against `oxidenes-diagnostic-prior-profile` with a large-regression failure threshold.
 - GitHub Actions CI is green on Windows, Linux, macOS, rustfmt, clippy, security audit, IP compliance, and diagnostic bundle jobs.
 
 ### Compatibility And Safety
