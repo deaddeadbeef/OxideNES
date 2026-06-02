@@ -482,7 +482,7 @@ overflow regressions localize to `ppu.sprite_overflow`.
 attributes after OAM setup, proving sprite/background pixel-mux regressions
 localize to `ppu.sprite_priority` through host-sampled frame colors.
 `ppu_scroll_seam_fault` corrupts one side of a deterministic scroll-seam scene,
-proving fine-X and vertical scroll regressions localize to `ppu.scroll_seam`
+proving fine-X, coarse-X, and vertical scroll regressions localize to `ppu.scroll_seam`
 through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
@@ -1034,6 +1034,12 @@ existing `ppu_nmi_and_render_frame` cartridge test. The host records the CPU
 cycle when the cartridge enters the render-enabled NMI wait loop, the first NMI
 cycle, the second NMI cycle, the first-NMI latency, and the inter-NMI interval,
 then exposes `ppu.vblank_timing.nmi_window` as a pass/fail probe.
+
+Schema version `40` expands the `ppu_scroll_seam_matrix` host-observed frame
+samples from four to six. The cartridge now renders the existing fine-X and
+vertical seam phase, then renders a coarse-X phase with an 8-pixel horizontal
+scroll so `ppu_scroll_seam` telemetry records coarse-left and coarse-right
+tile-shift samples in addition to the existing left/right/top/bottom samples.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
