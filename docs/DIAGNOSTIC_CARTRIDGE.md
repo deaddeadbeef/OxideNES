@@ -481,9 +481,9 @@ overflow regressions localize to `ppu.sprite_overflow`.
 `ppu_sprite_priority_fault` swaps the two overlapping sprite priority
 attributes after OAM setup, proving sprite/background pixel-mux regressions
 localize to `ppu.sprite_priority` through host-sampled frame colors.
-`ppu_scroll_seam_fault` corrupts the right-side tile at a deterministic fine-X
-background seam, proving horizontal fine-X scroll regressions localize to
-`ppu.scroll_seam` through host-sampled frame colors.
+`ppu_scroll_seam_fault` corrupts one side of a deterministic scroll-seam scene,
+proving fine-X and vertical scroll regressions localize to `ppu.scroll_seam`
+through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -514,7 +514,7 @@ joypad masks, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
 host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion,
 PPU sprite-zero-hit signaling, PPU sprite-overflow signaling, PPU
-sprite-priority muxing, PPU fine-X scroll seams, and PPU progress-timeout failure
+sprite-priority muxing, PPU scroll seams, and PPU progress-timeout failure
 localization without requiring a broken emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
@@ -1021,6 +1021,12 @@ deterministic horizontal background tile seam, scrolls it by fine X, verifies
 left and right seam samples through host-observed frame pixels, records
 `ppu_scroll_seam` telemetry, and exposes `cartridge.test.28.result` plus
 `ppu.scroll_seam.samples` probes for automated localization.
+
+Schema version `38` renames that test to `ppu_scroll_seam_matrix` and expands
+it into a four-sample scroll seam matrix. The same deterministic frame now
+checks left/right fine-X samples plus top/bottom vertical-scroll samples, so
+the PPU pixel-pipeline coverage gap no longer lists vertical scroll seams as
+missing.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
