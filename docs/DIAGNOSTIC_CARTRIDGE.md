@@ -80,6 +80,22 @@ handoff package for automated debugging, release evidence, and failure triage.
 Start with `manifest.json` for integrity and `triage.json` for the compact
 machine-readable failure focus before loading `telemetry.json`.
 
+To use the diagnostic cartridge as a repeatable profiling workload, run:
+
+```powershell
+python scripts/profile_diagnostic_cartridge.py --output-dir target/diagnostics/diagnostic-profile
+```
+
+The profiler builds `oxidenes-diagnostic` once, runs configurable warmup and
+sample passes, stores each run's telemetry/report under `samples/`, and writes
+`diagnostic-cartridge-profile.json` plus `diagnostic-cartridge-profile.md`.
+The summary records wall-clock duration, emulated cycles per second, frames per
+second, the most frequent slowest test, and the highest cartridge cycle-duration
+tests. Use `--samples`, `--warmups`, `--profile debug`, `--binary`, or
+`--skip-build` to tailor the workload. To compare against a prior profile, pass
+`--baseline-json <FILE> --fail-on-regression`; by default the comparison allows
+up to a 20% wall-time or throughput regression before failing.
+
 To generate a reusable AI debugging corpus with both healthy and known-bad
 outcomes, write a diagnostic scenario suite:
 
