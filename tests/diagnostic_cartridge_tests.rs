@@ -396,6 +396,28 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.ppu_scroll_seam.coarse_right_observed_color_hex,
         "0x64B0FF"
     );
+    assert_eq!(
+        telemetry.ppu_scroll_seam.nametable_wrap_mirroring,
+        "vertical"
+    );
+    assert_eq!(telemetry.ppu_scroll_seam.nametable_wrap_scroll_x, 248);
+    assert_eq!(telemetry.ppu_scroll_seam.nametable_wrap_scroll_y, 0);
+    assert_eq!(
+        telemetry
+            .ppu_scroll_seam
+            .nametable_wrap_left_observed_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_scroll_seam
+            .nametable_wrap_right_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert!(telemetry.ppu_scroll_seam.nametable_wrap_frames >= 2);
+    assert!(telemetry.ppu_scroll_seam.nametable_wrap_cycles > 0);
+    assert!(telemetry.ppu_scroll_seam.nametable_wrap_passed);
+    assert!(telemetry.ppu_scroll_seam.nametable_wrap_error.is_none());
     assert_eq!(telemetry.ppu_scroll_seam.top_observed_color_hex, "0x64B0FF");
     assert_eq!(
         telemetry.ppu_scroll_seam.bottom_observed_color_hex,
@@ -664,6 +686,16 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .contains("| Scroll-seam coarse-left sample / expected | (2, 18) 0xB53120 / 0xB53120 |"));
     assert!(report
         .contains("| Scroll-seam coarse-right sample / expected | (10, 18) 0x64B0FF / 0x64B0FF |"));
+    assert!(report.contains(
+        "| Scroll-seam nametable-wrap left sample / expected | (2, 18) 0xB53120 / 0xB53120 |"
+    ));
+    assert!(report.contains(
+        "| Scroll-seam nametable-wrap right sample / expected | (10, 18) 0x64B0FF / 0x64B0FF |"
+    ));
+    assert!(
+        report.contains("| Scroll-seam nametable-wrap scroll X/Y/mirroring | 248 / 0 / vertical |")
+    );
+    assert!(report.contains("| Scroll-seam nametable-wrap error | none |"));
     assert!(report.contains("| Scroll-seam top sample / expected | (2, 12) 0x64B0FF / 0x64B0FF |"));
     assert!(
         report.contains("| Scroll-seam bottom sample / expected | (2, 20) 0xB53120 / 0xB53120 |")
@@ -1443,7 +1475,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
     assert_eq!(failure.likely_domain, "ppu.scroll_seam");
     assert!(failure
         .assertion
-        .contains("fine-X, coarse-X, and vertical scroll"));
+        .contains("fine-X, coarse-X, coarse-X nametable-wrap, and vertical scroll"));
     assert!(failure.expected.contains("right sample"));
     assert!(failure.observed.contains("right sample 0x64B0FF"));
 
@@ -1492,6 +1524,19 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
     assert_eq!(
         telemetry.ppu_scroll_seam.coarse_left_expected_color_hex,
         "0xB53120"
+    );
+    assert!(telemetry.ppu_scroll_seam.nametable_wrap_passed);
+    assert_eq!(
+        telemetry
+            .ppu_scroll_seam
+            .nametable_wrap_left_observed_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_scroll_seam
+            .nametable_wrap_right_observed_color_hex,
+        "0x64B0FF"
     );
     assert_eq!(telemetry.ppu_scroll_seam.observed_case_count, 6);
     assert!(!telemetry.ppu_scroll_seam.passed);
