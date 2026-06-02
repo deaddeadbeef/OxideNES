@@ -12,7 +12,7 @@ from typing import Any
 
 EXPECTED_SCENARIO_SUITE_SCHEMA = 8
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 38
+EXPECTED_TELEMETRY_SCHEMA = 39
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -626,7 +626,7 @@ class SuiteVerifier:
             "PPU NMI observer evidence",
         )
         self.expect_in(
-            "failed_probe_ids=runtime.completed,cartridge.status.pass,cartridge.test.10.result,ppu.nmi_count",
+            "failed_probe_ids=runtime.completed,cartridge.status.pass,cartridge.test.10.result,ppu.nmi_count,ppu.vblank_timing.nmi_window",
             ppu_nmi_evidence,
             "PPU NMI observer evidence",
         )

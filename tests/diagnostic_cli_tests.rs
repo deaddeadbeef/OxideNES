@@ -150,7 +150,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
     assert_eq!(manifest["scenario_suite_schema_version"], Value::from(8));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(38));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(39));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
     assert_eq!(manifest["passed"], Value::Bool(true));
@@ -552,7 +552,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(2));
     assert_eq!(observer["scenario_suite_schema_version"], Value::from(8));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(38));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(39));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
@@ -848,7 +848,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .iter()
         .any(|entry| entry
             == &Value::String(
-                "failed_probe_ids=runtime.completed,cartridge.status.pass,cartridge.test.10.result,ppu.nmi_count"
+                "failed_probe_ids=runtime.completed,cartridge.status.pass,cartridge.test.10.result,ppu.nmi_count,ppu.vblank_timing.nmi_window"
                     .to_string()
             )));
     let dma_action = find_observer_action(observer_actions, "dma_oam_transfer_fault");
@@ -2613,6 +2613,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .expect("PPU NMI failed probes should be an array")
         .iter()
         .any(|probe| probe == &Value::String("ppu.nmi_count".to_string())));
+    assert!(ppu_nmi["failed_probe_ids"]
+        .as_array()
+        .expect("PPU NMI failed probes should be an array")
+        .iter()
+        .any(|probe| probe == &Value::String("ppu.vblank_timing.nmi_window".to_string())));
     assert_eq!(ppu_nmi["comparison"]["passed"], Value::Bool(false));
     assert!(
         ppu_nmi["comparison"]["difference_count"]
@@ -2810,7 +2815,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(38));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(39));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -2913,7 +2918,7 @@ fn assert_bundle_artifacts_with_config(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(38));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(39));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

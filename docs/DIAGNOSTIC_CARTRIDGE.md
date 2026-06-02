@@ -741,7 +741,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Combined `$4016`/`$4017` strobe-high, serial-shift, and overread matrix
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
-- PPU NMI delivery and rendered frame production
+- PPU NMI delivery, host-observed vblank timing windows, and rendered frame
+  production
 - Player-2 `$4017` strobe and shift reads with an independent Start + Down mask
 
 ## Telemetry Protocol
@@ -911,8 +912,8 @@ Schema version `23` adds the `ppu_nmi_timeout_fault` scenario-suite fixture and
 active-test timeout localization. The fixture disables PPUCTRL NMI delivery
 after `ppu_nmi_and_render_frame` enables rendering, causing the cartridge to
 stall in its NMI wait loop. Telemetry now keeps that timeout focused on
-`ppu.nmi`, marks `ppu.nmi_count` failed, and preserves the stalled loop symbol
-in the instruction trace tail.
+`ppu.nmi`, marks `ppu.nmi_count` and `ppu.vblank_timing.nmi_window` failed, and
+preserves the stalled loop symbol in the instruction trace tail.
 
 Schema version `24` changes the generated diagnostic cartridge to Mapper 2/UXROM
 and adds the `mapper2_prg_bank_switch` integration test plus the
@@ -1027,6 +1028,12 @@ it into a four-sample scroll seam matrix. The same deterministic frame now
 checks left/right fine-X samples plus top/bottom vertical-scroll samples, so
 the PPU pixel-pipeline coverage gap no longer lists vertical scroll seams as
 missing.
+
+Schema version `39` adds top-level `ppu_vblank_timing` telemetry for the
+existing `ppu_nmi_and_render_frame` cartridge test. The host records the CPU
+cycle when the cartridge enters the render-enabled NMI wait loop, the first NMI
+cycle, the second NMI cycle, the first-NMI latency, and the inter-NMI interval,
+then exposes `ppu.vblank_timing.nmi_window` as a pass/fail probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 38;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 39;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v38";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v39";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -61,6 +61,11 @@ const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
+const PPU_VBLANK_TIMING_TEST_ID: u8 = 10;
+const PPU_VBLANK_FIRST_NMI_MIN_CYCLES: u64 = 1;
+const PPU_VBLANK_FIRST_NMI_MAX_CYCLES: u64 = 30_000;
+const PPU_VBLANK_INTER_NMI_MIN_CYCLES: u64 = 29_700;
+const PPU_VBLANK_INTER_NMI_MAX_CYCLES: u64 = 29_900;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -1126,9 +1131,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, vertical scroll seam sampling, NMI delivery, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Vblank timing, sprite overflow hardware-bug false positives/negatives, coarse-X seams, and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
-        suggested_next_test: "Add deterministic vblank-timing probes or coarse-X seam scenes with expected frame checksums.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Per-dot vblank edge timing, sprite overflow hardware-bug false positives/negatives, coarse-X seams, and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
+        suggested_next_test: "Add deterministic coarse-X seam scenes or dot-edge vblank probes with expected frame checksums.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1305,6 +1310,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
+    pub ppu_vblank_timing: PpuVblankTimingTelemetry,
     pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
     pub ppu_sprite_priority: PpuSpritePriorityTelemetry,
@@ -1687,6 +1693,26 @@ pub struct PpuScrollSeamTelemetry {
     pub passed: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PpuVblankTimingTelemetry {
+    pub test_id: u8,
+    pub test_name: Option<&'static str>,
+    pub wait_loop_start_cycle: Option<u64>,
+    pub wait_loop_start_frame: Option<u64>,
+    pub first_nmi_cycle: Option<u64>,
+    pub first_nmi_frame: Option<u64>,
+    pub first_nmi_latency_cycles: Option<u64>,
+    pub first_nmi_expected_min_cycles: u64,
+    pub first_nmi_expected_max_cycles: u64,
+    pub second_nmi_cycle: Option<u64>,
+    pub second_nmi_frame: Option<u64>,
+    pub inter_nmi_cycles: Option<u64>,
+    pub inter_nmi_expected_min_cycles: u64,
+    pub inter_nmi_expected_max_cycles: u64,
+    pub observed_nmi_count: u8,
+    pub passed: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DiagnosticRamWatchTelemetry {
     pub status: u8,
@@ -1984,6 +2010,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         Some(fault) => Some(label_addr(&labels, fault.injection_label())?),
         None => None,
     };
+    let ppu_nmi_wait_pc = label_addr(&labels, PPU_NMI_TIMEOUT_FAULT_LABEL)?;
     let rom = build_diagnostic_cartridge_from_program(&program, &labels)?;
     let cartridge_info = cartridge_telemetry(&rom);
     let cartridge = Cartridge::new(&rom)?;
@@ -2015,6 +2042,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut timeout = true;
     let mut dma_observation = DmaObservation::default();
     let mut instruction_trace = InstructionTraceObservation::default();
+    let mut ppu_vblank_timing =
+        PpuVblankTimingObservation::new(read_ram_byte(&mut bus, NMI_COUNT_ADDR));
     let mut fault_injected = false;
 
     let reset_cpu = cpu_telemetry(&cpu);
@@ -2047,6 +2076,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             cycles,
             frames,
         );
+        ppu_vblank_timing.observe_wait_loop(
+            cpu.pc,
+            ppu_nmi_wait_pc,
+            cycles,
+            frames,
+            read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
+        );
         let dma_active_before = bus.dma_active();
         let dmc_stall_before = bus.dmc_stall_active();
         cpu.clock(&mut bus);
@@ -2059,6 +2095,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
         let cpu_snapshot = cpu_telemetry(&cpu);
         let diagnostic_ram = diagnostic_ram_watch_telemetry(&mut bus, status, current_test);
+        ppu_vblank_timing.observe_nmi_count(cycles, frames, current_test, diagnostic_ram.nmi_count);
         let dma_active_after = bus.dma_active();
         dma_observation.observe_tick(DmaTickObservation {
             cycle: cycles,
@@ -2166,6 +2203,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 cycles,
                 frames,
             );
+            ppu_vblank_timing.observe_wait_loop(
+                cpu.pc,
+                ppu_nmi_wait_pc,
+                cycles,
+                frames,
+                read_ram_byte(&mut bus, CURRENT_TEST_ADDR),
+            );
             let dma_active_before = bus.dma_active();
             let dmc_stall_before = bus.dmc_stall_active();
             cpu.clock(&mut bus);
@@ -2178,6 +2222,12 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             let current_test = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
             let cpu_snapshot = cpu_telemetry(&cpu);
             let diagnostic_ram = diagnostic_ram_watch_telemetry(&mut bus, status, current_test);
+            ppu_vblank_timing.observe_nmi_count(
+                cycles,
+                frames,
+                current_test,
+                diagnostic_ram.nmi_count,
+            );
             let dma_active_after = bus.dma_active();
             dma_observation.observe_tick(DmaTickObservation {
                 cycle: cycles,
@@ -2243,6 +2293,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
+    let ppu_vblank_timing = ppu_vblank_timing.telemetry(ram[NMI_COUNT_ADDR as usize]);
     let ppu_scroll_seam =
         ppu_scroll_seam_telemetry(&ram, ppu_scroll_seam_frame.as_ref(), &bus.ppu.frame_data);
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
@@ -2259,6 +2310,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
@@ -2286,6 +2338,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
@@ -2342,6 +2395,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         input_port_matrix,
+        ppu_vblank_timing,
         ppu_scroll_seam,
         ppu_sprite_overflow,
         ppu_sprite_priority,
@@ -2804,6 +2858,42 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report).expect("write report");
     writeln!(report, "| Field | Value |").expect("write report");
     writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Vblank wait-loop start cycle / frame | {} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.wait_loop_start_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.wait_loop_start_frame)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| First NMI cycle / latency | {} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.first_nmi_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.first_nmi_latency_cycles)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Second NMI cycle / inter-NMI cycles | {} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.second_nmi_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.inter_nmi_cycles)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank timing windows | first {}..={}, inter {}..={} |",
+        telemetry.ppu_vblank_timing.first_nmi_expected_min_cycles,
+        telemetry.ppu_vblank_timing.first_nmi_expected_max_cycles,
+        telemetry.ppu_vblank_timing.inter_nmi_expected_min_cycles,
+        telemetry.ppu_vblank_timing.inter_nmi_expected_max_cycles
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank timing passed | {} |",
+        telemetry.ppu_vblank_timing.passed
+    )
+    .expect("write report");
     writeln!(
         report,
         "| Sprite-zero-hit status bit / expected | {} / {} |",
@@ -3956,6 +4046,94 @@ fn cycle_parity_label(even: bool) -> &'static str {
     }
 }
 
+#[derive(Debug, Default)]
+struct PpuVblankTimingObservation {
+    wait_loop_start_cycle: Option<u64>,
+    wait_loop_start_frame: Option<u64>,
+    first_nmi_cycle: Option<u64>,
+    first_nmi_frame: Option<u64>,
+    second_nmi_cycle: Option<u64>,
+    second_nmi_frame: Option<u64>,
+    last_nmi_count: u8,
+}
+
+impl PpuVblankTimingObservation {
+    fn new(initial_nmi_count: u8) -> Self {
+        Self {
+            last_nmi_count: initial_nmi_count,
+            ..Self::default()
+        }
+    }
+
+    fn observe_wait_loop(
+        &mut self,
+        pc: u16,
+        wait_loop_pc: u16,
+        cycle: u64,
+        frame: u64,
+        current_test: u8,
+    ) {
+        if current_test == PPU_VBLANK_TIMING_TEST_ID
+            && pc == wait_loop_pc
+            && self.wait_loop_start_cycle.is_none()
+        {
+            self.wait_loop_start_cycle = Some(cycle);
+            self.wait_loop_start_frame = Some(frame);
+        }
+    }
+
+    fn observe_nmi_count(&mut self, cycle: u64, frame: u64, current_test: u8, nmi_count: u8) {
+        if current_test == PPU_VBLANK_TIMING_TEST_ID && nmi_count > self.last_nmi_count {
+            for _ in self.last_nmi_count..nmi_count {
+                if self.first_nmi_cycle.is_none() {
+                    self.first_nmi_cycle = Some(cycle);
+                    self.first_nmi_frame = Some(frame);
+                } else if self.second_nmi_cycle.is_none() {
+                    self.second_nmi_cycle = Some(cycle);
+                    self.second_nmi_frame = Some(frame);
+                }
+            }
+        }
+        self.last_nmi_count = nmi_count;
+    }
+
+    fn telemetry(&self, observed_nmi_count: u8) -> PpuVblankTimingTelemetry {
+        let first_nmi_latency_cycles = self
+            .wait_loop_start_cycle
+            .zip(self.first_nmi_cycle)
+            .map(|(start, first)| first.saturating_sub(start));
+        let inter_nmi_cycles = self
+            .first_nmi_cycle
+            .zip(self.second_nmi_cycle)
+            .map(|(first, second)| second.saturating_sub(first));
+        let first_nmi_in_window = first_nmi_latency_cycles.is_some_and(|cycles| {
+            (PPU_VBLANK_FIRST_NMI_MIN_CYCLES..=PPU_VBLANK_FIRST_NMI_MAX_CYCLES).contains(&cycles)
+        });
+        let inter_nmi_in_window = inter_nmi_cycles.is_some_and(|cycles| {
+            (PPU_VBLANK_INTER_NMI_MIN_CYCLES..=PPU_VBLANK_INTER_NMI_MAX_CYCLES).contains(&cycles)
+        });
+
+        PpuVblankTimingTelemetry {
+            test_id: PPU_VBLANK_TIMING_TEST_ID,
+            test_name: test_name(PPU_VBLANK_TIMING_TEST_ID),
+            wait_loop_start_cycle: self.wait_loop_start_cycle,
+            wait_loop_start_frame: self.wait_loop_start_frame,
+            first_nmi_cycle: self.first_nmi_cycle,
+            first_nmi_frame: self.first_nmi_frame,
+            first_nmi_latency_cycles,
+            first_nmi_expected_min_cycles: PPU_VBLANK_FIRST_NMI_MIN_CYCLES,
+            first_nmi_expected_max_cycles: PPU_VBLANK_FIRST_NMI_MAX_CYCLES,
+            second_nmi_cycle: self.second_nmi_cycle,
+            second_nmi_frame: self.second_nmi_frame,
+            inter_nmi_cycles,
+            inter_nmi_expected_min_cycles: PPU_VBLANK_INTER_NMI_MIN_CYCLES,
+            inter_nmi_expected_max_cycles: PPU_VBLANK_INTER_NMI_MAX_CYCLES,
+            observed_nmi_count,
+            passed: observed_nmi_count >= 2 && first_nmi_in_window && inter_nmi_in_window,
+        }
+    }
+}
+
 struct HostValidationInput<'a> {
     status: u8,
     timeout: bool,
@@ -3963,6 +4141,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
@@ -3983,6 +4162,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
@@ -4053,6 +4233,21 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.input_port_matrix.joypad2_overread_second_hex,
             input.input_port_matrix.observed_case_count,
             input.input_port_matrix.expected_case_count
+        ));
+    }
+    if !input.ppu_vblank_timing.passed {
+        failures.push(format!(
+            "PPU vblank timing mismatch: wait_start={}, first_nmi={}, first_latency={} expected {}..={}, second_nmi={}, inter_nmi={} expected {}..={}, nmi_count={}",
+            optional_u64(input.ppu_vblank_timing.wait_loop_start_cycle),
+            optional_u64(input.ppu_vblank_timing.first_nmi_cycle),
+            optional_u64(input.ppu_vblank_timing.first_nmi_latency_cycles),
+            input.ppu_vblank_timing.first_nmi_expected_min_cycles,
+            input.ppu_vblank_timing.first_nmi_expected_max_cycles,
+            optional_u64(input.ppu_vblank_timing.second_nmi_cycle),
+            optional_u64(input.ppu_vblank_timing.inter_nmi_cycles),
+            input.ppu_vblank_timing.inter_nmi_expected_min_cycles,
+            input.ppu_vblank_timing.inter_nmi_expected_max_cycles,
+            input.ppu_vblank_timing.observed_nmi_count
         ));
     }
     if !input.ppu_sprite_zero_hit.passed {
@@ -4484,6 +4679,40 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             expected: "NMI count >= 2".to_string(),
             observed: format!("NMI count {}", input.ram[NMI_COUNT_ADDR as usize]),
             likely_domain: "ppu.nmi".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.vblank_timing.nmi_window".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_VBLANK_TIMING_TEST_ID),
+            test_name: test_name(PPU_VBLANK_TIMING_TEST_ID),
+            status: gated_probe_status(
+                should_validate_ppu_render_observations,
+                input.ppu_vblank_timing.passed,
+            ),
+            description:
+                "Host-observed NMI timing stays inside the expected NTSC vblank cadence window"
+                    .to_string(),
+            expected: format!(
+                "first NMI latency {}..={} CPU cycles, inter-NMI interval {}..={} CPU cycles",
+                input.ppu_vblank_timing.first_nmi_expected_min_cycles,
+                input.ppu_vblank_timing.first_nmi_expected_max_cycles,
+                input.ppu_vblank_timing.inter_nmi_expected_min_cycles,
+                input.ppu_vblank_timing.inter_nmi_expected_max_cycles
+            ),
+            observed: format!(
+                "wait_start={}, first_nmi={}, first_latency={}, second_nmi={}, inter_nmi={}, nmi_count={}",
+                optional_u64(input.ppu_vblank_timing.wait_loop_start_cycle),
+                optional_u64(input.ppu_vblank_timing.first_nmi_cycle),
+                optional_u64(input.ppu_vblank_timing.first_nmi_latency_cycles),
+                optional_u64(input.ppu_vblank_timing.second_nmi_cycle),
+                optional_u64(input.ppu_vblank_timing.inter_nmi_cycles),
+                input.ppu_vblank_timing.observed_nmi_count
+            ),
+            likely_domain: "ppu.vblank_timing".to_string(),
         },
     );
     push_probe(
@@ -8092,6 +8321,9 @@ fn compare_observation_checksums(
         &["ppu_sprite_priority", "behind_observed_color"][..],
         &["ppu_sprite_priority", "observed_case_count"][..],
         &["ppu_sprite_priority", "passed"][..],
+        &["ppu_vblank_timing", "first_nmi_latency_cycles"][..],
+        &["ppu_vblank_timing", "inter_nmi_cycles"][..],
+        &["ppu_vblank_timing", "passed"][..],
         &["ppu_scroll_seam", "left_observed_color"][..],
         &["ppu_scroll_seam", "right_observed_color"][..],
         &["ppu_scroll_seam", "top_observed_color"][..],
