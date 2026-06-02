@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.4] - 2026-06-02
+
+### Added
+- Added a diagnostic cartridge profiler with JSON, Markdown, and CI release-gate output for headless performance telemetry.
+
+### Changed
+- Expanded the PPU scroll seam diagnostic into a four-sample fine-X and vertical scroll matrix.
+- Updated diagnostic telemetry schema 38 and release evidence docs to expose the new scroll seam probes.
+
+## [0.3.3] - 2026-06-02
+
+### Added
+- Added the headless diagnostic test cartridge, telemetry schema, Markdown report, triage bundle, and scenario-suite observability workflow.
+- Added AI-oriented diagnostic indexes, route matrices, debug packets, localization scoring, session plans, and artifact verification.
+- Added targeted CPU, PPU, DMA, APU, joypad, and mapper diagnostic fixtures for failure replay and source/test localization.
+
 ## [0.3.2] - 2026-05-23
 
 ### Security
