@@ -332,10 +332,49 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
                 ..=telemetry.ppu_vblank_timing.inter_nmi_expected_max_cycles)
                 .contains(&cycles)
         }));
+    assert!(telemetry.ppu_vblank_timing.nmi_window_passed);
+    assert!(telemetry.ppu_vblank_timing.edge_passed);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_expected_set_scanline, 241);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_expected_set_dot, 1);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_expected_clear_scanline, -1);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_expected_clear_dot, 1);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_set_count, 2);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_clear_count, 1);
+    assert_eq!(telemetry.ppu_vblank_timing.edge_nmi_trigger_count, 2);
+    assert_eq!(
+        telemetry.ppu_vblank_timing.edge_first_set_ppu_scanline,
+        Some(241)
+    );
+    assert_eq!(telemetry.ppu_vblank_timing.edge_first_set_ppu_dot, Some(1));
+    assert!(telemetry
+        .ppu_vblank_timing
+        .edge_first_set_cpu_cycle
+        .is_some());
+    assert_eq!(
+        telemetry.ppu_vblank_timing.edge_first_clear_ppu_scanline,
+        Some(-1)
+    );
+    assert_eq!(
+        telemetry.ppu_vblank_timing.edge_first_clear_ppu_dot,
+        Some(1)
+    );
+    assert_eq!(
+        telemetry.ppu_vblank_timing.edge_second_set_ppu_scanline,
+        Some(241)
+    );
+    assert_eq!(telemetry.ppu_vblank_timing.edge_second_set_ppu_dot, Some(1));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ppu.vblank_timing.nmi_window"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "ppu.vblank_timing"
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.edge_dots"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.vblank_timing"
+            && probe.observed.contains("first_set=241:1")
+            && probe.observed.contains("first_clear=-1:1")
+            && probe.observed.contains("second_set=241:1")
     }));
     assert!(telemetry.ppu_sprite_zero_hit.passed);
     assert_eq!(
@@ -615,6 +654,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.observed.contains("inter_nmi=")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.edge_dots"
+            && probe.test_name == Some("ppu_nmi_and_render_frame")
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("scanline 241 dot 1")
+            && probe.observed.contains("first_set=241:1")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "dma.oam_active_cycles"
             && probe.test_name == Some("oam_dma_transfer")
             && probe.status == DiagnosticProbeStatus::Passed
@@ -669,6 +715,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## PPU Pixel Pipeline"));
     assert!(report.contains("| First NMI cycle / latency |"));
     assert!(report.contains("| Second NMI cycle / inter-NMI cycles |"));
+    assert!(report.contains(
+        "| Vblank edge expected set/clear dots | set scanline 241 dot 1, clear scanline -1 dot 1 |"
+    ));
+    assert!(report.contains("| Vblank edge observed counts | set 2, clear 1, NMI triggers 2 |"));
+    assert!(report.contains("| Vblank first set edge CPU/frame/PPU/phase |"));
+    assert!(report.contains("/ 241:1 /"));
+    assert!(report.contains("| Vblank first clear edge CPU/frame/PPU/phase |"));
+    assert!(report.contains("/ -1:1 /"));
+    assert!(report.contains("| Vblank second set edge CPU/frame/PPU/phase |"));
     assert!(report.contains("| Vblank timing passed | true |"));
     assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x40 / 0x40 |"));
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x20 / 0x20 |"));
@@ -2658,6 +2713,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
         .debug_focus
         .failed_probe_ids
         .contains(&"ppu.vblank_timing.nmi_window".to_string()));
+    assert!(!telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.vblank_timing.edge_dots".to_string()));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ppu.nmi_count"
             && probe.status == DiagnosticProbeStatus::Failed
@@ -2666,7 +2726,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
             && probe.observed.contains("NMI count 0")
     }));
     assert!(!telemetry.ppu_vblank_timing.passed);
+    assert!(!telemetry.ppu_vblank_timing.nmi_window_passed);
+    assert!(telemetry.ppu_vblank_timing.edge_passed);
     assert_eq!(telemetry.ppu_vblank_timing.observed_nmi_count, 0);
+    assert!(telemetry.ppu_vblank_timing.edge_set_count >= 2);
+    assert!(telemetry.ppu_vblank_timing.edge_clear_count >= 1);
     assert!(telemetry
         .ppu_vblank_timing
         .first_nmi_latency_cycles
@@ -2677,6 +2741,14 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
             && probe.test_id == Some(10)
             && probe.likely_domain == "ppu.vblank_timing"
             && probe.observed.contains("nmi_count=0")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.edge_dots"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.test_id == Some(10)
+            && probe.likely_domain == "ppu.vblank_timing"
+            && probe.observed.contains("first_set=241:1")
+            && probe.observed.contains("first_clear=-1:1")
     }));
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol

@@ -188,11 +188,15 @@ impl Bus {
     pub fn tick(&mut self, cpu_cycles: u8) -> bool {
         let mut nmi = false;
         for _ in 0..(cpu_cycles as usize * 3) {
-            if self.ppu.tick(&mut self.cartridge) {
+            if self.tick_ppu_once() {
                 nmi = true;
             }
         }
         nmi
+    }
+
+    pub fn tick_ppu_once(&mut self) -> bool {
+        self.ppu.tick(&mut self.cartridge)
     }
 
     pub fn poll_nmi(&mut self) -> bool {

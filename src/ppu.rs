@@ -56,6 +56,18 @@ pub struct Ppu {
     emphasis: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PpuTimingState {
+    pub scanline: i16,
+    pub dot: u16,
+    pub status: u8,
+    pub nmi_occurred: bool,
+    pub nmi_output: bool,
+    pub nmi_previous: bool,
+    pub frame_complete: bool,
+    pub odd_frame: bool,
+}
+
 #[derive(Clone, Copy)]
 struct OamEntry {
     y: u8,
@@ -144,6 +156,19 @@ impl Default for Ppu {
 }
 
 impl Ppu {
+    pub fn timing_state(&self) -> PpuTimingState {
+        PpuTimingState {
+            scanline: self.scanline,
+            dot: self.cycle,
+            status: self.status,
+            nmi_occurred: self.nmi_occurred,
+            nmi_output: self.nmi_output,
+            nmi_previous: self.nmi_previous,
+            frame_complete: self.frame_complete,
+            odd_frame: self.odd_frame,
+        }
+    }
+
     #[inline(always)]
     fn mirror_vram_addr(mirroring: &Mirroring, addr: u16) -> u16 {
         let mirrored = addr & 0x2FFF;

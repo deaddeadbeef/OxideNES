@@ -741,8 +741,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Combined `$4016`/`$4017` strobe-high, serial-shift, and overread matrix
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
-- PPU NMI delivery, host-observed vblank timing windows, and rendered frame
-  production
+- PPU NMI delivery, host-observed vblank timing windows, PPUSTATUS
+  vblank set/clear dot-edge timing, and rendered frame production
 - Player-2 `$4017` strobe and shift reads with an independent Start + Down mask
 
 ## Telemetry Protocol
@@ -1048,6 +1048,14 @@ variant renders tile 31 of `$2000` and tile 0 of `$2400` with contrasting
 patterns, scrolls X by 248 pixels, and records nametable-wrap left/right frame
 samples, variant mirroring, frames, cycles, pass status, and any variant error
 inside `ppu_scroll_seam` telemetry.
+
+Schema version `42` expands `ppu_vblank_timing` from coarse CPU-cycle NMI
+windows into dot-edge evidence. The diagnostic host samples the PPU before and
+after each PPU tick while `ppu_nmi_and_render_frame` is active, records the
+first two PPUSTATUS vblank set edges at scanline 241 dot 1, records the first
+pre-render clear edge at scanline -1 dot 1, retains total set/clear edge and
+NMI-trigger counts, and exposes `ppu.vblank_timing.edge_dots` as a pass/fail
+probe alongside `ppu.vblank_timing.nmi_window`.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
