@@ -392,12 +392,36 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.ppu_sprite_overflow.observed_status_bit_hex,
         "0x20"
     );
-    assert_eq!(telemetry.ppu_sprite_overflow.observed_case_count, 1);
+    assert_eq!(
+        telemetry
+            .ppu_sprite_overflow
+            .false_positive_observed_status_bit_hex,
+        "0x20"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_sprite_overflow
+            .false_negative_observed_status_bit_hex,
+        "0x00"
+    );
+    assert!(telemetry.ppu_sprite_overflow.hardware_bug_matrix_passed);
+    assert_eq!(telemetry.ppu_sprite_overflow.observed_case_count, 3);
     assert_eq!(telemetry.ppu_sprite_overflow.restored_oam_byte_count, 256);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ppu.sprite_overflow.status"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "ppu.sprite_overflow"
+            && probe.observed.contains("false_positive 0x20")
+            && probe.observed.contains("false_negative 0x00")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.sprite_overflow.hardware_bug_matrix"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.sprite_overflow.hardware_bug"
+            && probe.expected.contains("false_negative=0x00")
+            && probe.observed.contains("true_positive=0x20")
+            && probe.observed.contains("false_positive=0x20")
+            && probe.observed.contains("false_negative=0x00")
     }));
     assert!(telemetry.ppu_sprite_priority.passed);
     assert_eq!(telemetry.ppu_sprite_priority.observed_case_count, 2);
@@ -727,7 +751,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Vblank timing passed | true |"));
     assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x40 / 0x40 |"));
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x20 / 0x20 |"));
+    assert!(report.contains("| Sprite-overflow false-positive bit / expected | 0x20 / 0x20 |"));
+    assert!(report.contains("| Sprite-overflow false-negative bit / expected | 0x00 / 0x00 |"));
+    assert!(report.contains("| Sprite-overflow cases / expected | 3 / 3 |"));
     assert!(report.contains("| Sprite-overflow restored OAM bytes | 256 |"));
+    assert!(report.contains("| Sprite-overflow hardware-bug matrix passed | true |"));
     assert!(report
         .contains("| Sprite-priority front sample / expected | (18, 18) 0xB53120 / 0xB53120 |"));
     assert!(report
@@ -1368,7 +1396,20 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_fail
         telemetry.ppu_sprite_overflow.observed_status_bit_hex,
         "0x00"
     );
+    assert_eq!(
+        telemetry
+            .ppu_sprite_overflow
+            .false_positive_observed_status_bit_hex,
+        "0x20"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_sprite_overflow
+            .false_negative_observed_status_bit_hex,
+        "0x00"
+    );
     assert_eq!(telemetry.ppu_sprite_overflow.observed_case_count, 0);
+    assert!(!telemetry.ppu_sprite_overflow.hardware_bug_matrix_passed);
     assert!(!telemetry.ppu_sprite_overflow.passed);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "cartridge.test.26.result"
@@ -1378,6 +1419,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_fail
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ppu.sprite_overflow.status"
+            && probe.status == DiagnosticProbeStatus::Skipped
+            && probe.test_id == Some(26)
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.sprite_overflow.hardware_bug_matrix"
             && probe.status == DiagnosticProbeStatus::Skipped
             && probe.test_id == Some(26)
     }));
@@ -1394,6 +1440,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_fail
     assert!(report.contains("| Focus domain | ppu.sprite_overflow |"));
     assert!(report.contains("| Likely domain | ppu.sprite_overflow |"));
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x00 / 0x20 |"));
+    assert!(report.contains("| Sprite-overflow false-positive bit / expected | 0x20 / 0x20 |"));
+    assert!(report.contains("| Sprite-overflow false-negative bit / expected | 0x00 / 0x00 |"));
+    assert!(report.contains("| Sprite-overflow cases / expected | 0 / 3 |"));
+    assert!(report.contains("| Sprite-overflow hardware-bug matrix passed | false |"));
     assert!(report.contains("| 26 | ppu_sprite_overflow | ppu | edge_case | failed |"));
     assert!(report.contains("| 27 | ppu_sprite_priority_mux | ppu | edge_case | not_started |"));
     assert!(report.contains("| 28 | ppu_scroll_seam_matrix | ppu | edge_case | not_started |"));
