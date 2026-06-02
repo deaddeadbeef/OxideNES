@@ -125,7 +125,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - `telemetry.json` includes PPU sprite-zero-hit status and case-count probes so automated debuggers can localize sprite/background collision signaling regressions to `ppu.sprite_zero_hit`.
 - `telemetry.json` includes PPU sprite-overflow status, case-count, and OAM-restore probes so automated debuggers can localize sprite evaluation regressions to `ppu.sprite_overflow` without confusing the fixture with DMA checksum drift.
 - `telemetry.json` includes PPU sprite-priority frame-pixel samples so automated debuggers can localize sprite/background priority mux regressions to `ppu.sprite_priority`.
-- `telemetry.json` includes PPU fine-X and vertical scroll-seam frame-pixel samples so automated debuggers can localize background seam regressions to `ppu.scroll_seam`.
+- `telemetry.json` includes PPU fine-X, coarse-X, and vertical scroll-seam frame-pixel samples so automated debuggers can localize background seam regressions to `ppu.scroll_seam`.
 - `telemetry.json` includes OAM DMA start/end, active-cycle, per-transfer phase-matrix buckets/parities, and DMC-overlap telemetry proving the accepted run covers both 513-cycle and 514-cycle OAM DMA buckets while a phase-specific 3-cycle or 4-cycle DMC sample-DMA stall bucket was serviced during the OAM stall window.
 - Mapper construction and bank-switching regressions cover supported mappers with synthetic fixtures.
 - PPU mirroring and save-state truncation regressions pass.

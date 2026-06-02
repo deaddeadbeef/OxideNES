@@ -11,9 +11,9 @@ use crate::joypad::JoypadButton;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 39;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 40;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v39";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v40";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -130,13 +130,19 @@ const PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR: u32 = 0xB53120;
 const PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR: u32 = 0x64B0FF;
 const PPU_SCROLL_SEAM_TEST_ID: u8 = 28;
 const PPU_SCROLL_SEAM_CASE_COUNT_ADDR: u16 = 0x0254;
-const PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT: u8 = 4;
+const PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT: u8 = 6;
 const PPU_SCROLL_SEAM_LEFT_SAMPLE_X: usize = 2;
 const PPU_SCROLL_SEAM_LEFT_SAMPLE_Y: usize = 18;
 const PPU_SCROLL_SEAM_RIGHT_SAMPLE_X: usize = 10;
 const PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y: usize = 18;
 const PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR: u32 = 0x64B0FF;
 const PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR: u32 = 0xB53120;
+const PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_X: usize = 2;
+const PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_Y: usize = 18;
+const PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_X: usize = 10;
+const PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_Y: usize = 18;
+const PPU_SCROLL_SEAM_EXPECTED_COARSE_LEFT_COLOR: u32 = 0xB53120;
+const PPU_SCROLL_SEAM_EXPECTED_COARSE_RIGHT_COLOR: u32 = 0x64B0FF;
 const PPU_SCROLL_SEAM_TOP_SAMPLE_X: usize = 2;
 const PPU_SCROLL_SEAM_TOP_SAMPLE_Y: usize = 12;
 const PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X: usize = 2;
@@ -477,9 +483,10 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "ppu_scroll_seam_matrix",
         subsystem: DiagnosticSubsystem::Ppu,
         tier: DiagnosticTestTier::EdgeCase,
-        intent: "Verify fine-X and vertical scrolling render expected pixels across deterministic background tile seams.",
+        intent: "Verify fine-X, coarse-X, and vertical scrolling render expected pixels across deterministic background tile seams.",
         expected_observations: &[
             "left and right samples straddle the fine-X horizontal tile seam",
+            "coarse-X samples prove an 8-pixel scroll shifts the viewport into the next background tile",
             "top and bottom samples straddle a vertical scroll tile seam",
         ],
     },
@@ -1131,9 +1138,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Per-dot vblank edge timing, sprite overflow hardware-bug false positives/negatives, coarse-X seams, and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
-        suggested_next_test: "Add deterministic coarse-X seam scenes or dot-edge vblank probes with expected frame checksums.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Per-dot vblank edge timing, sprite overflow hardware-bug false positives/negatives, coarse-X nametable wrap seams, and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
+        suggested_next_test: "Add deterministic coarse-X nametable-wrap scenes or dot-edge vblank probes with expected frame checksums.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1665,6 +1672,7 @@ pub struct PpuScrollSeamTelemetry {
     pub expected_case_count: u8,
     pub observed_case_count: u8,
     pub scroll_x: u8,
+    pub coarse_scroll_x: u8,
     pub scroll_y: u8,
     pub left_sample_x: usize,
     pub left_sample_y: usize,
@@ -1678,6 +1686,18 @@ pub struct PpuScrollSeamTelemetry {
     pub right_expected_color_hex: String,
     pub right_observed_color: u32,
     pub right_observed_color_hex: String,
+    pub coarse_left_sample_x: usize,
+    pub coarse_left_sample_y: usize,
+    pub coarse_left_expected_color: u32,
+    pub coarse_left_expected_color_hex: String,
+    pub coarse_left_observed_color: u32,
+    pub coarse_left_observed_color_hex: String,
+    pub coarse_right_sample_x: usize,
+    pub coarse_right_sample_y: usize,
+    pub coarse_right_expected_color: u32,
+    pub coarse_right_expected_color_hex: String,
+    pub coarse_right_observed_color: u32,
+    pub coarse_right_observed_color_hex: String,
     pub top_sample_x: usize,
     pub top_sample_y: usize,
     pub top_expected_color: u32,
@@ -2125,9 +2145,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 current_test,
                 &bus.ppu.frame_data,
             );
+            let ppu_scroll_seam_case_count = bus.cpu_read(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
             maybe_capture_ppu_scroll_seam_frame(
                 &mut ppu_scroll_seam_frame,
                 current_test,
+                ppu_scroll_seam_case_count,
                 &bus.ppu.frame_data,
             );
             bus.apu.end_frame();
@@ -2257,9 +2279,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     current_test,
                     &bus.ppu.frame_data,
                 );
+                let ppu_scroll_seam_case_count = bus.cpu_read(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
                 maybe_capture_ppu_scroll_seam_frame(
                     &mut ppu_scroll_seam_frame,
                     current_test,
+                    ppu_scroll_seam_case_count,
                     &bus.ppu.frame_data,
                 );
                 bus.apu.end_frame();
@@ -2991,6 +3015,24 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
+        "| Scroll-seam coarse-left sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_scroll_seam.coarse_left_sample_x,
+        telemetry.ppu_scroll_seam.coarse_left_sample_y,
+        telemetry.ppu_scroll_seam.coarse_left_observed_color_hex,
+        telemetry.ppu_scroll_seam.coarse_left_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Scroll-seam coarse-right sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_scroll_seam.coarse_right_sample_x,
+        telemetry.ppu_scroll_seam.coarse_right_sample_y,
+        telemetry.ppu_scroll_seam.coarse_right_observed_color_hex,
+        telemetry.ppu_scroll_seam.coarse_right_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "| Scroll-seam top sample / expected | ({}, {}) {} / {} |",
         telemetry.ppu_scroll_seam.top_sample_x,
         telemetry.ppu_scroll_seam.top_sample_y,
@@ -3009,8 +3051,10 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
-        "| Scroll-seam scroll X/Y | {} / {} |",
-        telemetry.ppu_scroll_seam.scroll_x, telemetry.ppu_scroll_seam.scroll_y
+        "| Scroll-seam scroll X/coarse-X/Y | {} / {} / {} |",
+        telemetry.ppu_scroll_seam.scroll_x,
+        telemetry.ppu_scroll_seam.coarse_scroll_x,
+        telemetry.ppu_scroll_seam.scroll_y
     )
     .expect("write report");
     writeln!(
@@ -4283,7 +4327,7 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
     if !input.ppu_scroll_seam.passed {
         failures.push(format!(
-            "PPU scroll-seam mismatch: left sample ({}, {}) {} expected {}, right sample ({}, {}) {} expected {}, top sample ({}, {}) {} expected {}, bottom sample ({}, {}) {} expected {}, scroll {}/{}, cases {}/{}",
+            "PPU scroll-seam mismatch: left sample ({}, {}) {} expected {}, right sample ({}, {}) {} expected {}, coarse-left sample ({}, {}) {} expected {}, coarse-right sample ({}, {}) {} expected {}, top sample ({}, {}) {} expected {}, bottom sample ({}, {}) {} expected {}, scroll {}/{}, coarse scroll {}, cases {}/{}",
             input.ppu_scroll_seam.left_sample_x,
             input.ppu_scroll_seam.left_sample_y,
             input.ppu_scroll_seam.left_observed_color_hex,
@@ -4292,6 +4336,14 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_scroll_seam.right_sample_y,
             input.ppu_scroll_seam.right_observed_color_hex,
             input.ppu_scroll_seam.right_expected_color_hex,
+            input.ppu_scroll_seam.coarse_left_sample_x,
+            input.ppu_scroll_seam.coarse_left_sample_y,
+            input.ppu_scroll_seam.coarse_left_observed_color_hex,
+            input.ppu_scroll_seam.coarse_left_expected_color_hex,
+            input.ppu_scroll_seam.coarse_right_sample_x,
+            input.ppu_scroll_seam.coarse_right_sample_y,
+            input.ppu_scroll_seam.coarse_right_observed_color_hex,
+            input.ppu_scroll_seam.coarse_right_expected_color_hex,
             input.ppu_scroll_seam.top_sample_x,
             input.ppu_scroll_seam.top_sample_y,
             input.ppu_scroll_seam.top_observed_color_hex,
@@ -4302,6 +4354,7 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_scroll_seam.bottom_expected_color_hex,
             input.ppu_scroll_seam.scroll_x,
             input.ppu_scroll_seam.scroll_y,
+            input.ppu_scroll_seam.coarse_scroll_x,
             input.ppu_scroll_seam.observed_case_count,
             input.ppu_scroll_seam.expected_case_count
         ));
@@ -4629,16 +4682,22 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             test_name: test_name(PPU_SCROLL_SEAM_TEST_ID),
             status: gated_probe_status(passed_suite, input.ppu_scroll_seam.passed),
             description:
-                "Host-sampled frame pixels prove fine-X and vertical scroll seams"
+                "Host-sampled frame pixels prove fine-X, coarse-X, and vertical scroll seams"
                     .to_string(),
             expected: format!(
-                "left sample ({}, {}) {}, right sample ({}, {}) {}, top sample ({}, {}) {}, bottom sample ({}, {}) {}, scroll {}/{}, cases {}",
+                "left sample ({}, {}) {}, right sample ({}, {}) {}, coarse-left sample ({}, {}) {}, coarse-right sample ({}, {}) {}, top sample ({}, {}) {}, bottom sample ({}, {}) {}, scroll {}/{}, coarse scroll {}, cases {}",
                 input.ppu_scroll_seam.left_sample_x,
                 input.ppu_scroll_seam.left_sample_y,
                 input.ppu_scroll_seam.left_expected_color_hex,
                 input.ppu_scroll_seam.right_sample_x,
                 input.ppu_scroll_seam.right_sample_y,
                 input.ppu_scroll_seam.right_expected_color_hex,
+                input.ppu_scroll_seam.coarse_left_sample_x,
+                input.ppu_scroll_seam.coarse_left_sample_y,
+                input.ppu_scroll_seam.coarse_left_expected_color_hex,
+                input.ppu_scroll_seam.coarse_right_sample_x,
+                input.ppu_scroll_seam.coarse_right_sample_y,
+                input.ppu_scroll_seam.coarse_right_expected_color_hex,
                 input.ppu_scroll_seam.top_sample_x,
                 input.ppu_scroll_seam.top_sample_y,
                 input.ppu_scroll_seam.top_expected_color_hex,
@@ -4647,12 +4706,15 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.ppu_scroll_seam.bottom_expected_color_hex,
                 input.ppu_scroll_seam.scroll_x,
                 input.ppu_scroll_seam.scroll_y,
+                input.ppu_scroll_seam.coarse_scroll_x,
                 input.ppu_scroll_seam.expected_case_count
             ),
             observed: format!(
-                "left sample {}, right sample {}, top sample {}, bottom sample {}, cases {}/{}",
+                "left sample {}, right sample {}, coarse-left sample {}, coarse-right sample {}, top sample {}, bottom sample {}, cases {}/{}",
                 input.ppu_scroll_seam.left_observed_color_hex,
                 input.ppu_scroll_seam.right_observed_color_hex,
+                input.ppu_scroll_seam.coarse_left_observed_color_hex,
+                input.ppu_scroll_seam.coarse_right_observed_color_hex,
                 input.ppu_scroll_seam.top_observed_color_hex,
                 input.ppu_scroll_seam.bottom_observed_color_hex,
                 input.ppu_scroll_seam.observed_case_count,
@@ -6125,6 +6187,14 @@ impl DiagnosticProgram {
         self.asm.lda_abs(0x2002);
         self.asm.lda_imm(0x20);
         self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x42);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
         self.asm.lda_imm(0x60);
         self.asm.sta_abs(0x2006);
         self.asm.lda_imm(0x03);
@@ -6161,7 +6231,7 @@ impl DiagnosticProgram {
         self.asm
             .label(PPU_SCROLL_SEAM_FAULT_LABEL)
             .expect("diagnostic fault-injection label should not collide");
-        self.asm.lda_imm(PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT);
+        self.asm.lda_imm(0x04);
         self.asm.sta_abs(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x2000);
@@ -6190,6 +6260,38 @@ impl DiagnosticProgram {
         self.asm.and_imm(0x80);
         self.asm.cmp_imm(0x80);
         self.asm.bne(&second_vblank);
+
+        self.delay_host_frame_capture();
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2001);
+        self.asm.lda_imm(PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x08);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x04);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x0A);
+        self.asm.sta_abs(0x2001);
+
+        let coarse_first_vblank = self.unique_label("scroll_seam_coarse_first_vblank");
+        self.asm
+            .label(&coarse_first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&coarse_first_vblank);
+
+        let coarse_second_vblank = self.unique_label("scroll_seam_coarse_second_vblank");
+        self.asm
+            .label(&coarse_second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&coarse_second_vblank);
 
         self.delay_host_frame_capture();
         self.pass_test(PPU_SCROLL_SEAM_TEST_ID);
@@ -6908,63 +7010,98 @@ fn ppu_scroll_seam_telemetry(
     final_frame: &[u32],
 ) -> PpuScrollSeamTelemetry {
     let observed_case_count = ram[(PPU_SCROLL_SEAM_CASE_COUNT_ADDR & 0x07FF) as usize];
-    let fallback_sample = PpuScrollSeamFrameSample {
-        left_color: sample_frame_color(
+    let sample = captured_sample.copied().unwrap_or_default();
+    let left_color = sample.left_color.unwrap_or_else(|| {
+        sample_frame_color(
             final_frame,
             PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
             PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
-        ),
-        right_color: sample_frame_color(
+        )
+    });
+    let right_color = sample.right_color.unwrap_or_else(|| {
+        sample_frame_color(
             final_frame,
             PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
             PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
-        ),
-        top_color: sample_frame_color(
+        )
+    });
+    let coarse_left_color = sample.coarse_left_color.unwrap_or_else(|| {
+        sample_frame_color(
+            final_frame,
+            PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_X,
+            PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_Y,
+        )
+    });
+    let coarse_right_color = sample.coarse_right_color.unwrap_or_else(|| {
+        sample_frame_color(
+            final_frame,
+            PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_X,
+            PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_Y,
+        )
+    });
+    let top_color = sample.top_color.unwrap_or_else(|| {
+        sample_frame_color(
             final_frame,
             PPU_SCROLL_SEAM_TOP_SAMPLE_X,
             PPU_SCROLL_SEAM_TOP_SAMPLE_Y,
-        ),
-        bottom_color: sample_frame_color(
+        )
+    });
+    let bottom_color = sample.bottom_color.unwrap_or_else(|| {
+        sample_frame_color(
             final_frame,
             PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X,
             PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y,
-        ),
-    };
-    let sample = captured_sample.copied().unwrap_or(fallback_sample);
+        )
+    });
     PpuScrollSeamTelemetry {
         expected_case_count: PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT,
         observed_case_count,
         scroll_x: 0x04,
+        coarse_scroll_x: 0x08,
         scroll_y: 0x04,
         left_sample_x: PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
         left_sample_y: PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
         left_expected_color: PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR,
         left_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR),
-        left_observed_color: sample.left_color,
-        left_observed_color_hex: hex_color(sample.left_color),
+        left_observed_color: left_color,
+        left_observed_color_hex: hex_color(left_color),
         right_sample_x: PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
         right_sample_y: PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
         right_expected_color: PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR,
         right_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR),
-        right_observed_color: sample.right_color,
-        right_observed_color_hex: hex_color(sample.right_color),
+        right_observed_color: right_color,
+        right_observed_color_hex: hex_color(right_color),
+        coarse_left_sample_x: PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_X,
+        coarse_left_sample_y: PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_Y,
+        coarse_left_expected_color: PPU_SCROLL_SEAM_EXPECTED_COARSE_LEFT_COLOR,
+        coarse_left_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_COARSE_LEFT_COLOR),
+        coarse_left_observed_color: coarse_left_color,
+        coarse_left_observed_color_hex: hex_color(coarse_left_color),
+        coarse_right_sample_x: PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_X,
+        coarse_right_sample_y: PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_Y,
+        coarse_right_expected_color: PPU_SCROLL_SEAM_EXPECTED_COARSE_RIGHT_COLOR,
+        coarse_right_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_COARSE_RIGHT_COLOR),
+        coarse_right_observed_color: coarse_right_color,
+        coarse_right_observed_color_hex: hex_color(coarse_right_color),
         top_sample_x: PPU_SCROLL_SEAM_TOP_SAMPLE_X,
         top_sample_y: PPU_SCROLL_SEAM_TOP_SAMPLE_Y,
         top_expected_color: PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR,
         top_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR),
-        top_observed_color: sample.top_color,
-        top_observed_color_hex: hex_color(sample.top_color),
+        top_observed_color: top_color,
+        top_observed_color_hex: hex_color(top_color),
         bottom_sample_x: PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X,
         bottom_sample_y: PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y,
         bottom_expected_color: PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR,
         bottom_expected_color_hex: hex_color(PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR),
-        bottom_observed_color: sample.bottom_color,
-        bottom_observed_color_hex: hex_color(sample.bottom_color),
+        bottom_observed_color: bottom_color,
+        bottom_observed_color_hex: hex_color(bottom_color),
         passed: observed_case_count == PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT
-            && sample.left_color == PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR
-            && sample.right_color == PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR
-            && sample.top_color == PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR
-            && sample.bottom_color == PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR,
+            && left_color == PPU_SCROLL_SEAM_EXPECTED_LEFT_COLOR
+            && right_color == PPU_SCROLL_SEAM_EXPECTED_RIGHT_COLOR
+            && coarse_left_color == PPU_SCROLL_SEAM_EXPECTED_COARSE_LEFT_COLOR
+            && coarse_right_color == PPU_SCROLL_SEAM_EXPECTED_COARSE_RIGHT_COLOR
+            && top_color == PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR
+            && bottom_color == PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR,
     }
 }
 
@@ -7845,12 +7982,14 @@ struct PpuSpritePriorityFrameSample {
     behind_color: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct PpuScrollSeamFrameSample {
-    left_color: u32,
-    right_color: u32,
-    top_color: u32,
-    bottom_color: u32,
+    left_color: Option<u32>,
+    right_color: Option<u32>,
+    coarse_left_color: Option<u32>,
+    coarse_right_color: Option<u32>,
+    top_color: Option<u32>,
+    bottom_color: Option<u32>,
 }
 
 fn maybe_capture_diagnostic_render_frame(
@@ -7892,33 +8031,50 @@ fn maybe_capture_ppu_sprite_priority_frame(
 fn maybe_capture_ppu_scroll_seam_frame(
     retained_sample: &mut Option<PpuScrollSeamFrameSample>,
     current_test: u8,
+    observed_case_count: u8,
     frame: &[u32],
 ) {
     if current_test != PPU_SCROLL_SEAM_TEST_ID {
         return;
     }
-    *retained_sample = Some(PpuScrollSeamFrameSample {
-        left_color: sample_frame_color(
-            frame,
-            PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
-            PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
-        ),
-        right_color: sample_frame_color(
-            frame,
-            PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
-            PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
-        ),
-        top_color: sample_frame_color(
-            frame,
-            PPU_SCROLL_SEAM_TOP_SAMPLE_X,
-            PPU_SCROLL_SEAM_TOP_SAMPLE_Y,
-        ),
-        bottom_color: sample_frame_color(
-            frame,
-            PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X,
-            PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y,
-        ),
-    });
+    let sample = retained_sample.get_or_insert_with(PpuScrollSeamFrameSample::default);
+    match observed_case_count {
+        4 => {
+            sample.left_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_LEFT_SAMPLE_X,
+                PPU_SCROLL_SEAM_LEFT_SAMPLE_Y,
+            ));
+            sample.right_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_RIGHT_SAMPLE_X,
+                PPU_SCROLL_SEAM_RIGHT_SAMPLE_Y,
+            ));
+            sample.top_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_TOP_SAMPLE_X,
+                PPU_SCROLL_SEAM_TOP_SAMPLE_Y,
+            ));
+            sample.bottom_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X,
+                PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y,
+            ));
+        }
+        PPU_SCROLL_SEAM_EXPECTED_CASE_COUNT => {
+            sample.coarse_left_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_X,
+                PPU_SCROLL_SEAM_COARSE_LEFT_SAMPLE_Y,
+            ));
+            sample.coarse_right_color = Some(sample_frame_color(
+                frame,
+                PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_X,
+                PPU_SCROLL_SEAM_COARSE_RIGHT_SAMPLE_Y,
+            ));
+        }
+        _ => {}
+    }
 }
 
 fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
@@ -8326,6 +8482,8 @@ fn compare_observation_checksums(
         &["ppu_vblank_timing", "passed"][..],
         &["ppu_scroll_seam", "left_observed_color"][..],
         &["ppu_scroll_seam", "right_observed_color"][..],
+        &["ppu_scroll_seam", "coarse_left_observed_color"][..],
+        &["ppu_scroll_seam", "coarse_right_observed_color"][..],
         &["ppu_scroll_seam", "top_observed_color"][..],
         &["ppu_scroll_seam", "bottom_observed_color"][..],
         &["ppu_scroll_seam", "observed_case_count"][..],
@@ -8924,10 +9082,12 @@ mod tests {
             .coverage_gaps
             .iter()
             .any(|gap| gap.id == "ppu_pixel_pipeline"
-                && gap.missing_coverage.contains("coarse-X seams")
+                && gap
+                    .missing_coverage
+                    .contains("coarse-X nametable wrap seams")
                 && gap
                     .current_coverage
-                    .contains("vertical scroll seam sampling")));
+                    .contains("coarse-X tile-shift sampling")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(
