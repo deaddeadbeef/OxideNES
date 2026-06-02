@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -16,6 +17,7 @@ from typing import Any
 
 AI_DEBUG_PACKET_MATRIX_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
+MAX_ROUTE_DIR_NAME_LENGTH = 20
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -94,7 +96,13 @@ def script_path(name: str) -> str:
 
 def sanitize_path_component(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
-    return cleaned.strip(".-") or "route"
+    cleaned = cleaned.strip(".-") or "route"
+    if len(cleaned) <= MAX_ROUTE_DIR_NAME_LENGTH:
+        return cleaned
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    prefix_length = MAX_ROUTE_DIR_NAME_LENGTH - len(digest) - 1
+    prefix = cleaned[:prefix_length].strip(".-") or "route"
+    return f"{prefix}-{digest}"
 
 
 def markdown_cell(value: Any) -> str:
@@ -238,7 +246,8 @@ def build_route_row(
     output_dir: Path,
 ) -> dict[str, Any]:
     route_id = str(route.get("route_id") or "")
-    route_dir = output_dir / sanitize_path_component(route_id)
+    route_path_component = sanitize_path_component(route_id)
+    route_dir = output_dir / route_path_component
     route_dir.mkdir(parents=True, exist_ok=True)
     artifacts = route_output_artifacts(route_dir)
     execution = run_command(
@@ -296,6 +305,7 @@ def build_route_row(
     status = "passed" if not errors else "failed"
     return {
         "route_id": route_id,
+        "route_path_component": route_path_component,
         "rank": route.get("rank"),
         "focus_domain": route.get("focus_domain"),
         "primary_scenario_id": route.get("primary_scenario_id"),

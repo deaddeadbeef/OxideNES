@@ -296,7 +296,7 @@ python scripts/run_diagnostic_ai_debug_packet_matrix.py --suite-dir target/diagn
 
 This writes `diagnostic-ai-debug-packet-matrix.json` plus
 `diagnostic-ai-debug-packet-matrix.md`, with per-route packets under
-`ai-debug-packet-matrix/<route>/`. A passed matrix means every accepted AI
+`ai-debug-packet-matrix/<route-slug>/`. A passed matrix means every accepted AI
 route has copied replay evidence, a packet-local verification result,
 digest-checked packet files, source context, test context, matching route
 identity, and passed packet stop conditions.
@@ -731,6 +731,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - PPU sprite-zero-hit signaling through a deterministic sprite/background
   overlap scene
 - PPU sprite-overflow signaling through nine in-range sprites on one scanline
+  plus hardware-bug false-positive and false-negative subcases
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
 - APU pulse-channel status register
@@ -1056,6 +1057,15 @@ first two PPUSTATUS vblank set edges at scanline 241 dot 1, records the first
 pre-render clear edge at scanline -1 dot 1, retains total set/clear edge and
 NMI-trigger counts, and exposes `ppu.vblank_timing.edge_dots` as a pass/fail
 probe alongside `ppu.vblank_timing.nmi_window`.
+
+Schema version `43` expands `ppu_sprite_overflow` into a three-case cartridge
+matrix. The test still records the direct nine-sprites-on-one-scanline overflow
+case, then adds a false-positive scene where the hardware-bug evaluator reads a
+later sprite tile byte as a Y coordinate, and a false-negative scene where an
+out-of-range sprite shifts the evaluator away from a real ninth sprite's Y byte.
+Telemetry now records each subcase status bit, and the
+`ppu.sprite_overflow.hardware_bug_matrix` probe separates hardware-bug behavior
+from the broader sprite-overflow status probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 42;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 43;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v42";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v43";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -123,9 +123,12 @@ const PPU_SPRITE_ZERO_HIT_TEST_ID: u8 = 25;
 const PPU_SPRITE_OVERFLOW_STATUS_ADDR: u16 = 0x0251;
 const PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR: u16 = 0x0252;
 const PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT: u8 = 0x20;
-const PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT: u8 = 1;
+const PPU_SPRITE_OVERFLOW_EXPECTED_CLEAR_STATUS_BIT: u8 = 0x00;
+const PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT: u8 = 3;
 const PPU_SPRITE_OVERFLOW_TEST_ID: u8 = 26;
 const PPU_SPRITE_OVERFLOW_RESTORE_BYTES: usize = 256;
+const PPU_SPRITE_OVERFLOW_FALSE_POSITIVE_STATUS_ADDR: u16 = 0x0260;
+const PPU_SPRITE_OVERFLOW_FALSE_NEGATIVE_STATUS_ADDR: u16 = 0x0261;
 const PPU_SPRITE_PRIORITY_TEST_ID: u8 = 27;
 const PPU_SPRITE_PRIORITY_CASE_COUNT_ADDR: u16 = 0x0253;
 const PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT: u8 = 2;
@@ -1155,9 +1158,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Sprite overflow hardware-bug false positives/negatives and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
-        suggested_next_test: "Add sprite overflow false-positive/false-negative probes or broader per-dot renderer checks with expected frame checksums.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, and sprite-overflow samples.",
+        suggested_next_test: "Add broader per-dot renderer checks with expected frame checksums.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1659,8 +1662,17 @@ pub struct PpuSpriteOverflowTelemetry {
     pub expected_status_bit_hex: String,
     pub observed_status_bit: u8,
     pub observed_status_bit_hex: String,
+    pub false_positive_expected_status_bit: u8,
+    pub false_positive_expected_status_bit_hex: String,
+    pub false_positive_observed_status_bit: u8,
+    pub false_positive_observed_status_bit_hex: String,
+    pub false_negative_expected_status_bit: u8,
+    pub false_negative_expected_status_bit_hex: String,
+    pub false_negative_observed_status_bit: u8,
+    pub false_negative_observed_status_bit_hex: String,
     pub expected_case_count: u8,
     pub observed_case_count: u8,
+    pub hardware_bug_matrix_passed: bool,
     pub restored_oam_byte_count: u16,
     pub passed: bool,
 }
@@ -3155,6 +3167,28 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
+        "| Sprite-overflow false-positive bit / expected | {} / {} |",
+        telemetry
+            .ppu_sprite_overflow
+            .false_positive_observed_status_bit_hex,
+        telemetry
+            .ppu_sprite_overflow
+            .false_positive_expected_status_bit_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow false-negative bit / expected | {} / {} |",
+        telemetry
+            .ppu_sprite_overflow
+            .false_negative_observed_status_bit_hex,
+        telemetry
+            .ppu_sprite_overflow
+            .false_negative_expected_status_bit_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "| Sprite-overflow cases / expected | {} / {} |",
         telemetry.ppu_sprite_overflow.observed_case_count,
         telemetry.ppu_sprite_overflow.expected_case_count
@@ -3164,6 +3198,12 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Sprite-overflow restored OAM bytes | {} |",
         telemetry.ppu_sprite_overflow.restored_oam_byte_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Sprite-overflow hardware-bug matrix passed | {} |",
+        telemetry.ppu_sprite_overflow.hardware_bug_matrix_passed
     )
     .expect("write report");
     writeln!(
@@ -4717,10 +4757,15 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
     if !input.ppu_sprite_overflow.passed {
         failures.push(format!(
-            "PPU sprite-overflow mismatch: status bit {}, cases {}/{}",
+            "PPU sprite-overflow mismatch: true_positive={}, false_positive={}, false_negative={}, cases {}/{}, hardware_bug_matrix_passed={}",
             input.ppu_sprite_overflow.observed_status_bit_hex,
+            input.ppu_sprite_overflow
+                .false_positive_observed_status_bit_hex,
+            input.ppu_sprite_overflow
+                .false_negative_observed_status_bit_hex,
             input.ppu_sprite_overflow.observed_case_count,
-            input.ppu_sprite_overflow.expected_case_count
+            input.ppu_sprite_overflow.expected_case_count,
+            input.ppu_sprite_overflow.hardware_bug_matrix_passed
         ));
     }
     if !input.ppu_sprite_priority.passed {
@@ -5051,18 +5096,60 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 "Cartridge-observed PPUSTATUS sprite-overflow bit is retained in host telemetry"
                     .to_string(),
             expected: format!(
-                "sprite-overflow status bit {} and cases {}",
+                "sprite-overflow status bit {}, false-positive bit {}, false-negative bit {}, cases {}",
                 input.ppu_sprite_overflow.expected_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_positive_expected_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_negative_expected_status_bit_hex,
                 input.ppu_sprite_overflow.expected_case_count
             ),
             observed: format!(
-                "sprite-overflow status bit {}, cases {}/{}, restored OAM bytes {}",
+                "sprite-overflow status bit {}, false_positive {}, false_negative {}, cases {}/{}, restored OAM bytes {}",
                 input.ppu_sprite_overflow.observed_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_positive_observed_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_negative_observed_status_bit_hex,
                 input.ppu_sprite_overflow.observed_case_count,
                 input.ppu_sprite_overflow.expected_case_count,
                 input.ppu_sprite_overflow.restored_oam_byte_count
             ),
             likely_domain: "ppu.sprite_overflow".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.sprite_overflow.hardware_bug_matrix".to_string(),
+            source: DiagnosticProbeSource::CartridgeResult,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_SPRITE_OVERFLOW_TEST_ID),
+            test_name: test_name(PPU_SPRITE_OVERFLOW_TEST_ID),
+            status: gated_probe_status(
+                passed_suite,
+                input.ppu_sprite_overflow.hardware_bug_matrix_passed,
+            ),
+            description:
+                "Cartridge-observed sprite-overflow hardware-bug false-positive and false-negative subcases match expected status bits"
+                    .to_string(),
+            expected: format!(
+                "true_positive={}, false_positive={}, false_negative={}",
+                input.ppu_sprite_overflow.expected_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_positive_expected_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_negative_expected_status_bit_hex
+            ),
+            observed: format!(
+                "true_positive={}, false_positive={}, false_negative={}",
+                input.ppu_sprite_overflow.observed_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_positive_observed_status_bit_hex,
+                input.ppu_sprite_overflow
+                    .false_negative_observed_status_bit_hex
+            ),
+            likely_domain: "ppu.sprite_overflow.hardware_bug".to_string(),
         },
     );
     push_probe(
@@ -6489,52 +6576,46 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(PPU_SPRITE_OVERFLOW_STATUS_ADDR);
         self.asm.sta_abs(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR);
+        self.asm
+            .sta_abs(PPU_SPRITE_OVERFLOW_FALSE_POSITIVE_STATUS_ADDR);
+        self.asm
+            .sta_abs(PPU_SPRITE_OVERFLOW_FALSE_NEGATIVE_STATUS_ADDR);
         self.asm.sta_abs(0x2000);
         self.asm.sta_abs(0x2001);
 
-        self.asm.lda_imm(0x00);
-        self.asm.sta_abs(0x2003);
-        for sprite_index in 0..9u8 {
-            let x = 0x20 + sprite_index * 8;
-            self.write_oam_bytes(&[0x30, 0x02, 0x00, x]);
-        }
-
+        self.write_sprite_overflow_true_positive_scene();
         self.asm
             .label(PPU_SPRITE_OVERFLOW_FAULT_LABEL)
             .expect("diagnostic fault-injection label should not collide");
-        self.asm.lda_imm(0x00);
-        self.asm.sta_abs(0x2005);
-        self.asm.sta_abs(0x2005);
-        self.asm.lda_abs(0x2002);
-        self.asm.lda_imm(0x00);
-        self.asm.sta_abs(0x2000);
-        self.asm.lda_imm(0x18);
-        self.asm.sta_abs(0x2001);
-
-        let first_vblank = self.unique_label("sprite_overflow_first_vblank");
-        self.asm
-            .label(&first_vblank)
-            .expect("unique label should not collide");
-        self.asm.lda_abs(0x2002);
-        self.asm.and_imm(0x80);
-        self.asm.cmp_imm(0x80);
-        self.asm.bne(&first_vblank);
-
-        let second_vblank = self.unique_label("sprite_overflow_second_vblank");
-        self.asm
-            .label(&second_vblank)
-            .expect("unique label should not collide");
-        self.asm.lda_abs(0x2002);
-        self.asm.and_imm(0x80);
-        self.asm.cmp_imm(0x80);
-        self.asm.bne(&second_vblank);
+        self.render_sprite_overflow_scene(
+            "sprite_overflow_true_positive",
+            PPU_SPRITE_OVERFLOW_STATUS_ADDR,
+        );
+        self.write_sprite_overflow_false_positive_scene();
+        self.render_sprite_overflow_scene(
+            "sprite_overflow_false_positive",
+            PPU_SPRITE_OVERFLOW_FALSE_POSITIVE_STATUS_ADDR,
+        );
+        self.write_sprite_overflow_false_negative_scene();
+        self.render_sprite_overflow_scene(
+            "sprite_overflow_false_negative",
+            PPU_SPRITE_OVERFLOW_FALSE_NEGATIVE_STATUS_ADDR,
+        );
 
         let overflow_fail = self.unique_label("sprite_overflow_fail");
         let overflow_ok = self.unique_label("sprite_overflow_ok");
         self.asm.lda_abs(0x2002);
-        self.asm.and_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
-        self.asm.sta_abs(PPU_SPRITE_OVERFLOW_STATUS_ADDR);
+        self.asm.lda_abs(PPU_SPRITE_OVERFLOW_STATUS_ADDR);
         self.asm.cmp_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
+        self.asm.bne(&overflow_fail);
+        self.asm
+            .lda_abs(PPU_SPRITE_OVERFLOW_FALSE_POSITIVE_STATUS_ADDR);
+        self.asm.cmp_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
+        self.asm.bne(&overflow_fail);
+        self.asm
+            .lda_abs(PPU_SPRITE_OVERFLOW_FALSE_NEGATIVE_STATUS_ADDR);
+        self.asm
+            .cmp_imm(PPU_SPRITE_OVERFLOW_EXPECTED_CLEAR_STATUS_BIT);
         self.asm.bne(&overflow_fail);
         self.asm.jmp_label(&overflow_ok);
 
@@ -6553,6 +6634,50 @@ impl DiagnosticProgram {
         self.asm.sta_abs(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR);
         self.restore_oam_prefix_from_dma_source(PPU_SPRITE_OVERFLOW_RESTORE_BYTES);
         self.pass_test(PPU_SPRITE_OVERFLOW_TEST_ID);
+    }
+
+    fn write_sprite_overflow_true_positive_scene(&mut self) {
+        self.fill_oam(0xF0, "sprite_overflow_true_positive_clear_oam");
+        for sprite_index in 0..9u8 {
+            let x = 0x20 + sprite_index * 8;
+            self.write_oam_entry_at(sprite_index, [0x30, 0x02, 0x00, x]);
+        }
+    }
+
+    fn write_sprite_overflow_false_positive_scene(&mut self) {
+        self.fill_oam(0xF0, "sprite_overflow_false_positive_clear_oam");
+        for sprite_index in 0..8u8 {
+            let x = 0x20 + sprite_index * 8;
+            self.write_oam_entry_at(sprite_index, [0x30, 0x02, 0x00, x]);
+        }
+        self.write_oam_entry_at(9, [0xF0, 0x30, 0xF0, 0xF0]);
+    }
+
+    fn write_sprite_overflow_false_negative_scene(&mut self) {
+        self.fill_oam(0xF0, "sprite_overflow_false_negative_clear_oam");
+        for sprite_index in 0..8u8 {
+            let x = 0x20 + sprite_index * 8;
+            self.write_oam_entry_at(sprite_index, [0x30, 0x02, 0x00, x]);
+        }
+        self.write_oam_entry_at(9, [0x30, 0xF0, 0xF0, 0xF0]);
+    }
+
+    fn render_sprite_overflow_scene(&mut self, label_prefix: &str, status_addr: u16) {
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_imm(0x18);
+        self.asm.sta_abs(0x2001);
+        self.wait_for_vblank(&format!("{label_prefix}_first_vblank"));
+        self.wait_for_vblank(&format!("{label_prefix}_second_vblank"));
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT);
+        self.asm.sta_abs(status_addr);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2001);
     }
 
     fn ppu_sprite_priority(&mut self) {
@@ -6813,6 +6938,27 @@ impl DiagnosticProgram {
             self.asm.lda_imm(byte);
             self.asm.sta_abs(0x2004);
         }
+    }
+
+    fn write_oam_entry_at(&mut self, sprite_index: u8, bytes: [u8; 4]) {
+        self.asm.lda_imm(sprite_index.saturating_mul(4));
+        self.asm.sta_abs(0x2003);
+        self.write_oam_bytes(&bytes);
+    }
+
+    fn fill_oam(&mut self, value: u8, label_prefix: &str) {
+        let loop_label = self.unique_label(label_prefix);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2003);
+        self.asm.ldx_imm(0x00);
+        self.asm
+            .label(&loop_label)
+            .expect("unique label should not collide");
+        self.asm.lda_imm(value);
+        self.asm.sta_abs(0x2004);
+        self.asm.inx();
+        self.asm.txa();
+        self.asm.bne(&loop_label);
     }
 
     fn restore_oam_prefix_from_dma_source(&mut self, byte_count: usize) {
@@ -7450,15 +7596,33 @@ fn ppu_sprite_zero_hit_telemetry(ram: &[u8]) -> PpuSpriteZeroHitTelemetry {
 fn ppu_sprite_overflow_telemetry(ram: &[u8]) -> PpuSpriteOverflowTelemetry {
     let observed_status_bit = ram[(PPU_SPRITE_OVERFLOW_STATUS_ADDR & 0x07FF) as usize];
     let observed_case_count = ram[(PPU_SPRITE_OVERFLOW_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let false_positive_observed_status_bit =
+        ram[(PPU_SPRITE_OVERFLOW_FALSE_POSITIVE_STATUS_ADDR & 0x07FF) as usize];
+    let false_negative_observed_status_bit =
+        ram[(PPU_SPRITE_OVERFLOW_FALSE_NEGATIVE_STATUS_ADDR & 0x07FF) as usize];
+    let hardware_bug_matrix_passed = observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT
+        && false_positive_observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT
+        && false_negative_observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_CLEAR_STATUS_BIT;
     PpuSpriteOverflowTelemetry {
         expected_status_bit: PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT,
         expected_status_bit_hex: hex_byte(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT),
         observed_status_bit,
         observed_status_bit_hex: hex_byte(observed_status_bit),
+        false_positive_expected_status_bit: PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT,
+        false_positive_expected_status_bit_hex: hex_byte(PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT),
+        false_positive_observed_status_bit,
+        false_positive_observed_status_bit_hex: hex_byte(false_positive_observed_status_bit),
+        false_negative_expected_status_bit: PPU_SPRITE_OVERFLOW_EXPECTED_CLEAR_STATUS_BIT,
+        false_negative_expected_status_bit_hex: hex_byte(
+            PPU_SPRITE_OVERFLOW_EXPECTED_CLEAR_STATUS_BIT,
+        ),
+        false_negative_observed_status_bit,
+        false_negative_observed_status_bit_hex: hex_byte(false_negative_observed_status_bit),
         expected_case_count: PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT,
         observed_case_count,
+        hardware_bug_matrix_passed,
         restored_oam_byte_count: PPU_SPRITE_OVERFLOW_RESTORE_BYTES as u16,
-        passed: observed_status_bit == PPU_SPRITE_OVERFLOW_EXPECTED_STATUS_BIT
+        passed: hardware_bug_matrix_passed
             && observed_case_count == PPU_SPRITE_OVERFLOW_EXPECTED_CASE_COUNT,
     }
 }
@@ -9103,7 +9267,10 @@ fn compare_observation_checksums(
         &["ppu_sprite_zero_hit", "observed_case_count"][..],
         &["ppu_sprite_zero_hit", "passed"][..],
         &["ppu_sprite_overflow", "observed_status_bit"][..],
+        &["ppu_sprite_overflow", "false_positive_observed_status_bit"][..],
+        &["ppu_sprite_overflow", "false_negative_observed_status_bit"][..],
         &["ppu_sprite_overflow", "observed_case_count"][..],
+        &["ppu_sprite_overflow", "hardware_bug_matrix_passed"][..],
         &["ppu_sprite_overflow", "passed"][..],
         &["ppu_sprite_priority", "front_observed_color"][..],
         &["ppu_sprite_priority", "behind_observed_color"][..],
@@ -9752,10 +9919,16 @@ mod tests {
                 && gap
                     .current_coverage
                     .contains("PPUSTATUS vblank set/clear dot-edge timing")
+                && gap
+                    .current_coverage
+                    .contains("sprite-overflow evaluation including hardware-bug")
                 && !gap.missing_coverage.contains("vblank edge timing")
+                && !gap
+                    .missing_coverage
+                    .contains("Sprite overflow hardware-bug")
                 && gap
                     .missing_coverage
-                    .contains("Sprite overflow hardware-bug false positives/negatives")));
+                    .contains("Per-dot rendering behavior beyond targeted")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(
