@@ -482,8 +482,8 @@ overflow regressions localize to `ppu.sprite_overflow`.
 attributes after OAM setup, proving sprite/background pixel-mux regressions
 localize to `ppu.sprite_priority` through host-sampled frame colors.
 `ppu_scroll_seam_fault` corrupts one side of a deterministic scroll-seam scene,
-proving fine-X, coarse-X, and vertical scroll regressions localize to `ppu.scroll_seam`
-through host-sampled frame colors.
+proving fine-X, coarse-X, coarse-X nametable-wrap, and vertical scroll
+regressions localize to `ppu.scroll_seam` through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -1040,6 +1040,14 @@ samples from four to six. The cartridge now renders the existing fine-X and
 vertical seam phase, then renders a coarse-X phase with an 8-pixel horizontal
 scroll so `ppu_scroll_seam` telemetry records coarse-left and coarse-right
 tile-shift samples in addition to the existing left/right/top/bottom samples.
+
+Schema version `41` adds a vertical-mirroring scroll-wrap variant cartridge to
+the host diagnostic run. The main diagnostic cartridge remains Mapper 2 with
+horizontal mirroring so it still covers horizontal nametable aliasing. The
+variant renders tile 31 of `$2000` and tile 0 of `$2400` with contrasting
+patterns, scrolls X by 248 pixels, and records nametable-wrap left/right frame
+samples, variant mirroring, frames, cycles, pass status, and any variant error
+inside `ppu_scroll_seam` telemetry.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
