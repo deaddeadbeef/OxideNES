@@ -308,6 +308,35 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "joypad.input_port_matrix"
     }));
+    assert!(telemetry.ppu_vblank_timing.passed);
+    assert_eq!(telemetry.ppu_vblank_timing.test_id, 10);
+    assert_eq!(
+        telemetry.ppu_vblank_timing.test_name,
+        Some("ppu_nmi_and_render_frame")
+    );
+    assert_eq!(telemetry.ppu_vblank_timing.observed_nmi_count, 2);
+    assert!(telemetry.ppu_vblank_timing.wait_loop_start_cycle.is_some());
+    assert!(telemetry
+        .ppu_vblank_timing
+        .first_nmi_latency_cycles
+        .is_some_and(|cycles| {
+            (telemetry.ppu_vblank_timing.first_nmi_expected_min_cycles
+                ..=telemetry.ppu_vblank_timing.first_nmi_expected_max_cycles)
+                .contains(&cycles)
+        }));
+    assert!(telemetry
+        .ppu_vblank_timing
+        .inter_nmi_cycles
+        .is_some_and(|cycles| {
+            (telemetry.ppu_vblank_timing.inter_nmi_expected_min_cycles
+                ..=telemetry.ppu_vblank_timing.inter_nmi_expected_max_cycles)
+                .contains(&cycles)
+        }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.nmi_window"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.vblank_timing"
+    }));
     assert!(telemetry.ppu_sprite_zero_hit.passed);
     assert_eq!(
         telemetry.ppu_sprite_zero_hit.observed_status_bit_hex,
@@ -549,6 +578,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
     }));
     assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.nmi_window"
+            && probe.test_name == Some("ppu_nmi_and_render_frame")
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.observed.contains("inter_nmi=")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "dma.oam_active_cycles"
             && probe.test_name == Some("oam_dma_transfer")
             && probe.status == DiagnosticProbeStatus::Passed
@@ -601,6 +636,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Known Coverage Gaps"));
     assert!(report.contains("| mapper_banking_runtime | cartridge |"));
     assert!(report.contains("## PPU Pixel Pipeline"));
+    assert!(report.contains("| First NMI cycle / latency |"));
+    assert!(report.contains("| Second NMI cycle / inter-NMI cycles |"));
+    assert!(report.contains("| Vblank timing passed | true |"));
     assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x40 / 0x40 |"));
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x20 / 0x20 |"));
     assert!(report.contains("| Sprite-overflow restored OAM bytes | 256 |"));
@@ -2545,12 +2583,30 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
         .debug_focus
         .failed_probe_ids
         .contains(&"ppu.nmi_count".to_string()));
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.vblank_timing.nmi_window".to_string()));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ppu.nmi_count"
             && probe.status == DiagnosticProbeStatus::Failed
             && probe.test_id == Some(10)
             && probe.likely_domain == "ppu.nmi"
             && probe.observed.contains("NMI count 0")
+    }));
+    assert!(!telemetry.ppu_vblank_timing.passed);
+    assert_eq!(telemetry.ppu_vblank_timing.observed_nmi_count, 0);
+    assert!(telemetry
+        .ppu_vblank_timing
+        .first_nmi_latency_cycles
+        .is_none());
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.vblank_timing.nmi_window"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(10)
+            && probe.likely_domain == "ppu.vblank_timing"
+            && probe.observed.contains("nmi_count=0")
     }));
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
@@ -2582,6 +2638,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout() {
     assert!(report.contains("| Likely domain | ppu.nmi |"));
     assert!(report.contains("| 10 | ppu_nmi_and_render_frame | ppu | integration | timed_out |"));
     assert!(report.contains("ppu.nmi_count"));
+    assert!(report.contains("ppu.vblank_timing.nmi_window"));
 }
 
 #[test]
