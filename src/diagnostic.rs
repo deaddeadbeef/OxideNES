@@ -8,12 +8,13 @@ use crate::bus::{Bus, DmcDmaService};
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::joypad::JoypadButton;
+use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 41;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 42;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v41";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v42";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -66,6 +67,12 @@ const PPU_VBLANK_FIRST_NMI_MIN_CYCLES: u64 = 1;
 const PPU_VBLANK_FIRST_NMI_MAX_CYCLES: u64 = 30_000;
 const PPU_VBLANK_INTER_NMI_MIN_CYCLES: u64 = 29_700;
 const PPU_VBLANK_INTER_NMI_MAX_CYCLES: u64 = 29_900;
+const PPU_VBLANK_EDGE_SET_SCANLINE: i16 = 241;
+const PPU_VBLANK_EDGE_SET_DOT: u16 = 1;
+const PPU_VBLANK_EDGE_CLEAR_SCANLINE: i16 = -1;
+const PPU_VBLANK_EDGE_CLEAR_DOT: u16 = 1;
+const PPU_VBLANK_EDGE_EXPECTED_SET_COUNT: u8 = 2;
+const PPU_VBLANK_EDGE_EXPECTED_CLEAR_COUNT: u8 = 1;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -1148,9 +1155,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Per-dot vblank edge timing, sprite overflow hardware-bug false positives/negatives, and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
-        suggested_next_test: "Add dot-edge vblank probes or broader per-dot renderer checks with expected frame checksums.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, and host-visible multi-color background output.",
+        missing_coverage: "Sprite overflow hardware-bug false positives/negatives and per-dot rendering behavior beyond targeted sprite-priority and scroll-seam samples.",
+        suggested_next_test: "Add sprite overflow false-positive/false-negative probes or broader per-dot renderer checks with expected frame checksums.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1759,6 +1766,32 @@ pub struct PpuVblankTimingTelemetry {
     pub inter_nmi_expected_min_cycles: u64,
     pub inter_nmi_expected_max_cycles: u64,
     pub observed_nmi_count: u8,
+    pub nmi_window_passed: bool,
+    pub edge_expected_set_scanline: i16,
+    pub edge_expected_set_dot: u16,
+    pub edge_expected_clear_scanline: i16,
+    pub edge_expected_clear_dot: u16,
+    pub edge_expected_set_count: u8,
+    pub edge_expected_clear_count: u8,
+    pub edge_set_count: u8,
+    pub edge_clear_count: u8,
+    pub edge_nmi_trigger_count: u8,
+    pub edge_first_set_cpu_cycle: Option<u64>,
+    pub edge_first_set_frame: Option<u64>,
+    pub edge_first_set_ppu_scanline: Option<i16>,
+    pub edge_first_set_ppu_dot: Option<u16>,
+    pub edge_first_set_ppu_phase: Option<u8>,
+    pub edge_first_clear_cpu_cycle: Option<u64>,
+    pub edge_first_clear_frame: Option<u64>,
+    pub edge_first_clear_ppu_scanline: Option<i16>,
+    pub edge_first_clear_ppu_dot: Option<u16>,
+    pub edge_first_clear_ppu_phase: Option<u8>,
+    pub edge_second_set_cpu_cycle: Option<u64>,
+    pub edge_second_set_frame: Option<u64>,
+    pub edge_second_set_ppu_scanline: Option<i16>,
+    pub edge_second_set_ppu_dot: Option<u16>,
+    pub edge_second_set_ppu_phase: Option<u8>,
+    pub edge_passed: bool,
     pub passed: bool,
 }
 
@@ -2215,7 +2248,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         let dma_active_before = bus.dma_active();
         let dmc_stall_before = bus.dmc_stall_active();
         cpu.clock(&mut bus);
-        bus.tick(1);
+        let current_test_after_cpu = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+        tick_ppu_for_diagnostic_cpu_cycle(
+            &mut bus,
+            &mut ppu_vblank_timing,
+            current_test_after_cpu,
+            cycles,
+            frames,
+        );
         bus.tick_apu();
         let dmc_dma_service = bus.service_dmc_dma(cpu.is_odd_cycle());
         cycles += 1;
@@ -2344,7 +2384,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             let dma_active_before = bus.dma_active();
             let dmc_stall_before = bus.dmc_stall_active();
             cpu.clock(&mut bus);
-            bus.tick(1);
+            let current_test_after_cpu = read_ram_byte(&mut bus, CURRENT_TEST_ADDR);
+            tick_ppu_for_diagnostic_cpu_cycle(
+                &mut bus,
+                &mut ppu_vblank_timing,
+                current_test_after_cpu,
+                cycles,
+                frames,
+            );
             bus.tick_apu();
             let dmc_dma_service = bus.service_dmc_dma(cpu.is_odd_cycle());
             cycles += 1;
@@ -3024,6 +3071,53 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         telemetry.ppu_vblank_timing.first_nmi_expected_max_cycles,
         telemetry.ppu_vblank_timing.inter_nmi_expected_min_cycles,
         telemetry.ppu_vblank_timing.inter_nmi_expected_max_cycles
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank edge expected set/clear dots | set scanline {} dot {}, clear scanline {} dot {} |",
+        telemetry.ppu_vblank_timing.edge_expected_set_scanline,
+        telemetry.ppu_vblank_timing.edge_expected_set_dot,
+        telemetry.ppu_vblank_timing.edge_expected_clear_scanline,
+        telemetry.ppu_vblank_timing.edge_expected_clear_dot
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank edge observed counts | set {}, clear {}, NMI triggers {} |",
+        telemetry.ppu_vblank_timing.edge_set_count,
+        telemetry.ppu_vblank_timing.edge_clear_count,
+        telemetry.ppu_vblank_timing.edge_nmi_trigger_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank first set edge CPU/frame/PPU/phase | {} / {} / {}:{} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.edge_first_set_cpu_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.edge_first_set_frame),
+        optional_i16(telemetry.ppu_vblank_timing.edge_first_set_ppu_scanline),
+        optional_u16(telemetry.ppu_vblank_timing.edge_first_set_ppu_dot),
+        optional_u8(telemetry.ppu_vblank_timing.edge_first_set_ppu_phase)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank first clear edge CPU/frame/PPU/phase | {} / {} / {}:{} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.edge_first_clear_cpu_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.edge_first_clear_frame),
+        optional_i16(telemetry.ppu_vblank_timing.edge_first_clear_ppu_scanline),
+        optional_u16(telemetry.ppu_vblank_timing.edge_first_clear_ppu_dot),
+        optional_u8(telemetry.ppu_vblank_timing.edge_first_clear_ppu_phase)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Vblank second set edge CPU/frame/PPU/phase | {} / {} / {}:{} / {} |",
+        optional_u64(telemetry.ppu_vblank_timing.edge_second_set_cpu_cycle),
+        optional_u64(telemetry.ppu_vblank_timing.edge_second_set_frame),
+        optional_i16(telemetry.ppu_vblank_timing.edge_second_set_ppu_scanline),
+        optional_u16(telemetry.ppu_vblank_timing.edge_second_set_ppu_dot),
+        optional_u8(telemetry.ppu_vblank_timing.edge_second_set_ppu_phase)
     )
     .expect("write report");
     writeln!(
@@ -4261,6 +4355,92 @@ struct PpuVblankTimingObservation {
     second_nmi_cycle: Option<u64>,
     second_nmi_frame: Option<u64>,
     last_nmi_count: u8,
+    edge: PpuVblankEdgeObservation,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PpuVblankEdgeSample {
+    cpu_cycle: u64,
+    frame: u64,
+    ppu_scanline: i16,
+    ppu_dot: u16,
+    ppu_phase: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PpuVblankTickObservation {
+    cpu_cycle: u64,
+    frame: u64,
+    ppu_phase: u8,
+    before: PpuTimingState,
+    after: PpuTimingState,
+    nmi_triggered: bool,
+}
+
+#[derive(Debug, Default)]
+struct PpuVblankEdgeObservation {
+    first_set: Option<PpuVblankEdgeSample>,
+    first_clear: Option<PpuVblankEdgeSample>,
+    second_set: Option<PpuVblankEdgeSample>,
+    set_count: u8,
+    clear_count: u8,
+    nmi_trigger_count: u8,
+}
+
+impl PpuVblankEdgeObservation {
+    fn observe_ppu_tick(&mut self, tick: PpuVblankTickObservation) {
+        let before_vblank = tick.before.status & 0x80 != 0;
+        let after_vblank = tick.after.status & 0x80 != 0;
+        let sample = PpuVblankEdgeSample {
+            cpu_cycle: tick.cpu_cycle,
+            frame: tick.frame,
+            ppu_scanline: tick.before.scanline,
+            ppu_dot: tick.before.dot,
+            ppu_phase: tick.ppu_phase,
+        };
+
+        if !before_vblank && after_vblank {
+            self.set_count = self.set_count.saturating_add(1);
+            if self.first_set.is_none() {
+                self.first_set = Some(sample);
+            } else if self.second_set.is_none() {
+                self.second_set = Some(sample);
+            }
+        } else if before_vblank && !after_vblank {
+            self.clear_count = self.clear_count.saturating_add(1);
+            if self.first_clear.is_none() {
+                self.first_clear = Some(sample);
+            }
+        }
+
+        if tick.nmi_triggered {
+            self.nmi_trigger_count = self.nmi_trigger_count.saturating_add(1);
+        }
+    }
+
+    fn edge_matches(sample: Option<PpuVblankEdgeSample>, scanline: i16, dot: u16) -> bool {
+        sample.is_some_and(|sample| sample.ppu_scanline == scanline && sample.ppu_dot == dot)
+    }
+
+    fn passed(&self) -> bool {
+        self.set_count >= PPU_VBLANK_EDGE_EXPECTED_SET_COUNT
+            && self.clear_count >= PPU_VBLANK_EDGE_EXPECTED_CLEAR_COUNT
+            && Self::edge_matches(
+                self.first_set,
+                PPU_VBLANK_EDGE_SET_SCANLINE,
+                PPU_VBLANK_EDGE_SET_DOT,
+            )
+            && Self::edge_matches(
+                self.second_set,
+                PPU_VBLANK_EDGE_SET_SCANLINE,
+                PPU_VBLANK_EDGE_SET_DOT,
+            )
+            && Self::edge_matches(
+                self.first_clear,
+                PPU_VBLANK_EDGE_CLEAR_SCANLINE,
+                PPU_VBLANK_EDGE_CLEAR_DOT,
+            )
+    }
 }
 
 impl PpuVblankTimingObservation {
@@ -4303,6 +4483,12 @@ impl PpuVblankTimingObservation {
         self.last_nmi_count = nmi_count;
     }
 
+    fn observe_ppu_tick(&mut self, current_test: u8, tick: PpuVblankTickObservation) {
+        if current_test == PPU_VBLANK_TIMING_TEST_ID {
+            self.edge.observe_ppu_tick(tick);
+        }
+    }
+
     fn telemetry(&self, observed_nmi_count: u8) -> PpuVblankTimingTelemetry {
         let first_nmi_latency_cycles = self
             .wait_loop_start_cycle
@@ -4318,6 +4504,9 @@ impl PpuVblankTimingObservation {
         let inter_nmi_in_window = inter_nmi_cycles.is_some_and(|cycles| {
             (PPU_VBLANK_INTER_NMI_MIN_CYCLES..=PPU_VBLANK_INTER_NMI_MAX_CYCLES).contains(&cycles)
         });
+        let nmi_window_passed =
+            observed_nmi_count >= 2 && first_nmi_in_window && inter_nmi_in_window;
+        let edge_passed = self.edge.passed();
 
         PpuVblankTimingTelemetry {
             test_id: PPU_VBLANK_TIMING_TEST_ID,
@@ -4335,8 +4524,57 @@ impl PpuVblankTimingObservation {
             inter_nmi_expected_min_cycles: PPU_VBLANK_INTER_NMI_MIN_CYCLES,
             inter_nmi_expected_max_cycles: PPU_VBLANK_INTER_NMI_MAX_CYCLES,
             observed_nmi_count,
-            passed: observed_nmi_count >= 2 && first_nmi_in_window && inter_nmi_in_window,
+            nmi_window_passed,
+            edge_expected_set_scanline: PPU_VBLANK_EDGE_SET_SCANLINE,
+            edge_expected_set_dot: PPU_VBLANK_EDGE_SET_DOT,
+            edge_expected_clear_scanline: PPU_VBLANK_EDGE_CLEAR_SCANLINE,
+            edge_expected_clear_dot: PPU_VBLANK_EDGE_CLEAR_DOT,
+            edge_expected_set_count: PPU_VBLANK_EDGE_EXPECTED_SET_COUNT,
+            edge_expected_clear_count: PPU_VBLANK_EDGE_EXPECTED_CLEAR_COUNT,
+            edge_set_count: self.edge.set_count,
+            edge_clear_count: self.edge.clear_count,
+            edge_nmi_trigger_count: self.edge.nmi_trigger_count,
+            edge_first_set_cpu_cycle: self.edge.first_set.map(|sample| sample.cpu_cycle),
+            edge_first_set_frame: self.edge.first_set.map(|sample| sample.frame),
+            edge_first_set_ppu_scanline: self.edge.first_set.map(|sample| sample.ppu_scanline),
+            edge_first_set_ppu_dot: self.edge.first_set.map(|sample| sample.ppu_dot),
+            edge_first_set_ppu_phase: self.edge.first_set.map(|sample| sample.ppu_phase),
+            edge_first_clear_cpu_cycle: self.edge.first_clear.map(|sample| sample.cpu_cycle),
+            edge_first_clear_frame: self.edge.first_clear.map(|sample| sample.frame),
+            edge_first_clear_ppu_scanline: self.edge.first_clear.map(|sample| sample.ppu_scanline),
+            edge_first_clear_ppu_dot: self.edge.first_clear.map(|sample| sample.ppu_dot),
+            edge_first_clear_ppu_phase: self.edge.first_clear.map(|sample| sample.ppu_phase),
+            edge_second_set_cpu_cycle: self.edge.second_set.map(|sample| sample.cpu_cycle),
+            edge_second_set_frame: self.edge.second_set.map(|sample| sample.frame),
+            edge_second_set_ppu_scanline: self.edge.second_set.map(|sample| sample.ppu_scanline),
+            edge_second_set_ppu_dot: self.edge.second_set.map(|sample| sample.ppu_dot),
+            edge_second_set_ppu_phase: self.edge.second_set.map(|sample| sample.ppu_phase),
+            edge_passed,
+            passed: nmi_window_passed && edge_passed,
         }
+    }
+}
+
+fn tick_ppu_for_diagnostic_cpu_cycle(
+    bus: &mut Bus,
+    ppu_vblank_timing: &mut PpuVblankTimingObservation,
+    current_test: u8,
+    cycles: u64,
+    frames: u64,
+) {
+    for ppu_phase in 0..3 {
+        let before = bus.ppu.timing_state();
+        let nmi_triggered = bus.tick_ppu_once();
+        let after = bus.ppu.timing_state();
+        let tick = PpuVblankTickObservation {
+            cpu_cycle: cycles,
+            frame: frames,
+            ppu_phase,
+            before,
+            after,
+            nmi_triggered,
+        };
+        ppu_vblank_timing.observe_ppu_tick(current_test, tick);
     }
 }
 
@@ -4443,7 +4681,7 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
     if !input.ppu_vblank_timing.passed {
         failures.push(format!(
-            "PPU vblank timing mismatch: wait_start={}, first_nmi={}, first_latency={} expected {}..={}, second_nmi={}, inter_nmi={} expected {}..={}, nmi_count={}",
+            "PPU vblank timing mismatch: wait_start={}, first_nmi={}, first_latency={} expected {}..={}, second_nmi={}, inter_nmi={} expected {}..={}, nmi_count={}, nmi_window_passed={}, edge_set_count={}/{}, edge_clear_count={}/{}, edge_nmi_triggers={}, first_set={}:{}, first_clear={}:{}, second_set={}:{}, edge_passed={}",
             optional_u64(input.ppu_vblank_timing.wait_loop_start_cycle),
             optional_u64(input.ppu_vblank_timing.first_nmi_cycle),
             optional_u64(input.ppu_vblank_timing.first_nmi_latency_cycles),
@@ -4453,7 +4691,20 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             optional_u64(input.ppu_vblank_timing.inter_nmi_cycles),
             input.ppu_vblank_timing.inter_nmi_expected_min_cycles,
             input.ppu_vblank_timing.inter_nmi_expected_max_cycles,
-            input.ppu_vblank_timing.observed_nmi_count
+            input.ppu_vblank_timing.observed_nmi_count,
+            input.ppu_vblank_timing.nmi_window_passed,
+            input.ppu_vblank_timing.edge_set_count,
+            input.ppu_vblank_timing.edge_expected_set_count,
+            input.ppu_vblank_timing.edge_clear_count,
+            input.ppu_vblank_timing.edge_expected_clear_count,
+            input.ppu_vblank_timing.edge_nmi_trigger_count,
+            optional_i16(input.ppu_vblank_timing.edge_first_set_ppu_scanline),
+            optional_u16(input.ppu_vblank_timing.edge_first_set_ppu_dot),
+            optional_i16(input.ppu_vblank_timing.edge_first_clear_ppu_scanline),
+            optional_u16(input.ppu_vblank_timing.edge_first_clear_ppu_dot),
+            optional_i16(input.ppu_vblank_timing.edge_second_set_ppu_scanline),
+            optional_u16(input.ppu_vblank_timing.edge_second_set_ppu_dot),
+            input.ppu_vblank_timing.edge_passed
         ));
     }
     if !input.ppu_sprite_zero_hit.passed {
@@ -4941,7 +5192,7 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             test_name: test_name(PPU_VBLANK_TIMING_TEST_ID),
             status: gated_probe_status(
                 should_validate_ppu_render_observations,
-                input.ppu_vblank_timing.passed,
+                input.ppu_vblank_timing.nmi_window_passed,
             ),
             description:
                 "Host-observed NMI timing stays inside the expected NTSC vblank cadence window"
@@ -4961,6 +5212,45 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 optional_u64(input.ppu_vblank_timing.second_nmi_cycle),
                 optional_u64(input.ppu_vblank_timing.inter_nmi_cycles),
                 input.ppu_vblank_timing.observed_nmi_count
+            ),
+            likely_domain: "ppu.vblank_timing".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "ppu.vblank_timing.edge_dots".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_VBLANK_TIMING_TEST_ID),
+            test_name: test_name(PPU_VBLANK_TIMING_TEST_ID),
+            status: gated_probe_status(
+                should_validate_ppu_render_observations,
+                input.ppu_vblank_timing.edge_passed,
+            ),
+            description:
+                "Host-observed PPUSTATUS vblank set/clear transitions occur on exact PPU dots"
+                    .to_string(),
+            expected: format!(
+                "at least {} set edges at scanline {} dot {}, at least {} clear edge at scanline {} dot {}",
+                input.ppu_vblank_timing.edge_expected_set_count,
+                input.ppu_vblank_timing.edge_expected_set_scanline,
+                input.ppu_vblank_timing.edge_expected_set_dot,
+                input.ppu_vblank_timing.edge_expected_clear_count,
+                input.ppu_vblank_timing.edge_expected_clear_scanline,
+                input.ppu_vblank_timing.edge_expected_clear_dot
+            ),
+            observed: format!(
+                "set_count={}, clear_count={}, nmi_triggers={}, first_set={}:{}, first_clear={}:{}, second_set={}:{}",
+                input.ppu_vblank_timing.edge_set_count,
+                input.ppu_vblank_timing.edge_clear_count,
+                input.ppu_vblank_timing.edge_nmi_trigger_count,
+                optional_i16(input.ppu_vblank_timing.edge_first_set_ppu_scanline),
+                optional_u16(input.ppu_vblank_timing.edge_first_set_ppu_dot),
+                optional_i16(input.ppu_vblank_timing.edge_first_clear_ppu_scanline),
+                optional_u16(input.ppu_vblank_timing.edge_first_clear_ppu_dot),
+                optional_i16(input.ppu_vblank_timing.edge_second_set_ppu_scanline),
+                optional_u16(input.ppu_vblank_timing.edge_second_set_ppu_dot)
             ),
             likely_domain: "ppu.vblank_timing".to_string(),
         },
@@ -8821,6 +9111,16 @@ fn compare_observation_checksums(
         &["ppu_sprite_priority", "passed"][..],
         &["ppu_vblank_timing", "first_nmi_latency_cycles"][..],
         &["ppu_vblank_timing", "inter_nmi_cycles"][..],
+        &["ppu_vblank_timing", "edge_set_count"][..],
+        &["ppu_vblank_timing", "edge_clear_count"][..],
+        &["ppu_vblank_timing", "edge_nmi_trigger_count"][..],
+        &["ppu_vblank_timing", "edge_first_set_ppu_scanline"][..],
+        &["ppu_vblank_timing", "edge_first_set_ppu_dot"][..],
+        &["ppu_vblank_timing", "edge_first_clear_ppu_scanline"][..],
+        &["ppu_vblank_timing", "edge_first_clear_ppu_dot"][..],
+        &["ppu_vblank_timing", "edge_second_set_ppu_scanline"][..],
+        &["ppu_vblank_timing", "edge_second_set_ppu_dot"][..],
+        &["ppu_vblank_timing", "edge_passed"][..],
         &["ppu_vblank_timing", "passed"][..],
         &["ppu_scroll_seam", "left_observed_color"][..],
         &["ppu_scroll_seam", "right_observed_color"][..],
@@ -9243,6 +9543,18 @@ fn optional_u8(value: Option<u8>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn optional_u16(value: Option<u16>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn optional_i16(value: Option<i16>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
 fn optional_string(value: Option<&str>) -> String {
     value.unwrap_or("none").to_string()
 }
@@ -9436,7 +9748,14 @@ mod tests {
                     .contains("coarse-X nametable-wrap sampling")
                 && gap
                     .current_coverage
-                    .contains("coarse-X tile-shift sampling")));
+                    .contains("coarse-X tile-shift sampling")
+                && gap
+                    .current_coverage
+                    .contains("PPUSTATUS vblank set/clear dot-edge timing")
+                && !gap.missing_coverage.contains("vblank edge timing")
+                && gap
+                    .missing_coverage
+                    .contains("Sprite overflow hardware-bug false positives/negatives")));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(
