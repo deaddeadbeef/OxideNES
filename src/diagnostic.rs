@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 44;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 45;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v44";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v45";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -82,6 +82,14 @@ const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_INPUT_REASON: &str =
     "disabled: non-default input timing fixture";
 const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_FAULT_REASON: &str =
     "disabled: intentional fault-injection fixture";
+const APU_AUDIO_EXPECTED_MIN_SAMPLE_COUNT: usize = 12_000;
+const APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT: usize = 13_000;
+const APU_AUDIO_EXPECTED_MIN_PEAK_ABS: f32 = 0.05;
+const APU_AUDIO_EXPECTED_MAX_PEAK_ABS: f32 = 0.20;
+const APU_AUDIO_EXPECTED_MIN_RMS_ABS: f32 = 0.005;
+const APU_AUDIO_EXPECTED_MAX_RMS_ABS: f32 = 0.10;
+const APU_AUDIO_EXPECTED_MIN_MEAN_ABS: f32 = 0.001;
+const APU_AUDIO_EXPECTED_MAX_MEAN_ABS: f32 = 0.10;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -1183,9 +1191,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "apu_audio_depth",
         subsystem: "apu",
         risk: "The cartridge proves APU status and sample production, not channel accuracy or mixer behavior.",
-        current_coverage: "$4015 pulse enable status and nonzero drained audio samples at frame boundaries.",
-        missing_coverage: "Envelope, sweep, triangle/noise/DMC behavior, frame counter timing, mixer levels, and IRQ edge cases.",
-        suggested_next_test: "Add per-channel register programs with host-side waveform windows, sample-count ranges, and peak/RMS expectations.",
+        current_coverage: "$4015 pulse enable status plus host-observed drained sample-count, peak, RMS, and mean absolute audio envelope windows at frame boundaries.",
+        missing_coverage: "Per-channel envelope, sweep, triangle/noise/DMC waveform behavior, frame counter timing, mixer levels, and IRQ edge cases.",
+        suggested_next_test: "Add per-channel register programs with channel-specific waveform windows and mixer-level expectations.",
     },
     DiagnosticCoverageGapSpec {
         id: "dma_cycle_timing",
@@ -1982,7 +1990,22 @@ pub struct FrameTelemetry {
 #[derive(Debug, Serialize)]
 pub struct AudioTelemetry {
     pub sample_count: usize,
+    pub expected_min_sample_count: usize,
+    pub expected_max_sample_count: usize,
+    pub sample_count_passed: bool,
     pub peak_abs: f32,
+    pub expected_min_peak_abs: f32,
+    pub expected_max_peak_abs: f32,
+    pub peak_abs_passed: bool,
+    pub rms_abs: f32,
+    pub expected_min_rms_abs: f32,
+    pub expected_max_rms_abs: f32,
+    pub rms_abs_passed: bool,
+    pub mean_abs: f32,
+    pub expected_min_mean_abs: f32,
+    pub expected_max_mean_abs: f32,
+    pub mean_abs_passed: bool,
+    pub passed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2242,6 +2265,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut frames = 0u64;
     let mut audio_sample_count = 0usize;
     let mut audio_peak_abs = 0.0f32;
+    let mut audio_sum_abs = 0.0f64;
+    let mut audio_sum_squares = 0.0f64;
     let mut diagnostic_render_frame = None;
     let mut ppu_scroll_seam_frame = None;
     let mut ppu_sprite_priority_frame = None;
@@ -2354,7 +2379,10 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             let samples = bus.apu.drain_samples();
             audio_sample_count += samples.len();
             for sample in samples {
-                audio_peak_abs = audio_peak_abs.max(sample.abs());
+                let abs = sample.abs();
+                audio_peak_abs = audio_peak_abs.max(abs);
+                audio_sum_abs += f64::from(abs);
+                audio_sum_squares += f64::from(sample) * f64::from(sample);
             }
             events.push(event_telemetry(EventTelemetryInput {
                 cycle: cycles,
@@ -2497,7 +2525,10 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 let samples = bus.apu.drain_samples();
                 audio_sample_count += samples.len();
                 for sample in samples {
-                    audio_peak_abs = audio_peak_abs.max(sample.abs());
+                    let abs = sample.abs();
+                    audio_peak_abs = audio_peak_abs.max(abs);
+                    audio_sum_abs += f64::from(abs);
+                    audio_sum_squares += f64::from(sample) * f64::from(sample);
                 }
                 events.push(event_telemetry(EventTelemetryInput {
                     cycle: cycles,
@@ -2545,6 +2576,12 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &bus.ppu.frame_data,
     );
     let ppu_sprite_zero_hit = ppu_sprite_zero_hit_telemetry(&ram);
+    let audio = audio_telemetry(
+        audio_sample_count,
+        audio_peak_abs,
+        audio_sum_abs,
+        audio_sum_squares,
+    );
     let mut host_failures = host_validate(HostValidationInput {
         status,
         timeout,
@@ -2560,7 +2597,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         dma: &dma,
         oam: &oam,
         frame: &frame,
-        audio_sample_count,
+        audio: &audio,
         frames,
     });
 
@@ -2588,7 +2625,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         dma: &dma,
         oam: &oam,
         frame: &frame,
-        audio_sample_count,
+        audio: &audio,
         frames,
     });
     let passed = status == STATUS_PASS && !timeout && host_failures.is_empty();
@@ -2654,10 +2691,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         dma,
         oam,
         frame,
-        audio: AudioTelemetry {
-            sample_count: audio_sample_count,
-            peak_abs: audio_peak_abs,
-        },
+        audio,
         instruction_trace,
         events,
     })
@@ -2669,8 +2703,10 @@ pub fn compare_diagnostic_to_baseline(
 ) -> Result<DiagnosticComparisonTelemetry, String> {
     let baseline: Value = serde_json::from_str(baseline_json)
         .map_err(|err| format!("failed to parse baseline diagnostic JSON: {err}"))?;
-    let current = serde_json::to_value(telemetry)
+    let current_json = serde_json::to_string(telemetry)
         .map_err(|err| format!("failed to serialize current diagnostic telemetry: {err}"))?;
+    let current: Value = serde_json::from_str(&current_json)
+        .map_err(|err| format!("failed to parse current diagnostic JSON: {err}"))?;
     let mut differences = Vec::new();
 
     compare_schema(&baseline, &current, &mut differences);
@@ -2873,6 +2909,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_coverage_gaps_section(&mut report, telemetry);
     write_ppu_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
+    write_audio_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_instruction_trace_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
@@ -3579,6 +3616,56 @@ fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         "| DMC queued / post-OAM stall cycles | {} / {} |",
         telemetry.dma.dmc_dma_queued_during_oam_dma_cycles,
         telemetry.dma.dmc_dma_stall_cycles_after_oam_dma
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
+fn write_audio_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## APU Audio Output").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Sample count / expected | {} / {}..={} |",
+        telemetry.audio.sample_count,
+        telemetry.audio.expected_min_sample_count,
+        telemetry.audio.expected_max_sample_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Peak abs / expected | {} / {}..={} |",
+        format_audio_level(telemetry.audio.peak_abs),
+        format_audio_level(telemetry.audio.expected_min_peak_abs),
+        format_audio_level(telemetry.audio.expected_max_peak_abs)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| RMS abs / expected | {} / {}..={} |",
+        format_audio_level(telemetry.audio.rms_abs),
+        format_audio_level(telemetry.audio.expected_min_rms_abs),
+        format_audio_level(telemetry.audio.expected_max_rms_abs)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mean abs / expected | {} / {}..={} |",
+        format_audio_level(telemetry.audio.mean_abs),
+        format_audio_level(telemetry.audio.expected_min_mean_abs),
+        format_audio_level(telemetry.audio.expected_max_mean_abs)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Audio envelope passed | sample_count={} peak={} rms={} mean={} overall={} |",
+        telemetry.audio.sample_count_passed,
+        telemetry.audio.peak_abs_passed,
+        telemetry.audio.rms_abs_passed,
+        telemetry.audio.mean_abs_passed,
+        telemetry.audio.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -4708,7 +4795,7 @@ struct HostValidationInput<'a> {
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
-    audio_sample_count: usize,
+    audio: &'a AudioTelemetry,
     frames: u64,
 }
 
@@ -4729,7 +4816,7 @@ struct ProbeTelemetryInput<'a> {
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
-    audio_sample_count: usize,
+    audio: &'a AudioTelemetry,
     frames: u64,
 }
 
@@ -4994,8 +5081,22 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.frame.checksum_hex, input.frame.expected_checksum_hex
         ));
     }
-    if input.audio_sample_count == 0 {
-        failures.push("APU did not produce any drained frame samples".to_string());
+    if !input.audio.passed {
+        failures.push(format!(
+            "APU audio envelope outside expected windows: samples {} expected {}..={}, peak {} expected {}..={}, rms {} expected {}..={}, mean {} expected {}..={}",
+            input.audio.sample_count,
+            input.audio.expected_min_sample_count,
+            input.audio.expected_max_sample_count,
+            format_audio_level(input.audio.peak_abs),
+            format_audio_level(input.audio.expected_min_peak_abs),
+            format_audio_level(input.audio.expected_max_peak_abs),
+            format_audio_level(input.audio.rms_abs),
+            format_audio_level(input.audio.expected_min_rms_abs),
+            format_audio_level(input.audio.expected_max_rms_abs),
+            format_audio_level(input.audio.mean_abs),
+            format_audio_level(input.audio.expected_min_mean_abs),
+            format_audio_level(input.audio.expected_max_mean_abs)
+        ));
     }
 
     failures
@@ -5625,12 +5726,46 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             subsystem: Some(DiagnosticSubsystem::Apu),
             test_id: Some(6),
             test_name: test_name(6),
-            status: gated_probe_status(passed_suite, input.audio_sample_count > 0),
+            status: gated_probe_status(passed_suite, input.audio.sample_count_passed),
             description: "APU produced samples that the host runner drained at frame boundaries"
                 .to_string(),
-            expected: "drained audio samples > 0".to_string(),
-            observed: format!("drained audio samples {}", input.audio_sample_count),
+            expected: format!(
+                "drained audio samples {}..={}",
+                input.audio.expected_min_sample_count, input.audio.expected_max_sample_count
+            ),
+            observed: format!("drained audio samples {}", input.audio.sample_count),
             likely_domain: "apu.frame_output".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "apu.output_envelope".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Apu),
+            test_id: Some(6),
+            test_name: test_name(6),
+            status: gated_probe_status(passed_suite, input.audio.passed),
+            description:
+                "APU host output envelope stays within expected peak, RMS, and mean windows"
+                    .to_string(),
+            expected: format!(
+                "peak {}..={}, rms {}..={}, mean {}..={}",
+                format_audio_level(input.audio.expected_min_peak_abs),
+                format_audio_level(input.audio.expected_max_peak_abs),
+                format_audio_level(input.audio.expected_min_rms_abs),
+                format_audio_level(input.audio.expected_max_rms_abs),
+                format_audio_level(input.audio.expected_min_mean_abs),
+                format_audio_level(input.audio.expected_max_mean_abs)
+            ),
+            observed: format!(
+                "samples {}, peak {}, rms {}, mean {}",
+                input.audio.sample_count,
+                format_audio_level(input.audio.peak_abs),
+                format_audio_level(input.audio.rms_abs),
+                format_audio_level(input.audio.mean_abs)
+            ),
+            likely_domain: "apu.output_envelope".to_string(),
         },
     );
 
@@ -9059,6 +9194,66 @@ fn frame_telemetry(
     }
 }
 
+fn audio_telemetry(
+    sample_count: usize,
+    peak_abs: f32,
+    sum_abs: f64,
+    sum_squares: f64,
+) -> AudioTelemetry {
+    let mean_abs = if sample_count == 0 {
+        0.0
+    } else {
+        (sum_abs / sample_count as f64) as f32
+    };
+    let rms_abs = if sample_count == 0 {
+        0.0
+    } else {
+        (sum_squares / sample_count as f64).sqrt() as f32
+    };
+    let sample_count_passed = (APU_AUDIO_EXPECTED_MIN_SAMPLE_COUNT
+        ..=APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT)
+        .contains(&sample_count);
+    let peak_abs_passed = audio_level_in_range(
+        peak_abs,
+        APU_AUDIO_EXPECTED_MIN_PEAK_ABS,
+        APU_AUDIO_EXPECTED_MAX_PEAK_ABS,
+    );
+    let rms_abs_passed = audio_level_in_range(
+        rms_abs,
+        APU_AUDIO_EXPECTED_MIN_RMS_ABS,
+        APU_AUDIO_EXPECTED_MAX_RMS_ABS,
+    );
+    let mean_abs_passed = audio_level_in_range(
+        mean_abs,
+        APU_AUDIO_EXPECTED_MIN_MEAN_ABS,
+        APU_AUDIO_EXPECTED_MAX_MEAN_ABS,
+    );
+
+    AudioTelemetry {
+        sample_count,
+        expected_min_sample_count: APU_AUDIO_EXPECTED_MIN_SAMPLE_COUNT,
+        expected_max_sample_count: APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT,
+        sample_count_passed,
+        peak_abs,
+        expected_min_peak_abs: APU_AUDIO_EXPECTED_MIN_PEAK_ABS,
+        expected_max_peak_abs: APU_AUDIO_EXPECTED_MAX_PEAK_ABS,
+        peak_abs_passed,
+        rms_abs,
+        expected_min_rms_abs: APU_AUDIO_EXPECTED_MIN_RMS_ABS,
+        expected_max_rms_abs: APU_AUDIO_EXPECTED_MAX_RMS_ABS,
+        rms_abs_passed,
+        mean_abs,
+        expected_min_mean_abs: APU_AUDIO_EXPECTED_MIN_MEAN_ABS,
+        expected_max_mean_abs: APU_AUDIO_EXPECTED_MAX_MEAN_ABS,
+        mean_abs_passed,
+        passed: sample_count_passed && peak_abs_passed && rms_abs_passed && mean_abs_passed,
+    }
+}
+
+fn audio_level_in_range(value: f32, min: f32, max: f32) -> bool {
+    value.is_finite() && value >= min && value <= max
+}
+
 fn sample_frame_color(frame: &[u32], x: usize, y: usize) -> u32 {
     frame.get(y * 256 + x).copied().unwrap_or(0)
 }
@@ -9479,6 +9674,14 @@ fn compare_observation_checksums(
         &["ppu_scroll_seam", "observed_case_count"][..],
         &["ppu_scroll_seam", "passed"][..],
         &["audio", "sample_count"][..],
+        &["audio", "sample_count_passed"][..],
+        &["audio", "peak_abs"][..],
+        &["audio", "peak_abs_passed"][..],
+        &["audio", "rms_abs"][..],
+        &["audio", "rms_abs_passed"][..],
+        &["audio", "mean_abs"][..],
+        &["audio", "mean_abs_passed"][..],
+        &["audio", "passed"][..],
     ] {
         compare_optional_value(
             baseline,
@@ -9927,6 +10130,10 @@ fn optional_pc(value: Option<u16>) -> String {
     value.map(format_pc).unwrap_or_else(|| "none".to_string())
 }
 
+fn format_audio_level(value: f32) -> String {
+    format!("{value:.6}")
+}
+
 fn format_debug_event_focus(event: Option<&DiagnosticDebugEventFocusTelemetry>) -> String {
     let Some(event) = event else {
         return "none".to_string();
@@ -10150,7 +10357,11 @@ mod tests {
         assert!(telemetry.verdict.failure.is_none());
         assert_eq!(telemetry.ram.signature, 0xA5);
         assert!(telemetry.frames >= 2);
-        assert!(telemetry.audio.sample_count > 0);
+        assert!(telemetry.audio.sample_count_passed);
+        assert!(telemetry.audio.peak_abs_passed);
+        assert!(telemetry.audio.rms_abs_passed);
+        assert!(telemetry.audio.mean_abs_passed);
+        assert!(telemetry.audio.passed);
         assert!(telemetry.frame.unique_colors >= 2);
         assert!(telemetry.frame.checksum_matches_expected);
         assert!(telemetry.frame.checksum_validation_enabled);
