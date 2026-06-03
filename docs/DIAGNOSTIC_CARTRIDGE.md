@@ -796,8 +796,8 @@ The cartridge writes status bytes into CPU RAM:
 
 The host runner adds emulator-side telemetry that the cartridge cannot inspect
 directly: CPU registers, frame count, RAM checksum, OAM checksum,
-rendered-frame expected/observed checksum and color counts, audio sample
-count/peak/RMS/mean envelope, status/frame events, current-test transition events, a bounded
+rendered-frame expected/observed checksum and color counts, APU status-matrix
+bits, audio sample count/peak/RMS/mean envelope, status/frame events, current-test transition events, a bounded
 instruction-boundary trace, failure-localization metadata, per-test
 timeline/duration telemetry, structured observation probes, and a derived
 analysis summary.
@@ -1085,6 +1085,13 @@ peak into a bounded APU output envelope. The host runner now records expected
 sample-count, peak, RMS, and mean absolute windows plus pass booleans, and adds
 the `apu.output_envelope` probe so silent, clipped, or obviously unstable audio
 output can fail as a direct expected-vs-observed observation.
+
+Schema version `46` expands the `apu_status_register` cartridge test from a
+pulse-1 status bit into a non-DMC `$4015` channel matrix. The cartridge now
+programs pulse 1, pulse 2, triangle, and noise length counters, records the
+observed bits 0-3 mask plus case count in RAM, exposes top-level
+`apu_status_matrix` telemetry, and adds the `apu.status_matrix` probe for
+expected-vs-observed APU status evidence.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

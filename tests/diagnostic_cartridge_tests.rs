@@ -310,6 +310,22 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "joypad.input_port_matrix"
     }));
+    assert!(telemetry.apu_status_matrix.passed);
+    assert_eq!(telemetry.apu_status_matrix.expected_mask_hex, "0x0F");
+    assert_eq!(telemetry.apu_status_matrix.observed_mask_hex, "0x0F");
+    assert_eq!(telemetry.apu_status_matrix.expected_case_count, 4);
+    assert_eq!(telemetry.apu_status_matrix.observed_case_count, 4);
+    assert!(telemetry.apu_status_matrix.pulse1_status_bit);
+    assert!(telemetry.apu_status_matrix.pulse2_status_bit);
+    assert!(telemetry.apu_status_matrix.triangle_status_bit);
+    assert!(telemetry.apu_status_matrix.noise_status_bit);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "apu.status_matrix"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "apu.status_matrix"
+            && probe.observed.contains("mask 0x0F")
+            && probe.observed.contains("cases 4/4")
+    }));
     assert!(telemetry.ppu_vblank_timing.passed);
     assert_eq!(telemetry.ppu_vblank_timing.test_id, 10);
     assert_eq!(
@@ -1763,6 +1779,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
     );
     assert!(report
         .contains("| Scroll-seam coarse-left sample / expected | (2, 18) 0x64B0FF / 0xB53120 |"));
+    assert!(report.contains("| Status matrix mask / expected | 0x0F / 0x0F |"));
+    assert!(report
+        .contains("| Status matrix channels | pulse1=true pulse2=true triangle=true noise=true |"));
+    assert!(report.contains("| Status matrix cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Status matrix passed | true |"));
     assert!(report.contains("| 28 | ppu_scroll_seam_matrix | ppu | edge_case | passed |"));
 }
 
