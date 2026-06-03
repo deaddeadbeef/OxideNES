@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 43;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 44;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v43";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v44";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -73,6 +73,15 @@ const PPU_VBLANK_EDGE_CLEAR_SCANLINE: i16 = -1;
 const PPU_VBLANK_EDGE_CLEAR_DOT: u16 = 1;
 const PPU_VBLANK_EDGE_EXPECTED_SET_COUNT: u8 = 2;
 const PPU_VBLANK_EDGE_EXPECTED_CLEAR_COUNT: u8 = 1;
+pub const DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM: u64 = 0x00BDFEF60DAB16A5;
+pub const DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS: usize = 3;
+pub const DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS: usize = 256 * 240;
+const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_ENABLED_REASON: &str =
+    "enabled: canonical default diagnostic fixture";
+const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_INPUT_REASON: &str =
+    "disabled: non-default input timing fixture";
+const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_FAULT_REASON: &str =
+    "disabled: intentional fault-injection fixture";
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -1158,9 +1167,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, and host-visible multi-color background output.",
-        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, and sprite-overflow samples.",
-        suggested_next_test: "Add broader per-dot renderer checks with expected frame checksums.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, host-visible multi-color background output, and an expected full-frame render checksum for the deterministic background frame.",
+        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, sprite-overflow, and deterministic full-frame signature samples.",
+        suggested_next_test: "Add broader per-dot renderer checks with scanline/window-local expected signatures and tile fetch phase assertions.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -1217,6 +1226,20 @@ impl Default for DiagnosticConfig {
             fault_injection: None,
         }
     }
+}
+
+fn diagnostic_render_frame_signature_validation(config: &DiagnosticConfig) -> (bool, &'static str) {
+    if config.fault_injection.is_some() {
+        return (false, DIAGNOSTIC_RENDER_FRAME_SIGNATURE_FAULT_REASON);
+    }
+    if config.joypad1_mask != EXPECTED_JOYPAD1_MASK
+        || config.expected_joypad1_mask != EXPECTED_JOYPAD1_MASK
+        || config.joypad2_mask != EXPECTED_JOYPAD2_MASK
+        || config.expected_joypad2_mask != EXPECTED_JOYPAD2_MASK
+    {
+        return (false, DIAGNOSTIC_RENDER_FRAME_SIGNATURE_INPUT_REASON);
+    }
+    (true, DIAGNOSTIC_RENDER_FRAME_SIGNATURE_ENABLED_REASON)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1942,8 +1965,18 @@ pub struct OamTelemetry {
 #[derive(Debug, Serialize)]
 pub struct FrameTelemetry {
     pub checksum: u64,
+    pub checksum_hex: String,
+    pub expected_checksum: u64,
+    pub expected_checksum_hex: String,
+    pub checksum_matches_expected: bool,
+    pub checksum_validation_enabled: bool,
+    pub checksum_validation_reason: String,
     pub unique_colors: usize,
+    pub expected_unique_colors: usize,
+    pub unique_colors_match_expected: bool,
     pub nonzero_pixels: usize,
+    pub expected_nonzero_pixels: usize,
+    pub nonzero_pixels_match_expected: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2187,6 +2220,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let ppu_nmi_wait_pc = label_addr(&labels, PPU_NMI_TIMEOUT_FAULT_LABEL)?;
     let rom = build_diagnostic_cartridge_from_program(&program, &labels)?;
     let cartridge_info = cartridge_telemetry(&rom);
+    let (validate_render_frame_signature, render_frame_signature_validation_reason) =
+        diagnostic_render_frame_signature_validation(&config);
     let cartridge = Cartridge::new(&rom)?;
     let mut bus = Bus::new(cartridge);
     apply_joypad_mask(&mut bus, config.joypad1_mask);
@@ -2300,6 +2335,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                 &mut diagnostic_render_frame,
                 current_test,
                 &bus.ppu.frame_data,
+                validate_render_frame_signature,
+                render_frame_signature_validation_reason,
             );
             maybe_capture_ppu_sprite_priority_frame(
                 &mut ppu_sprite_priority_frame,
@@ -2441,6 +2478,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     &mut diagnostic_render_frame,
                     current_test,
                     &bus.ppu.frame_data,
+                    validate_render_frame_signature,
+                    render_frame_signature_validation_reason,
                 );
                 maybe_capture_ppu_sprite_priority_frame(
                     &mut ppu_sprite_priority_frame,
@@ -2482,7 +2521,13 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let test_results = test_telemetry(&ram);
     let dma = dma_observation.telemetry();
     let oam = oam_telemetry(&bus.ppu.oam_data);
-    let frame = diagnostic_render_frame.unwrap_or_else(|| frame_telemetry(&bus.ppu.frame_data));
+    let frame = diagnostic_render_frame.unwrap_or_else(|| {
+        frame_telemetry(
+            &bus.ppu.frame_data,
+            validate_render_frame_signature,
+            render_frame_signature_validation_reason,
+        )
+    });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let ppu_vblank_timing = ppu_vblank_timing.telemetry(ram[NMI_COUNT_ADDR as usize]);
@@ -3136,6 +3181,36 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Vblank timing passed | {} |",
         telemetry.ppu_vblank_timing.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Render-frame checksum / expected | {} / {} |",
+        telemetry.frame.checksum_hex, telemetry.frame.expected_checksum_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Render-frame checksum passed | {} |",
+        telemetry.frame.checksum_matches_expected
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Render-frame checksum validation | {} |",
+        telemetry.frame.checksum_validation_reason
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Render-frame colors / expected | {} / {} |",
+        telemetry.frame.unique_colors, telemetry.frame.expected_unique_colors
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Render-frame nonzero pixels / expected | {} / {} |",
+        telemetry.frame.nonzero_pixels, telemetry.frame.expected_nonzero_pixels
     )
     .expect("write report");
     writeln!(
@@ -4913,6 +4988,12 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.frame.unique_colors
         ));
     }
+    if input.frame.checksum_validation_enabled && !input.frame.checksum_matches_expected {
+        failures.push(format!(
+            "PPU render-frame checksum mismatch: got {}, expected {}",
+            input.frame.checksum_hex, input.frame.expected_checksum_hex
+        ));
+    }
     if input.audio_sample_count == 0 {
         failures.push("APU did not produce any drained frame samples".to_string());
     }
@@ -5530,6 +5611,14 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     );
     push_probe(
         &mut probes,
+        frame_checksum_probe_record(
+            passed_suite,
+            should_validate_ppu_render_observations,
+            input.frame,
+        ),
+    );
+    push_probe(
+        &mut probes,
         ProbeTelemetryRecord {
             id: "apu.sample_count".to_string(),
             source: DiagnosticProbeSource::HostObservation,
@@ -5546,6 +5635,65 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     );
 
     probes
+}
+
+fn frame_checksum_probe_record(
+    passed_suite: bool,
+    should_validate_ppu_render_observations: bool,
+    frame: &FrameTelemetry,
+) -> ProbeTelemetryRecord {
+    let status = if !should_validate_ppu_render_observations {
+        DiagnosticProbeStatus::Skipped
+    } else if !frame.checksum_validation_enabled {
+        if passed_suite {
+            DiagnosticProbeStatus::Passed
+        } else {
+            DiagnosticProbeStatus::Skipped
+        }
+    } else {
+        passed_or_failed(frame.checksum_matches_expected)
+    };
+
+    let (description, expected) = if frame.checksum_validation_enabled {
+        (
+            "Rendered diagnostic frame matches the expected full-frame signature".to_string(),
+            format!(
+                "checksum {}, unique colors {}, nonzero pixels {}, validation {}",
+                frame.expected_checksum_hex,
+                frame.expected_unique_colors,
+                frame.expected_nonzero_pixels,
+                frame.checksum_validation_reason
+            ),
+        )
+    } else {
+        (
+            "Canonical render-frame signature is recorded but not required for this fixture"
+                .to_string(),
+            format!(
+                "canonical checksum validation disabled ({})",
+                frame.checksum_validation_reason
+            ),
+        )
+    };
+
+    ProbeTelemetryRecord {
+        id: "ppu.frame_checksum".to_string(),
+        source: DiagnosticProbeSource::HostObservation,
+        subsystem: Some(DiagnosticSubsystem::Ppu),
+        test_id: Some(10),
+        test_name: test_name(10),
+        status,
+        description,
+        expected,
+        observed: format!(
+            "checksum {}, unique colors {}, nonzero pixels {}, validation {}",
+            frame.checksum_hex,
+            frame.unique_colors,
+            frame.nonzero_pixels,
+            frame.checksum_validation_reason
+        ),
+        likely_domain: "ppu.rendering.frame_signature".to_string(),
+    }
 }
 
 struct ProbeTelemetryRecord {
@@ -8792,11 +8940,13 @@ fn maybe_capture_diagnostic_render_frame(
     retained_frame: &mut Option<FrameTelemetry>,
     current_test: u8,
     frame: &[u32],
+    validate_signature: bool,
+    validation_reason: &'static str,
 ) {
     if retained_frame.is_some() || current_test != 10 {
         return;
     }
-    let telemetry = frame_telemetry(frame);
+    let telemetry = frame_telemetry(frame, validate_signature, validation_reason);
     if telemetry.unique_colors >= 2 {
         *retained_frame = Some(telemetry);
     }
@@ -8873,7 +9023,11 @@ fn maybe_capture_ppu_scroll_seam_frame(
     }
 }
 
-fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
+fn frame_telemetry(
+    frame: &[u32],
+    validate_signature: bool,
+    validation_reason: &'static str,
+) -> FrameTelemetry {
     let mut bytes = Vec::with_capacity(frame.len() * 4);
     let mut colors = BTreeSet::new();
     let mut nonzero_pixels = 0;
@@ -8884,10 +9038,24 @@ fn frame_telemetry(frame: &[u32]) -> FrameTelemetry {
             nonzero_pixels += 1;
         }
     }
+    let checksum = hash_bytes(&bytes);
+    let unique_colors = colors.len();
     FrameTelemetry {
-        checksum: hash_bytes(&bytes),
-        unique_colors: colors.len(),
+        checksum,
+        checksum_hex: hex_u64(checksum),
+        expected_checksum: DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM,
+        expected_checksum_hex: hex_u64(DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM),
+        checksum_matches_expected: checksum == DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM,
+        checksum_validation_enabled: validate_signature,
+        checksum_validation_reason: validation_reason.to_string(),
+        unique_colors,
+        expected_unique_colors: DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS,
+        unique_colors_match_expected: unique_colors
+            == DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS,
         nonzero_pixels,
+        expected_nonzero_pixels: DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS,
+        nonzero_pixels_match_expected: nonzero_pixels
+            == DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS,
     }
 }
 
@@ -9204,6 +9372,16 @@ fn compare_probe_observed_value(
 ) {
     let baseline_observed = json_string(baseline_probe, &["observed"]);
     let current_observed = json_string(current_probe, &["observed"]);
+    if probe_id == "ppu.frame_checksum"
+        && (baseline_observed
+            .as_deref()
+            .is_some_and(|observed| observed.contains("validation disabled"))
+            || current_observed
+                .as_deref()
+                .is_some_and(|observed| observed.contains("validation disabled")))
+    {
+        return;
+    }
     if baseline_observed != current_observed {
         push_difference(
             differences,
@@ -9300,8 +9478,6 @@ fn compare_observation_checksums(
         &["ppu_scroll_seam", "bottom_observed_color"][..],
         &["ppu_scroll_seam", "observed_case_count"][..],
         &["ppu_scroll_seam", "passed"][..],
-        &["frame", "checksum"][..],
-        &["frame", "unique_colors"][..],
         &["audio", "sample_count"][..],
     ] {
         compare_optional_value(
@@ -9313,6 +9489,27 @@ fn compare_observation_checksums(
             "observable diagnostic artifact changed from baseline",
             differences,
         );
+    }
+
+    if json_bool(current, &["frame", "checksum_validation_enabled"]).unwrap_or(true)
+        && json_bool(baseline, &["frame", "checksum_validation_enabled"]).unwrap_or(true)
+    {
+        for path in [
+            &["frame", "checksum"][..],
+            &["frame", "checksum_matches_expected"][..],
+            &["frame", "unique_colors"][..],
+            &["frame", "nonzero_pixels"][..],
+        ] {
+            compare_optional_value(
+                baseline,
+                current,
+                path,
+                "observation",
+                DiagnosticComparisonSeverity::Warning,
+                "observable diagnostic artifact changed from baseline",
+                differences,
+            );
+        }
     }
 }
 
@@ -9789,6 +9986,10 @@ fn hex_color(value: u32) -> String {
     format!("0x{value:06X}")
 }
 
+fn hex_u64(value: u64) -> String {
+    format!("0x{value:016X}")
+}
+
 fn hash_bytes(bytes: &[u8]) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x00000100000001B3;
@@ -9922,10 +10123,14 @@ mod tests {
                 && gap
                     .current_coverage
                     .contains("sprite-overflow evaluation including hardware-bug")
+                && gap
+                    .current_coverage
+                    .contains("expected full-frame render checksum")
                 && !gap.missing_coverage.contains("vblank edge timing")
                 && !gap
                     .missing_coverage
                     .contains("Sprite overflow hardware-bug")
+                && !gap.suggested_next_test.contains("expected frame checksums")
                 && gap
                     .missing_coverage
                     .contains("Per-dot rendering behavior beyond targeted")));
@@ -9947,6 +10152,16 @@ mod tests {
         assert!(telemetry.frames >= 2);
         assert!(telemetry.audio.sample_count > 0);
         assert!(telemetry.frame.unique_colors >= 2);
+        assert!(telemetry.frame.checksum_matches_expected);
+        assert!(telemetry.frame.checksum_validation_enabled);
+        assert_eq!(
+            telemetry.frame.checksum,
+            DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM
+        );
+        assert_eq!(
+            telemetry.frame.nonzero_pixels,
+            DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS
+        );
         assert!(telemetry.tests.iter().all(|test| test.passed));
         assert!(telemetry
             .timeline

@@ -4,7 +4,9 @@ use oxidenes::diagnostic::{
     DiagnosticComparisonSeverity, DiagnosticConfig, DiagnosticFailureKind,
     DiagnosticFaultInjection, DiagnosticHealth, DiagnosticProbeStatus, DiagnosticSubsystem,
     TestTimelineEndReason, TestTimelineOutcome, DIAGNOSTIC_PROVENANCE,
-    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION, DIAGNOSTIC_TESTS,
+    DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM, DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS,
+    DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
+    DIAGNOSTIC_TESTS,
 };
 
 #[test]
@@ -375,6 +377,47 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.observed.contains("first_set=241:1")
             && probe.observed.contains("first_clear=-1:1")
             && probe.observed.contains("second_set=241:1")
+    }));
+    assert_eq!(
+        telemetry.frame.checksum,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM
+    );
+    assert_eq!(
+        telemetry.frame.expected_checksum,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_CHECKSUM
+    );
+    assert_eq!(telemetry.frame.checksum_hex, "0x00BDFEF60DAB16A5");
+    assert_eq!(telemetry.frame.expected_checksum_hex, "0x00BDFEF60DAB16A5");
+    assert!(telemetry.frame.checksum_matches_expected);
+    assert!(telemetry.frame.checksum_validation_enabled);
+    assert_eq!(
+        telemetry.frame.checksum_validation_reason,
+        "enabled: canonical default diagnostic fixture"
+    );
+    assert_eq!(
+        telemetry.frame.unique_colors,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS
+    );
+    assert_eq!(
+        telemetry.frame.expected_unique_colors,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_UNIQUE_COLORS
+    );
+    assert!(telemetry.frame.unique_colors_match_expected);
+    assert_eq!(
+        telemetry.frame.nonzero_pixels,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS
+    );
+    assert_eq!(
+        telemetry.frame.expected_nonzero_pixels,
+        DIAGNOSTIC_RENDER_FRAME_EXPECTED_NONZERO_PIXELS
+    );
+    assert!(telemetry.frame.nonzero_pixels_match_expected);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.frame_checksum"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.rendering.frame_signature"
+            && probe.expected.contains("0x00BDFEF60DAB16A5")
+            && probe.observed.contains("0x00BDFEF60DAB16A5")
     }));
     assert!(telemetry.ppu_sprite_zero_hit.passed);
     assert_eq!(
@@ -749,6 +792,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("/ -1:1 /"));
     assert!(report.contains("| Vblank second set edge CPU/frame/PPU/phase |"));
     assert!(report.contains("| Vblank timing passed | true |"));
+    assert!(report.contains(
+        "| Render-frame checksum / expected | 0x00BDFEF60DAB16A5 / 0x00BDFEF60DAB16A5 |"
+    ));
+    assert!(report.contains("| Render-frame checksum passed | true |"));
+    assert!(report.contains(
+        "| Render-frame checksum validation | enabled: canonical default diagnostic fixture |"
+    ));
+    assert!(report.contains("| Render-frame colors / expected | 3 / 3 |"));
+    assert!(report.contains("| Render-frame nonzero pixels / expected | 61440 / 61440 |"));
     assert!(report.contains("| Sprite-zero-hit status bit / expected | 0x40 / 0x40 |"));
     assert!(report.contains("| Sprite-overflow status bit / expected | 0x20 / 0x20 |"));
     assert!(report.contains("| Sprite-overflow false-positive bit / expected | 0x20 / 0x20 |"));
@@ -856,6 +908,20 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
     assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0xAA");
     assert_eq!(telemetry.input.joypad2_mask_hex, "0x55");
     assert_eq!(telemetry.input.joypad2_expected_mask_hex, "0x55");
+    assert_eq!(telemetry.frame.checksum_hex, "0x89D7CBABF407D845");
+    assert!(!telemetry.frame.checksum_matches_expected);
+    assert!(!telemetry.frame.checksum_validation_enabled);
+    assert_eq!(
+        telemetry.frame.checksum_validation_reason,
+        "disabled: non-default input timing fixture"
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.frame_checksum"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "ppu.rendering.frame_signature"
+            && probe.expected.contains("validation disabled")
+            && probe.observed.contains("0x89D7CBABF407D845")
+    }));
     assert!(telemetry.input_port_matrix.passed);
     assert_eq!(telemetry.input_port_matrix.joypad1_high_first_hex, "0x00");
     assert_eq!(telemetry.input_port_matrix.joypad2_high_first_hex, "0x01");

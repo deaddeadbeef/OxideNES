@@ -743,7 +743,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery, host-observed vblank timing windows, PPUSTATUS
-  vblank set/clear dot-edge timing, and rendered frame production
+  vblank set/clear dot-edge timing, rendered frame production, and an expected
+  deterministic full-frame render checksum
 - Player-2 `$4017` strobe and shift reads with an independent Start + Down mask
 
 ## Telemetry Protocol
@@ -794,10 +795,11 @@ The cartridge writes status bytes into CPU RAM:
 
 The host runner adds emulator-side telemetry that the cartridge cannot inspect
 directly: CPU registers, frame count, RAM checksum, OAM checksum,
-rendered-frame checksum/color count, audio sample count/peak, status/frame
-events, current-test transition events, a bounded instruction-boundary trace,
-failure-localization metadata, per-test timeline/duration telemetry, structured
-observation probes, and a derived analysis summary.
+rendered-frame expected/observed checksum and color counts, audio sample
+count/peak, status/frame events, current-test transition events, a bounded
+instruction-boundary trace, failure-localization metadata, per-test
+timeline/duration telemetry, structured observation probes, and a derived
+analysis summary.
 
 Schema version `6` adds `analysis.coverage_gaps` and includes the same
 high-level limits in `triage.json`. These records name known untested risk
@@ -1066,6 +1068,16 @@ out-of-range sprite shifts the evaluator away from a real ninth sprite's Y byte.
 Telemetry now records each subcase status bit, and the
 `ppu.sprite_overflow.hardware_bug_matrix` probe separates hardware-bug behavior
 from the broader sprite-overflow status probe.
+
+Schema version `44` promotes the host-observed deterministic render frame into
+an expected-vs-observed PPU signature. Top-level `frame` telemetry now records
+the expected checksum, observed checksum, hex forms, match status, validation
+mode, expected unique color count, and expected nonzero pixel count. The
+`ppu.frame_checksum` probe fails when the canonical default no-fault fixture's
+rendered full frame drifts from the accepted diagnostic signature. Non-default
+input-timing fixtures report the probe as validation-disabled while still
+passing and recording their observed checksums; intentional fault fixtures keep
+the probe out of the failure focus so the intended fault remains localized.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
