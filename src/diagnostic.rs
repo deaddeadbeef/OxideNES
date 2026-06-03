@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 45;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 46;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v45";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v46";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -90,6 +90,12 @@ const APU_AUDIO_EXPECTED_MIN_RMS_ABS: f32 = 0.005;
 const APU_AUDIO_EXPECTED_MAX_RMS_ABS: f32 = 0.10;
 const APU_AUDIO_EXPECTED_MIN_MEAN_ABS: f32 = 0.001;
 const APU_AUDIO_EXPECTED_MAX_MEAN_ABS: f32 = 0.10;
+const APU_STATUS_MATRIX_EXPECTED_MASK: u8 = 0x0F;
+const APU_STATUS_MATRIX_EXPECTED_CASE_COUNT: u8 = 4;
+const APU_STATUS_MATRIX_OBSERVED_MASK_ADDR: u16 = 0x0262;
+const APU_STATUS_MATRIX_CASE_COUNT_ADDR: u16 = 0x0263;
+// Keep the canonical render-frame signature phase stable after earlier tests grow.
+const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 26;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -286,8 +292,8 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "apu_status_register",
         subsystem: DiagnosticSubsystem::Apu,
         tier: DiagnosticTestTier::Smoke,
-        intent: "Verify enabling pulse channel 1 is reflected through the APU status register.",
-        expected_observations: &["$4015 bit 0 remains set after pulse setup"],
+        intent: "Verify non-DMC channel enables are reflected through the APU status register.",
+        expected_observations: &["$4015 bits 0-3 remain set after pulse 1, pulse 2, triangle, and noise setup"],
     },
     DiagnosticTestSpec {
         id: 7,
@@ -1191,7 +1197,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "apu_audio_depth",
         subsystem: "apu",
         risk: "The cartridge proves APU status and sample production, not channel accuracy or mixer behavior.",
-        current_coverage: "$4015 pulse enable status plus host-observed drained sample-count, peak, RMS, and mean absolute audio envelope windows at frame boundaries.",
+        current_coverage: "$4015 non-DMC channel status matrix for pulse 1, pulse 2, triangle, and noise, plus host-observed drained sample-count, peak, RMS, and mean absolute audio envelope windows at frame boundaries.",
         missing_coverage: "Per-channel envelope, sweep, triangle/noise/DMC waveform behavior, frame counter timing, mixer levels, and IRQ edge cases.",
         suggested_next_test: "Add per-channel register programs with channel-specific waveform windows and mixer-level expectations.",
     },
@@ -1368,6 +1374,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
+    pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub ppu_vblank_timing: PpuVblankTimingTelemetry,
     pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
@@ -1674,6 +1681,21 @@ pub struct InputPortMatrixTelemetry {
     pub joypad2_overread_first_hex: String,
     pub joypad2_overread_second: u8,
     pub joypad2_overread_second_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApuStatusMatrixTelemetry {
+    pub expected_mask: u8,
+    pub expected_mask_hex: String,
+    pub observed_mask: u8,
+    pub observed_mask_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub pulse1_status_bit: bool,
+    pub pulse2_status_bit: bool,
+    pub triangle_status_bit: bool,
+    pub noise_status_bit: bool,
+    pub passed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2561,6 +2583,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
+    let apu_status_matrix = apu_status_matrix_telemetry(&ram);
     let ppu_vblank_timing = ppu_vblank_timing.telemetry(ram[NMI_COUNT_ADDR as usize]);
     let ppu_scroll_wrap = run_ppu_scroll_wrap_variant();
     let ppu_scroll_seam = ppu_scroll_seam_telemetry(
@@ -2589,6 +2612,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        apu_status_matrix: &apu_status_matrix,
         ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -2617,6 +2641,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        apu_status_matrix: &apu_status_matrix,
         ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -2674,6 +2699,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         input_port_matrix,
+        apu_status_matrix,
         ppu_vblank_timing,
         ppu_scroll_seam,
         ppu_sprite_overflow,
@@ -3666,6 +3692,35 @@ fn write_audio_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         telemetry.audio.rms_abs_passed,
         telemetry.audio.mean_abs_passed,
         telemetry.audio.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status matrix mask / expected | {} / {} |",
+        telemetry.apu_status_matrix.observed_mask_hex,
+        telemetry.apu_status_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status matrix channels | pulse1={} pulse2={} triangle={} noise={} |",
+        telemetry.apu_status_matrix.pulse1_status_bit,
+        telemetry.apu_status_matrix.pulse2_status_bit,
+        telemetry.apu_status_matrix.triangle_status_bit,
+        telemetry.apu_status_matrix.noise_status_bit
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status matrix cases / expected | {} / {} |",
+        telemetry.apu_status_matrix.observed_case_count,
+        telemetry.apu_status_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status matrix passed | {} |",
+        telemetry.apu_status_matrix.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -4787,6 +4842,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -4808,6 +4864,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -4879,6 +4936,19 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.input_port_matrix.joypad2_overread_second_hex,
             input.input_port_matrix.observed_case_count,
             input.input_port_matrix.expected_case_count
+        ));
+    }
+    if !input.apu_status_matrix.passed {
+        failures.push(format!(
+            "APU status matrix mismatch: observed mask {} expected {}, cases {}/{}, pulse1={}, pulse2={}, triangle={}, noise={}",
+            input.apu_status_matrix.observed_mask_hex,
+            input.apu_status_matrix.expected_mask_hex,
+            input.apu_status_matrix.observed_case_count,
+            input.apu_status_matrix.expected_case_count,
+            input.apu_status_matrix.pulse1_status_bit,
+            input.apu_status_matrix.pulse2_status_bit,
+            input.apu_status_matrix.triangle_status_bit,
+            input.apu_status_matrix.noise_status_bit
         ));
     }
     if !input.ppu_vblank_timing.passed {
@@ -5237,6 +5307,36 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.input_port_matrix.expected_case_count
             ),
             likely_domain: "joypad.input_port_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "apu.status_matrix".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Apu),
+            test_id: Some(6),
+            test_name: test_name(6),
+            status: gated_probe_status(passed_suite, input.apu_status_matrix.passed),
+            description:
+                "Cartridge-observed non-DMC APU channel status bits are retained in host telemetry"
+                    .to_string(),
+            expected: format!(
+                "$4015 bits 0-3 mask {}, cases {}",
+                input.apu_status_matrix.expected_mask_hex,
+                input.apu_status_matrix.expected_case_count
+            ),
+            observed: format!(
+                "mask {}, pulse1={}, pulse2={}, triangle={}, noise={}, cases {}/{}",
+                input.apu_status_matrix.observed_mask_hex,
+                input.apu_status_matrix.pulse1_status_bit,
+                input.apu_status_matrix.pulse2_status_bit,
+                input.apu_status_matrix.triangle_status_bit,
+                input.apu_status_matrix.noise_status_bit,
+                input.apu_status_matrix.observed_case_count,
+                input.apu_status_matrix.expected_case_count
+            ),
+            likely_domain: "apu.status_matrix".to_string(),
         },
     );
     push_probe(
@@ -6192,20 +6292,52 @@ impl DiagnosticProgram {
 
     fn apu_status_register(&mut self) {
         self.begin_test(6);
-        self.asm.lda_imm(0x01);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(APU_STATUS_MATRIX_OBSERVED_MASK_ADDR);
+        self.asm.sta_abs(APU_STATUS_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_imm(APU_STATUS_MATRIX_EXPECTED_MASK);
         self.asm.sta_abs(0x4015);
+
         self.asm.lda_imm(0x1F);
         self.asm.sta_abs(0x4000);
         self.asm.lda_imm(0x08);
         self.asm.sta_abs(0x4002);
         self.asm.lda_imm(0x08);
         self.asm.sta_abs(0x4003);
+
+        self.asm.lda_imm(0x1F);
+        self.asm.sta_abs(0x4004);
+        self.asm.lda_imm(0x08);
+        self.asm.sta_abs(0x4006);
+        self.asm.lda_imm(0x08);
+        self.asm.sta_abs(0x4007);
+
+        self.asm.lda_imm(0xFF);
+        self.asm.sta_abs(0x4008);
+        self.asm.lda_imm(0xF0);
+        self.asm.sta_abs(0x400A);
+        self.asm.lda_imm(0x08);
+        self.asm.sta_abs(0x400B);
+
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x400C);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x400E);
+        self.asm.lda_imm(0x08);
+        self.asm.sta_abs(0x400F);
+
         self.asm
             .label(APU_STATUS_FAULT_LABEL)
             .expect("fault injection label should not collide");
         self.asm.lda_abs(0x4015);
-        self.asm.and_imm(0x01);
-        self.expect_a_eq(0x01, 0x61);
+        self.asm.and_imm(APU_STATUS_MATRIX_EXPECTED_MASK);
+        self.asm.sta_abs(APU_STATUS_MATRIX_OBSERVED_MASK_ADDR);
+        self.expect_a_eq(APU_STATUS_MATRIX_EXPECTED_MASK, 0x61);
+        self.asm.lda_imm(APU_STATUS_MATRIX_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(APU_STATUS_MATRIX_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4015);
         self.pass_test(6);
     }
 
@@ -6254,6 +6386,9 @@ impl DiagnosticProgram {
             self.expect_a_eq(0x01, 0x90 + index);
         }
         self.pass_test(9);
+        for _ in 0..PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS {
+            self.asm.nop();
+        }
     }
 
     fn ppu_nmi_and_render_frame(&mut self) {
@@ -7858,6 +7993,26 @@ fn input_port_matrix_telemetry(ram: &[u8], config: &DiagnosticConfig) -> InputPo
         joypad2_overread_first_hex: hex_byte(joypad2_overread_first),
         joypad2_overread_second,
         joypad2_overread_second_hex: hex_byte(joypad2_overread_second),
+    }
+}
+
+fn apu_status_matrix_telemetry(ram: &[u8]) -> ApuStatusMatrixTelemetry {
+    let observed_mask = ram[(APU_STATUS_MATRIX_OBSERVED_MASK_ADDR & 0x07FF) as usize]
+        & APU_STATUS_MATRIX_EXPECTED_MASK;
+    let observed_case_count = ram[(APU_STATUS_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    ApuStatusMatrixTelemetry {
+        expected_mask: APU_STATUS_MATRIX_EXPECTED_MASK,
+        expected_mask_hex: hex_byte(APU_STATUS_MATRIX_EXPECTED_MASK),
+        observed_mask,
+        observed_mask_hex: hex_byte(observed_mask),
+        expected_case_count: APU_STATUS_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        pulse1_status_bit: observed_mask & 0x01 != 0,
+        pulse2_status_bit: observed_mask & 0x02 != 0,
+        triangle_status_bit: observed_mask & 0x04 != 0,
+        noise_status_bit: observed_mask & 0x08 != 0,
+        passed: observed_mask == APU_STATUS_MATRIX_EXPECTED_MASK
+            && observed_case_count == APU_STATUS_MATRIX_EXPECTED_CASE_COUNT,
     }
 }
 
@@ -9673,6 +9828,13 @@ fn compare_observation_checksums(
         &["ppu_scroll_seam", "bottom_observed_color"][..],
         &["ppu_scroll_seam", "observed_case_count"][..],
         &["ppu_scroll_seam", "passed"][..],
+        &["apu_status_matrix", "observed_mask"][..],
+        &["apu_status_matrix", "observed_case_count"][..],
+        &["apu_status_matrix", "pulse1_status_bit"][..],
+        &["apu_status_matrix", "pulse2_status_bit"][..],
+        &["apu_status_matrix", "triangle_status_bit"][..],
+        &["apu_status_matrix", "noise_status_bit"][..],
+        &["apu_status_matrix", "passed"][..],
         &["audio", "sample_count"][..],
         &["audio", "sample_count_passed"][..],
         &["audio", "peak_abs"][..],
@@ -10357,6 +10519,9 @@ mod tests {
         assert!(telemetry.verdict.failure.is_none());
         assert_eq!(telemetry.ram.signature, 0xA5);
         assert!(telemetry.frames >= 2);
+        assert!(telemetry.apu_status_matrix.passed);
+        assert_eq!(telemetry.apu_status_matrix.observed_mask, 0x0F);
+        assert_eq!(telemetry.apu_status_matrix.observed_case_count, 4);
         assert!(telemetry.audio.sample_count_passed);
         assert!(telemetry.audio.peak_abs_passed);
         assert!(telemetry.audio.rms_abs_passed);
