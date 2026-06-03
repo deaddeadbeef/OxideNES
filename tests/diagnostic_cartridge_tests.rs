@@ -593,6 +593,28 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .dmc_dma_first_oam_overlap_stall_cycles
             .expect("overlap stall bucket should be observed") as u64
     );
+    assert!(telemetry.audio.sample_count_passed);
+    assert!((telemetry.audio.expected_min_sample_count
+        ..=telemetry.audio.expected_max_sample_count)
+        .contains(&telemetry.audio.sample_count));
+    assert!(telemetry.audio.peak_abs_passed);
+    assert!(telemetry.audio.rms_abs_passed);
+    assert!(telemetry.audio.mean_abs_passed);
+    assert!(telemetry.audio.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "apu.sample_count"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "apu.frame_output"
+            && probe.expected.contains("12000..=13000")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "apu.output_envelope"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "apu.output_envelope"
+            && probe.observed.contains("peak")
+            && probe.observed.contains("rms")
+            && probe.observed.contains("mean")
+    }));
     assert_eq!(telemetry.instruction_trace.retention_limit, 64);
     assert_eq!(
         telemetry.instruction_trace.retained_instruction_count,
@@ -846,6 +868,14 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
     assert!(report.contains("| DMC overlap parity / stall bucket |"));
     assert!(report.contains("| DMC 3-cycle / 4-cycle fetches |"));
+    assert!(report.contains("## APU Audio Output"));
+    assert!(report.contains("| Sample count / expected |"));
+    assert!(report.contains("| Peak abs / expected |"));
+    assert!(report.contains("| RMS abs / expected |"));
+    assert!(report.contains("| Mean abs / expected |"));
+    assert!(report.contains(
+        "| Audio envelope passed | sample_count=true peak=true rms=true mean=true overall=true |"
+    ));
     assert!(report.contains("## Timing"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));

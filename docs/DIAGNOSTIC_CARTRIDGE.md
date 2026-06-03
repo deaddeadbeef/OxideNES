@@ -734,7 +734,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   plus hardware-bug false-positive and false-negative subcases
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   and DMC sample-DMA overlap telemetry
-- APU pulse-channel status register
+- APU pulse-channel status register plus host-observed sample-count, peak,
+  RMS, and mean absolute output envelope checks
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Joypad strobe and shift reads with configurable expected masks
 - Joypad mid-stream strobe reset behavior
@@ -796,7 +797,7 @@ The cartridge writes status bytes into CPU RAM:
 The host runner adds emulator-side telemetry that the cartridge cannot inspect
 directly: CPU registers, frame count, RAM checksum, OAM checksum,
 rendered-frame expected/observed checksum and color counts, audio sample
-count/peak, status/frame events, current-test transition events, a bounded
+count/peak/RMS/mean envelope, status/frame events, current-test transition events, a bounded
 instruction-boundary trace, failure-localization metadata, per-test
 timeline/duration telemetry, structured observation probes, and a derived
 analysis summary.
@@ -1078,6 +1079,12 @@ rendered full frame drifts from the accepted diagnostic signature. Non-default
 input-timing fixtures report the probe as validation-disabled while still
 passing and recording their observed checksums; intentional fault fixtures keep
 the probe out of the failure focus so the intended fault remains localized.
+
+Schema version `45` expands top-level `audio` telemetry from sample count and
+peak into a bounded APU output envelope. The host runner now records expected
+sample-count, peak, RMS, and mean absolute windows plus pass booleans, and adds
+the `apu.output_envelope` probe so silent, clipped, or obviously unstable audio
+output can fail as a direct expected-vs-observed observation.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
