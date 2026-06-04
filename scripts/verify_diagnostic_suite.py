@@ -22,6 +22,8 @@ EXPECTED_SCENARIOS = {
     "input_mask_all_pressed_pass",
     "input_mask_joypad1_pressed_pass",
     "input_mask_joypad2_pressed_pass",
+    "input_mask_sparse_bits_pass",
+    "input_mask_nibble_split_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
@@ -1020,6 +1022,56 @@ class SuiteVerifier:
         else:
             self.errors.append("missing observer observation for input_mask_joypad2_pressed_pass")
 
+        input_sparse_bits = by_scenario.get("input_mask_sparse_bits_pass")
+        if isinstance(input_sparse_bits, dict):
+            self.expect_equal(
+                input_sparse_bits.get("role"),
+                "expected_pass_fixture",
+                "input sparse-bits observer role",
+            )
+            self.expect_equal(
+                input_sparse_bits.get("outcome"),
+                "matches_baseline",
+                "input sparse-bits observer outcome",
+            )
+            self.expect_equal(
+                input_sparse_bits.get("health"),
+                "healthy",
+                "input sparse-bits observer health",
+            )
+            self.expect_equal(
+                input_sparse_bits.get("next_artifact"),
+                "input_mask_sparse_bits_pass/triage.json",
+                "input sparse-bits observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_sparse_bits_pass")
+
+        input_nibble_split = by_scenario.get("input_mask_nibble_split_pass")
+        if isinstance(input_nibble_split, dict):
+            self.expect_equal(
+                input_nibble_split.get("role"),
+                "expected_pass_fixture",
+                "input nibble-split observer role",
+            )
+            self.expect_equal(
+                input_nibble_split.get("outcome"),
+                "matches_baseline",
+                "input nibble-split observer outcome",
+            )
+            self.expect_equal(
+                input_nibble_split.get("health"),
+                "healthy",
+                "input nibble-split observer health",
+            )
+            self.expect_equal(
+                input_nibble_split.get("next_artifact"),
+                "input_mask_nibble_split_pass/triage.json",
+                "input nibble-split observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_nibble_split_pass")
+
         timeout = by_scenario.get("timeout_cycle_limit")
         if isinstance(timeout, dict):
             self.expect_equal(
@@ -1610,6 +1662,28 @@ class SuiteVerifier:
                 self.expect_in(token, replay_args, "input_mask_joypad2_pressed_pass replay_args")
         else:
             self.errors.append("missing replay args check subject input_mask_joypad2_pressed_pass")
+
+        input_sparse_bits = scenarios.get("input_mask_sparse_bits_pass")
+        if isinstance(input_sparse_bits, dict):
+            replay_args = self.expect_list(
+                input_sparse_bits.get("replay_args"),
+                "input_mask_sparse_bits_pass replay_args",
+            )
+            for token in ("--joypad1", "0x81", "--expect-joypad2", "0x18"):
+                self.expect_in(token, replay_args, "input_mask_sparse_bits_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_sparse_bits_pass")
+
+        input_nibble_split = scenarios.get("input_mask_nibble_split_pass")
+        if isinstance(input_nibble_split, dict):
+            replay_args = self.expect_list(
+                input_nibble_split.get("replay_args"),
+                "input_mask_nibble_split_pass replay_args",
+            )
+            for token in ("--joypad1", "0x0F", "--expect-joypad2", "0xF0"):
+                self.expect_in(token, replay_args, "input_mask_nibble_split_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_nibble_split_pass")
 
         joypad_hold = scenarios.get("joypad_strobe_high_hold_fault")
         if isinstance(joypad_hold, dict):
