@@ -319,12 +319,25 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.apu_status_matrix.pulse2_status_bit);
     assert!(telemetry.apu_status_matrix.triangle_status_bit);
     assert!(telemetry.apu_status_matrix.noise_status_bit);
+    assert!(telemetry.apu_dmc_status.passed);
+    assert_eq!(telemetry.apu_dmc_status.expected_bit_hex, "0x10");
+    assert_eq!(telemetry.apu_dmc_status.observed_bit_hex, "0x10");
+    assert_eq!(telemetry.apu_dmc_status.expected_case_count, 1);
+    assert_eq!(telemetry.apu_dmc_status.observed_case_count, 1);
+    assert!(telemetry.apu_dmc_status.dmc_status_bit);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "apu.status_matrix"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "apu.status_matrix"
             && probe.observed.contains("mask 0x0F")
             && probe.observed.contains("cases 4/4")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "apu.dmc_status"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "apu.dmc_status"
+            && probe.observed.contains("bit 0x10")
+            && probe.observed.contains("cases 1/1")
     }));
     assert!(telemetry.ppu_vblank_timing.passed);
     assert_eq!(telemetry.ppu_vblank_timing.test_id, 10);
@@ -892,6 +905,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains(
         "| Audio envelope passed | sample_count=true peak=true rms=true mean=true overall=true |"
     ));
+    assert!(report.contains("| DMC status bit / expected | 0x10 / 0x10 |"));
+    assert!(report.contains("| DMC status active / cases / passed | true / 1/1 / true |"));
     assert!(report.contains("## Timing"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));

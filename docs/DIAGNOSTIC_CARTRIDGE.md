@@ -1093,6 +1093,13 @@ observed bits 0-3 mask plus case count in RAM, exposes top-level
 `apu_status_matrix` telemetry, and adds the `apu.status_matrix` probe for
 expected-vs-observed APU status evidence.
 
+Schema version `47` adds DMC status-register evidence to the existing
+OAM/DMC overlap path. After the cartridge primes DMC sample playback and before
+it runs the OAM DMA transfer, it records `$4015` bit 4 plus a case count in RAM,
+exposes top-level `apu_dmc_status` telemetry, and adds the `apu.dmc_status`
+probe so DMC-active status regressions localize separately from the non-DMC
+channel matrix.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`

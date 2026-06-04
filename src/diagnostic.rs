@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 46;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 47;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v46";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v47";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -94,8 +94,12 @@ const APU_STATUS_MATRIX_EXPECTED_MASK: u8 = 0x0F;
 const APU_STATUS_MATRIX_EXPECTED_CASE_COUNT: u8 = 4;
 const APU_STATUS_MATRIX_OBSERVED_MASK_ADDR: u16 = 0x0262;
 const APU_STATUS_MATRIX_CASE_COUNT_ADDR: u16 = 0x0263;
+const APU_DMC_STATUS_EXPECTED_BIT: u8 = 0x10;
+const APU_DMC_STATUS_EXPECTED_CASE_COUNT: u8 = 1;
+const APU_DMC_STATUS_OBSERVED_BIT_ADDR: u16 = 0x0264;
+const APU_DMC_STATUS_CASE_COUNT_ADDR: u16 = 0x0265;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
-const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 26;
+const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
@@ -1197,7 +1201,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "apu_audio_depth",
         subsystem: "apu",
         risk: "The cartridge proves APU status and sample production, not channel accuracy or mixer behavior.",
-        current_coverage: "$4015 non-DMC channel status matrix for pulse 1, pulse 2, triangle, and noise, plus host-observed drained sample-count, peak, RMS, and mean absolute audio envelope windows at frame boundaries.",
+        current_coverage: "$4015 non-DMC channel status matrix for pulse 1, pulse 2, triangle, and noise, DMC active-bit observation during sample-DMA setup, plus host-observed drained sample-count, peak, RMS, and mean absolute audio envelope windows at frame boundaries.",
         missing_coverage: "Per-channel envelope, sweep, triangle/noise/DMC waveform behavior, frame counter timing, mixer levels, and IRQ edge cases.",
         suggested_next_test: "Add per-channel register programs with channel-specific waveform windows and mixer-level expectations.",
     },
@@ -1375,6 +1379,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
+    pub apu_dmc_status: ApuDmcStatusTelemetry,
     pub ppu_vblank_timing: PpuVblankTimingTelemetry,
     pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
@@ -1695,6 +1700,18 @@ pub struct ApuStatusMatrixTelemetry {
     pub pulse2_status_bit: bool,
     pub triangle_status_bit: bool,
     pub noise_status_bit: bool,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApuDmcStatusTelemetry {
+    pub expected_bit: u8,
+    pub expected_bit_hex: String,
+    pub observed_bit: u8,
+    pub observed_bit_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub dmc_status_bit: bool,
     pub passed: bool,
 }
 
@@ -2584,6 +2601,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
+    let apu_dmc_status = apu_dmc_status_telemetry(&ram);
     let ppu_vblank_timing = ppu_vblank_timing.telemetry(ram[NMI_COUNT_ADDR as usize]);
     let ppu_scroll_wrap = run_ppu_scroll_wrap_variant();
     let ppu_scroll_seam = ppu_scroll_seam_telemetry(
@@ -2613,6 +2631,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
         apu_status_matrix: &apu_status_matrix,
+        apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -2642,6 +2661,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
         apu_status_matrix: &apu_status_matrix,
+        apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -2700,6 +2720,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix,
         input_port_matrix,
         apu_status_matrix,
+        apu_dmc_status,
         ppu_vblank_timing,
         ppu_scroll_seam,
         ppu_sprite_overflow,
@@ -3721,6 +3742,21 @@ fn write_audio_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Status matrix passed | {} |",
         telemetry.apu_status_matrix.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| DMC status bit / expected | {} / {} |",
+        telemetry.apu_dmc_status.observed_bit_hex, telemetry.apu_dmc_status.expected_bit_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| DMC status active / cases / passed | {} / {}/{} / {} |",
+        telemetry.apu_dmc_status.dmc_status_bit,
+        telemetry.apu_dmc_status.observed_case_count,
+        telemetry.apu_dmc_status.expected_case_count,
+        telemetry.apu_dmc_status.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -4843,6 +4879,7 @@ struct HostValidationInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
+    apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -4865,6 +4902,7 @@ struct ProbeTelemetryInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
+    apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -4949,6 +4987,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.apu_status_matrix.pulse2_status_bit,
             input.apu_status_matrix.triangle_status_bit,
             input.apu_status_matrix.noise_status_bit
+        ));
+    }
+    if !input.apu_dmc_status.passed {
+        failures.push(format!(
+            "APU DMC status mismatch: observed bit {} expected {}, active={}, cases {}/{}",
+            input.apu_dmc_status.observed_bit_hex,
+            input.apu_dmc_status.expected_bit_hex,
+            input.apu_dmc_status.dmc_status_bit,
+            input.apu_dmc_status.observed_case_count,
+            input.apu_dmc_status.expected_case_count
         ));
     }
     if !input.ppu_vblank_timing.passed {
@@ -5337,6 +5385,31 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.apu_status_matrix.expected_case_count
             ),
             likely_domain: "apu.status_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "apu.dmc_status".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Apu),
+            test_id: Some(5),
+            test_name: test_name(5),
+            status: gated_probe_status(passed_suite, input.apu_dmc_status.passed),
+            description: "Cartridge-observed DMC active status bit is retained in host telemetry"
+                .to_string(),
+            expected: format!(
+                "$4015 bit 4 {} during DMC setup before OAM DMA, cases {}",
+                input.apu_dmc_status.expected_bit_hex, input.apu_dmc_status.expected_case_count
+            ),
+            observed: format!(
+                "bit {}, dmc_active={}, cases {}/{}",
+                input.apu_dmc_status.observed_bit_hex,
+                input.apu_dmc_status.dmc_status_bit,
+                input.apu_dmc_status.observed_case_count,
+                input.apu_dmc_status.expected_case_count
+            ),
+            likely_domain: "apu.dmc_status".to_string(),
         },
     );
     push_probe(
@@ -6280,6 +6353,11 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x4013); // 17 bytes, enough to request again during OAM DMA.
         self.asm.lda_imm(0x10);
         self.asm.sta_abs(0x4015); // Prime an immediate DMC sample fetch.
+        self.asm.lda_abs(0x4015);
+        self.asm.and_imm(APU_DMC_STATUS_EXPECTED_BIT);
+        self.asm.sta_abs(APU_DMC_STATUS_OBSERVED_BIT_ADDR);
+        self.asm.lda_imm(APU_DMC_STATUS_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(APU_DMC_STATUS_CASE_COUNT_ADDR);
         self.asm
             .label(DMA_OAM_TRANSFER_FAULT_LABEL)
             .expect("fault injection label should not collide");
@@ -8013,6 +8091,23 @@ fn apu_status_matrix_telemetry(ram: &[u8]) -> ApuStatusMatrixTelemetry {
         noise_status_bit: observed_mask & 0x08 != 0,
         passed: observed_mask == APU_STATUS_MATRIX_EXPECTED_MASK
             && observed_case_count == APU_STATUS_MATRIX_EXPECTED_CASE_COUNT,
+    }
+}
+
+fn apu_dmc_status_telemetry(ram: &[u8]) -> ApuDmcStatusTelemetry {
+    let observed_bit =
+        ram[(APU_DMC_STATUS_OBSERVED_BIT_ADDR & 0x07FF) as usize] & APU_DMC_STATUS_EXPECTED_BIT;
+    let observed_case_count = ram[(APU_DMC_STATUS_CASE_COUNT_ADDR & 0x07FF) as usize];
+    ApuDmcStatusTelemetry {
+        expected_bit: APU_DMC_STATUS_EXPECTED_BIT,
+        expected_bit_hex: hex_byte(APU_DMC_STATUS_EXPECTED_BIT),
+        observed_bit,
+        observed_bit_hex: hex_byte(observed_bit),
+        expected_case_count: APU_DMC_STATUS_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        dmc_status_bit: observed_bit & APU_DMC_STATUS_EXPECTED_BIT != 0,
+        passed: observed_bit == APU_DMC_STATUS_EXPECTED_BIT
+            && observed_case_count == APU_DMC_STATUS_EXPECTED_CASE_COUNT,
     }
 }
 
@@ -9835,6 +9930,10 @@ fn compare_observation_checksums(
         &["apu_status_matrix", "triangle_status_bit"][..],
         &["apu_status_matrix", "noise_status_bit"][..],
         &["apu_status_matrix", "passed"][..],
+        &["apu_dmc_status", "observed_bit"][..],
+        &["apu_dmc_status", "observed_case_count"][..],
+        &["apu_dmc_status", "dmc_status_bit"][..],
+        &["apu_dmc_status", "passed"][..],
         &["audio", "sample_count"][..],
         &["audio", "sample_count_passed"][..],
         &["audio", "peak_abs"][..],
@@ -10522,6 +10621,9 @@ mod tests {
         assert!(telemetry.apu_status_matrix.passed);
         assert_eq!(telemetry.apu_status_matrix.observed_mask, 0x0F);
         assert_eq!(telemetry.apu_status_matrix.observed_case_count, 4);
+        assert!(telemetry.apu_dmc_status.passed);
+        assert_eq!(telemetry.apu_dmc_status.observed_bit, 0x10);
+        assert_eq!(telemetry.apu_dmc_status.observed_case_count, 1);
         assert!(telemetry.audio.sample_count_passed);
         assert!(telemetry.audio.peak_abs_passed);
         assert!(telemetry.audio.rms_abs_passed);
