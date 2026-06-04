@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 50;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 51;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v50";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v51";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -28,10 +28,9 @@ const PRG_BANK_SIZE: usize = 16 * 1024;
 const DIAGNOSTIC_MAPPER: u8 = 2;
 const PRG_BANKS: u8 = 4;
 const CHR_BANKS: u8 = 1;
+const CHR_BANK_SIZE: usize = 8 * 1024;
 const PRG_SIZE: usize = PRG_BANKS as usize * PRG_BANK_SIZE;
-const CHR_SIZE: usize = CHR_BANKS as usize * 8 * 1024;
-const PROGRAM_PRG_BANK: usize = PRG_BANKS as usize - 1;
-const PROGRAM_PRG_OFFSET: usize = PROGRAM_PRG_BANK * PRG_BANK_SIZE;
+const CHR_SIZE: usize = CHR_BANKS as usize * CHR_BANK_SIZE;
 const MAPPER2_SWITCHABLE_ADDR: u16 = 0x8000;
 const MAPPER2_FIXED_SENTINEL_ADDR: u16 = 0xFF00;
 const MAPPER2_BANK_SENTINELS: &[(u8, u8)] = &[(0, 0xA0), (1, 0xB1), (2, 0xC2)];
@@ -40,6 +39,14 @@ const MAPPER2_PRG_RAM_LOW_ADDR: u16 = 0x6000;
 const MAPPER2_PRG_RAM_HIGH_ADDR: u16 = 0x7FFF;
 const MAPPER2_PRG_RAM_LOW_SENTINEL: u8 = 0x5C;
 const MAPPER2_PRG_RAM_HIGH_SENTINEL: u8 = 0xA7;
+const MAPPER3_CHR_BANK_TEST_ID: u8 = 29;
+const MAPPER3_MAPPER: u8 = 3;
+const MAPPER3_PRG_BANKS: u8 = 2;
+const MAPPER3_CHR_BANKS: u8 = 4;
+const MAPPER3_CHR_READ_ADDR: u16 = 0x0010;
+const MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT: u8 = 4;
+const MAPPER3_CHR_BANK_EXPECTED_BANKS: [u8; 4] = [0, 1, 2, 3];
+const MAPPER3_CHR_BANK_EXPECTED_VALUES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
 
 const STATUS_ADDR: u8 = 0xF0;
 const CURRENT_TEST_ADDR: u8 = 0xF1;
@@ -102,6 +109,8 @@ const APU_DMC_STATUS_EXPECTED_BIT: u8 = 0x10;
 const APU_DMC_STATUS_EXPECTED_CASE_COUNT: u8 = 1;
 const APU_DMC_STATUS_OBSERVED_BIT_ADDR: u16 = 0x0264;
 const APU_DMC_STATUS_CASE_COUNT_ADDR: u16 = 0x0265;
+const MAPPER3_CHR_BANK_CASE_COUNT_ADDR: u16 = 0x0266;
+const MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR: u16 = 0x0267;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1198,10 +1207,10 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
-        risk: "The diagnostic cartridge now exercises one PRG bank-switching mapper, but broader mapper behavior can still regress outside this fixture.",
-        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end.",
-        missing_coverage: "Runtime CHR bank switching, IRQ-generating mappers, other mirroring modes, MMC register edge cases, and battery-backed RAM persistence.",
-        suggested_next_test: "Generate additional mapper-specific synthetic cartridges for supported mappers and assert bank-visible sentinels from CPU and PPU paths.",
+        risk: "The diagnostic cartridges now exercise two simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
+        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks.",
+        missing_coverage: "IRQ-generating mappers, other mirroring modes, MMC register edge cases, battery-backed RAM persistence, and CHR/PRG switches during active rendering.",
+        suggested_next_test: "Generate MMC-style synthetic cartridges that switch CHR/PRG banks during rendering and assert selected pattern/table data through PPU-visible pixels and mapper IRQ timing.",
     },
     DiagnosticCoverageGapSpec {
         id: "apu_audio_depth",
@@ -1376,6 +1385,7 @@ pub struct DiagnosticTelemetry {
     pub provenance: &'static str,
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
+    pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
     pub input: DiagnosticInputTelemetry,
     pub verdict: VerdictTelemetry,
     pub analysis: DiagnosticAnalysisTelemetry,
@@ -1422,6 +1432,26 @@ pub struct CartridgeTelemetry {
     pub nmi_vector: u16,
     pub irq_vector: u16,
     pub rom_hash: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper3ChrBankTelemetry {
+    pub mapper: u8,
+    pub prg_banks: u8,
+    pub chr_banks: u8,
+    pub read_addr: u16,
+    pub read_addr_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_banks: Vec<u8>,
+    pub expected_values: Vec<u8>,
+    pub expected_values_hex: Vec<String>,
+    pub observed_values: Vec<u8>,
+    pub observed_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2184,6 +2214,32 @@ fn build_diagnostic_cartridge_from_program_with_flags6(
     labels: &HashMap<String, u16>,
     flags6_mirroring_bits: u8,
 ) -> Result<Vec<u8>, String> {
+    build_diagnostic_cartridge_rom(
+        program,
+        labels,
+        DiagnosticCartridgeRomConfig {
+            mapper: DIAGNOSTIC_MAPPER,
+            prg_banks: PRG_BANKS,
+            flags6_mirroring_bits,
+            chr_rom: build_chr_rom(),
+            seed_mapper2_prg_sentinels: true,
+        },
+    )
+}
+
+struct DiagnosticCartridgeRomConfig {
+    mapper: u8,
+    prg_banks: u8,
+    flags6_mirroring_bits: u8,
+    chr_rom: Vec<u8>,
+    seed_mapper2_prg_sentinels: bool,
+}
+
+fn build_diagnostic_cartridge_rom(
+    program: &[u8],
+    labels: &HashMap<String, u16>,
+    config: DiagnosticCartridgeRomConfig,
+) -> Result<Vec<u8>, String> {
     if program.len() > PRG_BANK_SIZE {
         return Err(format!(
             "diagnostic program is too large: {} bytes > {} bytes",
@@ -2191,36 +2247,151 @@ fn build_diagnostic_cartridge_from_program_with_flags6(
             PRG_BANK_SIZE
         ));
     }
+    if config.prg_banks == 0 {
+        return Err("diagnostic cartridge requires at least one PRG bank".to_string());
+    }
+    if config.chr_rom.is_empty() || !config.chr_rom.len().is_multiple_of(CHR_BANK_SIZE) {
+        return Err(format!(
+            "diagnostic CHR ROM size must be a nonzero multiple of {} bytes, got {} bytes",
+            CHR_BANK_SIZE,
+            config.chr_rom.len()
+        ));
+    }
 
-    let mut rom = Vec::with_capacity(16 + PRG_SIZE + CHR_SIZE);
+    let chr_banks = config.chr_rom.len() / CHR_BANK_SIZE;
+    let chr_banks_u8 = u8::try_from(chr_banks)
+        .map_err(|_| format!("diagnostic CHR bank count {chr_banks} exceeds iNES limit"))?;
+    let prg_size = config.prg_banks as usize * PRG_BANK_SIZE;
+    let program_prg_offset = (config.prg_banks as usize - 1) * PRG_BANK_SIZE;
+
+    let mut rom = Vec::with_capacity(16 + prg_size + config.chr_rom.len());
     rom.extend_from_slice(b"NES\x1A");
-    rom.push(PRG_BANKS);
-    rom.push(CHR_BANKS);
-    rom.push(((DIAGNOSTIC_MAPPER & 0x0F) << 4) | (flags6_mirroring_bits & 0x09));
-    rom.push(DIAGNOSTIC_MAPPER & 0xF0);
+    rom.push(config.prg_banks);
+    rom.push(chr_banks_u8);
+    rom.push(((config.mapper & 0x0F) << 4) | (config.flags6_mirroring_bits & 0x09));
+    rom.push(config.mapper & 0xF0);
     rom.extend_from_slice(&[0; 8]);
 
-    let mut prg = vec![0xEA; PRG_SIZE];
-    for (bank, sentinel) in MAPPER2_BANK_SENTINELS {
-        prg[*bank as usize * PRG_BANK_SIZE] = *sentinel;
+    let mut prg = vec![0xEA; prg_size];
+    if config.seed_mapper2_prg_sentinels {
+        for (bank, sentinel) in MAPPER2_BANK_SENTINELS {
+            if *bank < config.prg_banks {
+                prg[*bank as usize * PRG_BANK_SIZE] = *sentinel;
+            }
+        }
+        write_prg_cpu_byte_for_banks(
+            &mut prg,
+            config.prg_banks,
+            MAPPER2_FIXED_SENTINEL_ADDR,
+            MAPPER2_FIXED_SENTINEL,
+        );
     }
-    write_prg_cpu_byte(
+    prg[program_prg_offset..program_prg_offset + program.len()].copy_from_slice(program);
+    write_vector_for_banks(
         &mut prg,
-        MAPPER2_FIXED_SENTINEL_ADDR,
-        MAPPER2_FIXED_SENTINEL,
+        config.prg_banks,
+        0xFFFA,
+        label_addr(labels, "nmi")?,
     );
-    prg[PROGRAM_PRG_OFFSET..PROGRAM_PRG_OFFSET + program.len()].copy_from_slice(program);
-    write_vector(&mut prg, 0xFFFA, label_addr(labels, "nmi")?);
-    write_vector(&mut prg, 0xFFFC, PROGRAM_BASE);
-    write_vector(&mut prg, 0xFFFE, label_addr(labels, "irq")?);
+    write_vector_for_banks(&mut prg, config.prg_banks, 0xFFFC, PROGRAM_BASE);
+    write_vector_for_banks(
+        &mut prg,
+        config.prg_banks,
+        0xFFFE,
+        label_addr(labels, "irq")?,
+    );
     rom.extend_from_slice(&prg);
-    rom.extend_from_slice(&build_chr_rom());
+    rom.extend_from_slice(&config.chr_rom);
     Ok(rom)
 }
 
 fn build_ppu_scroll_wrap_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_ppu_scroll_wrap_variant_program_with_labels()?;
     build_diagnostic_cartridge_from_program_with_flags6(&program, &labels, 0x01)
+}
+
+fn build_mapper3_chr_bank_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper3_chr_bank_variant_program_with_labels()?;
+    build_diagnostic_cartridge_rom(
+        &program,
+        &labels,
+        DiagnosticCartridgeRomConfig {
+            mapper: MAPPER3_MAPPER,
+            prg_banks: MAPPER3_PRG_BANKS,
+            flags6_mirroring_bits: 0,
+            chr_rom: build_mapper3_chr_bank_variant_chr_rom(),
+            seed_mapper2_prg_sentinels: false,
+        },
+    )
+}
+
+fn build_mapper3_chr_bank_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER3_CHR_BANK_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
+    for offset in 0..MAPPER3_CHR_BANK_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+
+    for (case_index, (&bank, &expected)) in MAPPER3_CHR_BANK_EXPECTED_BANKS
+        .iter()
+        .zip(MAPPER3_CHR_BANK_EXPECTED_VALUES.iter())
+        .enumerate()
+    {
+        program.asm.lda_imm(bank);
+        program.asm.sta_abs(0x8000);
+        program.read_ppu_data_into_a(MAPPER3_CHR_READ_ADDR);
+        program
+            .asm
+            .sta_abs(MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR + case_index as u16);
+        program.expect_a_eq(expected, 0x90 + case_index as u8);
+        program.asm.lda_abs(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
+        program.asm.clc();
+        program.asm.adc_imm(0x01);
+        program.asm.sta_abs(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
+    }
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
 }
 
 fn build_ppu_scroll_wrap_variant_program_with_labels(
@@ -2628,6 +2799,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &bus.ppu.frame_data,
         &ppu_scroll_wrap,
     );
+    let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
     let ppu_sprite_priority = ppu_sprite_priority_telemetry(
         &ram,
@@ -2655,6 +2827,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
+        mapper3_chr_bank: &mapper3_chr_bank,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -2685,6 +2858,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
+        mapper3_chr_bank: &mapper3_chr_bank,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -2729,6 +2903,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         provenance: DIAGNOSTIC_PROVENANCE,
         suite: suite_telemetry(),
         cartridge: cartridge_info,
+        mapper3_chr_bank,
         input: diagnostic_input_telemetry(&config),
         verdict,
         analysis,
@@ -2972,6 +3147,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_failure_section(&mut report, telemetry);
     write_coverage_section(&mut report, telemetry);
     write_coverage_gaps_section(&mut report, telemetry);
+    write_mapper_section(&mut report, telemetry);
     write_ppu_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
     write_audio_section(&mut report, telemetry);
@@ -3194,6 +3370,68 @@ fn write_coverage_gaps_section(report: &mut String, telemetry: &DiagnosticTeleme
         )
         .expect("write report");
     }
+    writeln!(report).expect("write report");
+}
+
+fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## Cartridge Mapper Variants").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Main cartridge mapper / PRG banks / CHR banks | {} / {} / {} |",
+        telemetry.cartridge.mapper, telemetry.cartridge.prg_banks, telemetry.cartridge.chr_banks
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 variant mapper / PRG banks / CHR banks | {} / {} / {} |",
+        telemetry.mapper3_chr_bank.mapper,
+        telemetry.mapper3_chr_bank.prg_banks,
+        telemetry.mapper3_chr_bank.chr_banks
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR read address | {} |",
+        telemetry.mapper3_chr_bank.read_addr_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR banks | {:?} |",
+        telemetry.mapper3_chr_bank.expected_banks
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR observed / expected | {:?} / {:?} |",
+        telemetry.mapper3_chr_bank.observed_values_hex,
+        telemetry.mapper3_chr_bank.expected_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR cases / expected | {} / {} |",
+        telemetry.mapper3_chr_bank.observed_case_count,
+        telemetry.mapper3_chr_bank.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper3_chr_bank.cycles,
+        telemetry.mapper3_chr_bank.frames,
+        telemetry.mapper3_chr_bank.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 3 CHR error | {} |",
+        optional_string(telemetry.mapper3_chr_bank.error.as_deref())
+    )
+    .expect("write report");
     writeln!(report).expect("write report");
 }
 
@@ -5063,6 +5301,7 @@ struct HostValidationInput<'a> {
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
+    mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -5086,6 +5325,7 @@ struct ProbeTelemetryInput<'a> {
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
+    mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -5285,6 +5525,18 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_scroll_seam.observed_case_count,
             input.ppu_scroll_seam.expected_case_count,
             optional_string(input.ppu_scroll_seam.nametable_wrap_error.as_deref())
+        ));
+    }
+    if !input.mapper3_chr_bank.passed {
+        failures.push(format!(
+            "Mapper 3 CHR-bank variant mismatch: read {}, observed {:?} expected {:?}, cases {}/{}, cycles={}, error {}",
+            input.mapper3_chr_bank.read_addr_hex,
+            input.mapper3_chr_bank.observed_values_hex,
+            input.mapper3_chr_bank.expected_values_hex,
+            input.mapper3_chr_bank.observed_case_count,
+            input.mapper3_chr_bank.expected_case_count,
+            input.mapper3_chr_bank.cycles,
+            optional_string(input.mapper3_chr_bank.error.as_deref())
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -5799,6 +6051,38 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.ppu_scroll_seam.expected_case_count
             ),
             likely_domain: "ppu.scroll_seam".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper3.chr_bank_switch".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER3_CHR_BANK_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper3_chr_bank.passed),
+            description:
+                "Generated Mapper 3 variant switches CNROM CHR banks and reads distinct pattern bytes through PPUDATA"
+                    .to_string(),
+            expected: format!(
+                "mapper {}, CHR banks {:?}, read {}, values {:?}, cases {}",
+                input.mapper3_chr_bank.mapper,
+                input.mapper3_chr_bank.expected_banks,
+                input.mapper3_chr_bank.read_addr_hex,
+                input.mapper3_chr_bank.expected_values_hex,
+                input.mapper3_chr_bank.expected_case_count
+            ),
+            observed: format!(
+                "values {:?}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper3_chr_bank.observed_values_hex,
+                input.mapper3_chr_bank.observed_case_count,
+                input.mapper3_chr_bank.expected_case_count,
+                input.mapper3_chr_bank.cycles,
+                input.mapper3_chr_bank.frames,
+                optional_string(input.mapper3_chr_bank.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper3_chr_bank".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -6484,6 +6768,16 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x2006);
         self.asm.lda_imm(value);
         self.asm.sta_abs(0x2007);
+    }
+
+    fn read_ppu_data_into_a(&mut self, addr: u16) {
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm((addr >> 8) as u8);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(addr as u8);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_abs(0x2007);
+        self.asm.lda_abs(0x2007);
     }
 
     fn wait_for_vblank(&mut self, label_prefix: &str) {
@@ -8069,21 +8363,37 @@ fn build_chr_rom() -> Vec<u8> {
     chr
 }
 
+fn build_mapper3_chr_bank_variant_chr_rom() -> Vec<u8> {
+    let mut chr = vec![0; MAPPER3_CHR_BANKS as usize * CHR_BANK_SIZE];
+    for (bank, value) in MAPPER3_CHR_BANK_EXPECTED_VALUES.iter().enumerate() {
+        let index = bank * CHR_BANK_SIZE + MAPPER3_CHR_READ_ADDR as usize;
+        chr[index] = *value;
+    }
+    chr
+}
+
 fn diagnostic_prg_offset_for_cpu_addr(addr: u16) -> usize {
+    diagnostic_prg_offset_for_cpu_addr_with_banks(addr, PRG_BANKS)
+}
+
+fn diagnostic_prg_offset_for_cpu_addr_with_banks(addr: u16, prg_banks: u8) -> usize {
     match addr {
         0x8000..=0xBFFF => (addr - 0x8000) as usize,
-        0xC000..=0xFFFF => PROGRAM_PRG_OFFSET + (addr - 0xC000) as usize,
+        0xC000..=0xFFFF => {
+            let final_bank_offset = (prg_banks as usize - 1) * PRG_BANK_SIZE;
+            final_bank_offset + (addr - 0xC000) as usize
+        }
         _ => panic!("diagnostic PRG CPU address out of cartridge range: 0x{addr:04X}"),
     }
 }
 
-fn write_prg_cpu_byte(prg: &mut [u8], addr: u16, value: u8) {
-    let index = diagnostic_prg_offset_for_cpu_addr(addr);
+fn write_prg_cpu_byte_for_banks(prg: &mut [u8], prg_banks: u8, addr: u16, value: u8) {
+    let index = diagnostic_prg_offset_for_cpu_addr_with_banks(addr, prg_banks);
     prg[index] = value;
 }
 
-fn write_vector(prg: &mut [u8], vector_addr: u16, value: u16) {
-    let index = diagnostic_prg_offset_for_cpu_addr(vector_addr);
+fn write_vector_for_banks(prg: &mut [u8], prg_banks: u8, vector_addr: u16, value: u16) {
+    let index = diagnostic_prg_offset_for_cpu_addr_with_banks(vector_addr, prg_banks);
     prg[index] = value as u8;
     prg[index + 1] = (value >> 8) as u8;
 }
@@ -8390,6 +8700,35 @@ fn apu_dmc_status_telemetry(ram: &[u8]) -> ApuDmcStatusTelemetry {
     }
 }
 
+fn mapper3_chr_bank_telemetry(observation: &Mapper3ChrBankObservation) -> Mapper3ChrBankTelemetry {
+    let expected_values = MAPPER3_CHR_BANK_EXPECTED_VALUES.to_vec();
+    let observed_values = observation.observed_values.to_vec();
+    Mapper3ChrBankTelemetry {
+        mapper: MAPPER3_MAPPER,
+        prg_banks: MAPPER3_PRG_BANKS,
+        chr_banks: MAPPER3_CHR_BANKS,
+        read_addr: MAPPER3_CHR_READ_ADDR,
+        read_addr_hex: format!("0x{:04X}", MAPPER3_CHR_READ_ADDR),
+        expected_case_count: MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        expected_banks: MAPPER3_CHR_BANK_EXPECTED_BANKS.to_vec(),
+        expected_values: expected_values.clone(),
+        expected_values_hex: expected_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_values: observed_values.clone(),
+        observed_values_hex: observed_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn ppu_sprite_zero_hit_telemetry(ram: &[u8]) -> PpuSpriteZeroHitTelemetry {
     let observed_status_bit = ram[(PPU_SPRITE_ZERO_HIT_STATUS_ADDR & 0x07FF) as usize];
     let observed_case_count = ram[(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR & 0x07FF) as usize];
@@ -8480,6 +8819,29 @@ fn ppu_sprite_priority_telemetry(
 }
 
 #[derive(Debug, Clone)]
+struct Mapper3ChrBankObservation {
+    observed_values: [u8; 4],
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper3ChrBankObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            observed_values: [0; 4],
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PpuScrollNametableWrapObservation {
     left_color: u32,
     right_color: u32,
@@ -8500,6 +8862,87 @@ impl PpuScrollNametableWrapObservation {
             error: Some(message.into()),
         }
     }
+}
+
+fn run_mapper3_chr_bank_variant() -> Mapper3ChrBankObservation {
+    match try_run_mapper3_chr_bank_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper3ChrBankObservation::failed(error),
+    }
+}
+
+fn try_run_mapper3_chr_bank_variant() -> Result<Mapper3ChrBankObservation, String> {
+    let rom = build_mapper3_chr_bank_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 20_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed_values = read_mapper3_chr_bank_observed_values(&mut bus);
+            let observed_case_count = bus.cpu_read(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && observed_case_count == MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT
+                && observed_values == MAPPER3_CHR_BANK_EXPECTED_VALUES;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 3 CHR-bank variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(
+                    "Mapper 3 CHR-bank variant reached PASS with mismatched host observations"
+                        .to_string(),
+                )
+            };
+            return Ok(Mapper3ChrBankObservation {
+                observed_values,
+                observed_case_count,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    Ok(Mapper3ChrBankObservation {
+        observed_values: read_mapper3_chr_bank_observed_values(&mut bus),
+        observed_case_count: bus.cpu_read(MAPPER3_CHR_BANK_CASE_COUNT_ADDR),
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 3 CHR-bank variant timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_mapper3_chr_bank_observed_values(bus: &mut Bus) -> [u8; 4] {
+    let mut values = [0; 4];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
 }
 
 fn run_ppu_scroll_wrap_variant() -> PpuScrollNametableWrapObservation {

@@ -20,13 +20,13 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 50
+EXPECTED_TELEMETRY_SCHEMA = 51
 EXPECTED_SCENARIO_COUNT = 31
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 23
 EXPECTED_PASS_SCENARIO_COUNT = 8
 EXPECTED_CARTRIDGE_TEST_COUNT = 28
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 55
+EXPECTED_PROBE_COUNT = 56
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -642,6 +642,7 @@ class ObservabilityVerifier:
             "ppu.sprite_priority.samples",
             "ppu.sprite_overflow.status",
             "ppu.sprite_zero_hit.status",
+            "mapper3.chr_bank_switch",
             "dma.dmc_stall_phase",
             "dma.dmc_overlap_placement",
             "apu.status_matrix",
