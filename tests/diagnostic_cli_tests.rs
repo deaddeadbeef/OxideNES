@@ -159,7 +159,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(27));
+    assert_eq!(manifest["scenario_count"], Value::from(29));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -180,10 +180,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(27));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(29));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(27)
+        Value::from(29)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -557,7 +557,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(27));
+    assert_eq!(observer["scenario_count"], Value::from(29));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
     assert_eq!(observer["baseline_divergence_count"], Value::from(23));
     let observer_actions = observer["next_actions"]
@@ -963,7 +963,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 27);
+    assert_eq!(observations.len(), 29);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -1042,6 +1042,62 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_replay_args_contains(
         &input_all_pressed_observation["replay_args"],
         "target/diagnostics/replay/input_mask_all_pressed_pass",
+    );
+    let input_joypad1_pressed_observation =
+        find_observer_observation(observations, "input_mask_joypad1_pressed_pass");
+    assert_eq!(
+        input_joypad1_pressed_observation["role"],
+        Value::String("expected_pass_fixture".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed_observation["outcome"],
+        Value::String("matches_baseline".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed_observation["health"],
+        Value::String("healthy".to_string())
+    );
+    assert_replay_args_contains(
+        &input_joypad1_pressed_observation["replay_args"],
+        "--joypad1",
+    );
+    assert_replay_args_contains(&input_joypad1_pressed_observation["replay_args"], "0xFF");
+    assert_replay_args_contains(
+        &input_joypad1_pressed_observation["replay_args"],
+        "--joypad2",
+    );
+    assert_replay_args_contains(&input_joypad1_pressed_observation["replay_args"], "0x00");
+    assert_replay_args_contains(
+        &input_joypad1_pressed_observation["replay_args"],
+        "target/diagnostics/replay/input_mask_joypad1_pressed_pass",
+    );
+    let input_joypad2_pressed_observation =
+        find_observer_observation(observations, "input_mask_joypad2_pressed_pass");
+    assert_eq!(
+        input_joypad2_pressed_observation["role"],
+        Value::String("expected_pass_fixture".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed_observation["outcome"],
+        Value::String("matches_baseline".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed_observation["health"],
+        Value::String("healthy".to_string())
+    );
+    assert_replay_args_contains(
+        &input_joypad2_pressed_observation["replay_args"],
+        "--joypad1",
+    );
+    assert_replay_args_contains(&input_joypad2_pressed_observation["replay_args"], "0x00");
+    assert_replay_args_contains(
+        &input_joypad2_pressed_observation["replay_args"],
+        "--joypad2",
+    );
+    assert_replay_args_contains(&input_joypad2_pressed_observation["replay_args"], "0xFF");
+    assert_replay_args_contains(
+        &input_joypad2_pressed_observation["replay_args"],
+        "target/diagnostics/replay/input_mask_joypad2_pressed_pass",
     );
     let timeout_observation = find_observer_observation(observations, "timeout_cycle_limit");
     assert_eq!(
@@ -1465,6 +1521,12 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains(
         "| input_mask_all_pressed_pass | expected_pass_fixture | matches_baseline | healthy | - |"
     ));
+    assert!(observer_report.contains(
+        "| input_mask_joypad1_pressed_pass | expected_pass_fixture | matches_baseline | healthy | - |"
+    ));
+    assert!(observer_report.contains(
+        "| input_mask_joypad2_pressed_pass | expected_pass_fixture | matches_baseline | healthy | - |"
+    ));
     assert!(observer_report.contains("| dma_phase_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | dma.oam_phase_matrix |"));
     assert!(observer_report.contains("| ppu_sprite_zero_hit_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.sprite_zero_hit |"));
     assert!(observer_report.contains("| ppu_sprite_overflow_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | ppu.sprite_overflow |"));
@@ -1526,6 +1588,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .contains("| input_mask_all_released_pass | true | true | true | healthy | 28 | - |"));
     assert!(suite_report
         .contains("| input_mask_all_pressed_pass | true | true | true | healthy | 28 | - |"));
+    assert!(suite_report
+        .contains("| input_mask_joypad1_pressed_pass | true | true | true | healthy | 28 | - |"));
+    assert!(suite_report
+        .contains("| input_mask_joypad2_pressed_pass | true | true | true | healthy | 28 | - |"));
     assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
     assert!(suite_report.contains("| dma_oam_transfer_fault | false | false | true | host_validation_failed | 5 | dma.oam_transfer |"));
     assert!(suite_report.contains(
@@ -1587,6 +1653,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("target/diagnostics/replay/input_mask_matrix_pass"));
     assert!(suite_report.contains("target/diagnostics/replay/input_mask_all_released_pass"));
     assert!(suite_report.contains("target/diagnostics/replay/input_mask_all_pressed_pass"));
+    assert!(suite_report.contains("target/diagnostics/replay/input_mask_joypad1_pressed_pass"));
+    assert!(suite_report.contains("target/diagnostics/replay/input_mask_joypad2_pressed_pass"));
     assert!(suite_report.contains("## Baseline Comparison Matrix"));
     assert!(suite_report.contains("| pass | true | 0 | 0 | 0 | 0 | - |"));
     assert!(suite_report.contains("| joypad1_mismatch | false |"));
@@ -1740,6 +1808,86 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_replay_args_contains(&input_all_pressed["replay_args"], "0xFF");
     assert_bundle_artifacts_with_config(
         &suite_dir.join("input_mask_all_pressed_pass"),
+        true,
+        true,
+        "0xFF",
+        None,
+    );
+
+    let input_joypad1_pressed = find_scenario(scenarios, "input_mask_joypad1_pressed_pass");
+    assert_eq!(input_joypad1_pressed["expected_passed"], Value::Bool(true));
+    assert_eq!(input_joypad1_pressed["actual_passed"], Value::Bool(true));
+    assert_eq!(input_joypad1_pressed["expectation_met"], Value::Bool(true));
+    assert_eq!(
+        input_joypad1_pressed["actual_health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed["config"]["joypad1_mask_hex"],
+        Value::String("0xFF".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed["config"]["expected_joypad1_mask_hex"],
+        Value::String("0xFF".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed["config"]["joypad2_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed["config"]["expected_joypad2_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        input_joypad1_pressed["comparison"]["passed"],
+        Value::Bool(true)
+    );
+    assert_replay_args_contains(&input_joypad1_pressed["replay_args"], "--joypad1");
+    assert_replay_args_contains(&input_joypad1_pressed["replay_args"], "0xFF");
+    assert_replay_args_contains(&input_joypad1_pressed["replay_args"], "--expect-joypad2");
+    assert_replay_args_contains(&input_joypad1_pressed["replay_args"], "0x00");
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("input_mask_joypad1_pressed_pass"),
+        true,
+        true,
+        "0x00",
+        None,
+    );
+
+    let input_joypad2_pressed = find_scenario(scenarios, "input_mask_joypad2_pressed_pass");
+    assert_eq!(input_joypad2_pressed["expected_passed"], Value::Bool(true));
+    assert_eq!(input_joypad2_pressed["actual_passed"], Value::Bool(true));
+    assert_eq!(input_joypad2_pressed["expectation_met"], Value::Bool(true));
+    assert_eq!(
+        input_joypad2_pressed["actual_health"],
+        Value::String("healthy".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed["config"]["joypad1_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed["config"]["expected_joypad1_mask_hex"],
+        Value::String("0x00".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed["config"]["joypad2_mask_hex"],
+        Value::String("0xFF".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed["config"]["expected_joypad2_mask_hex"],
+        Value::String("0xFF".to_string())
+    );
+    assert_eq!(
+        input_joypad2_pressed["comparison"]["passed"],
+        Value::Bool(true)
+    );
+    assert_replay_args_contains(&input_joypad2_pressed["replay_args"], "--joypad1");
+    assert_replay_args_contains(&input_joypad2_pressed["replay_args"], "0x00");
+    assert_replay_args_contains(&input_joypad2_pressed["replay_args"], "--expect-joypad2");
+    assert_replay_args_contains(&input_joypad2_pressed["replay_args"], "0xFF");
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("input_mask_joypad2_pressed_pass"),
         true,
         true,
         "0xFF",

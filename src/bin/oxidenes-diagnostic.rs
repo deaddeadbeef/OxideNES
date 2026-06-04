@@ -2157,6 +2157,20 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             joypad1_mask: 0xFF,
             joypad2_mask: 0xFF,
         },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_joypad1_pressed_pass",
+            title: "Configured joypad-1-only input-mask pass",
+            purpose: "Healthy fixture proving joypad 1 can validate all pressed buttons while joypad 2 remains all released.",
+            joypad1_mask: 0xFF,
+            joypad2_mask: 0x00,
+        },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_joypad2_pressed_pass",
+            title: "Configured joypad-2-only input-mask pass",
+            purpose: "Healthy fixture proving joypad 2 can validate all pressed buttons while joypad 1 remains all released.",
+            joypad1_mask: 0x00,
+            joypad2_mask: 0xFF,
+        },
     ];
 
     INPUT_MASK_SCENARIOS

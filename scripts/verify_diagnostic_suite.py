@@ -20,6 +20,8 @@ EXPECTED_SCENARIOS = {
     "input_mask_matrix_pass",
     "input_mask_all_released_pass",
     "input_mask_all_pressed_pass",
+    "input_mask_joypad1_pressed_pass",
+    "input_mask_joypad2_pressed_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
@@ -968,6 +970,56 @@ class SuiteVerifier:
         else:
             self.errors.append("missing observer observation for input_mask_all_pressed_pass")
 
+        input_joypad1_pressed = by_scenario.get("input_mask_joypad1_pressed_pass")
+        if isinstance(input_joypad1_pressed, dict):
+            self.expect_equal(
+                input_joypad1_pressed.get("role"),
+                "expected_pass_fixture",
+                "input joypad-1 pressed observer role",
+            )
+            self.expect_equal(
+                input_joypad1_pressed.get("outcome"),
+                "matches_baseline",
+                "input joypad-1 pressed observer outcome",
+            )
+            self.expect_equal(
+                input_joypad1_pressed.get("health"),
+                "healthy",
+                "input joypad-1 pressed observer health",
+            )
+            self.expect_equal(
+                input_joypad1_pressed.get("next_artifact"),
+                "input_mask_joypad1_pressed_pass/triage.json",
+                "input joypad-1 pressed observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_joypad1_pressed_pass")
+
+        input_joypad2_pressed = by_scenario.get("input_mask_joypad2_pressed_pass")
+        if isinstance(input_joypad2_pressed, dict):
+            self.expect_equal(
+                input_joypad2_pressed.get("role"),
+                "expected_pass_fixture",
+                "input joypad-2 pressed observer role",
+            )
+            self.expect_equal(
+                input_joypad2_pressed.get("outcome"),
+                "matches_baseline",
+                "input joypad-2 pressed observer outcome",
+            )
+            self.expect_equal(
+                input_joypad2_pressed.get("health"),
+                "healthy",
+                "input joypad-2 pressed observer health",
+            )
+            self.expect_equal(
+                input_joypad2_pressed.get("next_artifact"),
+                "input_mask_joypad2_pressed_pass/triage.json",
+                "input joypad-2 pressed observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_joypad2_pressed_pass")
+
         timeout = by_scenario.get("timeout_cycle_limit")
         if isinstance(timeout, dict):
             self.expect_equal(
@@ -1536,6 +1588,28 @@ class SuiteVerifier:
                 self.expect_in(token, replay_args, "input_mask_all_pressed_pass replay_args")
         else:
             self.errors.append("missing replay args check subject input_mask_all_pressed_pass")
+
+        input_joypad1_pressed = scenarios.get("input_mask_joypad1_pressed_pass")
+        if isinstance(input_joypad1_pressed, dict):
+            replay_args = self.expect_list(
+                input_joypad1_pressed.get("replay_args"),
+                "input_mask_joypad1_pressed_pass replay_args",
+            )
+            for token in ("--joypad1", "0xFF", "--expect-joypad2", "0x00"):
+                self.expect_in(token, replay_args, "input_mask_joypad1_pressed_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_joypad1_pressed_pass")
+
+        input_joypad2_pressed = scenarios.get("input_mask_joypad2_pressed_pass")
+        if isinstance(input_joypad2_pressed, dict):
+            replay_args = self.expect_list(
+                input_joypad2_pressed.get("replay_args"),
+                "input_mask_joypad2_pressed_pass replay_args",
+            )
+            for token in ("--joypad1", "0x00", "--expect-joypad2", "0xFF"):
+                self.expect_in(token, replay_args, "input_mask_joypad2_pressed_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_joypad2_pressed_pass")
 
         joypad_hold = scenarios.get("joypad_strobe_high_hold_fault")
         if isinstance(joypad_hold, dict):
