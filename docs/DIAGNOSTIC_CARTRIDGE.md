@@ -1114,9 +1114,18 @@ channel matrix.
 Schema version `48` adds DMC/OAM overlap placement telemetry. The host runner
 records the OAM-transfer index, offset inside the active OAM DMA stall window,
 beginning/middle/end bucket, covered buckets, missing buckets, and
-`dma.dmc_overlap_placement` probe. The current cartridge covers beginning and
-end placements and keeps the missing middle-placement case explicit in the DMA
-coverage gap instead of implying full interleaving coverage.
+`dma.dmc_overlap_placement` probe. At introduction, the cartridge covered
+beginning and end placements and kept the missing middle-placement case
+explicit in the DMA coverage gap instead of implying full interleaving
+coverage.
+
+Schema version `49` extends the post-render `oam_dma_phase_matrix` edge-case
+test. After its odd/even OAM phase checks, the cartridge primes DMC playback,
+triggers paired OAM DMA transfers, and aligns the second transfer so a DMC
+sample fetch lands in the middle third of the OAM DMA stall window. The
+accepted run must now cover beginning, middle, and end overlap buckets; the
+remaining DMA coverage gap is repeated burst trains and longer CPU/APU
+interleaving sequences.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

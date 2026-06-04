@@ -580,8 +580,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.dma.oam_dma_start_test_name,
         Some("oam_dma_transfer")
     );
-    assert_eq!(telemetry.dma.oam_dma_transfer_count, 3);
-    assert_eq!(telemetry.dma.oam_dma_phase_matrix_test_transfer_count, 2);
+    assert_eq!(telemetry.dma.oam_dma_transfer_count, 5);
+    assert_eq!(telemetry.dma.oam_dma_phase_matrix_test_transfer_count, 4);
     assert_eq!(
         telemetry.dma.oam_dma_phase_matrix_expected_test_transfers,
         2
@@ -589,7 +589,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.dma.oam_dma_phase_matrix_has_even_start);
     assert!(telemetry.dma.oam_dma_phase_matrix_has_odd_start);
     assert!(telemetry.dma.oam_dma_phase_matrix_passed);
-    assert_eq!(telemetry.dma.oam_dma_active_cycle_buckets.len(), 3);
+    assert_eq!(telemetry.dma.oam_dma_active_cycle_buckets.len(), 5);
     assert!(telemetry
         .dma
         .oam_dma_active_cycle_buckets
@@ -622,6 +622,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry
         .dma
         .dmc_dma_oam_overlap_covered_position_buckets
+        .contains(&"middle"));
+    assert!(telemetry
+        .dma
+        .dmc_dma_oam_overlap_covered_position_buckets
         .contains(&"end"));
     assert_eq!(
         telemetry.dma.dmc_dma_oam_overlap_expected_position_buckets,
@@ -629,13 +633,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     );
     assert_eq!(
         telemetry.dma.dmc_dma_oam_overlap_missing_position_buckets,
-        vec!["middle"]
+        Vec::<&str>::new()
     );
     assert_eq!(
         telemetry
             .dma
             .dmc_dma_oam_overlap_expected_min_position_buckets,
-        2
+        3
     );
     assert!(telemetry.dma.dmc_dma_oam_overlap_position_matrix_passed);
     assert_eq!(
@@ -655,12 +659,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.dma.dmc_dma_first_oam_overlap_test_name,
         Some("oam_dma_transfer")
     );
-    assert_eq!(
-        telemetry.dma.dmc_dma_stall_cycles_after_oam_dma,
-        telemetry
-            .dma
-            .dmc_dma_first_oam_overlap_stall_cycles
-            .expect("overlap stall bucket should be observed") as u64
+    assert!(
+        telemetry.dma.dmc_dma_stall_cycles_after_oam_dma
+            >= telemetry
+                .dma
+                .dmc_dma_first_oam_overlap_stall_cycles
+                .expect("overlap stall bucket should be observed") as u64
     );
     assert!(telemetry.audio.sample_count_passed);
     assert!((telemetry.audio.expected_min_sample_count
@@ -737,6 +741,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .iter()
         .any(|event| event.note == "dmc_dma_oam_overlap"
             && event.current_test_name == Some("oam_dma_transfer")));
+    assert!(telemetry
+        .events
+        .iter()
+        .any(|event| event.note == "dmc_dma_oam_overlap"
+            && event.current_test_name == Some("oam_dma_phase_matrix")));
     assert!(telemetry
         .events
         .iter()
@@ -937,8 +946,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## DMA Timing"));
     assert!(report.contains("| OAM DMA completed | true |"));
     assert!(report.contains("| Active cycles / expected |"));
-    assert!(report.contains("| Transfer count / total active cycles | 3 /"));
-    assert!(report.contains("| Phase matrix transfers / expected | 2 / 2 |"));
+    assert!(report.contains("| Transfer count / total active cycles | 5 /"));
+    assert!(report.contains("| Phase matrix transfers / expected | 4 / 2 |"));
     assert!(report.contains("| Phase matrix parity coverage | even=true odd=true"));
     assert!(report.contains("| DMC fetches / overlapping fetches |"));
     assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
