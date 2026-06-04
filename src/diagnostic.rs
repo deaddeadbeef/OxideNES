@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 48;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 49;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v48";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v49";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -61,8 +61,9 @@ const OAM_DMA_EXPECTED_MAX_CYCLES: u64 = 514;
 const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
-const DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS: usize = 2;
+const DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS: usize = 3;
 const DMC_DMA_OAM_OVERLAP_POSITION_BUCKETS: [&str; 3] = ["beginning", "middle", "end"];
+const DMC_DMA_OAM_MIDDLE_TRANSFER_ALIGNMENT_NOPS: usize = 80;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
 const PPU_VBLANK_TIMING_TEST_ID: u8 = 10;
 const PPU_VBLANK_FIRST_NMI_MIN_CYCLES: u64 = 1;
@@ -487,10 +488,11 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "oam_dma_phase_matrix",
         subsystem: DiagnosticSubsystem::Dma,
         tier: DiagnosticTestTier::EdgeCase,
-        intent: "Trigger paired OAM DMA transfers so host telemetry proves both odd and even start-phase cycle buckets.",
+        intent: "Trigger paired OAM DMA transfers so host telemetry proves both odd and even start-phase cycle buckets, then schedule DMC playback into a middle-position OAM overlap.",
         expected_observations: &[
             "two additional OAM DMA transfers are started by the diagnostic cartridge",
             "host telemetry observes both 513-cycle and 514-cycle OAM DMA buckets across odd/even start phases",
+            "DMC/OAM overlap placement covers beginning, middle, and end buckets across the cartridge run",
         ],
     },
     DiagnosticTestSpec {
@@ -1211,9 +1213,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "dma_cycle_timing",
         subsystem: "dma",
         risk: "The cartridge validates OAM contents and both host-observed OAM DMA stall-length phases, but not all DMA interactions.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, the phase-specific 3-4 cycle DMC stall bucket is validated, and host telemetry records DMC/OAM overlap offsets plus beginning/end placement buckets.",
-        missing_coverage: "Middle-position DMC/OAM overlap placement inside an OAM transfer, repeated DMA burst trains, and deeper CPU/APU interleaving across long-running DMA sequences.",
-        suggested_next_test: "Extend the DMA matrix with a cartridge-scheduled middle-position DMC/OAM overlap plus repeated burst trains.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, the phase-specific 3-4 cycle DMC stall bucket is validated, and host telemetry records DMC/OAM overlap offsets covering beginning, middle, and end placement buckets.",
+        missing_coverage: "Repeated DMA burst trains and deeper CPU/APU interleaving across long-running DMA sequences.",
+        suggested_next_test: "Extend the DMA matrix with repeated DMC/OAM burst trains and longer CPU/APU interleaving sequences.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -5305,9 +5307,9 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
                 input.dma.dmc_dma_expected_max_stall_cycles
             ));
         }
-        if input.dma.dmc_dma_stall_cycles_after_oam_dma != u64::from(stall_cycles) {
+        if input.dma.dmc_dma_stall_cycles_after_oam_dma < u64::from(stall_cycles) {
             failures.push(format!(
-                "post-OAM DMC stall count {} differed from overlap service bucket {}",
+                "post-OAM DMC stall count {} did not include overlap service bucket {}",
                 input.dma.dmc_dma_stall_cycles_after_oam_dma, stall_cycles
             ));
         }
@@ -5994,7 +5996,7 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                     .is_some_and(|cycles| {
                         cycles >= input.dma.dmc_dma_expected_min_stall_cycles
                             && cycles <= input.dma.dmc_dma_expected_max_stall_cycles
-                            && input.dma.dmc_dma_stall_cycles_after_oam_dma == u64::from(cycles)
+                            && input.dma.dmc_dma_stall_cycles_after_oam_dma >= u64::from(cycles)
                     })
                     && input.dma.dmc_dma_three_cycle_fetches
                         + input.dma.dmc_dma_four_cycle_fetches
@@ -7153,6 +7155,25 @@ impl DiagnosticProgram {
         self.asm.sta_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
         self.asm.lda_abs(DMA_PHASE_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(DMA_PHASE_MATRIX_EXPECTED_TEST_TRANSFERS as u8, 0x84);
+        self.asm.lda_imm(0x0F);
+        self.asm.sta_abs(0x4010); // Fastest DMC rate, IRQ/loop disabled.
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4011);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4012); // Sample starts at $C000 in the fixed Mapper 2 PRG bank.
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x4013); // 17 bytes, enough to request across paired OAM DMAs.
+        self.asm.lda_imm(0x10);
+        self.asm.sta_abs(0x4015);
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x4014);
+        for _ in 0..DMC_DMA_OAM_MIDDLE_TRANSFER_ALIGNMENT_NOPS {
+            self.asm.nop();
+        }
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x4014);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x4015);
         self.pass_test(DMA_PHASE_MATRIX_TEST_ID);
     }
 
