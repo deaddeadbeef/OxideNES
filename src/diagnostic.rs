@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 47;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 48;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v47";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v48";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -61,6 +61,8 @@ const OAM_DMA_EXPECTED_MAX_CYCLES: u64 = 514;
 const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
+const DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS: usize = 2;
+const DMC_DMA_OAM_OVERLAP_POSITION_BUCKETS: [&str; 3] = ["beginning", "middle", "end"];
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
 const PPU_VBLANK_TIMING_TEST_ID: u8 = 10;
 const PPU_VBLANK_FIRST_NMI_MIN_CYCLES: u64 = 1;
@@ -1209,9 +1211,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "dma_cycle_timing",
         subsystem: "dma",
         risk: "The cartridge validates OAM contents and both host-observed OAM DMA stall-length phases, but not all DMA interactions.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, and the phase-specific 3-4 cycle DMC stall bucket is validated.",
-        missing_coverage: "Multiple DMC overlap positions inside one transfer, repeated DMA burst trains, and deeper CPU/APU interleaving across long-running DMA sequences.",
-        suggested_next_test: "Extend the DMA matrix with DMC overlap placement near the beginning, middle, and end of OAM transfers plus repeated burst trains.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, the phase-specific 3-4 cycle DMC stall bucket is validated, and host telemetry records DMC/OAM overlap offsets plus beginning/end placement buckets.",
+        missing_coverage: "Middle-position DMC/OAM overlap placement inside an OAM transfer, repeated DMA burst trains, and deeper CPU/APU interleaving across long-running DMA sequences.",
+        suggested_next_test: "Extend the DMA matrix with a cartridge-scheduled middle-position DMC/OAM overlap plus repeated burst trains.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -1940,6 +1942,14 @@ pub struct DmaTelemetry {
     pub dmc_dma_first_oam_overlap_test_name: Option<&'static str>,
     pub dmc_dma_first_oam_overlap_cpu_cycle_parity: Option<&'static str>,
     pub dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    pub dmc_dma_oam_overlap_offsets: Vec<u64>,
+    pub dmc_dma_oam_overlap_transfer_indices: Vec<usize>,
+    pub dmc_dma_oam_overlap_position_buckets: Vec<&'static str>,
+    pub dmc_dma_oam_overlap_covered_position_buckets: Vec<&'static str>,
+    pub dmc_dma_oam_overlap_expected_position_buckets: Vec<&'static str>,
+    pub dmc_dma_oam_overlap_missing_position_buckets: Vec<&'static str>,
+    pub dmc_dma_oam_overlap_expected_min_position_buckets: usize,
+    pub dmc_dma_oam_overlap_position_matrix_passed: bool,
     pub dmc_dma_three_cycle_fetches: u64,
     pub dmc_dma_four_cycle_fetches: u64,
     pub dmc_dma_expected_min_stall_cycles: u8,
@@ -3654,6 +3664,22 @@ fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
+        "| DMC overlap transfer indices / offsets | {:?} / {:?} |",
+        telemetry.dma.dmc_dma_oam_overlap_transfer_indices,
+        telemetry.dma.dmc_dma_oam_overlap_offsets
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| DMC overlap placement buckets | observed {:?}, covered {:?}, missing {:?}, expected-min {} |",
+        telemetry.dma.dmc_dma_oam_overlap_position_buckets,
+        telemetry.dma.dmc_dma_oam_overlap_covered_position_buckets,
+        telemetry.dma.dmc_dma_oam_overlap_missing_position_buckets,
+        telemetry.dma.dmc_dma_oam_overlap_expected_min_position_buckets
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "| DMC 3-cycle / 4-cycle fetches | {} / {} |",
         telemetry.dma.dmc_dma_three_cycle_fetches, telemetry.dma.dmc_dma_four_cycle_fetches
     )
@@ -4375,6 +4401,12 @@ impl OamDmaTransferObservation {
     }
 }
 
+#[derive(Debug)]
+struct DmcOamOverlapObservation {
+    transfer_index: usize,
+    cycle: u64,
+}
+
 #[derive(Debug, Default)]
 struct DmaObservation {
     oam_dma_transfers: Vec<OamDmaTransferObservation>,
@@ -4389,6 +4421,7 @@ struct DmaObservation {
     dmc_dma_first_oam_overlap_test: Option<u8>,
     dmc_dma_first_oam_overlap_cpu_cycle_odd: Option<bool>,
     dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    dmc_dma_oam_overlap_observations: Vec<DmcOamOverlapObservation>,
     dmc_dma_three_cycle_fetches: u64,
     dmc_dma_four_cycle_fetches: u64,
     dmc_dma_stall_cycles: u64,
@@ -4500,6 +4533,17 @@ impl DmaObservation {
                 self.dmc_dma_fetches_during_oam_dma += 1;
                 self.dmc_dma_first_oam_overlap_cycle
                     .get_or_insert(tick.cycle);
+                if self
+                    .current_oam_dma_transfer
+                    .as_ref()
+                    .is_some_and(|transfer| transfer.oam_dma_first_active_cycle.is_some())
+                {
+                    self.dmc_dma_oam_overlap_observations
+                        .push(DmcOamOverlapObservation {
+                            transfer_index: self.oam_dma_transfers.len() + 1,
+                            cycle: tick.cycle,
+                        });
+                }
                 if self.dmc_dma_first_oam_overlap_test.is_none() {
                     self.dmc_dma_first_oam_overlap_test = known_test_id(tick.current_test);
                 }
@@ -4524,6 +4568,17 @@ impl DmaObservation {
         if tick.dmc_stall_after && tick.active_after && !tick.dmc_stall_before {
             self.dmc_dma_queued_during_oam_dma_cycles += 1;
         }
+    }
+
+    fn oam_transfer_by_index(&self, index: usize) -> Option<&OamDmaTransferObservation> {
+        if index == 0 {
+            return None;
+        }
+        self.oam_dma_transfers.get(index - 1).or_else(|| {
+            (index == self.oam_dma_transfers.len() + 1)
+                .then_some(self.current_oam_dma_transfer.as_ref())
+                .flatten()
+        })
     }
 
     fn telemetry(&self) -> DmaTelemetry {
@@ -4559,6 +4614,53 @@ impl DmaObservation {
             transfer.oam_dma_active_cycles >= OAM_DMA_EXPECTED_MIN_CYCLES
                 && transfer.oam_dma_active_cycles <= OAM_DMA_EXPECTED_MAX_CYCLES
         });
+        let dmc_dma_oam_overlap_offsets: Vec<u64> = self
+            .dmc_dma_oam_overlap_observations
+            .iter()
+            .filter_map(|overlap| {
+                self.oam_transfer_by_index(overlap.transfer_index)
+                    .and_then(|transfer| transfer.oam_dma_first_active_cycle)
+                    .map(|first_active_cycle| overlap.cycle.saturating_sub(first_active_cycle))
+            })
+            .collect();
+        let dmc_dma_oam_overlap_transfer_indices: Vec<usize> = self
+            .dmc_dma_oam_overlap_observations
+            .iter()
+            .filter_map(|overlap| {
+                self.oam_transfer_by_index(overlap.transfer_index)
+                    .map(|_| overlap.transfer_index)
+            })
+            .collect();
+        let dmc_dma_oam_overlap_position_buckets: Vec<&'static str> = self
+            .dmc_dma_oam_overlap_observations
+            .iter()
+            .filter_map(|overlap| {
+                let transfer = self.oam_transfer_by_index(overlap.transfer_index)?;
+                let first_active_cycle = transfer.oam_dma_first_active_cycle?;
+                let offset = overlap.cycle.saturating_sub(first_active_cycle);
+                Some(dmc_oam_overlap_position_bucket(
+                    offset,
+                    transfer.oam_dma_active_cycles,
+                ))
+            })
+            .collect();
+        let dmc_dma_oam_overlap_covered_position_buckets =
+            dmc_oam_overlap_covered_position_buckets(&dmc_dma_oam_overlap_position_buckets);
+        let dmc_dma_oam_overlap_expected_position_buckets =
+            DMC_DMA_OAM_OVERLAP_POSITION_BUCKETS.to_vec();
+        let dmc_dma_oam_overlap_missing_position_buckets: Vec<&'static str> =
+            dmc_dma_oam_overlap_expected_position_buckets
+                .iter()
+                .copied()
+                .filter(|expected| {
+                    !dmc_dma_oam_overlap_covered_position_buckets
+                        .iter()
+                        .any(|covered| covered == expected)
+                })
+                .collect();
+        let dmc_dma_oam_overlap_position_matrix_passed =
+            dmc_dma_oam_overlap_covered_position_buckets.len()
+                >= DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS;
 
         DmaTelemetry {
             oam_dma_observed: first_transfer.is_some(),
@@ -4620,6 +4722,15 @@ impl DmaObservation {
                 .dmc_dma_first_oam_overlap_cpu_cycle_odd
                 .map(|odd| cycle_parity_label(!odd)),
             dmc_dma_first_oam_overlap_stall_cycles: self.dmc_dma_first_oam_overlap_stall_cycles,
+            dmc_dma_oam_overlap_offsets,
+            dmc_dma_oam_overlap_transfer_indices,
+            dmc_dma_oam_overlap_position_buckets,
+            dmc_dma_oam_overlap_covered_position_buckets,
+            dmc_dma_oam_overlap_expected_position_buckets,
+            dmc_dma_oam_overlap_missing_position_buckets,
+            dmc_dma_oam_overlap_expected_min_position_buckets:
+                DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS,
+            dmc_dma_oam_overlap_position_matrix_passed,
             dmc_dma_three_cycle_fetches: self.dmc_dma_three_cycle_fetches,
             dmc_dma_four_cycle_fetches: self.dmc_dma_four_cycle_fetches,
             dmc_dma_expected_min_stall_cycles: DMC_DMA_EXPECTED_MIN_STALL_CYCLES,
@@ -4637,6 +4748,29 @@ fn cycle_parity_label(even: bool) -> &'static str {
     } else {
         "odd"
     }
+}
+
+fn dmc_oam_overlap_position_bucket(offset: u64, active_cycles: u64) -> &'static str {
+    if active_cycles == 0 {
+        return "unknown";
+    }
+    if offset.saturating_mul(3) < active_cycles {
+        "beginning"
+    } else if offset.saturating_mul(3) < active_cycles.saturating_mul(2) {
+        "middle"
+    } else {
+        "end"
+    }
+}
+
+fn dmc_oam_overlap_covered_position_buckets(
+    position_buckets: &[&'static str],
+) -> Vec<&'static str> {
+    DMC_DMA_OAM_OVERLAP_POSITION_BUCKETS
+        .iter()
+        .copied()
+        .filter(|expected| position_buckets.iter().any(|bucket| bucket == expected))
+        .collect()
 }
 
 #[derive(Debug, Default)]
@@ -5149,6 +5283,15 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             "expected at least {} DMC DMA fetch during OAM DMA, observed {}",
             input.dma.dmc_dma_expected_min_oam_overlap_fetches,
             input.dma.dmc_dma_fetches_during_oam_dma
+        ));
+    }
+    if !input.dma.dmc_dma_oam_overlap_position_matrix_passed {
+        failures.push(format!(
+            "DMC/OAM overlap placement coverage incomplete: covered {:?}, missing {:?}, offsets {:?}, expected at least {} distinct buckets",
+            input.dma.dmc_dma_oam_overlap_covered_position_buckets,
+            input.dma.dmc_dma_oam_overlap_missing_position_buckets,
+            input.dma.dmc_dma_oam_overlap_offsets,
+            input.dma.dmc_dma_oam_overlap_expected_min_position_buckets
         ));
     }
     if let Some(stall_cycles) = input.dma.dmc_dma_first_oam_overlap_stall_cycles {
@@ -5802,6 +5945,37 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.dma.dmc_dma_stall_cycles_after_oam_dma
             ),
             likely_domain: "dma.dmc_oam_interleaving".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "dma.dmc_overlap_placement".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(5),
+            test_name: test_name(5),
+            status: gated_probe_status(
+                passed_suite,
+                input.dma.dmc_dma_oam_overlap_position_matrix_passed,
+            ),
+            description:
+                "DMC/OAM overlap telemetry records placement offsets inside the OAM DMA stall window"
+                    .to_string(),
+            expected: format!(
+                "covered DMC/OAM overlap positions >= {} distinct buckets from {:?}",
+                input.dma.dmc_dma_oam_overlap_expected_min_position_buckets,
+                input.dma.dmc_dma_oam_overlap_expected_position_buckets
+            ),
+            observed: format!(
+                "transfer indices {:?}, offsets {:?}, buckets {:?}, covered {:?}, missing {:?}",
+                input.dma.dmc_dma_oam_overlap_transfer_indices,
+                input.dma.dmc_dma_oam_overlap_offsets,
+                input.dma.dmc_dma_oam_overlap_position_buckets,
+                input.dma.dmc_dma_oam_overlap_covered_position_buckets,
+                input.dma.dmc_dma_oam_overlap_missing_position_buckets
+            ),
+            likely_domain: "dma.dmc_overlap_placement".to_string(),
         },
     );
     push_probe(
@@ -9611,6 +9785,12 @@ fn compare_dma(
         &["dma", "dmc_dma_first_fetch_stall_cycles"][..],
         &["dma", "dmc_dma_first_oam_overlap_cpu_cycle_parity"][..],
         &["dma", "dmc_dma_first_oam_overlap_stall_cycles"][..],
+        &["dma", "dmc_dma_oam_overlap_offsets"][..],
+        &["dma", "dmc_dma_oam_overlap_transfer_indices"][..],
+        &["dma", "dmc_dma_oam_overlap_position_buckets"][..],
+        &["dma", "dmc_dma_oam_overlap_covered_position_buckets"][..],
+        &["dma", "dmc_dma_oam_overlap_missing_position_buckets"][..],
+        &["dma", "dmc_dma_oam_overlap_position_matrix_passed"][..],
         &["dma", "dmc_dma_three_cycle_fetches"][..],
         &["dma", "dmc_dma_four_cycle_fetches"][..],
         &["dma", "dmc_dma_stall_cycles_after_oam_dma"][..],
