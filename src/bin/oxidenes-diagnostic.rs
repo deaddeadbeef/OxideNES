@@ -233,6 +233,14 @@ struct DiagnosticScenarioSpec {
     expected_focus_domain: Option<&'static str>,
 }
 
+struct DiagnosticInputMaskScenario {
+    id: &'static str,
+    title: &'static str,
+    purpose: &'static str,
+    joypad1_mask: u8,
+    joypad2_mask: u8,
+}
+
 struct DiagnosticScenarioSuiteWriteResult {
     passed: bool,
     json: String,
@@ -1802,33 +1810,18 @@ fn scenario_replay_args(scenario_id: &str, config: &DiagnosticConfig) -> Vec<Str
 
 fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
     let default = DiagnosticConfig::default();
-    vec![
-        DiagnosticScenarioSpec {
-            id: "pass",
-            title: "Known-good generated cartridge pass",
-            purpose: "Baseline diagnostic bundle for comparison and healthy debug-focus shape.",
-            config: default.clone(),
-            expected_passed: true,
-            expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(28),
-            expected_focus_domain: None,
-        },
-        DiagnosticScenarioSpec {
-            id: "input_mask_matrix_pass",
-            title: "Configured alternate input-mask pass",
-            purpose: "Healthy fixture proving the cartridge can validate non-default joypad masks without rebuilding the ROM.",
-            config: DiagnosticConfig {
-                joypad1_mask: 0xAA,
-                expected_joypad1_mask: 0xAA,
-                joypad2_mask: 0x55,
-                expected_joypad2_mask: 0x55,
-                ..default.clone()
-            },
-            expected_passed: true,
-            expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(28),
-            expected_focus_domain: None,
-        },
+    let mut specs = vec![DiagnosticScenarioSpec {
+        id: "pass",
+        title: "Known-good generated cartridge pass",
+        purpose: "Baseline diagnostic bundle for comparison and healthy debug-focus shape.",
+        config: default.clone(),
+        expected_passed: true,
+        expected_health: DiagnosticHealth::Healthy,
+        expected_focus_test_id: Some(28),
+        expected_focus_domain: None,
+    }];
+    specs.extend(input_mask_scenario_specs(&default));
+    specs.extend([
         DiagnosticScenarioSpec {
             id: "joypad1_mismatch",
             title: "Intentional joypad-1 assertion failure",
@@ -2137,7 +2130,54 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_focus_test_id: None,
             expected_focus_domain: Some("emulator.progress_or_infinite_loop"),
         },
-    ]
+    ]);
+    specs
+}
+
+fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenarioSpec> {
+    const INPUT_MASK_SCENARIOS: &[DiagnosticInputMaskScenario] = &[
+        DiagnosticInputMaskScenario {
+            id: "input_mask_matrix_pass",
+            title: "Configured alternate input-mask pass",
+            purpose: "Healthy fixture proving the cartridge can validate non-default alternating joypad masks without rebuilding the ROM.",
+            joypad1_mask: 0xAA,
+            joypad2_mask: 0x55,
+        },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_all_released_pass",
+            title: "Configured all-released input-mask pass",
+            purpose: "Healthy fixture proving both input ports validate the disconnected/all-released serial mask.",
+            joypad1_mask: 0x00,
+            joypad2_mask: 0x00,
+        },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_all_pressed_pass",
+            title: "Configured all-pressed input-mask pass",
+            purpose: "Healthy fixture proving both input ports validate the all-buttons-pressed serial mask.",
+            joypad1_mask: 0xFF,
+            joypad2_mask: 0xFF,
+        },
+    ];
+
+    INPUT_MASK_SCENARIOS
+        .iter()
+        .map(|scenario| DiagnosticScenarioSpec {
+            id: scenario.id,
+            title: scenario.title,
+            purpose: scenario.purpose,
+            config: DiagnosticConfig {
+                joypad1_mask: scenario.joypad1_mask,
+                expected_joypad1_mask: scenario.joypad1_mask,
+                joypad2_mask: scenario.joypad2_mask,
+                expected_joypad2_mask: scenario.joypad2_mask,
+                ..default.clone()
+            },
+            expected_passed: true,
+            expected_health: DiagnosticHealth::Healthy,
+            expected_focus_test_id: Some(28),
+            expected_focus_domain: None,
+        })
+        .collect()
 }
 
 fn scenario_suite_ai_handoff() -> Vec<String> {

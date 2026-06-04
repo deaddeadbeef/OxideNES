@@ -308,7 +308,7 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 25
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 27
 scenarios match their expected health and focus-domain contracts, the 23
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
@@ -403,6 +403,7 @@ scenario-id-first automated debugging. When `--compare-suite-dir <DIR>` is suppl
 `scenario-suite.json`, `scenario-suite.md`, `scenario-suite-observer.json`, and
 `scenario-suite-observer.md`. The suite also writes one full bundle per
 scenario: `pass`, `input_mask_matrix_pass`,
+`input_mask_all_released_pass`, `input_mask_all_pressed_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `dma_phase_matrix_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
@@ -487,10 +488,12 @@ regressions localize to `ppu.scroll_seam` through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
-`input_mask_matrix_pass` runs joypad 1 with `0xAA` and joypad 2 with `0x55`
-while setting the cartridge's expected masks to the same values, proving
-non-default controller masks can be validated as a healthy fixture without
-rebuilding the ROM.
+`input_mask_matrix_pass` runs joypad 1 with `0xAA` and joypad 2 with `0x55`,
+`input_mask_all_released_pass` runs both ports with `0x00`, and
+`input_mask_all_pressed_pass` runs both ports with `0xFF`, while setting the
+cartridge's expected masks to the same values. Together they prove alternating,
+all-released, and all-pressed controller masks can be validated as healthy
+fixtures without rebuilding the ROM.
 `joypad_strobe_high_hold_fault` clears joypad 1's A button just before the
 strobe-high hold test reads `$4016`, proving strobe-high read regressions
 localize to `joypad.strobe_high_hold`.
@@ -510,7 +513,7 @@ to `ppu.registers.status_latch_reset`.
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
-joypad masks, joypad strobe-reset behavior, joypad strobe-high hold behavior,
+joypad mask-table fixtures, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
 host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion,
 PPU sprite-zero-hit signaling, PPU sprite-overflow signaling, PPU

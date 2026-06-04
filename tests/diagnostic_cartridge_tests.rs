@@ -949,55 +949,71 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
 
 #[test]
 fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
-    let telemetry = run_diagnostic(DiagnosticConfig {
-        joypad1_mask: 0xAA,
-        expected_joypad1_mask: 0xAA,
-        joypad2_mask: 0x55,
-        expected_joypad2_mask: 0x55,
-        ..DiagnosticConfig::default()
-    })
-    .expect("diagnostic should run with alternate expected input masks");
+    let cases = [
+        (0xAA, 0x55, "0x00", "0x01"),
+        (0x00, 0x00, "0x00", "0x00"),
+        (0xFF, 0xFF, "0x01", "0x01"),
+    ];
 
-    assert!(telemetry.verdict.passed);
-    assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
-    assert_eq!(
-        telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_scroll_seam_matrix")
-    );
-    assert_eq!(telemetry.input.joypad1_mask_hex, "0xAA");
-    assert_eq!(telemetry.input.joypad1_expected_mask_hex, "0xAA");
-    assert_eq!(telemetry.input.joypad2_mask_hex, "0x55");
-    assert_eq!(telemetry.input.joypad2_expected_mask_hex, "0x55");
-    assert_eq!(telemetry.frame.checksum_hex, "0x89D7CBABF407D845");
-    assert!(!telemetry.frame.checksum_matches_expected);
-    assert!(!telemetry.frame.checksum_validation_enabled);
-    assert_eq!(
-        telemetry.frame.checksum_validation_reason,
-        "disabled: non-default input timing fixture"
-    );
-    assert!(telemetry.probes.iter().any(|probe| {
-        probe.id == "ppu.frame_checksum"
-            && probe.status == DiagnosticProbeStatus::Passed
-            && probe.likely_domain == "ppu.rendering.frame_signature"
-            && probe.expected.contains("validation disabled")
-            && probe.observed.contains("0x89D7CBABF407D845")
-    }));
-    assert!(telemetry.input_port_matrix.passed);
-    assert_eq!(telemetry.input_port_matrix.joypad1_high_first_hex, "0x00");
-    assert_eq!(telemetry.input_port_matrix.joypad2_high_first_hex, "0x01");
-    assert_eq!(
-        telemetry.analysis.coverage.passed_tests,
-        DIAGNOSTIC_TESTS.len()
-    );
-    assert!(telemetry.tests.iter().any(|test| {
-        test.name == "joypad_strobe_shift"
-            && test
-                .expected_observations
-                .iter()
-                .any(|observation| observation.contains("configured joypad-1 expected mask"))
-            && test.passed
-    }));
+    for (joypad1_mask, joypad2_mask, joypad1_high, joypad2_high) in cases {
+        let telemetry = run_diagnostic(DiagnosticConfig {
+            joypad1_mask,
+            expected_joypad1_mask: joypad1_mask,
+            joypad2_mask,
+            expected_joypad2_mask: joypad2_mask,
+            ..DiagnosticConfig::default()
+        })
+        .expect("diagnostic should run with configured expected input masks");
+
+        let joypad1_mask_hex = format!("0x{joypad1_mask:02X}");
+        let joypad2_mask_hex = format!("0x{joypad2_mask:02X}");
+
+        assert!(telemetry.verdict.passed);
+        assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
+        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
+        assert_eq!(
+            telemetry.analysis.debug_focus.focus_test_name,
+            Some("ppu_scroll_seam_matrix")
+        );
+        assert_eq!(telemetry.input.joypad1_mask_hex, joypad1_mask_hex);
+        assert_eq!(telemetry.input.joypad1_expected_mask_hex, joypad1_mask_hex);
+        assert_eq!(telemetry.input.joypad2_mask_hex, joypad2_mask_hex);
+        assert_eq!(telemetry.input.joypad2_expected_mask_hex, joypad2_mask_hex);
+        assert!(!telemetry.frame.checksum_matches_expected);
+        assert!(!telemetry.frame.checksum_validation_enabled);
+        assert_eq!(
+            telemetry.frame.checksum_validation_reason,
+            "disabled: non-default input timing fixture"
+        );
+        assert!(telemetry.probes.iter().any(|probe| {
+            probe.id == "ppu.frame_checksum"
+                && probe.status == DiagnosticProbeStatus::Passed
+                && probe.likely_domain == "ppu.rendering.frame_signature"
+                && probe.expected.contains("validation disabled")
+                && probe.observed.contains(&telemetry.frame.checksum_hex)
+        }));
+        assert!(telemetry.input_port_matrix.passed);
+        assert_eq!(
+            telemetry.input_port_matrix.joypad1_high_first_hex,
+            joypad1_high
+        );
+        assert_eq!(
+            telemetry.input_port_matrix.joypad2_high_first_hex,
+            joypad2_high
+        );
+        assert_eq!(
+            telemetry.analysis.coverage.passed_tests,
+            DIAGNOSTIC_TESTS.len()
+        );
+        assert!(telemetry.tests.iter().any(|test| {
+            test.name == "joypad_strobe_shift"
+                && test
+                    .expected_observations
+                    .iter()
+                    .any(|observation| observation.contains("configured joypad-1 expected mask"))
+                && test.passed
+        }));
+    }
 }
 
 #[test]
