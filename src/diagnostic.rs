@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 49;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 50;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v49";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v50";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -62,6 +62,7 @@ const DMC_DMA_EXPECTED_MIN_OAM_OVERLAP_FETCHES: u64 = 1;
 const DMC_DMA_EXPECTED_MIN_STALL_CYCLES: u8 = 3;
 const DMC_DMA_EXPECTED_MAX_STALL_CYCLES: u8 = 4;
 const DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_POSITION_BUCKETS: usize = 3;
+const DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_PHASE_MATRIX_TRANSFERS: usize = 3;
 const DMC_DMA_OAM_OVERLAP_POSITION_BUCKETS: [&str; 3] = ["beginning", "middle", "end"];
 const DMC_DMA_OAM_MIDDLE_TRANSFER_ALIGNMENT_NOPS: usize = 80;
 const INSTRUCTION_TRACE_TAIL_LIMIT: usize = 64;
@@ -488,11 +489,12 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         name: "oam_dma_phase_matrix",
         subsystem: DiagnosticSubsystem::Dma,
         tier: DiagnosticTestTier::EdgeCase,
-        intent: "Trigger paired OAM DMA transfers so host telemetry proves both odd and even start-phase cycle buckets, then schedule DMC playback into a middle-position OAM overlap.",
+        intent: "Trigger paired OAM DMA transfers so host telemetry proves both odd and even start-phase cycle buckets, then schedule DMC playback across a repeated OAM DMA burst train with a middle-position overlap.",
         expected_observations: &[
-            "two additional OAM DMA transfers are started by the diagnostic cartridge",
+            "multiple additional OAM DMA transfers are started by the diagnostic cartridge",
             "host telemetry observes both 513-cycle and 514-cycle OAM DMA buckets across odd/even start phases",
             "DMC/OAM overlap placement covers beginning, middle, and end buckets across the cartridge run",
+            "DMC/OAM overlap is observed across at least three distinct phase-matrix OAM transfers",
         ],
     },
     DiagnosticTestSpec {
@@ -1213,9 +1215,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "dma_cycle_timing",
         subsystem: "dma",
         risk: "The cartridge validates OAM contents and both host-observed OAM DMA stall-length phases, but not all DMA interactions.",
-        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a paired phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, the phase-specific 3-4 cycle DMC stall bucket is validated, and host telemetry records DMC/OAM overlap offsets covering beginning, middle, and end placement buckets.",
-        missing_coverage: "Repeated DMA burst trains and deeper CPU/APU interleaving across long-running DMA sequences.",
-        suggested_next_test: "Extend the DMA matrix with repeated DMC/OAM burst trains and longer CPU/APU interleaving sequences.",
+        current_coverage: "A full-page OAM DMA transfer produces the expected OAM checksum, a phase-matrix test forces multiple OAM DMA transfers across both 513-cycle and 514-cycle start-phase buckets, DMC sample DMA overlaps the OAM stall window, the phase-specific 3-4 cycle DMC stall bucket is validated, host telemetry records DMC/OAM overlap offsets covering beginning, middle, and end placement buckets, and a DMC-active phase-matrix burst train spans at least three distinct OAM transfers.",
+        missing_coverage: "Deeper CPU/APU interleaving across longer-running DMA sequences, repeated bursts with mixed DMC reload rates, and interrupt-adjacent DMA service ordering.",
+        suggested_next_test: "Extend the DMA matrix with longer CPU/APU interleaving sequences, varied DMC rates/sample lengths, and interrupt-boundary DMA service ordering checks.",
     },
     DiagnosticCoverageGapSpec {
         id: "input_port_matrix",
@@ -1946,6 +1948,10 @@ pub struct DmaTelemetry {
     pub dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
     pub dmc_dma_oam_overlap_offsets: Vec<u64>,
     pub dmc_dma_oam_overlap_transfer_indices: Vec<usize>,
+    pub dmc_dma_oam_overlap_phase_matrix_transfer_indices: Vec<usize>,
+    pub dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count: usize,
+    pub dmc_dma_oam_overlap_expected_min_phase_matrix_transfers: usize,
+    pub dmc_dma_oam_overlap_burst_train_passed: bool,
     pub dmc_dma_oam_overlap_position_buckets: Vec<&'static str>,
     pub dmc_dma_oam_overlap_covered_position_buckets: Vec<&'static str>,
     pub dmc_dma_oam_overlap_expected_position_buckets: Vec<&'static str>,
@@ -3673,6 +3679,21 @@ fn write_dma_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     .expect("write report");
     writeln!(
         report,
+        "| DMC overlap phase-matrix burst train | transfers {:?}, distinct {} / expected-min {}, passed={} |",
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_phase_matrix_transfer_indices,
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count,
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_expected_min_phase_matrix_transfers,
+        telemetry.dma.dmc_dma_oam_overlap_burst_train_passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
         "| DMC overlap placement buckets | observed {:?}, covered {:?}, missing {:?}, expected-min {} |",
         telemetry.dma.dmc_dma_oam_overlap_position_buckets,
         telemetry.dma.dmc_dma_oam_overlap_covered_position_buckets,
@@ -4633,6 +4654,22 @@ impl DmaObservation {
                     .map(|_| overlap.transfer_index)
             })
             .collect();
+        let dmc_dma_oam_overlap_phase_matrix_transfer_indices: Vec<usize> = self
+            .dmc_dma_oam_overlap_observations
+            .iter()
+            .filter_map(|overlap| {
+                let transfer = self.oam_transfer_by_index(overlap.transfer_index)?;
+                (transfer.oam_dma_start_test == Some(DMA_PHASE_MATRIX_TEST_ID))
+                    .then_some(overlap.transfer_index)
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count =
+            dmc_dma_oam_overlap_phase_matrix_transfer_indices.len();
+        let dmc_dma_oam_overlap_burst_train_passed =
+            dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count
+                >= DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_PHASE_MATRIX_TRANSFERS;
         let dmc_dma_oam_overlap_position_buckets: Vec<&'static str> = self
             .dmc_dma_oam_overlap_observations
             .iter()
@@ -4726,6 +4763,11 @@ impl DmaObservation {
             dmc_dma_first_oam_overlap_stall_cycles: self.dmc_dma_first_oam_overlap_stall_cycles,
             dmc_dma_oam_overlap_offsets,
             dmc_dma_oam_overlap_transfer_indices,
+            dmc_dma_oam_overlap_phase_matrix_transfer_indices,
+            dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count,
+            dmc_dma_oam_overlap_expected_min_phase_matrix_transfers:
+                DMC_DMA_OAM_OVERLAP_EXPECTED_MIN_PHASE_MATRIX_TRANSFERS,
+            dmc_dma_oam_overlap_burst_train_passed,
             dmc_dma_oam_overlap_position_buckets,
             dmc_dma_oam_overlap_covered_position_buckets,
             dmc_dma_oam_overlap_expected_position_buckets,
@@ -5294,6 +5336,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.dma.dmc_dma_oam_overlap_missing_position_buckets,
             input.dma.dmc_dma_oam_overlap_offsets,
             input.dma.dmc_dma_oam_overlap_expected_min_position_buckets
+        ));
+    }
+    if !input.dma.dmc_dma_oam_overlap_burst_train_passed {
+        failures.push(format!(
+            "DMC/OAM burst-train coverage incomplete: phase-matrix overlap transfers {:?}, distinct count {}, expected at least {}",
+            input.dma.dmc_dma_oam_overlap_phase_matrix_transfer_indices,
+            input.dma.dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count,
+            input
+                .dma
+                .dmc_dma_oam_overlap_expected_min_phase_matrix_transfers
         ));
     }
     if let Some(stall_cycles) = input.dma.dmc_dma_first_oam_overlap_stall_cycles {
@@ -5978,6 +6030,36 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.dma.dmc_dma_oam_overlap_missing_position_buckets
             ),
             likely_domain: "dma.dmc_overlap_placement".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "dma.dmc_overlap_burst_train".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Dma),
+            test_id: Some(DMA_PHASE_MATRIX_TEST_ID),
+            test_name: test_name(DMA_PHASE_MATRIX_TEST_ID),
+            status: gated_probe_status(
+                passed_suite,
+                input.dma.dmc_dma_oam_overlap_burst_train_passed,
+            ),
+            description: "DMC/OAM overlap telemetry covers a repeated phase-matrix DMA burst train"
+                .to_string(),
+            expected: format!(
+                "DMC/OAM overlaps across >= {} distinct phase-matrix OAM DMA transfers",
+                input
+                    .dma
+                    .dmc_dma_oam_overlap_expected_min_phase_matrix_transfers
+            ),
+            observed: format!(
+                "phase-matrix overlap transfer indices {:?}, distinct count {}",
+                input.dma.dmc_dma_oam_overlap_phase_matrix_transfer_indices,
+                input
+                    .dma
+                    .dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count
+            ),
+            likely_domain: "dma.dmc_oam_burst_train".to_string(),
         },
     );
     push_probe(
@@ -7162,7 +7244,7 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x4012); // Sample starts at $C000 in the fixed Mapper 2 PRG bank.
         self.asm.lda_imm(0x01);
-        self.asm.sta_abs(0x4013); // 17 bytes, enough to request across paired OAM DMAs.
+        self.asm.sta_abs(0x4013); // 17 bytes, enough to request across the OAM DMA burst.
         self.asm.lda_imm(0x10);
         self.asm.sta_abs(0x4015);
         self.asm.lda_imm(0x03);
@@ -7170,6 +7252,8 @@ impl DiagnosticProgram {
         for _ in 0..DMC_DMA_OAM_MIDDLE_TRANSFER_ALIGNMENT_NOPS {
             self.asm.nop();
         }
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x4014);
         self.asm.lda_imm(0x03);
         self.asm.sta_abs(0x4014);
         self.asm.lda_imm(0x00);
@@ -9808,6 +9892,12 @@ fn compare_dma(
         &["dma", "dmc_dma_first_oam_overlap_stall_cycles"][..],
         &["dma", "dmc_dma_oam_overlap_offsets"][..],
         &["dma", "dmc_dma_oam_overlap_transfer_indices"][..],
+        &["dma", "dmc_dma_oam_overlap_phase_matrix_transfer_indices"][..],
+        &[
+            "dma",
+            "dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count",
+        ][..],
+        &["dma", "dmc_dma_oam_overlap_burst_train_passed"][..],
         &["dma", "dmc_dma_oam_overlap_position_buckets"][..],
         &["dma", "dmc_dma_oam_overlap_covered_position_buckets"][..],
         &["dma", "dmc_dma_oam_overlap_missing_position_buckets"][..],

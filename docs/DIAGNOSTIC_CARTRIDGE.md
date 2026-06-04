@@ -1124,8 +1124,14 @@ test. After its odd/even OAM phase checks, the cartridge primes DMC playback,
 triggers paired OAM DMA transfers, and aligns the second transfer so a DMC
 sample fetch lands in the middle third of the OAM DMA stall window. The
 accepted run must now cover beginning, middle, and end overlap buckets; the
-remaining DMA coverage gap is repeated burst trains and longer CPU/APU
-interleaving sequences.
+remaining DMA coverage gap at that schema was repeated burst trains and longer
+CPU/APU interleaving sequences.
+
+Schema version `50` extends the same DMC-active `oam_dma_phase_matrix`
+sequence into a three-transfer OAM DMA burst train. Telemetry now reports the
+phase-matrix transfer indices that observed DMC/OAM overlap, the distinct
+phase-matrix overlap transfer count, the expected minimum transfer count, and
+the `dma.dmc_overlap_burst_train` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
