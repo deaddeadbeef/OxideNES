@@ -748,6 +748,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - APU pulse-channel status register plus host-observed sample-count, peak,
   RMS, and mean absolute output envelope checks
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
+- Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
+  PPU-visible pattern-table reads
 - Joypad strobe and shift reads with configurable expected masks
 - Joypad mid-stream strobe reset behavior
 - Joypad strobe-high hold behavior
@@ -1132,6 +1134,12 @@ sequence into a three-transfer OAM DMA burst train. Telemetry now reports the
 phase-matrix transfer indices that observed DMC/OAM overlap, the distinct
 phase-matrix overlap transfer count, the expected minimum transfer count, and
 the `dma.dmc_overlap_burst_train` probe.
+
+Schema version `51` adds a generated Mapper 3/CNROM variant cartridge to the
+host diagnostic run. The variant writes CHR bank values `0` through `3` to
+`$8000`, performs buffered PPUDATA reads from CHR address `$0010`, records the
+four observed bank-specific sentinel bytes in RAM, and exposes top-level
+`mapper3_chr_bank` telemetry plus the `mapper3.chr_bank_switch` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

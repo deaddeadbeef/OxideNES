@@ -835,6 +835,28 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .probes
         .iter()
         .all(|probe| probe.status == DiagnosticProbeStatus::Passed));
+    assert!(telemetry.mapper3_chr_bank.passed);
+    assert_eq!(telemetry.mapper3_chr_bank.mapper, 3);
+    assert_eq!(telemetry.mapper3_chr_bank.prg_banks, 2);
+    assert_eq!(telemetry.mapper3_chr_bank.chr_banks, 4);
+    assert_eq!(telemetry.mapper3_chr_bank.read_addr_hex, "0x0010");
+    assert_eq!(telemetry.mapper3_chr_bank.expected_banks, vec![0, 1, 2, 3]);
+    assert_eq!(
+        telemetry.mapper3_chr_bank.expected_values_hex,
+        vec![
+            "0x11".to_string(),
+            "0x22".to_string(),
+            "0x33".to_string(),
+            "0x44".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper3_chr_bank.observed_values_hex,
+        telemetry.mapper3_chr_bank.expected_values_hex
+    );
+    assert_eq!(telemetry.mapper3_chr_bank.observed_case_count, 4);
+    assert!(telemetry.mapper3_chr_bank.cycles > 0);
+    assert_eq!(telemetry.mapper3_chr_bank.error, None);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ram.signature"
             && probe.expected.contains("0xA5")
@@ -857,6 +879,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.expected.contains("scanline 241 dot 1")
             && probe.observed.contains("first_set=241:1")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper3.chr_bank_switch"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(29)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("0x44")
+            && probe.observed.contains("0x44")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "dma.oam_active_cycles"
@@ -917,6 +948,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
     assert!(report.contains("| mapper_banking_runtime | cartridge |"));
+    assert!(report.contains("## Cartridge Mapper Variants"));
+    assert!(report.contains("| Main cartridge mapper / PRG banks / CHR banks | 2 / 4 / 1 |"));
+    assert!(report.contains("| Mapper 3 variant mapper / PRG banks / CHR banks | 3 / 2 / 4 |"));
+    assert!(report.contains("| Mapper 3 CHR read address | 0x0010 |"));
+    assert!(report.contains(
+        "| Mapper 3 CHR observed / expected | [\"0x11\", \"0x22\", \"0x33\", \"0x44\"] / [\"0x11\", \"0x22\", \"0x33\", \"0x44\"] |"
+    ));
+    assert!(report.contains("| Mapper 3 CHR cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Mapper 3 CHR error | none |"));
     assert!(report.contains("## PPU Pixel Pipeline"));
     assert!(report.contains("| First NMI cycle / latency |"));
     assert!(report.contains("| Second NMI cycle / inter-NMI cycles |"));

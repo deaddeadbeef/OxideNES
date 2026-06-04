@@ -228,8 +228,8 @@ fn mapper1_shift_register() {
         0xC0,
         "Bank should still be 0 after only 4 serial writes"
     );
-    // 5th write completes the shift -> bank switches to 2
-    cart.mapper.write_prg(0xE000, (2 >> 4) & 1);
+    // 5th serial bit for bank 2 (0b00010) is zero and completes the shift.
+    cart.mapper.write_prg(0xE000, 0);
     assert_eq!(
         cart.mapper.read_prg(0x8000),
         0xC2,
