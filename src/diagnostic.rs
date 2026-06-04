@@ -1217,9 +1217,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, and all-pressed input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, and a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads.",
-        missing_coverage: "Per-port asymmetric mask sweeps, disconnected-controller electrical defaults beyond all-released masks, and host input remapping.",
-        suggested_next_test: "Run the serial-read program across per-port asymmetric masks plus host-remapping fixtures.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, and joypad-2-only pressed input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, and a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads.",
+        missing_coverage: "Mixed-bit per-port mask sweeps beyond the extreme asymmetric cases, disconnected-controller electrical defaults beyond all-released masks, and host input remapping.",
+        suggested_next_test: "Run the serial-read program across mixed-bit per-port masks plus host-remapping fixtures.",
     },
 ];
 
