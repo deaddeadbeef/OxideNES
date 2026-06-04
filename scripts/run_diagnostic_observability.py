@@ -74,10 +74,17 @@ FOCUS_DOMAIN_CODE_MAP = {
     },
     "dma.oam_transfer": {
         "subsystem": "dma",
-        "description": "OAM DMA transfer, CPU stall bucket, and DMC overlap telemetry.",
+        "description": "OAM DMA transfer, CPU stall bucket, and DMC overlap timing, stall-phase, and placement telemetry.",
         "source_files": ["src/bus.rs", "src/apu.rs", "src/ppu.rs"],
         "test_files": ["tests/bus_tests.rs", "tests/ppu_tests.rs"],
-        "search_terms": ["oam_dma", "DMC", "$4014", "dma_oam_transfer"],
+        "search_terms": [
+            "oam_dma",
+            "DMC",
+            "$4014",
+            "dma_oam_transfer",
+            "dmc_dma_oam_overlap_offsets",
+            "dma.dmc_overlap_placement",
+        ],
     },
     "dma.oam_phase_matrix": {
         "subsystem": "dma",

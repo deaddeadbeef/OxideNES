@@ -150,7 +150,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
     assert_eq!(manifest["scenario_suite_schema_version"], Value::from(8));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(47));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(48));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
     assert_eq!(manifest["passed"], Value::Bool(true));
@@ -552,7 +552,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(2));
     assert_eq!(observer["scenario_suite_schema_version"], Value::from(8));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(47));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(48));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
@@ -3221,7 +3221,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(47));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(48));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -3261,6 +3261,25 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(triage["dma"]["dmc_dma_first_oam_overlap_stall_cycles"]
         .as_u64()
         .is_some_and(|cycles| (3..=4).contains(&cycles)));
+    assert!(
+        triage["dma"]["dmc_dma_oam_overlap_offsets"]
+            .as_array()
+            .expect("DMC/OAM overlap offsets should be an array")
+            .len()
+            >= 2
+    );
+    assert_eq!(
+        triage["dma"]["dmc_dma_oam_overlap_expected_position_buckets"],
+        serde_json::json!(["beginning", "middle", "end"])
+    );
+    assert_eq!(
+        triage["dma"]["dmc_dma_oam_overlap_missing_position_buckets"],
+        serde_json::json!(["middle"])
+    );
+    assert_eq!(
+        triage["dma"]["dmc_dma_oam_overlap_position_matrix_passed"],
+        Value::Bool(true)
+    );
     assert!(triage["instruction_trace"]["captured_instruction_count"]
         .as_u64()
         .is_some_and(|count| count > 0));
@@ -3324,7 +3343,7 @@ fn assert_bundle_artifacts_with_config(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(47));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(48));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],

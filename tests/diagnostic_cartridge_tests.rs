@@ -599,6 +599,46 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.dma.dmc_dma_fetches_during_oam_dma >= 1);
     assert!(telemetry.dma.dmc_dma_oam_overlap_observed);
     assert_eq!(
+        telemetry.dma.dmc_dma_oam_overlap_offsets.len(),
+        telemetry.dma.dmc_dma_fetches_during_oam_dma as usize
+    );
+    assert_eq!(
+        telemetry.dma.dmc_dma_oam_overlap_transfer_indices.len(),
+        telemetry.dma.dmc_dma_oam_overlap_offsets.len()
+    );
+    assert_eq!(
+        telemetry.dma.dmc_dma_oam_overlap_position_buckets.len(),
+        telemetry.dma.dmc_dma_oam_overlap_offsets.len()
+    );
+    assert!(telemetry
+        .dma
+        .dmc_dma_oam_overlap_offsets
+        .iter()
+        .all(|offset| *offset < telemetry.dma.oam_dma_active_cycles));
+    assert!(telemetry
+        .dma
+        .dmc_dma_oam_overlap_covered_position_buckets
+        .contains(&"beginning"));
+    assert!(telemetry
+        .dma
+        .dmc_dma_oam_overlap_covered_position_buckets
+        .contains(&"end"));
+    assert_eq!(
+        telemetry.dma.dmc_dma_oam_overlap_expected_position_buckets,
+        vec!["beginning", "middle", "end"]
+    );
+    assert_eq!(
+        telemetry.dma.dmc_dma_oam_overlap_missing_position_buckets,
+        vec!["middle"]
+    );
+    assert_eq!(
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_expected_min_position_buckets,
+        2
+    );
+    assert!(telemetry.dma.dmc_dma_oam_overlap_position_matrix_passed);
+    assert_eq!(
         telemetry.dma.dmc_dma_three_cycle_fetches + telemetry.dma.dmc_dma_four_cycle_fetches,
         telemetry.dma.dmc_dma_fetches_observed
     );
@@ -797,6 +837,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.observed.contains("overlapping fetches")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "dma.dmc_overlap_placement"
+            && probe.test_name == Some("oam_dma_transfer")
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.observed.contains("offsets")
+            && probe.observed.contains("missing")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "dma.dmc_stall_phase"
             && probe.test_name == Some("oam_dma_transfer")
             && probe.status == DiagnosticProbeStatus::Passed
@@ -896,6 +943,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| DMC fetches / overlapping fetches |"));
     assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
     assert!(report.contains("| DMC overlap parity / stall bucket |"));
+    assert!(report.contains("| DMC overlap transfer indices / offsets |"));
+    assert!(report.contains("| DMC overlap placement buckets |"));
     assert!(report.contains("| DMC 3-cycle / 4-cycle fetches |"));
     assert!(report.contains("## APU Audio Output"));
     assert!(report.contains("| Sample count / expected |"));
@@ -3186,6 +3235,7 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
     baseline["dma"]["oam_dma_active_cycles"] = serde_json::Value::from(1);
     baseline["dma"]["dmc_dma_fetches_during_oam_dma"] = serde_json::Value::from(0);
     baseline["dma"]["dmc_dma_first_oam_overlap_stall_cycles"] = serde_json::Value::from(9);
+    baseline["dma"]["dmc_dma_oam_overlap_position_buckets"] = serde_json::json!(["middle"]);
     let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
 
     let comparison =
@@ -3206,6 +3256,11 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
         difference.severity == DiagnosticComparisonSeverity::Warning
             && difference.category == "dma"
             && difference.path == "dma.dmc_dma_first_oam_overlap_stall_cycles"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "dma"
+            && difference.path == "dma.dmc_dma_oam_overlap_position_buckets"
     }));
 }
 

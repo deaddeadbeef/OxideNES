@@ -416,6 +416,14 @@ struct DiagnosticTriageDma {
     dmc_dma_first_oam_overlap_test_name: Option<&'static str>,
     dmc_dma_first_oam_overlap_cpu_cycle_parity: Option<&'static str>,
     dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
+    dmc_dma_oam_overlap_offsets: Vec<u64>,
+    dmc_dma_oam_overlap_transfer_indices: Vec<usize>,
+    dmc_dma_oam_overlap_position_buckets: Vec<&'static str>,
+    dmc_dma_oam_overlap_covered_position_buckets: Vec<&'static str>,
+    dmc_dma_oam_overlap_expected_position_buckets: Vec<&'static str>,
+    dmc_dma_oam_overlap_missing_position_buckets: Vec<&'static str>,
+    dmc_dma_oam_overlap_expected_min_position_buckets: usize,
+    dmc_dma_oam_overlap_position_matrix_passed: bool,
     dmc_dma_three_cycle_fetches: u64,
     dmc_dma_four_cycle_fetches: u64,
     dmc_dma_expected_min_stall_cycles: u8,
@@ -2423,6 +2431,33 @@ fn diagnostic_triage_report(
             dmc_dma_first_oam_overlap_stall_cycles: telemetry
                 .dma
                 .dmc_dma_first_oam_overlap_stall_cycles,
+            dmc_dma_oam_overlap_offsets: telemetry.dma.dmc_dma_oam_overlap_offsets.clone(),
+            dmc_dma_oam_overlap_transfer_indices: telemetry
+                .dma
+                .dmc_dma_oam_overlap_transfer_indices
+                .clone(),
+            dmc_dma_oam_overlap_position_buckets: telemetry
+                .dma
+                .dmc_dma_oam_overlap_position_buckets
+                .clone(),
+            dmc_dma_oam_overlap_covered_position_buckets: telemetry
+                .dma
+                .dmc_dma_oam_overlap_covered_position_buckets
+                .clone(),
+            dmc_dma_oam_overlap_expected_position_buckets: telemetry
+                .dma
+                .dmc_dma_oam_overlap_expected_position_buckets
+                .clone(),
+            dmc_dma_oam_overlap_missing_position_buckets: telemetry
+                .dma
+                .dmc_dma_oam_overlap_missing_position_buckets
+                .clone(),
+            dmc_dma_oam_overlap_expected_min_position_buckets: telemetry
+                .dma
+                .dmc_dma_oam_overlap_expected_min_position_buckets,
+            dmc_dma_oam_overlap_position_matrix_passed: telemetry
+                .dma
+                .dmc_dma_oam_overlap_position_matrix_passed,
             dmc_dma_three_cycle_fetches: telemetry.dma.dmc_dma_three_cycle_fetches,
             dmc_dma_four_cycle_fetches: telemetry.dma.dmc_dma_four_cycle_fetches,
             dmc_dma_expected_min_stall_cycles: telemetry.dma.dmc_dma_expected_min_stall_cycles,

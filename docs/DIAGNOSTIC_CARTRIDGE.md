@@ -744,7 +744,7 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - PPU sprite-overflow signaling through nine in-range sprites on one scanline
   plus hardware-bug false-positive and false-negative subcases
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
-  and DMC sample-DMA overlap telemetry
+  plus DMC sample-DMA overlap timing, stall-phase, and placement telemetry
 - APU pulse-channel status register plus host-observed sample-count, peak,
   RMS, and mean absolute output envelope checks
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
@@ -1110,6 +1110,13 @@ it runs the OAM DMA transfer, it records `$4015` bit 4 plus a case count in RAM,
 exposes top-level `apu_dmc_status` telemetry, and adds the `apu.dmc_status`
 probe so DMC-active status regressions localize separately from the non-DMC
 channel matrix.
+
+Schema version `48` adds DMC/OAM overlap placement telemetry. The host runner
+records the OAM-transfer index, offset inside the active OAM DMA stall window,
+beginning/middle/end bucket, covered buckets, missing buckets, and
+`dma.dmc_overlap_placement` probe. The current cartridge covers beginning and
+end placements and keeps the missing middle-placement case explicit in the DMA
+coverage gap instead of implying full interleaving coverage.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
