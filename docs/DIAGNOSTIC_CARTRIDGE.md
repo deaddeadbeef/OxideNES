@@ -308,7 +308,7 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 29
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 31
 scenarios match their expected health and focus-domain contracts, the 23
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
@@ -405,6 +405,7 @@ scenario-id-first automated debugging. When `--compare-suite-dir <DIR>` is suppl
 scenario: `pass`, `input_mask_matrix_pass`,
 `input_mask_all_released_pass`, `input_mask_all_pressed_pass`,
 `input_mask_joypad1_pressed_pass`, `input_mask_joypad2_pressed_pass`,
+`input_mask_sparse_bits_pass`, `input_mask_nibble_split_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `dma_phase_matrix_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
@@ -494,10 +495,13 @@ localize to `joypad.strobe_reset`.
 `input_mask_all_pressed_pass` runs both ports with `0xFF`.
 `input_mask_joypad1_pressed_pass` runs joypad 1 with `0xFF` while joypad 2
 stays `0x00`, and `input_mask_joypad2_pressed_pass` runs the inverse
-`0x00`/`0xFF` mask pair. All five fixtures set the cartridge's expected masks
-to the same values. Together they prove alternating, all-released, all-pressed,
-joypad-1-only pressed, and joypad-2-only pressed controller masks can be
-validated as healthy fixtures without rebuilding the ROM.
+`0x00`/`0xFF` mask pair. `input_mask_sparse_bits_pass` runs sparse
+non-contiguous `0x81`/`0x18` masks, and `input_mask_nibble_split_pass` runs
+complementary low/high nibble `0x0F`/`0xF0` masks. All seven fixtures set the
+cartridge's expected masks to the same values. Together they prove
+alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only
+pressed, sparse-bit, and nibble-split controller masks can be validated as
+healthy fixtures without rebuilding the ROM.
 `joypad_strobe_high_hold_fault` clears joypad 1's A button just before the
 strobe-high hold test reads `$4016`, proving strobe-high read regressions
 localize to `joypad.strobe_high_hold`.

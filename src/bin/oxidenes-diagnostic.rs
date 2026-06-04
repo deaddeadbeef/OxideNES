@@ -2171,6 +2171,20 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             joypad1_mask: 0x00,
             joypad2_mask: 0xFF,
         },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_sparse_bits_pass",
+            title: "Configured sparse-bits input-mask pass",
+            purpose: "Healthy fixture proving both input ports validate sparse non-contiguous button masks without rebuilding the ROM.",
+            joypad1_mask: 0x81,
+            joypad2_mask: 0x18,
+        },
+        DiagnosticInputMaskScenario {
+            id: "input_mask_nibble_split_pass",
+            title: "Configured nibble-split input-mask pass",
+            purpose: "Healthy fixture proving both input ports validate complementary low/high nibble button masks without rebuilding the ROM.",
+            joypad1_mask: 0x0F,
+            joypad2_mask: 0xF0,
+        },
     ];
 
     INPUT_MASK_SCENARIOS

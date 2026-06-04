@@ -21,9 +21,9 @@ EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
 EXPECTED_TELEMETRY_SCHEMA = 47
-EXPECTED_SCENARIO_COUNT = 29
+EXPECTED_SCENARIO_COUNT = 31
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 23
-EXPECTED_PASS_SCENARIO_COUNT = 6
+EXPECTED_PASS_SCENARIO_COUNT = 8
 EXPECTED_CARTRIDGE_TEST_COUNT = 28
 EXPECTED_COVERAGE_GAP_COUNT = 6
 EXPECTED_PROBE_COUNT = 53
@@ -58,6 +58,8 @@ EXPECTED_SCENARIOS = {
     "input_mask_all_pressed_pass",
     "input_mask_joypad1_pressed_pass",
     "input_mask_joypad2_pressed_pass",
+    "input_mask_sparse_bits_pass",
+    "input_mask_nibble_split_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",

@@ -242,7 +242,7 @@ def build_smoke_summary(
             errors.append(f"smoke check failed: {name}")
 
     add_check("index_status", index.get("status") == "passed", index.get("status"))
-    add_check("scenario_cards", summary.get("scenario_count") == 29, summary.get("scenario_count"))
+    add_check("scenario_cards", summary.get("scenario_count") == 31, summary.get("scenario_count"))
     add_check(
         "actionable_scenarios",
         summary.get("actionable_scenario_count") == 23,
