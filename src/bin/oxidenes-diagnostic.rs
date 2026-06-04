@@ -418,6 +418,10 @@ struct DiagnosticTriageDma {
     dmc_dma_first_oam_overlap_stall_cycles: Option<u8>,
     dmc_dma_oam_overlap_offsets: Vec<u64>,
     dmc_dma_oam_overlap_transfer_indices: Vec<usize>,
+    dmc_dma_oam_overlap_phase_matrix_transfer_indices: Vec<usize>,
+    dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count: usize,
+    dmc_dma_oam_overlap_expected_min_phase_matrix_transfers: usize,
+    dmc_dma_oam_overlap_burst_train_passed: bool,
     dmc_dma_oam_overlap_position_buckets: Vec<&'static str>,
     dmc_dma_oam_overlap_covered_position_buckets: Vec<&'static str>,
     dmc_dma_oam_overlap_expected_position_buckets: Vec<&'static str>,
@@ -2436,6 +2440,19 @@ fn diagnostic_triage_report(
                 .dma
                 .dmc_dma_oam_overlap_transfer_indices
                 .clone(),
+            dmc_dma_oam_overlap_phase_matrix_transfer_indices: telemetry
+                .dma
+                .dmc_dma_oam_overlap_phase_matrix_transfer_indices
+                .clone(),
+            dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count: telemetry
+                .dma
+                .dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count,
+            dmc_dma_oam_overlap_expected_min_phase_matrix_transfers: telemetry
+                .dma
+                .dmc_dma_oam_overlap_expected_min_phase_matrix_transfers,
+            dmc_dma_oam_overlap_burst_train_passed: telemetry
+                .dma
+                .dmc_dma_oam_overlap_burst_train_passed,
             dmc_dma_oam_overlap_position_buckets: telemetry
                 .dma
                 .dmc_dma_oam_overlap_position_buckets

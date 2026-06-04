@@ -580,8 +580,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.dma.oam_dma_start_test_name,
         Some("oam_dma_transfer")
     );
-    assert_eq!(telemetry.dma.oam_dma_transfer_count, 5);
-    assert_eq!(telemetry.dma.oam_dma_phase_matrix_test_transfer_count, 4);
+    assert_eq!(telemetry.dma.oam_dma_transfer_count, 6);
+    assert_eq!(telemetry.dma.oam_dma_phase_matrix_test_transfer_count, 5);
     assert_eq!(
         telemetry.dma.oam_dma_phase_matrix_expected_test_transfers,
         2
@@ -589,7 +589,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.dma.oam_dma_phase_matrix_has_even_start);
     assert!(telemetry.dma.oam_dma_phase_matrix_has_odd_start);
     assert!(telemetry.dma.oam_dma_phase_matrix_passed);
-    assert_eq!(telemetry.dma.oam_dma_active_cycle_buckets.len(), 5);
+    assert_eq!(telemetry.dma.oam_dma_active_cycle_buckets.len(), 6);
     assert!(telemetry
         .dma
         .oam_dma_active_cycle_buckets
@@ -606,6 +606,31 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.dma.dmc_dma_oam_overlap_transfer_indices.len(),
         telemetry.dma.dmc_dma_oam_overlap_offsets.len()
     );
+    assert!(
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_phase_matrix_transfer_indices
+            .len()
+            >= 3
+    );
+    assert!(telemetry
+        .dma
+        .dmc_dma_oam_overlap_phase_matrix_transfer_indices
+        .iter()
+        .all(|index| *index > 1));
+    assert!(
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count
+            >= 3
+    );
+    assert_eq!(
+        telemetry
+            .dma
+            .dmc_dma_oam_overlap_expected_min_phase_matrix_transfers,
+        3
+    );
+    assert!(telemetry.dma.dmc_dma_oam_overlap_burst_train_passed);
     assert_eq!(
         telemetry.dma.dmc_dma_oam_overlap_position_buckets.len(),
         telemetry.dma.dmc_dma_oam_overlap_offsets.len()
@@ -674,6 +699,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.audio.rms_abs_passed);
     assert!(telemetry.audio.mean_abs_passed);
     assert!(telemetry.audio.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "dma.dmc_overlap_burst_train"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.test_name == Some("oam_dma_phase_matrix")
+            && probe.likely_domain == "dma.dmc_oam_burst_train"
+    }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "apu.sample_count"
             && probe.status == DiagnosticProbeStatus::Passed
@@ -946,13 +977,14 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("## DMA Timing"));
     assert!(report.contains("| OAM DMA completed | true |"));
     assert!(report.contains("| Active cycles / expected |"));
-    assert!(report.contains("| Transfer count / total active cycles | 5 /"));
-    assert!(report.contains("| Phase matrix transfers / expected | 4 / 2 |"));
+    assert!(report.contains("| Transfer count / total active cycles | 6 /"));
+    assert!(report.contains("| Phase matrix transfers / expected | 5 / 2 |"));
     assert!(report.contains("| Phase matrix parity coverage | even=true odd=true"));
     assert!(report.contains("| DMC fetches / overlapping fetches |"));
     assert!(report.contains("| DMC overlap test | oam_dma_transfer |"));
     assert!(report.contains("| DMC overlap parity / stall bucket |"));
     assert!(report.contains("| DMC overlap transfer indices / offsets |"));
+    assert!(report.contains("| DMC overlap phase-matrix burst train |"));
     assert!(report.contains("| DMC overlap placement buckets |"));
     assert!(report.contains("| DMC 3-cycle / 4-cycle fetches |"));
     assert!(report.contains("## APU Audio Output"));
@@ -3245,6 +3277,9 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
     baseline["dma"]["dmc_dma_fetches_during_oam_dma"] = serde_json::Value::from(0);
     baseline["dma"]["dmc_dma_first_oam_overlap_stall_cycles"] = serde_json::Value::from(9);
     baseline["dma"]["dmc_dma_oam_overlap_position_buckets"] = serde_json::json!(["middle"]);
+    baseline["dma"]["dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count"] =
+        serde_json::Value::from(1);
+    baseline["dma"]["dmc_dma_oam_overlap_burst_train_passed"] = serde_json::Value::Bool(false);
     let baseline_json = serde_json::to_string(&baseline).expect("baseline should serialize");
 
     let comparison =
@@ -3270,6 +3305,16 @@ fn generated_diagnostic_cartridge_comparison_warns_on_dma_timing_drift() {
         difference.severity == DiagnosticComparisonSeverity::Warning
             && difference.category == "dma"
             && difference.path == "dma.dmc_dma_oam_overlap_position_buckets"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "dma"
+            && difference.path == "dma.dmc_dma_oam_overlap_phase_matrix_distinct_transfer_count"
+    }));
+    assert!(comparison.differences.iter().any(|difference| {
+        difference.severity == DiagnosticComparisonSeverity::Warning
+            && difference.category == "dma"
+            && difference.path == "dma.dmc_dma_oam_overlap_burst_train_passed"
     }));
 }
 
