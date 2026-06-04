@@ -21,9 +21,9 @@ EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
 EXPECTED_TELEMETRY_SCHEMA = 47
-EXPECTED_SCENARIO_COUNT = 25
+EXPECTED_SCENARIO_COUNT = 27
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 23
-EXPECTED_PASS_SCENARIO_COUNT = 2
+EXPECTED_PASS_SCENARIO_COUNT = 4
 EXPECTED_CARTRIDGE_TEST_COUNT = 28
 EXPECTED_COVERAGE_GAP_COUNT = 6
 EXPECTED_PROBE_COUNT = 53
@@ -54,6 +54,8 @@ EXPECTED_EVENT_KINDS = {
 EXPECTED_SCENARIOS = {
     "pass",
     "input_mask_matrix_pass",
+    "input_mask_all_released_pass",
+    "input_mask_all_pressed_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
@@ -300,7 +302,7 @@ class ObservabilityVerifier:
         self.expect_equal(role_counts.get("baseline"), 1, "debug index baseline role count")
         self.expect_equal(
             role_counts.get("expected_pass_fixture"),
-            1,
+            EXPECTED_PASS_SCENARIO_COUNT - 1,
             "debug index expected_pass_fixture role count",
         )
         self.expect_equal(

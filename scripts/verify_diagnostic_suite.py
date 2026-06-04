@@ -18,6 +18,8 @@ EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
     "pass",
     "input_mask_matrix_pass",
+    "input_mask_all_released_pass",
+    "input_mask_all_pressed_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
     "dma_oam_transfer_fault",
@@ -916,6 +918,56 @@ class SuiteVerifier:
         else:
             self.errors.append("missing observer observation for input_mask_matrix_pass")
 
+        input_all_released = by_scenario.get("input_mask_all_released_pass")
+        if isinstance(input_all_released, dict):
+            self.expect_equal(
+                input_all_released.get("role"),
+                "expected_pass_fixture",
+                "input all-released observer role",
+            )
+            self.expect_equal(
+                input_all_released.get("outcome"),
+                "matches_baseline",
+                "input all-released observer outcome",
+            )
+            self.expect_equal(
+                input_all_released.get("health"),
+                "healthy",
+                "input all-released observer health",
+            )
+            self.expect_equal(
+                input_all_released.get("next_artifact"),
+                "input_mask_all_released_pass/triage.json",
+                "input all-released observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_all_released_pass")
+
+        input_all_pressed = by_scenario.get("input_mask_all_pressed_pass")
+        if isinstance(input_all_pressed, dict):
+            self.expect_equal(
+                input_all_pressed.get("role"),
+                "expected_pass_fixture",
+                "input all-pressed observer role",
+            )
+            self.expect_equal(
+                input_all_pressed.get("outcome"),
+                "matches_baseline",
+                "input all-pressed observer outcome",
+            )
+            self.expect_equal(
+                input_all_pressed.get("health"),
+                "healthy",
+                "input all-pressed observer health",
+            )
+            self.expect_equal(
+                input_all_pressed.get("next_artifact"),
+                "input_mask_all_pressed_pass/triage.json",
+                "input all-pressed observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for input_mask_all_pressed_pass")
+
         timeout = by_scenario.get("timeout_cycle_limit")
         if isinstance(timeout, dict):
             self.expect_equal(
@@ -1462,6 +1514,28 @@ class SuiteVerifier:
                 self.expect_in(token, replay_args, "input_mask_matrix_pass replay_args")
         else:
             self.errors.append("missing replay args check subject input_mask_matrix_pass")
+
+        input_all_released = scenarios.get("input_mask_all_released_pass")
+        if isinstance(input_all_released, dict):
+            replay_args = self.expect_list(
+                input_all_released.get("replay_args"),
+                "input_mask_all_released_pass replay_args",
+            )
+            for token in ("--joypad1", "0x00", "--expect-joypad2", "0x00"):
+                self.expect_in(token, replay_args, "input_mask_all_released_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_all_released_pass")
+
+        input_all_pressed = scenarios.get("input_mask_all_pressed_pass")
+        if isinstance(input_all_pressed, dict):
+            replay_args = self.expect_list(
+                input_all_pressed.get("replay_args"),
+                "input_mask_all_pressed_pass replay_args",
+            )
+            for token in ("--joypad1", "0xFF", "--expect-joypad2", "0xFF"):
+                self.expect_in(token, replay_args, "input_mask_all_pressed_pass replay_args")
+        else:
+            self.errors.append("missing replay args check subject input_mask_all_pressed_pass")
 
         joypad_hold = scenarios.get("joypad_strobe_high_hold_fault")
         if isinstance(joypad_hold, dict):
