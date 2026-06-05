@@ -123,6 +123,20 @@ FOCUS_DOMAIN_CODE_MAP = {
             "cpu_interrupt_brk_rti_matrix",
         ],
     },
+    "cpu.accumulator.shift_rotate": {
+        "subsystem": "cpu",
+        "description": "6502 accumulator-form ASL/LSR/ROL/ROR result and status-flag behavior observed through diagnostic sentinels.",
+        "source_files": ["src/cpu.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "ASL",
+            "LSR",
+            "ROL",
+            "ROR",
+            "AddressingMode::Accumulator",
+            "cpu_accumulator_shift_rotate_matrix",
+        ],
+    },
     "cpu.rmw.asl": {
         "subsystem": "cpu",
         "description": "6502 read-modify-write zero-page opcode sequencing and memory write-back behavior.",
@@ -400,6 +414,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_branch_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failure",
     "cpu_stack_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure",
     "cpu_interrupt_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_failure",
+    "cpu_accumulator_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_accumulator_matrix_failure",
     "cpu_rmw_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matrix_failure",
     "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",

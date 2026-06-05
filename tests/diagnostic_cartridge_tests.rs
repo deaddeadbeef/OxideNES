@@ -45,10 +45,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 41);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 42);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("cpu_interrupt_brk_rti_matrix")
+        Some("cpu_accumulator_shift_rotate_matrix")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -68,7 +68,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("cpu_interrupt_brk_rti_matrix")
+        Some("cpu_accumulator_shift_rotate_matrix")
     );
     assert_eq!(
         telemetry
@@ -85,7 +85,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 11));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 12));
     assert!(telemetry
         .analysis
         .coverage
@@ -144,6 +144,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         failure.code == 0x87
             && failure.test_name == Some("cpu_interrupt_brk_rti_matrix")
             && failure.likely_domain == "cpu.interrupt.brk_rti_matrix"
+    }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0x8E
+            && failure.test_name == Some("cpu_accumulator_shift_rotate_matrix")
+            && failure.likely_domain == "cpu.accumulator.shift_rotate"
     }));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0xCA
@@ -410,6 +415,23 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "cpu.interrupt_matrix.results"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "cpu.interrupt.brk_rti_matrix"
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "cpu_accumulator_shift_rotate_matrix"
+            && test.intent.contains("accumulator-form")
+            && test.passed
+    }));
+    assert!(telemetry.cpu_accumulator_matrix.passed);
+    assert_eq!(telemetry.cpu_accumulator_matrix.observed_case_count, 4);
+    assert_eq!(telemetry.cpu_accumulator_matrix.asl_result_hex, "0x00");
+    assert_eq!(telemetry.cpu_accumulator_matrix.lsr_result_hex, "0x00");
+    assert_eq!(telemetry.cpu_accumulator_matrix.rol_result_hex, "0x01");
+    assert_eq!(telemetry.cpu_accumulator_matrix.ror_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_accumulator_matrix.flag_mask_hex, "0x0F");
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cpu.accumulator_matrix.results"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "cpu.accumulator.shift_rotate"
     }));
     assert!(telemetry.input_port_matrix.passed);
     assert_eq!(telemetry.input_port_matrix.observed_case_count, 24);
@@ -1518,7 +1540,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Input mask sweep passed | true |"));
     assert!(report.contains("| Input mask sweep error | none |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | cpu_interrupt_brk_rti_matrix (41) |"));
+    assert!(report.contains("| Focus test | cpu_accumulator_shift_rotate_matrix (42) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -1731,6 +1753,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| IRQ handler count / expected | 0x01 / 0x01 |"));
     assert!(report.contains("| Interrupt matrix cases / expected | 5 / 5 |"));
     assert!(report.contains("| Interrupt matrix passed | true |"));
+    assert!(report.contains("## CPU Accumulator Matrix"));
+    assert!(report.contains("| ASL/LSR results | 0x00 / 0x00 |"));
+    assert!(report.contains("| ROL/ROR results | 0x01 / 0x80 |"));
+    assert!(report.contains("| Flag mask / expected | 0x0F / 0x0F |"));
+    assert!(report.contains("| Accumulator matrix cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Accumulator matrix passed | true |"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
     assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
@@ -1763,6 +1791,9 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 39 | cpu_branch_condition_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("| 40 | cpu_stack_status_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("| 41 | cpu_interrupt_brk_rti_matrix | cpu | edge_case | passed |"));
+    assert!(
+        report.contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | passed |")
+    );
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -1802,10 +1833,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
         assert!(telemetry.verdict.passed);
         assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 41);
+        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 42);
         assert_eq!(
             telemetry.analysis.debug_focus.focus_test_name,
-            Some("cpu_interrupt_brk_rti_matrix")
+            Some("cpu_accumulator_shift_rotate_matrix")
         );
         assert_eq!(telemetry.input.joypad1_mask_hex, joypad1_mask_hex);
         assert_eq!(telemetry.input.joypad1_expected_mask_hex, joypad1_mask_hex);
@@ -2156,7 +2187,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 41);
+    assert_eq!(telemetry.verdict.current_test, 42);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -2505,10 +2536,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
         Some("ppu_sprite_priority")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 41);
+    assert_eq!(telemetry.verdict.current_test, 42);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_interrupt_brk_rti_matrix")
+        Some("cpu_accumulator_shift_rotate_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -2608,10 +2639,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
         Some("ppu_scroll_seam")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 41);
+    assert_eq!(telemetry.verdict.current_test, 42);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_interrupt_brk_rti_matrix")
+        Some("cpu_accumulator_shift_rotate_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -3246,13 +3277,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failur
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 2
+        DIAGNOSTIC_TESTS.len() - 3
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 2
+        DIAGNOSTIC_TESTS.len() - 3
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Focus test | cpu_branch_condition_matrix (39) |"));
     assert!(report.contains("| Focus domain | cpu.branch.condition_matrix |"));
@@ -3264,6 +3295,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failur
     assert!(
         report.contains("| 41 | cpu_interrupt_brk_rti_matrix | cpu | edge_case | not_started |")
     );
+    assert!(report
+        .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
 }
 
 #[test]
@@ -3331,13 +3364,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 1
+        DIAGNOSTIC_TESTS.len() - 2
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 1
+        DIAGNOSTIC_TESTS.len() - 2
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Focus test | cpu_stack_status_matrix (40) |"));
     assert!(report.contains("| Focus domain | cpu.stack.status_matrix |"));
@@ -3348,6 +3381,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure
     assert!(
         report.contains("| 41 | cpu_interrupt_brk_rti_matrix | cpu | edge_case | not_started |")
     );
+    assert!(report
+        .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
 }
 
 #[test]
@@ -3422,13 +3457,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_fai
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len()
+        DIAGNOSTIC_TESTS.len() - 1
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len()
+        DIAGNOSTIC_TESTS.len() - 1
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -3441,6 +3476,100 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_fai
     assert!(report.contains("| Interrupt matrix cases / expected | 133 / 5 |"));
     assert!(report.contains("| Interrupt matrix passed | false |"));
     assert!(report.contains("| 41 | cpu_interrupt_brk_rti_matrix | cpu | edge_case | failed |"));
+    assert!(report
+        .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_accumulator_matrix_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU accumulator-matrix failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_accumulator_matrix")
+    );
+    assert_eq!(telemetry.verdict.current_test, 42);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_accumulator_shift_rotate_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x9E);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU accumulator-matrix localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 42);
+    assert_eq!(
+        failure.test_name,
+        Some("cpu_accumulator_shift_rotate_matrix")
+    );
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0x9E");
+    assert_eq!(failure.likely_domain, "cpu.accumulator.shift_rotate");
+    assert!(failure.assertion.contains("records every subcase"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_accumulator_shift_rotate_matrix")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.accumulator.shift_rotate")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 42);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.accumulator.shift_rotate")
+    );
+    assert_eq!(telemetry.cpu_accumulator_matrix.asl_result_hex, "0x00");
+    assert_eq!(telemetry.cpu_accumulator_matrix.lsr_result_hex, "0x00");
+    assert_eq!(telemetry.cpu_accumulator_matrix.rol_result_hex, "0x01");
+    assert_eq!(telemetry.cpu_accumulator_matrix.ror_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_accumulator_matrix.flag_mask_hex, "0x8F");
+    assert_eq!(telemetry.cpu_accumulator_matrix.observed_case_count, 4);
+    assert!(!telemetry.cpu_accumulator_matrix.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.42.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(42)
+            && probe.likely_domain == "cpu.accumulator.shift_rotate"
+    }));
+    assert_eq!(
+        telemetry.analysis.timing.started_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(
+        telemetry.analysis.timing.ended_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_accumulator_matrix_before_cases")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_accumulator_shift_rotate_matrix (42) |"));
+    assert!(report.contains("| Focus domain | cpu.accumulator.shift_rotate |"));
+    assert!(report.contains("| Likely domain | cpu.accumulator.shift_rotate |"));
+    assert!(report.contains("| Flag mask / expected | 0x8F / 0x0F |"));
+    assert!(report.contains("| Accumulator matrix cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Accumulator matrix passed | false |"));
+    assert!(
+        report.contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | failed |")
+    );
 }
 
 #[test]

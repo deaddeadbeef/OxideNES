@@ -254,7 +254,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 27 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 30 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -308,8 +308,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 35
-scenarios match their expected health and focus-domain contracts, the 27
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 38
+scenarios match their expected health and focus-domain contracts, the 30
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -321,7 +321,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 27 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 30 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -413,6 +413,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
 `cpu_stack_matrix_fault`,
 `cpu_interrupt_matrix_fault`,
+`cpu_accumulator_matrix_fault`,
 `input_port_matrix_fault`,
 `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -465,6 +466,7 @@ with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
 `cpu_stack_matrix_fault`,
 `cpu_interrupt_matrix_fault`,
+`cpu_accumulator_matrix_fault`,
 `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -536,6 +538,10 @@ regressions localize to `cpu.stack.status_matrix`.
 the generated cartridge executes BRK, proving interrupt vector dispatch,
 IRQ/BRK stack-frame depth, processor-status restore, and RTI return regressions
 localize to `cpu.interrupt.brk_rti_matrix`.
+`cpu_accumulator_matrix_fault` corrupts the accumulator shift/rotate flag mask
+before the generated cartridge exercises ASL A, LSR A, ROL A, and ROR A,
+proving accumulator-form shift/rotate result and flag regressions localize to
+`cpu.accumulator.shift_rotate`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -692,7 +698,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 27 accepted AI routes into deterministic debugger startup plans
+turning all 30 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -1272,6 +1278,12 @@ top-level `cpu_interrupt_matrix` telemetry, and the
 marker, handler stack pointer, RTI-return accumulator, status-restore sentinel,
 final stack pointer, IRQ/BRK handler count, and case count.
 
+Schema version `64` adds the `cpu_accumulator_shift_rotate_matrix` cartridge
+test, top-level `cpu_accumulator_matrix` telemetry, and the
+`cpu.accumulator_matrix.results` probe. The cartridge records accumulator-form
+ASL, LSR, ROL, and ROR results, a carry/zero/negative flag coverage mask, and
+case count.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1312,3 +1324,9 @@ negative fixture. The fault corrupts the BRK/RTI matrix case counter
 immediately before test 41 executes, so the suite can localize interrupt vector
 dispatch, IRQ/BRK stack-frame depth, status restore, and RTI return regressions
 to `cpu.interrupt.brk_rti_matrix` with a paired AI route and replay command.
+
+Scenario suite schema version `15` adds the `cpu_accumulator_matrix_fault`
+negative fixture. The fault corrupts the accumulator shift/rotate flag mask
+immediately before test 42 executes, so the suite can localize accumulator-form
+ASL, LSR, ROL, and ROR result and flag regressions to
+`cpu.accumulator.shift_rotate` with a paired AI route and replay command.
