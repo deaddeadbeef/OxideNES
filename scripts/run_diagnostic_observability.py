@@ -174,6 +174,20 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/mapper_tests.rs", "tests/cartridge_tests.rs"],
         "search_terms": ["prg_ram", "$6000", "$7FFF", "mapper2_prg_ram"],
     },
+    "cartridge.mapper1_mmc1": {
+        "subsystem": "mapper",
+        "description": "Generated Mapper 1/MMC1 variant validates serial register commits, PRG/CHR bank switching, and single-screen mirroring.",
+        "source_files": ["src/mapper.rs", "src/ppu.rs", "src/cartridge.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/mapper_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "Mapper001",
+            "mapper1_mmc1",
+            "shift_register",
+            "write_mmc1_register",
+            "chr_bank_0",
+            "prg_bank",
+        ],
+    },
     "cartridge.mapper7_axrom": {
         "subsystem": "mapper",
         "description": "Generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching and single-screen mirroring.",
