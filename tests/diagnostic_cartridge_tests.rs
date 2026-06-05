@@ -45,10 +45,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 37);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("ppu_scroll_seam_matrix")
+        Some("cpu_read_modify_write_matrix")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -68,7 +68,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("ppu_scroll_seam_matrix")
+        Some("cpu_read_modify_write_matrix")
     );
     assert_eq!(
         telemetry
@@ -85,7 +85,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 6));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 7));
     assert!(telemetry
         .analysis
         .coverage
@@ -129,6 +129,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         failure.code == 0xB3
             && failure.test_name == Some("cpu_addressing_mode_matrix")
             && failure.likely_domain == "cpu.addressing.page_cross_load"
+    }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0xB5
+            && failure.test_name == Some("cpu_read_modify_write_matrix")
+            && failure.likely_domain == "cpu.rmw.asl"
     }));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0xD0
@@ -262,6 +267,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(telemetry.tests.iter().any(|test| {
         test.name == "ppu_scroll_seam_matrix" && test.intent.contains("vertical") && test.passed
     }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "cpu_read_modify_write_matrix"
+            && test.intent.contains("read-modify-write")
+            && test.passed
+    }));
     assert!(telemetry.cpu_addressing_matrix.passed);
     assert_eq!(telemetry.cpu_addressing_matrix.observed_case_count, 3);
     assert_eq!(
@@ -282,6 +292,19 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "cpu.addressing_matrix.results"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "cpu.addressing.page_cross_load"
+    }));
+    assert!(telemetry.cpu_rmw_matrix.passed);
+    assert_eq!(telemetry.cpu_rmw_matrix.observed_case_count, 6);
+    assert_eq!(telemetry.cpu_rmw_matrix.asl_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_rmw_matrix.rol_result_hex, "0x01");
+    assert_eq!(telemetry.cpu_rmw_matrix.lsr_result_hex, "0x40");
+    assert_eq!(telemetry.cpu_rmw_matrix.ror_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_rmw_matrix.inc_result_hex, "0x00");
+    assert_eq!(telemetry.cpu_rmw_matrix.dec_result_hex, "0xFF");
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cpu.rmw_matrix.results"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "cpu.rmw.asl"
     }));
     assert!(telemetry.input_port_matrix.passed);
     assert_eq!(telemetry.input_port_matrix.observed_case_count, 24);
@@ -1390,7 +1413,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Input mask sweep passed | true |"));
     assert!(report.contains("| Input mask sweep error | none |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | ppu_scroll_seam_matrix (28) |"));
+    assert!(report.contains("| Focus test | cpu_read_modify_write_matrix (37) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -1608,6 +1631,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 26 | ppu_sprite_overflow | ppu | edge_case | passed |"));
     assert!(report.contains("| 27 | ppu_sprite_priority_mux | ppu | edge_case | passed |"));
     assert!(report.contains("| 28 | ppu_scroll_seam_matrix | ppu | edge_case | passed |"));
+    assert!(report.contains("| 37 | cpu_read_modify_write_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -1647,10 +1671,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
         assert!(telemetry.verdict.passed);
         assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 28);
+        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 37);
         assert_eq!(
             telemetry.analysis.debug_focus.focus_test_name,
-            Some("ppu_scroll_seam_matrix")
+            Some("cpu_read_modify_write_matrix")
         );
         assert_eq!(telemetry.input.joypad1_mask_hex, joypad1_mask_hex);
         assert_eq!(telemetry.input.joypad1_expected_mask_hex, joypad1_mask_hex);
@@ -2001,7 +2025,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 28);
+    assert_eq!(telemetry.verdict.current_test, 37);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -2350,10 +2374,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
         Some("ppu_sprite_priority")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 28);
+    assert_eq!(telemetry.verdict.current_test, 37);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("ppu_scroll_seam_matrix")
+        Some("cpu_read_modify_write_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -2414,8 +2438,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
             && probe.test_id == Some(27)
             && probe.likely_domain == "ppu.sprite_priority"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 28);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 28);
+    assert_eq!(telemetry.analysis.timing.started_tests, 29);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 29);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
@@ -2447,10 +2471,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
         Some("ppu_scroll_seam")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 28);
+    assert_eq!(telemetry.verdict.current_test, 37);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("ppu_scroll_seam_matrix")
+        Some("cpu_read_modify_write_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -2538,8 +2562,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
             && probe.test_id == Some(28)
             && probe.likely_domain == "ppu.scroll_seam"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 28);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 28);
+    assert_eq!(telemetry.analysis.timing.started_tests, 29);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 29);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
@@ -2863,6 +2887,77 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_fa
     assert!(report.contains("| Likely domain | cpu.addressing.page_cross_load |"));
     assert!(report.contains("| 22 | cpu_addressing_mode_matrix | cpu | edge_case | failed |"));
     assert!(report.contains("| 23 | input_port_serial_matrix | joypad | edge_case | not_started |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuReadModifyWriteMatrix),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU RMW-matrix failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_rmw_matrix")
+    );
+    assert_eq!(telemetry.verdict.current_test, 37);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_read_modify_write_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xB5);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU RMW-matrix localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 37);
+    assert_eq!(failure.test_name, Some("cpu_read_modify_write_matrix"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0xB5");
+    assert_eq!(failure.likely_domain, "cpu.rmw.asl");
+    assert!(failure.assertion.contains("ASL zero-page"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_read_modify_write_matrix")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.rmw.asl")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 37);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.rmw.asl")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.37.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(37)
+            && probe.likely_domain == "cpu.rmw.asl"
+    }));
+    assert_eq!(telemetry.analysis.timing.started_tests, 29);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 29);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_rmw_matrix_before_asl")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_read_modify_write_matrix (37) |"));
+    assert!(report.contains("| Focus domain | cpu.rmw.asl |"));
+    assert!(report.contains("| Likely domain | cpu.rmw.asl |"));
+    assert!(report.contains("| 37 | cpu_read_modify_write_matrix | cpu | edge_case | failed |"));
 }
 
 #[test]
@@ -3789,7 +3884,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 28 |"));
+    assert!(report.contains("| Not started tests | 29 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }

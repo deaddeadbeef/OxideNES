@@ -20,13 +20,14 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 58
-EXPECTED_SCENARIO_COUNT = 32
-EXPECTED_ACTIONABLE_SCENARIO_COUNT = 24
+EXPECTED_TELEMETRY_SCHEMA = 59
+EXPECTED_SCENARIO_COUNT = 33
+EXPECTED_ACTIONABLE_SCENARIO_COUNT = 25
 EXPECTED_PASS_SCENARIO_COUNT = 8
-EXPECTED_CARTRIDGE_TEST_COUNT = 28
+EXPECTED_CARTRIDGE_TEST_COUNT = 29
+EXPECTED_CARTRIDGE_TEST_IDS = set(range(1, 29)) | {37}
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 63
+EXPECTED_PROBE_COUNT = 65
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -69,6 +70,7 @@ EXPECTED_SCENARIOS = {
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
     "cpu_addressing_matrix_fault",
+    "cpu_rmw_matrix_fault",
     "input_port_matrix_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
@@ -464,7 +466,7 @@ class ObservabilityVerifier:
         )
         self.expect_equal(
             {test.get("id") for test in tests},
-            set(range(1, EXPECTED_CARTRIDGE_TEST_COUNT + 1)),
+            EXPECTED_CARTRIDGE_TEST_IDS,
             "diagnostic coverage ledger test ids",
         )
         for test in tests:
@@ -699,7 +701,7 @@ class ObservabilityVerifier:
         )
         self.expect_equal(
             {test.get("id") for test in test_signals},
-            set(range(1, EXPECTED_CARTRIDGE_TEST_COUNT + 1)),
+            EXPECTED_CARTRIDGE_TEST_IDS,
             "diagnostic telemetry catalog test signal ids",
         )
         for test in test_signals:

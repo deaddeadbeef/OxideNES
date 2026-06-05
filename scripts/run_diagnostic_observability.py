@@ -79,6 +79,20 @@ FOCUS_DOMAIN_CODE_MAP = {
             "cpu_addressing_mode_matrix",
         ],
     },
+    "cpu.rmw.asl": {
+        "subsystem": "cpu",
+        "description": "6502 read-modify-write zero-page opcode sequencing and memory write-back behavior.",
+        "source_files": ["src/cpu.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "ASL",
+            "ROL",
+            "LSR",
+            "ROR",
+            "AddressingMode::ZeroPage",
+            "cpu_read_modify_write_matrix",
+        ],
+    },
     "dma.oam_transfer": {
         "subsystem": "dma",
         "description": "OAM DMA transfer, CPU stall bucket, and DMC overlap timing, stall-phase, and placement telemetry.",
@@ -324,6 +338,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_ram_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_ram_mirroring_failure",
     "cpu_indirect_jmp_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure",
     "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
+    "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
     "dma_oam_transfer_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure",
     "dma_phase_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_dma_phase_matrix_failure",
