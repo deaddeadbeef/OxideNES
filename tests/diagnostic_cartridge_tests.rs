@@ -45,10 +45,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 38);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 39);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("cpu_rmw_addressing_matrix")
+        Some("cpu_branch_condition_matrix")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -68,7 +68,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("cpu_rmw_addressing_matrix")
+        Some("cpu_branch_condition_matrix")
     );
     assert_eq!(
         telemetry
@@ -85,7 +85,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 8));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 9));
     assert!(telemetry
         .analysis
         .coverage
@@ -346,6 +346,21 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "cpu.rmw_addressing_matrix.results"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "cpu.rmw.absolute_asl"
+    }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "cpu_branch_condition_matrix"
+            && test.intent.contains("conditional branch")
+            && test.passed
+    }));
+    assert!(telemetry.cpu_branch_matrix.passed);
+    assert_eq!(telemetry.cpu_branch_matrix.observed_case_count, 17);
+    assert_eq!(telemetry.cpu_branch_matrix.taken_mask_hex, "0xFF");
+    assert_eq!(telemetry.cpu_branch_matrix.not_taken_mask_hex, "0xFF");
+    assert_eq!(telemetry.cpu_branch_matrix.page_cross_result_hex, "0x5C");
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cpu.branch_matrix.results"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "cpu.branch.condition_matrix"
     }));
     assert!(telemetry.input_port_matrix.passed);
     assert_eq!(telemetry.input_port_matrix.observed_case_count, 24);
@@ -1454,7 +1469,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Input mask sweep passed | true |"));
     assert!(report.contains("| Input mask sweep error | none |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | cpu_rmw_addressing_matrix (38) |"));
+    assert!(report.contains("| Focus test | cpu_branch_condition_matrix (39) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -1645,6 +1660,12 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| DMC status bit / expected | 0x10 / 0x10 |"));
     assert!(report.contains("| DMC status active / cases / passed | true / 1/1 / true |"));
     assert!(report.contains("## Timing"));
+    assert!(report.contains("## CPU Branch Matrix"));
+    assert!(report.contains("| Branch taken mask / expected | 0xFF / 0xFF |"));
+    assert!(report.contains("| Branch not-taken mask / expected | 0xFF / 0xFF |"));
+    assert!(report.contains("| Branch page-cross result / expected | 0x5C / 0x5C |"));
+    assert!(report.contains("| Branch matrix cases / expected | 17 / 17 |"));
+    assert!(report.contains("| Branch matrix passed | true |"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
     assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
@@ -1674,6 +1695,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| 28 | ppu_scroll_seam_matrix | ppu | edge_case | passed |"));
     assert!(report.contains("| 37 | cpu_read_modify_write_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("| 38 | cpu_rmw_addressing_matrix | cpu | edge_case | passed |"));
+    assert!(report.contains("| 39 | cpu_branch_condition_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -1713,10 +1735,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
         assert!(telemetry.verdict.passed);
         assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 38);
+        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 39);
         assert_eq!(
             telemetry.analysis.debug_focus.focus_test_name,
-            Some("cpu_rmw_addressing_matrix")
+            Some("cpu_branch_condition_matrix")
         );
         assert_eq!(telemetry.input.joypad1_mask_hex, joypad1_mask_hex);
         assert_eq!(telemetry.input.joypad1_expected_mask_hex, joypad1_mask_hex);
@@ -2067,7 +2089,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 38);
+    assert_eq!(telemetry.verdict.current_test, 39);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -2416,10 +2438,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
         Some("ppu_sprite_priority")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 38);
+    assert_eq!(telemetry.verdict.current_test, 39);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_rmw_addressing_matrix")
+        Some("cpu_branch_condition_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -2519,10 +2541,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
         Some("ppu_scroll_seam")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 38);
+    assert_eq!(telemetry.verdict.current_test, 39);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_rmw_addressing_matrix")
+        Some("cpu_branch_condition_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -3016,6 +3038,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure()
     assert!(report.contains("| Likely domain | cpu.rmw.asl |"));
     assert!(report.contains("| 37 | cpu_read_modify_write_matrix | cpu | edge_case | failed |"));
     assert!(report.contains("| 38 | cpu_rmw_addressing_matrix | cpu | edge_case | not_started |"));
+    assert!(report.contains("| 39 | cpu_branch_condition_matrix | cpu | edge_case | not_started |"));
 }
 
 #[test]
@@ -3076,7 +3099,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matri
     }));
     assert_eq!(telemetry.analysis.timing.started_tests, 30);
     assert_eq!(telemetry.analysis.timing.ended_tests, 30);
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(
+        telemetry.analysis.timing.not_started_tests,
+        DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
+    );
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -3087,6 +3113,86 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matri
     assert!(report.contains("| Focus domain | cpu.rmw.absolute_asl |"));
     assert!(report.contains("| Likely domain | cpu.rmw.absolute_asl |"));
     assert!(report.contains("| 38 | cpu_rmw_addressing_matrix | cpu | edge_case | failed |"));
+    assert!(report.contains("| 39 | cpu_branch_condition_matrix | cpu | edge_case | not_started |"));
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuBranchConditionMatrix),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU branch-matrix failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_branch_condition_matrix")
+    );
+    assert_eq!(telemetry.verdict.current_test, 39);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_branch_condition_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xDE);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU branch-matrix localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 39);
+    assert_eq!(failure.test_name, Some("cpu_branch_condition_matrix"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0xDE");
+    assert_eq!(failure.likely_domain, "cpu.branch.condition_matrix");
+    assert!(failure.assertion.contains("expected case count"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_branch_condition_matrix")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.branch.condition_matrix")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 39);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.branch.condition_matrix")
+    );
+    assert_eq!(telemetry.cpu_branch_matrix.taken_mask_hex, "0xFF");
+    assert_eq!(telemetry.cpu_branch_matrix.not_taken_mask_hex, "0xFF");
+    assert_eq!(telemetry.cpu_branch_matrix.page_cross_result_hex, "0x5C");
+    assert_eq!(telemetry.cpu_branch_matrix.observed_case_count, 145);
+    assert!(!telemetry.cpu_branch_matrix.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.39.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(39)
+            && probe.likely_domain == "cpu.branch.condition_matrix"
+    }));
+    assert_eq!(
+        telemetry.analysis.timing.started_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(
+        telemetry.analysis.timing.ended_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_branch_condition_matrix (39) |"));
+    assert!(report.contains("| Focus domain | cpu.branch.condition_matrix |"));
+    assert!(report.contains("| Likely domain | cpu.branch.condition_matrix |"));
+    assert!(report.contains("| Branch matrix cases / expected | 145 / 17 |"));
+    assert!(report.contains("| Branch matrix passed | false |"));
+    assert!(report.contains("| 39 | cpu_branch_condition_matrix | cpu | edge_case | failed |"));
 }
 
 #[test]
@@ -4013,7 +4119,7 @@ fn generated_diagnostic_cartridge_localizes_timeout() {
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Health | timed_out |"));
     assert!(report.contains("| First failure domain | emulator.progress_or_infinite_loop |"));
-    assert!(report.contains("| Not started tests | 30 |"));
+    assert!(report.contains("| Not started tests | 31 |"));
     assert!(report.contains("| Slowest test | none |"));
     assert!(report.contains("| failed | runtime.completed | host_observation | none | none |"));
 }

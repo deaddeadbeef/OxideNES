@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 11
+EXPECTED_SCENARIO_SUITE_SCHEMA = 12
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 60
+EXPECTED_TELEMETRY_SCHEMA = 61
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -33,6 +33,7 @@ EXPECTED_SCENARIOS = {
     "cpu_zero_page_wrap_fault",
     "cpu_indirect_jmp_fault",
     "cpu_addressing_matrix_fault",
+    "cpu_branch_matrix_fault",
     "cpu_rmw_matrix_fault",
     "cpu_rmw_addressing_matrix_fault",
     "input_port_matrix_fault",
@@ -203,6 +204,7 @@ class SuiteVerifier:
             "cpu_addressing_matrix_fault",
             "cpu_rmw_matrix_fault",
             "cpu_rmw_addressing_matrix_fault",
+            "cpu_branch_matrix_fault",
             "input_port_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
@@ -877,6 +879,39 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.22.result",
             addressing_evidence,
             "CPU addressing matrix observer evidence",
+        )
+        branch = by_scenario.get("cpu_branch_matrix_fault")
+        if not isinstance(branch, dict):
+            self.errors.append("missing observer action for cpu_branch_matrix_fault")
+            return
+
+        self.expect_equal(
+            branch.get("priority"),
+            "known_divergence",
+            "CPU branch matrix observer action priority",
+        )
+        self.expect_equal(
+            branch.get("action_type"),
+            "inspect_known_divergence",
+            "CPU branch matrix observer action type",
+        )
+        self.expect_equal(
+            branch.get("primary_artifact"),
+            "cpu_branch_matrix_fault/comparison.json",
+            "CPU branch matrix observer primary_artifact",
+        )
+        branch_evidence = self.expect_list(
+            branch.get("evidence"), "CPU branch matrix observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.branch.condition_matrix",
+            branch_evidence,
+            "CPU branch matrix observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.39.result",
+            branch_evidence,
+            "CPU branch matrix observer evidence",
         )
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if not isinstance(rmw, dict):
@@ -1644,6 +1679,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_addressing_matrix_fault")
+
+        branch = by_scenario.get("cpu_branch_matrix_fault")
+        if isinstance(branch, dict):
+            self.expect_equal(
+                branch.get("role"),
+                "expected_failure_fixture",
+                "CPU branch matrix observer role",
+            )
+            self.expect_equal(
+                branch.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU branch matrix observer outcome",
+            )
+            self.expect_equal(
+                branch.get("health"),
+                "cartridge_assertion_failed",
+                "CPU branch matrix observer health",
+            )
+            self.expect_equal(
+                branch.get("focus_domain"),
+                "cpu.branch.condition_matrix",
+                "CPU branch matrix observer focus_domain",
+            )
+            self.expect_equal(
+                branch.get("next_artifact"),
+                "cpu_branch_matrix_fault/comparison.json",
+                "CPU branch matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_branch_matrix_fault")
 
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if isinstance(rmw, dict):

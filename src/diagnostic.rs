@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 60;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 61;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v60";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v61";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -49,6 +49,7 @@ const MAPPER1_MMC1_32K_PRG_TEST_ID: u8 = 35;
 const MAPPER4_MMC3_PRG_RAM_TEST_ID: u8 = 36;
 const CPU_RMW_MATRIX_TEST_ID: u8 = 37;
 const CPU_RMW_ADDRESSING_MATRIX_TEST_ID: u8 = 38;
+const CPU_BRANCH_MATRIX_TEST_ID: u8 = 39;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -291,6 +292,7 @@ const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_st
 const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
 const CPU_RMW_MATRIX_FAULT_LABEL: &str = "cpu_rmw_matrix_before_asl";
 const CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_rmw_addressing_matrix_before_absolute_asl";
+const CPU_BRANCH_MATRIX_FAULT_LABEL: &str = "cpu_branch_condition_matrix_before_cases";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -383,6 +385,13 @@ const CPU_RMW_ADDRESSING_INC_ABS_RESULT_ADDR: u16 = 0x02C0;
 const CPU_RMW_ADDRESSING_DEC_ABS_X_RESULT_ADDR: u16 = 0x02C1;
 const CPU_RMW_ADDRESSING_CASE_COUNT_ADDR: u16 = 0x02C2;
 const CPU_RMW_ADDRESSING_EXPECTED_CASE_COUNT: u8 = 6;
+const CPU_BRANCH_MATRIX_TAKEN_MASK_ADDR: u16 = 0x02C3;
+const CPU_BRANCH_MATRIX_NOT_TAKEN_MASK_ADDR: u16 = 0x02C4;
+const CPU_BRANCH_MATRIX_PAGE_CROSS_RESULT_ADDR: u16 = 0x02C5;
+const CPU_BRANCH_MATRIX_CASE_COUNT_ADDR: u16 = 0x02C6;
+const CPU_BRANCH_MATRIX_EXPECTED_MASK: u8 = 0xFF;
+const CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT: u8 = 0x5C;
+const CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT: u8 = 17;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -749,6 +758,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "ASL, LSR, and INC write expected absolute-address memory results",
             "ROL, ROR, and DEC write expected absolute,X memory results",
             "Indexed RMW cases prove write-back targets use the indexed effective address",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_BRANCH_MATRIX_TEST_ID,
+        name: "cpu_branch_condition_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify all official conditional branch opcodes take and skip based on their status flag conditions, including a page-crossing relative target.",
+        expected_observations: &[
+            "BPL, BMI, BVC, BVS, BCC, BCS, BNE, and BEQ all reach their taken targets when their condition is true",
+            "the same branch opcodes all fall through when their condition is false",
+            "a taken relative branch placed at page low byte 0xFC reaches a target on the next CPU page",
         ],
     },
 ];
@@ -1385,6 +1406,123 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect DEC absolute,X indexed effective-address resolution, memory write-back, and zero/negative flag updates.",
     },
     DiagnosticFailureSpec {
+        code: 0xD2,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BPL branches only when the negative flag is clear",
+        expected: "BPL reaches its taken target with N=0 and falls through with N=1",
+        observed: "BPL took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BPL condition evaluation, status negative-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD3,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BMI branches only when the negative flag is set",
+        expected: "BMI reaches its taken target with N=1 and falls through with N=0",
+        observed: "BMI took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BMI condition evaluation, status negative-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD4,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BVC branches only when the overflow flag is clear",
+        expected: "BVC reaches its taken target with V=0 and falls through with V=1",
+        observed: "BVC took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BVC condition evaluation, overflow-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD5,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BVS branches only when the overflow flag is set",
+        expected: "BVS reaches its taken target with V=1 and falls through with V=0",
+        observed: "BVS took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BVS condition evaluation, overflow-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD6,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BCC branches only when the carry flag is clear",
+        expected: "BCC reaches its taken target with C=0 and falls through with C=1",
+        observed: "BCC took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BCC condition evaluation, carry-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD7,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BCS branches only when the carry flag is set",
+        expected: "BCS reaches its taken target with C=1 and falls through with C=0",
+        observed: "BCS took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BCS condition evaluation, carry-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD8,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BNE branches only when the zero flag is clear",
+        expected: "BNE reaches its taken target with Z=0 and falls through with Z=1",
+        observed: "BNE took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BNE condition evaluation, zero-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xD9,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "BEQ branches only when the zero flag is set",
+        expected: "BEQ reaches its taken target with Z=1 and falls through with Z=0",
+        observed: "BEQ took the wrong path in the branch condition matrix",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect BEQ condition evaluation, zero-flag updates, and relative branch PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xDA,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "Page-crossing branch target executes normally inside the branch matrix",
+        expected: "A taken BNE placed at page low byte 0xFC stores the page-cross sentinel at the next-page target",
+        observed: "the page-cross branch did not reach the expected target",
+        likely_domain: "cpu.branch.page_cross",
+        remediation_hint: "Inspect relative branch signed-offset calculation and page-cross PC updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xDB,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "Branch condition matrix records every taken branch case",
+        expected: "taken mask == 0xFF",
+        observed: "one or more true branch-condition cases did not set the taken mask bit",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect conditional branch opcode dispatch and status-flag inputs before checking cycle accounting.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xDC,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "Branch condition matrix records every not-taken branch case",
+        expected: "not-taken mask == 0xFF",
+        observed: "one or more false branch-condition cases incorrectly branched",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect fallthrough PC advancement for branch opcodes when their status-flag condition is false.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xDD,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "Branch condition matrix records the page-cross sentinel",
+        expected: "page-cross result == 0x5C",
+        observed: "the page-cross branch result byte did not match the expected sentinel",
+        likely_domain: "cpu.branch.page_cross",
+        remediation_hint: "Inspect relative branch target calculation when a taken branch crosses a CPU page boundary.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xDE,
+        test_id: CPU_BRANCH_MATRIX_TEST_ID,
+        assertion: "Branch condition matrix records its expected case count",
+        expected: "case count == 17",
+        observed: "the branch matrix case count did not match the expected taken, not-taken, and page-cross cases",
+        likely_domain: "cpu.branch.condition_matrix",
+        remediation_hint: "Inspect branch matrix execution flow and any early exits before broadening the CPU opcode search.",
+    },
+    DiagnosticFailureSpec {
         code: 0xD0,
         test_id: 14,
         assertion: "PPUDATA read from $2000 returns the buffered VRAM byte on the second read",
@@ -1499,8 +1637,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, and a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but accumulator and broader addressing/flag/cycle combinations remain incomplete, and broader cycle-accurate addressing penalties.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, and a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but accumulator and broader addressing/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
     DiagnosticCoverageGapSpec {
@@ -1587,6 +1725,7 @@ fn diagnostic_render_frame_signature_validation(config: &DiagnosticConfig) -> (b
 pub enum DiagnosticFaultInjection {
     ApuStatusRegister,
     CpuAddressingModeMatrix,
+    CpuBranchConditionMatrix,
     CpuIndirectJmpPageWrap,
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
@@ -1611,9 +1750,10 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 23] = [
+    pub const ALL: [DiagnosticFaultInjection; 24] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
+        DiagnosticFaultInjection::CpuBranchConditionMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuRamMirroring,
         DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix,
@@ -1641,6 +1781,7 @@ impl DiagnosticFaultInjection {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
+            DiagnosticFaultInjection::CpuBranchConditionMatrix => "cpu_branch_condition_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
@@ -1675,6 +1816,7 @@ impl DiagnosticFaultInjection {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuBranchConditionMatrix => CPU_BRANCH_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
@@ -1723,6 +1865,7 @@ pub struct DiagnosticTelemetry {
     pub frames: u64,
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
+    pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
@@ -2252,6 +2395,23 @@ pub struct CpuAddressingMatrixTelemetry {
     pub abs_x_page_cross_result_hex: String,
     pub indirect_y_page_cross_result: u8,
     pub indirect_y_page_cross_result_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuBranchMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_mask: u8,
+    pub expected_mask_hex: String,
+    pub taken_mask: u8,
+    pub taken_mask_hex: String,
+    pub not_taken_mask: u8,
+    pub not_taken_mask_hex: String,
+    pub expected_page_cross_result: u8,
+    pub expected_page_cross_result_hex: String,
+    pub page_cross_result: u8,
+    pub page_cross_result_hex: String,
+    pub passed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -4417,6 +4577,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         )
     });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
+    let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
     let apu_dmc_status = apu_dmc_status_telemetry(&ram);
@@ -4457,6 +4618,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_branch_matrix: &cpu_branch_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
@@ -4497,6 +4659,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_branch_matrix: &cpu_branch_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
@@ -4574,6 +4737,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         frames,
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
+        cpu_branch_matrix,
         cpu_rmw_addressing_matrix,
         cpu_rmw_matrix,
         input_port_matrix,
@@ -4816,6 +4980,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_ppu_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
     write_audio_section(&mut report, telemetry);
+    write_cpu_branch_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_instruction_trace_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
@@ -6116,6 +6281,47 @@ fn write_audio_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_branch_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Branch Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Branch taken mask / expected | {} / {} |",
+        telemetry.cpu_branch_matrix.taken_mask_hex, telemetry.cpu_branch_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Branch not-taken mask / expected | {} / {} |",
+        telemetry.cpu_branch_matrix.not_taken_mask_hex,
+        telemetry.cpu_branch_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Branch page-cross result / expected | {} / {} |",
+        telemetry.cpu_branch_matrix.page_cross_result_hex,
+        telemetry.cpu_branch_matrix.expected_page_cross_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Branch matrix cases / expected | {} / {} |",
+        telemetry.cpu_branch_matrix.observed_case_count,
+        telemetry.cpu_branch_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Branch matrix passed | {} |",
+        telemetry.cpu_branch_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_timing_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Timing").expect("write report");
     writeln!(report).expect("write report");
@@ -7360,6 +7566,7 @@ struct HostValidationInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
@@ -7393,6 +7600,7 @@ struct ProbeTelemetryInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
@@ -7462,6 +7670,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_addressing_matrix.indirect_y_page_cross_result_hex,
             input.cpu_addressing_matrix.observed_case_count,
             input.cpu_addressing_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_branch_matrix.passed {
+        failures.push(format!(
+            "CPU branch matrix mismatch: taken={}, not_taken={}, page_cross={}, cases {}/{}",
+            input.cpu_branch_matrix.taken_mask_hex,
+            input.cpu_branch_matrix.not_taken_mask_hex,
+            input.cpu_branch_matrix.page_cross_result_hex,
+            input.cpu_branch_matrix.observed_case_count,
+            input.cpu_branch_matrix.expected_case_count
         ));
     }
     if !input.cpu_rmw_matrix.passed {
@@ -7986,6 +8204,30 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_addressing_matrix.expected_case_count
             ),
             likely_domain: "cpu.addressing.page_cross_load".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.branch_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_BRANCH_MATRIX_TEST_ID),
+            test_name: test_name(CPU_BRANCH_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_branch_matrix.passed),
+            description:
+                "CPU branch condition matrix retained expected taken, not-taken, and page-crossing branch observations"
+                    .to_string(),
+            expected: "taken=0xFF, not_taken=0xFF, page_cross=0x5C, cases=17".to_string(),
+            observed: format!(
+                "taken {}, not_taken {}, page_cross {}, cases {}/{}",
+                input.cpu_branch_matrix.taken_mask_hex,
+                input.cpu_branch_matrix.not_taken_mask_hex,
+                input.cpu_branch_matrix.page_cross_result_hex,
+                input.cpu_branch_matrix.observed_case_count,
+                input.cpu_branch_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.branch.condition_matrix".to_string(),
         },
     );
     push_probe(
@@ -9203,6 +9445,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_scroll_seam();
     program.cpu_read_modify_write_matrix();
     program.cpu_rmw_addressing_matrix();
+    program.cpu_branch_condition_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -9288,6 +9531,50 @@ impl DiagnosticProgram {
         self.asm.lda_imm(fail_code);
         self.asm.sta_zp(FAILURE_CODE_ADDR);
         self.asm.jmp_label("fail");
+    }
+
+    fn expect_branch_taken(&mut self, opcode: u8, label_prefix: &str, mask_bit: u8, fail_code: u8) {
+        let target = self.unique_label(label_prefix);
+        self.asm.op_rel(opcode, &target);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&target)
+            .expect("unique label should not collide");
+        self.mark_branch_matrix_case(CPU_BRANCH_MATRIX_TAKEN_MASK_ADDR, mask_bit);
+    }
+
+    fn expect_branch_not_taken(
+        &mut self,
+        opcode: u8,
+        label_prefix: &str,
+        mask_bit: u8,
+        fail_code: u8,
+    ) {
+        let wrong_taken = self.unique_label(label_prefix);
+        let ok = self.unique_label("branch_not_taken_ok");
+        self.asm.op_rel(opcode, &wrong_taken);
+        self.mark_branch_matrix_case(CPU_BRANCH_MATRIX_NOT_TAKEN_MASK_ADDR, mask_bit);
+        self.asm.jmp_label(&ok);
+        self.asm
+            .label(&wrong_taken)
+            .expect("unique label should not collide");
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn mark_branch_matrix_case(&mut self, mask_addr: u16, mask_bit: u8) {
+        self.asm.lda_abs(mask_addr);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(mask_addr);
+        self.asm.inc_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn set_overflow_flag(&mut self) {
+        self.asm.clc();
+        self.asm.lda_imm(0x40);
+        self.asm.adc_imm(0x40);
     }
 
     fn write_ppu_data(&mut self, addr: u16, value: u8) {
@@ -9578,6 +9865,82 @@ impl DiagnosticProgram {
         self.asm.lda_imm(0x5C);
         self.expect_a_eq(0x5C, 0x82);
         self.pass_test(8);
+    }
+
+    fn cpu_branch_condition_matrix(&mut self) {
+        self.begin_test(CPU_BRANCH_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_BRANCH_MATRIX_TAKEN_MASK_ADDR);
+        self.asm.sta_abs(CPU_BRANCH_MATRIX_NOT_TAKEN_MASK_ADDR);
+        self.asm.sta_abs(CPU_BRANCH_MATRIX_PAGE_CROSS_RESULT_ADDR);
+        self.asm.sta_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_BRANCH_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.lda_imm(0x01);
+        self.expect_branch_taken(0x10, "bpl_taken", 0x01, 0xD2);
+        self.asm.lda_imm(0x80);
+        self.expect_branch_not_taken(0x10, "bpl_not_taken", 0x01, 0xD2);
+
+        self.asm.lda_imm(0x80);
+        self.expect_branch_taken(0x30, "bmi_taken", 0x02, 0xD3);
+        self.asm.lda_imm(0x01);
+        self.expect_branch_not_taken(0x30, "bmi_not_taken", 0x02, 0xD3);
+
+        self.asm.clv();
+        self.expect_branch_taken(0x50, "bvc_taken", 0x04, 0xD4);
+        self.set_overflow_flag();
+        self.expect_branch_not_taken(0x50, "bvc_not_taken", 0x04, 0xD4);
+
+        self.set_overflow_flag();
+        self.expect_branch_taken(0x70, "bvs_taken", 0x08, 0xD5);
+        self.asm.clv();
+        self.expect_branch_not_taken(0x70, "bvs_not_taken", 0x08, 0xD5);
+
+        self.asm.clc();
+        self.expect_branch_taken(0x90, "bcc_taken", 0x10, 0xD6);
+        self.asm.sec();
+        self.expect_branch_not_taken(0x90, "bcc_not_taken", 0x10, 0xD6);
+
+        self.asm.sec();
+        self.expect_branch_taken(0xB0, "bcs_taken", 0x20, 0xD7);
+        self.asm.clc();
+        self.expect_branch_not_taken(0xB0, "bcs_not_taken", 0x20, 0xD7);
+
+        self.asm.lda_imm(0x01);
+        self.expect_branch_taken(0xD0, "bne_taken", 0x40, 0xD8);
+        self.asm.lda_imm(0x00);
+        self.expect_branch_not_taken(0xD0, "bne_not_taken", 0x40, 0xD8);
+
+        self.asm.lda_imm(0x00);
+        self.expect_branch_taken(0xF0, "beq_taken", 0x80, 0xD9);
+        self.asm.lda_imm(0x01);
+        self.expect_branch_not_taken(0xF0, "beq_not_taken", 0x80, 0xD9);
+
+        self.asm.lda_imm(0x01);
+        self.asm.pad_until_low_byte(0xFC);
+        let target = self.unique_label("branch_matrix_page_cross_target");
+        self.asm.bne(&target);
+        self.fail_with_code(0xDA);
+        self.asm
+            .label(&target)
+            .expect("unique label should not collide");
+        self.asm
+            .lda_imm(CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT);
+        self.asm.sta_abs(CPU_BRANCH_MATRIX_PAGE_CROSS_RESULT_ADDR);
+        self.asm.inc_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_BRANCH_MATRIX_TAKEN_MASK_ADDR);
+        self.expect_a_eq(CPU_BRANCH_MATRIX_EXPECTED_MASK, 0xDB);
+        self.asm.lda_abs(CPU_BRANCH_MATRIX_NOT_TAKEN_MASK_ADDR);
+        self.expect_a_eq(CPU_BRANCH_MATRIX_EXPECTED_MASK, 0xDC);
+        self.asm.lda_abs(CPU_BRANCH_MATRIX_PAGE_CROSS_RESULT_ADDR);
+        self.expect_a_eq(CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT, 0xDD);
+        self.asm.lda_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT, 0xDE);
+        self.pass_test(CPU_BRANCH_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -11088,6 +11451,10 @@ impl Assembler {
         self.emit(0x38);
     }
 
+    fn clv(&mut self) {
+        self.emit(0xB8);
+    }
+
     fn nop(&mut self) {
         self.emit(0xEA);
     }
@@ -11273,6 +11640,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuAddressingModeMatrix => {
             bus.cpu_write(0x0500, 0x00);
         }
+        DiagnosticFaultInjection::CpuBranchConditionMatrix => {
+            bus.cpu_write(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR, 0x80);
+        }
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
             let wrong_target_high = bus.cpu_read(0x0500);
             bus.cpu_write(0x0400, wrong_target_high);
@@ -11391,6 +11761,31 @@ fn cpu_addressing_matrix_telemetry(ram: &[u8]) -> CpuAddressingMatrixTelemetry {
         abs_x_page_cross_result_hex: hex_byte(abs_x_page_cross_result),
         indirect_y_page_cross_result,
         indirect_y_page_cross_result_hex: hex_byte(indirect_y_page_cross_result),
+    }
+}
+
+fn cpu_branch_matrix_telemetry(ram: &[u8]) -> CpuBranchMatrixTelemetry {
+    let taken_mask = ram[(CPU_BRANCH_MATRIX_TAKEN_MASK_ADDR & 0x07FF) as usize];
+    let not_taken_mask = ram[(CPU_BRANCH_MATRIX_NOT_TAKEN_MASK_ADDR & 0x07FF) as usize];
+    let page_cross_result = ram[(CPU_BRANCH_MATRIX_PAGE_CROSS_RESULT_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuBranchMatrixTelemetry {
+        expected_case_count: CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_mask: CPU_BRANCH_MATRIX_EXPECTED_MASK,
+        expected_mask_hex: hex_byte(CPU_BRANCH_MATRIX_EXPECTED_MASK),
+        taken_mask,
+        taken_mask_hex: hex_byte(taken_mask),
+        not_taken_mask,
+        not_taken_mask_hex: hex_byte(not_taken_mask),
+        expected_page_cross_result: CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT,
+        expected_page_cross_result_hex: hex_byte(CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT),
+        page_cross_result,
+        page_cross_result_hex: hex_byte(page_cross_result),
+        passed: observed_case_count == CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT
+            && taken_mask == CPU_BRANCH_MATRIX_EXPECTED_MASK
+            && not_taken_mask == CPU_BRANCH_MATRIX_EXPECTED_MASK
+            && page_cross_result == CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT,
     }
 }
 
@@ -14818,6 +15213,11 @@ fn compare_observation_checksums(
         &["cpu", "pending_cycles"][..],
         &["ram", "nmi_count"][..],
         &["ram", "checksum"][..],
+        &["cpu_branch_matrix", "taken_mask"][..],
+        &["cpu_branch_matrix", "not_taken_mask"][..],
+        &["cpu_branch_matrix", "page_cross_result"][..],
+        &["cpu_branch_matrix", "observed_case_count"][..],
+        &["cpu_branch_matrix", "passed"][..],
     ] {
         compare_optional_value(
             baseline,

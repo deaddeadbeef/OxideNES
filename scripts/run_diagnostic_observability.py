@@ -79,6 +79,20 @@ FOCUS_DOMAIN_CODE_MAP = {
             "cpu_addressing_mode_matrix",
         ],
     },
+    "cpu.branch.condition_matrix": {
+        "subsystem": "cpu",
+        "description": "6502 conditional branch opcode behavior across true and false status-flag states, plus a page-crossing relative branch target.",
+        "source_files": ["src/cpu.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "BPL",
+            "BMI",
+            "BVC",
+            "BVS",
+            "branch",
+            "cpu_branch_condition_matrix",
+        ],
+    },
     "cpu.rmw.asl": {
         "subsystem": "cpu",
         "description": "6502 read-modify-write zero-page opcode sequencing and memory write-back behavior.",
@@ -353,6 +367,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_ram_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_ram_mirroring_failure",
     "cpu_indirect_jmp_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure",
     "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
+    "cpu_branch_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failure",
     "cpu_rmw_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matrix_failure",
     "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
