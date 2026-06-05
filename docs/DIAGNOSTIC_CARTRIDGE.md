@@ -750,6 +750,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
   PPU-visible pattern-table reads
+- Mapper 7/AxROM 32 KiB PRG bank switching and single-screen lower/upper
+  nametable mirroring through CPU and PPU bus paths
 - Joypad strobe and shift reads with configurable expected masks
 - Joypad mid-stream strobe reset behavior
 - Joypad strobe-high hold behavior
@@ -1149,6 +1151,13 @@ from the host, strobes `$4016`, reconstructs both ports' eight serial bits into
 RAM, compares the reconstructed bytes to the expected masks, and exposes
 top-level `input_mask_sweep` telemetry plus the
 `joypad.input_mask_sweep.results` probe across 16 stratified mask pairs.
+
+Schema version `53` adds a generated Mapper 7/AxROM variant cartridge to the
+host diagnostic run. Because AxROM swaps the whole 32 KiB CPU window, the
+variant replicates the diagnostic program and vectors in every 32 KiB bank,
+then writes bank-select values through `$8000`, reads PRG sentinels from
+`$8000`, toggles single-screen lower/upper mirroring through bit 4, and exposes
+top-level `mapper7_axrom` telemetry plus the `mapper7.axrom_switching` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
