@@ -1,6 +1,6 @@
 # OxideNES Diagnostic Cartridge
 
-OxideNES includes a generated, IP-safe diagnostic cartridge for headless emulator validation. The cartridge is assembled from deterministic 6502 instructions and CHR byte patterns at runtime; no `.nes` file or third-party ROM content is committed. The generated ROM uses Mapper 2/UXROM so the same cartridge can validate PRG bank switching and PRG RAM access through the normal CPU bus.
+OxideNES includes a generated, IP-safe diagnostic cartridge for headless emulator validation. The cartridges are assembled from deterministic 6502 instructions and CHR byte patterns at runtime; no `.nes` file or third-party ROM content is committed. The main generated ROM uses Mapper 2/UXROM so the same cartridge can validate PRG bank switching and PRG RAM access through the normal CPU bus, while focused variant cartridges exercise additional mapper behavior through the same headless runner.
 
 Run it with:
 
@@ -747,6 +747,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   plus DMC sample-DMA overlap timing, stall-phase, and placement telemetry
 - APU pulse-channel status register plus host-observed sample-count, peak,
   RMS, and mean absolute output envelope checks
+- Mapper 1/MMC1 serial-register PRG bank switching, delayed commit after four
+  writes, 4 KiB CHR bank switching, fixed-last PRG reads, and single-screen
+  lower/upper nametable mirroring
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
   PPU-visible pattern-table reads
@@ -1158,6 +1161,14 @@ variant replicates the diagnostic program and vectors in every 32 KiB bank,
 then writes bank-select values through `$8000`, reads PRG sentinels from
 `$8000`, toggles single-screen lower/upper mirroring through bit 4, and exposes
 top-level `mapper7_axrom` telemetry plus the `mapper7.axrom_switching` probe.
+
+Schema version `54` adds a generated Mapper 1/MMC1 variant cartridge to the
+host diagnostic run. The variant writes MMC1 serial-register bits through
+`$8000`, `$A000`, `$C000`, and `$E000`, proves a PRG bank write does not commit
+after only four serial bits, commits the fifth bit, reads switchable and fixed
+PRG sentinels, reads 4 KiB CHR bank sentinels through PPUDATA, toggles
+single-screen lower/upper mirroring, and exposes top-level `mapper1_mmc1`
+telemetry plus the `mapper1.mmc1_shift_register` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
