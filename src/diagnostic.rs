@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 66;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 67;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v66";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v67";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -55,6 +55,7 @@ const CPU_INTERRUPT_MATRIX_TEST_ID: u8 = 41;
 const CPU_ACCUMULATOR_MATRIX_TEST_ID: u8 = 42;
 const CPU_COMPARE_MATRIX_TEST_ID: u8 = 43;
 const CPU_LOAD_STORE_MATRIX_TEST_ID: u8 = 44;
+const CPU_ALU_INDEX_MATRIX_TEST_ID: u8 = 45;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -305,6 +306,8 @@ const CPU_COMPARE_MATRIX_FAULT_LABEL: &str = "cpu_compare_matrix_before_cases";
 const CPU_COMPARE_MATRIX_SUMMARY_LABEL: &str = "cpu_compare_matrix_before_summary";
 const CPU_LOAD_STORE_MATRIX_FAULT_LABEL: &str = "cpu_load_store_matrix_before_cases";
 const CPU_LOAD_STORE_MATRIX_SUMMARY_LABEL: &str = "cpu_load_store_matrix_before_summary";
+const CPU_ALU_INDEX_MATRIX_FAULT_LABEL: &str = "cpu_alu_index_matrix_before_cases";
+const CPU_ALU_INDEX_MATRIX_SUMMARY_LABEL: &str = "cpu_alu_index_matrix_before_summary";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -464,6 +467,19 @@ const CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK: u8 = 0x0F;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK: u8 = 0x07;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK: u8 = 0x0F;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 11;
+const CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR: u16 = 0x02EC;
+const CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR: u16 = 0x02ED;
+const CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR: u16 = 0x02EE;
+const CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR: u16 = 0x02EF;
+const CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR: u16 = 0x02F0;
+const CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR: u16 = 0x02F1;
+const CPU_ALU_INDEX_MATRIX_INY_RESULT_ADDR: u16 = 0x02F2;
+const CPU_ALU_INDEX_MATRIX_DEX_RESULT_ADDR: u16 = 0x02F3;
+const CPU_ALU_INDEX_MATRIX_DEY_RESULT_ADDR: u16 = 0x02F4;
+const CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR: u16 = 0x02F5;
+const CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK: u8 = 0x07;
+const CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK: u8 = 0x0F;
+const CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT: u8 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -907,6 +923,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "STA, STX, and STY write expected bytes through absolute,Y, zero-page,Y, and zero-page,X stores",
             "TAX, TAY, TXA, and TYA transfer register values while updating zero and negative flags",
             "the matrix records every load, store, and transfer subcase in masks and case count",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_ALU_INDEX_MATRIX_TEST_ID,
+        name: "cpu_alu_index_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify representative logical accumulator opcodes and X/Y index increment/decrement opcodes preserve result and zero/negative flags.",
+        expected_observations: &[
+            "AND, ORA, and EOR immediate cases cover zero and negative result flag outcomes",
+            "INX, INY, DEX, and DEY cover wraparound, zero, and negative index-register outcomes",
+            "the matrix records every logical and index-register subcase in masks and case count",
         ],
     },
 ];
@@ -1552,6 +1580,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect matrix execution flow and the load/store/transfer opcode paths before broadening opcode coverage further.",
     },
     DiagnosticFailureSpec {
+        code: 0xC5,
+        test_id: CPU_ALU_INDEX_MATRIX_TEST_ID,
+        assertion: "ALU logical matrix covers AND, ORA, and EOR result and flag outcomes",
+        expected: "AND produces 0x00 with zero set, ORA produces 0xC0 with negative set, and EOR produces 0x80 with negative set",
+        observed: "one or more logical accumulator opcodes did not preserve the expected result or zero/negative flag state",
+        likely_domain: "cpu.alu_index.logic_flags",
+        remediation_hint: "Inspect AND/ORA/EOR dispatch and zero/negative flag updates before broadening the official opcode matrix.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC6,
+        test_id: CPU_ALU_INDEX_MATRIX_TEST_ID,
+        assertion: "Index register matrix covers INX, INY, DEX, and DEY result and flag outcomes",
+        expected: "INX wraps 0xFF to 0x00, INY advances 0x7F to 0x80, DEX wraps 0x00 to 0xFF, and DEY advances 0x01 to 0x00",
+        observed: "one or more index-register opcodes did not preserve the expected result or zero/negative flag state",
+        likely_domain: "cpu.alu_index.logic_flags",
+        remediation_hint: "Inspect INX/INY/DEX/DEY register writeback and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC7,
+        test_id: CPU_ALU_INDEX_MATRIX_TEST_ID,
+        assertion: "ALU/index matrix records every logical and index-register subcase",
+        expected: "logic mask == 0x07, index mask == 0x0F, and case count == 7",
+        observed: "the ALU/index matrix did not record every expected subcase",
+        likely_domain: "cpu.alu_index.logic_flags",
+        remediation_hint: "Inspect matrix execution flow and the logical/index opcode paths before broadening opcode coverage further.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -2017,8 +2072,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, and a load/store/transfer matrix covering LDA/LDX/LDY indexed loads, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader logical/arithmetic/addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, a load/store/transfer matrix covering LDA/LDX/LDY indexed loads, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes, and a logical/index matrix covering AND/ORA/EOR immediate results plus INX/INY/DEX/DEY wraparound and flag outcomes.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader arithmetic/addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
     DiagnosticCoverageGapSpec {
@@ -2111,6 +2166,7 @@ pub enum DiagnosticFaultInjection {
     CpuInterruptMatrix,
     CpuIndirectJmpPageWrap,
     CpuLoadStoreTransferMatrix,
+    CpuAluIndexMatrix,
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
     CpuReadModifyWriteMatrix,
@@ -2135,8 +2191,9 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 29] = [
+    pub const ALL: [DiagnosticFaultInjection; 30] = [
         DiagnosticFaultInjection::ApuStatusRegister,
+        DiagnosticFaultInjection::CpuAluIndexMatrix,
         DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
@@ -2177,6 +2234,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuInterruptMatrix => "cpu_interrupt_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => "cpu_load_store_matrix",
+            DiagnosticFaultInjection::CpuAluIndexMatrix => "cpu_alu_index_matrix",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 "cpu_rmw_addressing_matrix"
@@ -2221,6 +2279,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => {
                 CPU_LOAD_STORE_MATRIX_FAULT_LABEL
             }
+            DiagnosticFaultInjection::CpuAluIndexMatrix => CPU_ALU_INDEX_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL
@@ -2270,6 +2329,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_accumulator_matrix: CpuAccumulatorMatrixTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
+    pub cpu_alu_index_matrix: CpuAluIndexMatrixTelemetry,
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
     pub cpu_compare_matrix: CpuCompareMatrixTelemetry,
     pub cpu_interrupt_matrix: CpuInterruptMatrixTelemetry,
@@ -2935,6 +2995,35 @@ pub struct CpuLoadStoreMatrixTelemetry {
     pub transfer_txa_result_hex: String,
     pub transfer_tya_result: u8,
     pub transfer_tya_result_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuAluIndexMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_logic_mask: u8,
+    pub expected_logic_mask_hex: String,
+    pub logic_mask: u8,
+    pub logic_mask_hex: String,
+    pub expected_index_mask: u8,
+    pub expected_index_mask_hex: String,
+    pub index_mask: u8,
+    pub index_mask_hex: String,
+    pub and_result: u8,
+    pub and_result_hex: String,
+    pub ora_result: u8,
+    pub ora_result_hex: String,
+    pub eor_result: u8,
+    pub eor_result_hex: String,
+    pub inx_result: u8,
+    pub inx_result_hex: String,
+    pub iny_result: u8,
+    pub iny_result_hex: String,
+    pub dex_result: u8,
+    pub dex_result_hex: String,
+    pub dey_result: u8,
+    pub dey_result_hex: String,
     pub passed: bool,
 }
 
@@ -5106,6 +5195,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_compare_matrix = cpu_compare_matrix_telemetry(&ram);
     let cpu_interrupt_matrix = cpu_interrupt_matrix_telemetry(&ram);
     let cpu_load_store_matrix = cpu_load_store_matrix_telemetry(&ram);
+    let cpu_alu_index_matrix = cpu_alu_index_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
@@ -5148,6 +5238,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_alu_index_matrix: &cpu_alu_index_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -5194,6 +5285,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_alu_index_matrix: &cpu_alu_index_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -5277,6 +5369,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_accumulator_matrix,
         cpu_addressing_matrix,
+        cpu_alu_index_matrix,
         cpu_branch_matrix,
         cpu_compare_matrix,
         cpu_interrupt_matrix,
@@ -5528,6 +5621,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_cpu_branch_section(&mut report, telemetry);
     write_cpu_compare_section(&mut report, telemetry);
     write_cpu_load_store_section(&mut report, telemetry);
+    write_cpu_alu_index_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
     write_cpu_interrupt_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
@@ -7015,6 +7109,58 @@ fn write_cpu_load_store_section(report: &mut String, telemetry: &DiagnosticTelem
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_alu_index_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU ALU/Index Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Logic/index masks | {} / {} |",
+        telemetry.cpu_alu_index_matrix.logic_mask_hex,
+        telemetry.cpu_alu_index_matrix.index_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Expected masks | {} / {} |",
+        telemetry.cpu_alu_index_matrix.expected_logic_mask_hex,
+        telemetry.cpu_alu_index_matrix.expected_index_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| AND/ORA/EOR results | {} / {} / {} |",
+        telemetry.cpu_alu_index_matrix.and_result_hex,
+        telemetry.cpu_alu_index_matrix.ora_result_hex,
+        telemetry.cpu_alu_index_matrix.eor_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| INX/INY/DEX/DEY results | {} / {} / {} / {} |",
+        telemetry.cpu_alu_index_matrix.inx_result_hex,
+        telemetry.cpu_alu_index_matrix.iny_result_hex,
+        telemetry.cpu_alu_index_matrix.dex_result_hex,
+        telemetry.cpu_alu_index_matrix.dey_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| ALU/index cases / expected | {} / {} |",
+        telemetry.cpu_alu_index_matrix.observed_case_count,
+        telemetry.cpu_alu_index_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| ALU/index matrix passed | {} |",
+        telemetry.cpu_alu_index_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## CPU Stack Matrix").expect("write report");
     writeln!(report).expect("write report");
@@ -7574,6 +7720,7 @@ struct OpcodeDecode {
 fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
     let decode = match opcode {
         0x00 => OpcodeDecode::implied("BRK"),
+        0x09 => OpcodeDecode::immediate("ORA"),
         0x08 => OpcodeDecode::implied("PHP"),
         0x18 => OpcodeDecode::implied("CLC"),
         0x20 => OpcodeDecode::absolute("JSR"),
@@ -7582,6 +7729,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x38 => OpcodeDecode::implied("SEC"),
         0x40 => OpcodeDecode::implied("RTI"),
         0x48 => OpcodeDecode::implied("PHA"),
+        0x49 => OpcodeDecode::immediate("EOR"),
         0x4C => OpcodeDecode::absolute("JMP"),
         0x6C => OpcodeDecode::indirect("JMP"),
         0x60 => OpcodeDecode::implied("RTS"),
@@ -7626,6 +7774,8 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xBD => OpcodeDecode::absolute_x("LDA"),
         0xBE => OpcodeDecode::absolute_y("LDX"),
         0xC9 => OpcodeDecode::immediate("CMP"),
+        0xC8 => OpcodeDecode::implied("INY"),
+        0xCA => OpcodeDecode::implied("DEX"),
         0xD0 => OpcodeDecode::relative("BNE"),
         0xD8 => OpcodeDecode::implied("CLD"),
         0xE0 => OpcodeDecode::immediate("CPX"),
@@ -7633,6 +7783,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xE8 => OpcodeDecode::implied("INX"),
         0xE9 => OpcodeDecode::immediate("SBC"),
         0xEA => OpcodeDecode::implied("NOP"),
+        0x88 => OpcodeDecode::implied("DEY"),
         0xF0 => OpcodeDecode::relative("BEQ"),
         _ => return None,
     };
@@ -8439,6 +8590,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_alu_index_matrix: &'a CpuAluIndexMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -8478,6 +8630,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_alu_index_matrix: &'a CpuAluIndexMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -8604,6 +8757,22 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_load_store_matrix.transfer_tya_result_hex,
             input.cpu_load_store_matrix.observed_case_count,
             input.cpu_load_store_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_alu_index_matrix.passed {
+        failures.push(format!(
+            "CPU ALU/index matrix mismatch: logic_mask={}, index_mask={}, AND/ORA/EOR={}/{}/{}, INX/INY/DEX/DEY={}/{}/{}/{}, cases {}/{}",
+            input.cpu_alu_index_matrix.logic_mask_hex,
+            input.cpu_alu_index_matrix.index_mask_hex,
+            input.cpu_alu_index_matrix.and_result_hex,
+            input.cpu_alu_index_matrix.ora_result_hex,
+            input.cpu_alu_index_matrix.eor_result_hex,
+            input.cpu_alu_index_matrix.inx_result_hex,
+            input.cpu_alu_index_matrix.iny_result_hex,
+            input.cpu_alu_index_matrix.dex_result_hex,
+            input.cpu_alu_index_matrix.dey_result_hex,
+            input.cpu_alu_index_matrix.observed_case_count,
+            input.cpu_alu_index_matrix.expected_case_count
         ));
     }
     if !input.cpu_stack_matrix.passed {
@@ -9263,6 +9432,38 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_load_store_matrix.expected_case_count
             ),
             likely_domain: "cpu.load_store.transfer_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.alu_index_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_ALU_INDEX_MATRIX_TEST_ID),
+            test_name: test_name(CPU_ALU_INDEX_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_alu_index_matrix.passed),
+            description:
+                "CPU logical ALU and index-register matrix retained expected result and status-flag observations"
+                    .to_string(),
+            expected:
+                "logic=0x07, index=0x0F, AND/ORA/EOR=0x00/0xC0/0x80, INX/INY/DEX/DEY=0x00/0x80/0xFF/0x00, cases=7"
+                    .to_string(),
+            observed: format!(
+                "logic {}, index {}, AND/ORA/EOR {}/{}/{}, INX/INY/DEX/DEY {}/{}/{}/{}, cases {}/{}",
+                input.cpu_alu_index_matrix.logic_mask_hex,
+                input.cpu_alu_index_matrix.index_mask_hex,
+                input.cpu_alu_index_matrix.and_result_hex,
+                input.cpu_alu_index_matrix.ora_result_hex,
+                input.cpu_alu_index_matrix.eor_result_hex,
+                input.cpu_alu_index_matrix.inx_result_hex,
+                input.cpu_alu_index_matrix.iny_result_hex,
+                input.cpu_alu_index_matrix.dex_result_hex,
+                input.cpu_alu_index_matrix.dey_result_hex,
+                input.cpu_alu_index_matrix.observed_case_count,
+                input.cpu_alu_index_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.alu_index.logic_flags".to_string(),
         },
     );
     push_probe(
@@ -10542,6 +10743,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_accumulator_shift_rotate_matrix();
     program.cpu_compare_register_matrix();
     program.cpu_load_store_transfer_matrix();
+    program.cpu_alu_index_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -10753,6 +10955,13 @@ impl DiagnosticProgram {
         self.asm.ora_imm(mask_bit);
         self.asm.sta_abs(mask_addr);
         self.asm.inc_abs(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn mark_alu_index_matrix_case(&mut self, mask_addr: u16, mask_bit: u8) {
+        self.asm.lda_abs(mask_addr);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(mask_addr);
+        self.asm.inc_abs(CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR);
     }
 
     fn set_overflow_flag(&mut self) {
@@ -11533,6 +11742,96 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT, 0xC4);
         self.pass_test(CPU_LOAD_STORE_MATRIX_TEST_ID);
+    }
+
+    fn cpu_alu_index_matrix(&mut self) {
+        self.begin_test(CPU_ALU_INDEX_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_INY_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_DEX_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_DEY_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_ALU_INDEX_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.lda_imm(0xF0);
+        self.asm.and_imm(0x0F);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR);
+        self.expect_z_set(0xC5);
+        self.expect_n_clear(0xC5);
+        self.expect_a_eq(0x00, 0xC5);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x40);
+        self.asm.ora_imm(0x80);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR);
+        self.expect_z_clear(0xC5);
+        self.expect_n_set(0xC5);
+        self.expect_a_eq(0xC0, 0xC5);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x02);
+
+        self.asm.lda_imm(0xFF);
+        self.asm.eor_imm(0x7F);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR);
+        self.expect_z_clear(0xC5);
+        self.expect_n_set(0xC5);
+        self.expect_a_eq(0x80, 0xC5);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x04);
+
+        self.asm.ldx_imm(0xFF);
+        self.asm.inx();
+        self.expect_z_set(0xC6);
+        self.expect_n_clear(0xC6);
+        self.asm.stx_abs(CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR);
+        self.asm.cpx_imm(0x00);
+        self.expect_z_set(0xC6);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR, 0x01);
+
+        self.asm.ldy_imm(0x7F);
+        self.asm.iny();
+        self.expect_z_clear(0xC6);
+        self.expect_n_set(0xC6);
+        self.asm.sty_abs(CPU_ALU_INDEX_MATRIX_INY_RESULT_ADDR);
+        self.asm.cpy_imm(0x80);
+        self.expect_z_set(0xC6);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR, 0x02);
+
+        self.asm.ldx_imm(0x00);
+        self.asm.dex();
+        self.expect_z_clear(0xC6);
+        self.expect_n_set(0xC6);
+        self.asm.stx_abs(CPU_ALU_INDEX_MATRIX_DEX_RESULT_ADDR);
+        self.asm.cpx_imm(0xFF);
+        self.expect_z_set(0xC6);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR, 0x04);
+
+        self.asm.ldy_imm(0x01);
+        self.asm.dey();
+        self.expect_z_set(0xC6);
+        self.expect_n_clear(0xC6);
+        self.asm.sty_abs(CPU_ALU_INDEX_MATRIX_DEY_RESULT_ADDR);
+        self.asm.cpy_imm(0x00);
+        self.expect_z_set(0xC6);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR, 0x08);
+
+        self.asm
+            .label(CPU_ALU_INDEX_MATRIX_SUMMARY_LABEL)
+            .expect("diagnostic ALU/index summary label should not collide");
+        self.asm.lda_abs(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR);
+        self.expect_a_eq(CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK, 0xC7);
+        self.asm.lda_abs(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR);
+        self.expect_a_eq(CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK, 0xC7);
+        self.asm.lda_abs(CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT, 0xC7);
+        self.pass_test(CPU_ALU_INDEX_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -12955,6 +13254,10 @@ impl Assembler {
         self.op_imm(0x09, value);
     }
 
+    fn eor_imm(&mut self, value: u8) {
+        self.op_imm(0x49, value);
+    }
+
     fn cmp_imm(&mut self, value: u8) {
         self.op_imm(0xC9, value);
     }
@@ -13073,6 +13376,18 @@ impl Assembler {
 
     fn inx(&mut self) {
         self.emit(0xE8);
+    }
+
+    fn iny(&mut self) {
+        self.emit(0xC8);
+    }
+
+    fn dex(&mut self) {
+        self.emit(0xCA);
+    }
+
+    fn dey(&mut self) {
+        self.emit(0x88);
     }
 
     fn tax(&mut self) {
@@ -13351,6 +13666,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => {
             bus.cpu_write(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x80);
+        }
+        DiagnosticFaultInjection::CpuAluIndexMatrix => {
+            bus.cpu_write(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x80);
         }
         DiagnosticFaultInjection::CpuStackStatusMatrix => {
             bus.cpu_write(CPU_STACK_MATRIX_CASE_COUNT_ADDR, 0x80);
@@ -13694,6 +14012,56 @@ fn cpu_load_store_matrix_telemetry(ram: &[u8]) -> CpuLoadStoreMatrixTelemetry {
             && transfer_tay_result == 0x00
             && transfer_txa_result == 0x80
             && transfer_tya_result == 0x7F,
+    }
+}
+
+fn cpu_alu_index_matrix_telemetry(ram: &[u8]) -> CpuAluIndexMatrixTelemetry {
+    let logic_mask = ram[(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR & 0x07FF) as usize];
+    let index_mask = ram[(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR & 0x07FF) as usize];
+    let and_result = ram[(CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR & 0x07FF) as usize];
+    let ora_result = ram[(CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR & 0x07FF) as usize];
+    let eor_result = ram[(CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR & 0x07FF) as usize];
+    let inx_result = ram[(CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR & 0x07FF) as usize];
+    let iny_result = ram[(CPU_ALU_INDEX_MATRIX_INY_RESULT_ADDR & 0x07FF) as usize];
+    let dex_result = ram[(CPU_ALU_INDEX_MATRIX_DEX_RESULT_ADDR & 0x07FF) as usize];
+    let dey_result = ram[(CPU_ALU_INDEX_MATRIX_DEY_RESULT_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+
+    CpuAluIndexMatrixTelemetry {
+        expected_case_count: CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_logic_mask: CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK,
+        expected_logic_mask_hex: hex_byte(CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK),
+        logic_mask,
+        logic_mask_hex: hex_byte(logic_mask),
+        expected_index_mask: CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK,
+        expected_index_mask_hex: hex_byte(CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK),
+        index_mask,
+        index_mask_hex: hex_byte(index_mask),
+        and_result,
+        and_result_hex: hex_byte(and_result),
+        ora_result,
+        ora_result_hex: hex_byte(ora_result),
+        eor_result,
+        eor_result_hex: hex_byte(eor_result),
+        inx_result,
+        inx_result_hex: hex_byte(inx_result),
+        iny_result,
+        iny_result_hex: hex_byte(iny_result),
+        dex_result,
+        dex_result_hex: hex_byte(dex_result),
+        dey_result,
+        dey_result_hex: hex_byte(dey_result),
+        passed: observed_case_count == CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT
+            && logic_mask == CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK
+            && index_mask == CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK
+            && and_result == 0x00
+            && ora_result == 0xC0
+            && eor_result == 0x80
+            && inx_result == 0x00
+            && iny_result == 0x80
+            && dex_result == 0xFF
+            && dey_result == 0x00,
     }
 }
 
@@ -17148,6 +17516,17 @@ fn compare_observation_checksums(
         &["cpu_load_store_matrix", "transfer_tya_result"][..],
         &["cpu_load_store_matrix", "observed_case_count"][..],
         &["cpu_load_store_matrix", "passed"][..],
+        &["cpu_alu_index_matrix", "logic_mask"][..],
+        &["cpu_alu_index_matrix", "index_mask"][..],
+        &["cpu_alu_index_matrix", "and_result"][..],
+        &["cpu_alu_index_matrix", "ora_result"][..],
+        &["cpu_alu_index_matrix", "eor_result"][..],
+        &["cpu_alu_index_matrix", "inx_result"][..],
+        &["cpu_alu_index_matrix", "iny_result"][..],
+        &["cpu_alu_index_matrix", "dex_result"][..],
+        &["cpu_alu_index_matrix", "dey_result"][..],
+        &["cpu_alu_index_matrix", "observed_case_count"][..],
+        &["cpu_alu_index_matrix", "passed"][..],
         &["cpu_branch_matrix", "taken_mask"][..],
         &["cpu_branch_matrix", "not_taken_mask"][..],
         &["cpu_branch_matrix", "page_cross_result"][..],

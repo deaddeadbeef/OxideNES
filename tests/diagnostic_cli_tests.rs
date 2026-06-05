@@ -149,8 +149,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(17));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(66));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(18));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(67));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
     assert_eq!(manifest["passed"], Value::Bool(true));
@@ -159,7 +159,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(40));
+    assert_eq!(manifest["scenario_count"], Value::from(41));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -180,10 +180,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(40));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(41));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(40)
+        Value::from(41)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -195,7 +195,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         manifest["analysis"]["baseline_divergence_count"],
-        Value::from(32)
+        Value::from(33)
     );
     assert_eq!(
         manifest["analysis"]["critical_scenario_ids"],
@@ -295,6 +295,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .as_array()
         .expect("known divergence scenario ids should be an array")
         .iter()
+        .any(|id| id == &Value::String("cpu_alu_index_matrix_fault".to_string())));
+    assert!(manifest["analysis"]["known_divergence_scenario_ids"]
+        .as_array()
+        .expect("known divergence scenario ids should be an array")
+        .iter()
         .any(|id| id == &Value::String("input_port_matrix_fault".to_string())));
     assert!(manifest["analysis"]["known_divergence_scenario_ids"]
         .as_array()
@@ -329,7 +334,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let attention_queue = manifest["analysis"]["attention_queue"]
         .as_array()
         .expect("attention queue should be an array");
-    assert_eq!(attention_queue.len(), 32);
+    assert_eq!(attention_queue.len(), 33);
     let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
     assert_eq!(
         timeout_attention["priority"],
@@ -692,6 +697,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         load_store_attention["next_artifact"],
         Value::String("cpu_load_store_matrix_fault/comparison.json".to_string())
     );
+    let alu_index_attention = find_attention_item(attention_queue, "cpu_alu_index_matrix_fault");
+    assert_eq!(
+        alu_index_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        alu_index_attention["focus_domain"],
+        Value::String("cpu.alu_index.logic_flags".to_string())
+    );
+    assert_eq!(
+        alu_index_attention["next_artifact"],
+        Value::String("cpu_alu_index_matrix_fault/comparison.json".to_string())
+    );
     let input_port_attention = find_attention_item(attention_queue, "input_port_matrix_fault");
     assert_eq!(
         input_port_attention["priority"],
@@ -715,19 +733,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(2));
-    assert_eq!(observer["scenario_suite_schema_version"], Value::from(17));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(66));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(18));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(67));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(40));
+    assert_eq!(observer["scenario_count"], Value::from(41));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
-    assert_eq!(observer["baseline_divergence_count"], Value::from(32));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(33));
     let observer_actions = observer["next_actions"]
         .as_array()
         .expect("observer next_actions should be an array");
-    assert_eq!(observer_actions.len(), 32);
+    assert_eq!(observer_actions.len(), 33);
     let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
     assert_eq!(
         timeout_action["priority"],
@@ -1273,6 +1291,27 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             == &Value::String(
                 "failed_probe_ids=cartridge.status.pass,cartridge.test.44.result".to_string()
             )));
+    let alu_index_action = find_observer_action(observer_actions, "cpu_alu_index_matrix_fault");
+    assert_eq!(
+        alu_index_action["primary_artifact"],
+        Value::String("cpu_alu_index_matrix_fault/comparison.json".to_string())
+    );
+    assert!(
+        alu_index_action["evidence"]
+            .as_array()
+            .expect("CPU ALU/index action evidence should be an array")
+            .iter()
+            .any(|entry| entry
+                == &Value::String("focus_domain=cpu.alu_index.logic_flags".to_string()))
+    );
+    assert!(alu_index_action["evidence"]
+        .as_array()
+        .expect("CPU ALU/index action evidence should be an array")
+        .iter()
+        .any(|entry| entry
+            == &Value::String(
+                "failed_probe_ids=cartridge.status.pass,cartridge.test.45.result".to_string()
+            )));
     let input_port_action = find_observer_action(observer_actions, "input_port_matrix_fault");
     assert_eq!(
         input_port_action["primary_artifact"],
@@ -1295,7 +1334,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 40);
+    assert_eq!(observations.len(), 41);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -1963,6 +2002,28 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         load_store_observation["next_artifact"],
         Value::String("cpu_load_store_matrix_fault/comparison.json".to_string())
     );
+    let alu_index_observation =
+        find_observer_observation(observations, "cpu_alu_index_matrix_fault");
+    assert_eq!(
+        alu_index_observation["role"],
+        Value::String("expected_failure_fixture".to_string())
+    );
+    assert_eq!(
+        alu_index_observation["outcome"],
+        Value::String("expected_baseline_divergence".to_string())
+    );
+    assert_eq!(
+        alu_index_observation["health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(
+        alu_index_observation["focus_domain"],
+        Value::String("cpu.alu_index.logic_flags".to_string())
+    );
+    assert_eq!(
+        alu_index_observation["next_artifact"],
+        Value::String("cpu_alu_index_matrix_fault/comparison.json".to_string())
+    );
     let input_port_observation = find_observer_observation(observations, "input_port_matrix_fault");
     assert_eq!(
         input_port_observation["role"],
@@ -2063,6 +2124,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_accumulator_matrix_fault | cpu_accumulator_matrix_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_compare_matrix_fault | cpu_compare_matrix_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_load_store_matrix_fault | cpu_load_store_matrix_fault/comparison.json |"));
+    assert!(observer_report.contains("| known_divergence | inspect_known_divergence | cpu_alu_index_matrix_fault | cpu_alu_index_matrix_fault/comparison.json |"));
     assert!(observer_report.contains("| known_divergence | inspect_known_divergence | input_port_matrix_fault | input_port_matrix_fault/comparison.json |"));
     assert!(observer_report.contains("top_difference_path=dma.oam_dma_observed"));
     assert!(observer_report.contains("## Observations"));
@@ -2117,6 +2179,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| cpu_accumulator_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.accumulator.shift_rotate |"));
     assert!(observer_report.contains("| cpu_compare_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.compare.flags |"));
     assert!(observer_report.contains("| cpu_load_store_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.load_store.transfer_matrix |"));
+    assert!(observer_report.contains("| cpu_alu_index_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.alu_index.logic_flags |"));
     assert!(observer_report.contains("| input_port_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | joypad.input_port_matrix |"));
     assert!(observer_report.contains("## Replay Commands"));
     assert!(observer_report.contains("target/diagnostics/replay/joypad_strobe_high_hold_fault"));
@@ -2128,7 +2191,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
     assert!(suite_report.contains("## Suite Analysis"));
     assert!(suite_report.contains("| Status | passed |"));
-    assert!(suite_report.contains("| Baseline divergences | 32 |"));
+    assert!(suite_report.contains("| Baseline divergences | 33 |"));
     assert!(suite_report.contains("## Attention Queue"));
     assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop |"));
     assert!(suite_report.contains("| known_divergence | dma_oam_transfer_fault | scenario_diverges_from_pass_baseline | host_validation_failed | dma.oam_transfer |"));
@@ -2159,23 +2222,24 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| known_divergence | cpu_accumulator_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.accumulator.shift_rotate |"));
     assert!(suite_report.contains("| known_divergence | cpu_compare_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.compare.flags |"));
     assert!(suite_report.contains("| known_divergence | cpu_load_store_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.load_store.transfer_matrix |"));
+    assert!(suite_report.contains("| known_divergence | cpu_alu_index_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | cpu.alu_index.logic_flags |"));
     assert!(suite_report.contains("| known_divergence | input_port_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | joypad.input_port_matrix |"));
     assert!(suite_report.contains("| Scenario | Expected pass | Actual pass |"));
     assert!(
-        suite_report.contains("| input_mask_matrix_pass | true | true | true | healthy | 44 | - |")
+        suite_report.contains("| input_mask_matrix_pass | true | true | true | healthy | 45 | - |")
     );
     assert!(suite_report
-        .contains("| input_mask_all_released_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_all_released_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report
-        .contains("| input_mask_all_pressed_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_all_pressed_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report
-        .contains("| input_mask_joypad1_pressed_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_joypad1_pressed_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report
-        .contains("| input_mask_joypad2_pressed_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_joypad2_pressed_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report
-        .contains("| input_mask_sparse_bits_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_sparse_bits_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report
-        .contains("| input_mask_nibble_split_pass | true | true | true | healthy | 44 | - |"));
+        .contains("| input_mask_nibble_split_pass | true | true | true | healthy | 45 | - |"));
     assert!(suite_report.contains("| joypad1_mismatch | false | false | true |"));
     assert!(suite_report.contains("| dma_oam_transfer_fault | false | false | true | host_validation_failed | 5 | dma.oam_transfer |"));
     assert!(suite_report.contains(
@@ -2196,6 +2260,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("| cpu_accumulator_matrix_fault | false | false | true | cartridge_assertion_failed | 42 | cpu.accumulator.shift_rotate |"));
     assert!(suite_report.contains("| cpu_compare_matrix_fault | false | false | true | cartridge_assertion_failed | 43 | cpu.compare.flags |"));
     assert!(suite_report.contains("| cpu_load_store_matrix_fault | false | false | true | cartridge_assertion_failed | 44 | cpu.load_store.transfer_matrix |"));
+    assert!(suite_report.contains("| cpu_alu_index_matrix_fault | false | false | true | cartridge_assertion_failed | 45 | cpu.alu_index.logic_flags |"));
     assert!(suite_report.contains("| input_port_matrix_fault | false | false | true | cartridge_assertion_failed | 23 | joypad.input_port_matrix |"));
     assert!(suite_report.contains("| ppu_sprite_priority_fault | false | false | true | host_validation_failed | 27 | ppu.sprite_priority |"));
     assert!(suite_report.contains("| ppu_scroll_seam_fault | false | false | true | host_validation_failed | 28 | ppu.scroll_seam |"));
@@ -2234,6 +2299,9 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert!(
         suite_report.contains("| cpu_load_store_matrix_fault | true | true | true | true | true |")
+    );
+    assert!(
+        suite_report.contains("| cpu_alu_index_matrix_fault | true | true | true | true | true |")
     );
     assert!(suite_report.contains("| input_port_matrix_fault | true | true | true | true | true |"));
     assert!(suite_report.contains("| ppu_read_buffer_fault | true | true | true | true | true |"));
@@ -2279,7 +2347,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(pass["actual_passed"], Value::Bool(true));
     assert_eq!(pass["expectation_met"], Value::Bool(true));
     assert_eq!(pass["actual_health"], Value::String("healthy".to_string()));
-    assert_eq!(pass["actual_focus_test_id"], Value::from(44));
+    assert_eq!(pass["actual_focus_test_id"], Value::from(45));
     assert_eq!(pass["contract"]["all_matched"], Value::Bool(true));
     assert_eq!(pass["contract"]["passed_matches"], Value::Bool(true));
     assert_eq!(pass["contract"]["health_matches"], Value::Bool(true));
@@ -2295,8 +2363,8 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         pass["contract"]["actual_health"],
         Value::String("healthy".to_string())
     );
-    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(44));
-    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(44));
+    assert_eq!(pass["contract"]["expected_focus_test_id"], Value::from(45));
+    assert_eq!(pass["contract"]["actual_focus_test_id"], Value::from(45));
     assert_eq!(pass["comparison"]["passed"], Value::Bool(true));
     assert_eq!(pass["comparison"]["difference_count"], Value::from(0));
     assert_eq!(pass["comparison"]["failure_count"], Value::from(0));
@@ -2321,7 +2389,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         input_matrix["actual_health"],
         Value::String("healthy".to_string())
     );
-    assert_eq!(input_matrix["actual_focus_test_id"], Value::from(44));
+    assert_eq!(input_matrix["actual_focus_test_id"], Value::from(45));
     assert_eq!(input_matrix["comparison"]["passed"], Value::Bool(true));
     assert_eq!(
         input_matrix["config"]["joypad1_mask_hex"],
@@ -3355,6 +3423,66 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         Some("cpu_load_store_matrix"),
     );
 
+    let alu_index = find_scenario(scenarios, "cpu_alu_index_matrix_fault");
+    assert_eq!(
+        alu_index["actual_health"],
+        Value::String("cartridge_assertion_failed".to_string())
+    );
+    assert_eq!(alu_index["actual_focus_test_id"], Value::from(45));
+    assert_eq!(
+        alu_index["actual_focus_domain"],
+        Value::String("cpu.alu_index.logic_flags".to_string())
+    );
+    assert_eq!(alu_index["expectation_met"], Value::Bool(true));
+    assert_eq!(alu_index["contract"]["all_matched"], Value::Bool(true));
+    assert_eq!(
+        alu_index["contract"]["expected_focus_domain"],
+        Value::String("cpu.alu_index.logic_flags".to_string())
+    );
+    assert!(alu_index["failed_probe_ids"]
+        .as_array()
+        .expect("CPU ALU/index failed probes should be an array")
+        .iter()
+        .any(|probe| probe == &Value::String("cartridge.test.45.result".to_string())));
+    assert_eq!(alu_index["comparison"]["passed"], Value::Bool(false));
+    assert!(
+        alu_index["comparison"]["difference_count"]
+            .as_u64()
+            .expect("CPU ALU/index comparison difference_count should be numeric")
+            > 0
+    );
+    let alu_index_triage = read_json(
+        &suite_dir
+            .join("cpu_alu_index_matrix_fault")
+            .join("triage.json"),
+    );
+    assert_eq!(
+        alu_index_triage["input"]["fault_injection"],
+        Value::String("cpu_alu_index_matrix".to_string())
+    );
+    assert_eq!(
+        alu_index_triage["debug_focus"]["focus_test_name"],
+        Value::String("cpu_alu_index_matrix".to_string())
+    );
+    assert_eq!(
+        alu_index_triage["failure"]["likely_domain"],
+        Value::String("cpu.alu_index.logic_flags".to_string())
+    );
+    assert!(alu_index_triage["probes"]["failed"]
+        .as_array()
+        .expect("CPU ALU/index triage failed probes should be an array")
+        .iter()
+        .any(|probe| probe["id"] == Value::String("cartridge.test.45.result".to_string())));
+    assert_replay_args_contains(&alu_index["replay_args"], "--fault-injection");
+    assert_replay_args_contains(&alu_index["replay_args"], "cpu_alu_index_matrix");
+    assert_bundle_artifacts_with_config(
+        &suite_dir.join("cpu_alu_index_matrix_fault"),
+        true,
+        false,
+        "0x28",
+        Some("cpu_alu_index_matrix"),
+    );
+
     let input_port = find_scenario(scenarios, "input_port_matrix_fault");
     assert_eq!(
         input_port["actual_health"],
@@ -4239,7 +4367,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(status.success());
     let triage = read_json(&triage_path);
     assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(66));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(67));
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -4247,7 +4375,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     );
     assert_eq!(
         triage["debug_focus"]["focus_test_name"],
-        Value::String("cpu_load_store_transfer_matrix".to_string())
+        Value::String("cpu_alu_index_matrix".to_string())
     );
     assert_eq!(
         triage["debug_focus"]["terminal_instruction"]["symbol"],
@@ -4256,7 +4384,7 @@ fn diagnostic_cli_writes_standalone_triage_json() {
     assert!(triage["debug_focus"]["terminal_instruction"]["instruction"]
         .as_str()
         .is_some_and(|instruction| instruction.starts_with("JMP 0x")));
-    assert_eq!(triage["coverage"]["passed_tests"], Value::from(36));
+    assert_eq!(triage["coverage"]["passed_tests"], Value::from(37));
     assert_eq!(triage["dma"]["oam_dma_completed"], Value::Bool(true));
     assert_eq!(
         triage["dma"]["oam_dma_phase_matrix_passed"],
@@ -4381,7 +4509,7 @@ fn assert_bundle_artifacts_with_config(
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(66));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(67));
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],
