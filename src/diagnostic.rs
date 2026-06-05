@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 56;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 57;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v56";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v57";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -45,6 +45,7 @@ const MAPPER7_AXROM_TEST_ID: u8 = 31;
 const MAPPER1_MMC1_TEST_ID: u8 = 32;
 const MAPPER4_MMC3_TEST_ID: u8 = 33;
 const MAPPER4_MMC3_EDGE_TEST_ID: u8 = 34;
+const MAPPER1_MMC1_32K_PRG_TEST_ID: u8 = 35;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -61,6 +62,14 @@ const MAPPER1_CHR_BANK_WRITES: [u8; 4] = [0x02, 0x03, 0x00, 0x01];
 const MAPPER1_CHR_BANK_SENTINELS: [u8; 4] = [0x51, 0x62, 0x73, 0x84];
 const MAPPER1_CHR_EXPECTED_VALUES: [u8; 4] = [0x73, 0x84, 0x51, 0x62];
 const MAPPER1_MIRROR_EXPECTED_VALUES: [u8; 3] = [0x5A, 0xA5, 0x5A];
+const MAPPER1_32K_LOW_READ_ADDR: u16 = 0x8000;
+const MAPPER1_32K_HIGH_READ_ADDR: u16 = 0xE000;
+const MAPPER1_32K_EXPECTED_CASE_COUNT: u8 = 10;
+const MAPPER1_32K_CONTROL_WRITES: [u8; 2] = [0x00, 0x04];
+const MAPPER1_32K_PRG_BANK_WRITES: [u8; 5] = [0x00, 0x01, 0x02, 0x03, 0x03];
+const MAPPER1_32K_BANK_SENTINELS: [u8; 4] = [0xA0, 0xB1, 0xC2, 0xD3];
+const MAPPER1_32K_EXPECTED_VALUES: [u8; 10] =
+    [0xA0, 0xB1, 0xA0, 0xB1, 0xC2, 0xD3, 0xC2, 0xD3, 0xC2, 0xD3];
 const MAPPER3_MAPPER: u8 = 3;
 const MAPPER3_PRG_BANKS: u8 = 2;
 const MAPPER3_CHR_BANKS: u8 = 4;
@@ -245,6 +254,8 @@ const MAPPER4_MMC3_EDGE_PRG_OBSERVED_BASE_ADDR: u16 = 0x0291;
 const MAPPER4_MMC3_EDGE_CHR_OBSERVED_BASE_ADDR: u16 = 0x0294;
 const MAPPER4_MMC3_EDGE_IRQ_COUNT_ADDR: u16 = 0x029C;
 const MAPPER4_MMC3_EDGE_IRQ_OBSERVED_BASE_ADDR: u16 = 0x029D;
+const MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR: u16 = 0x02A0;
+const MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR: u16 = 0x02A1;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1342,8 +1353,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
         risk: "The diagnostic cartridges now exercise several simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
-        current_coverage: "The generated Mapper 1/MMC1 variant validates serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; generated Mapper 4/MMC3 variants validate R6/R7 PRG bank writes, fixed-last PRG reads, 2 KiB and 1 KiB CHR bank reads, mirroring control, scanline IRQ delivery, PRG-mode inversion, CHR inversion across all eight 1 KiB windows, and IRQ reload phases including a zero-latch reload; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
-        missing_coverage: "MMC1 32 KiB PRG mode, MMC3 battery-backed RAM persistence, active-render CHR/PRG switches, deeper MMC3 IRQ A12 filtering behavior, and broader mapper-family coverage beyond the generated variants.",
+        current_coverage: "The generated Mapper 1/MMC1 variants validate serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, MMC1 32 KiB PRG modes 0/1 with ignored low PRG bank bit, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; generated Mapper 4/MMC3 variants validate R6/R7 PRG bank writes, fixed-last PRG reads, 2 KiB and 1 KiB CHR bank reads, mirroring control, scanline IRQ delivery, PRG-mode inversion, CHR inversion across all eight 1 KiB windows, and IRQ reload phases including a zero-latch reload; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
+        missing_coverage: "MMC3 battery-backed RAM persistence, active-render CHR/PRG switches, deeper MMC3 IRQ A12 filtering behavior, and broader mapper-family coverage beyond the generated variants.",
         suggested_next_test: "Generate MMC-style synthetic cartridges that switch CHR/PRG banks during rendering and assert selected pattern/table data through PPU-visible pixels and mapper IRQ timing.",
     },
     DiagnosticCoverageGapSpec {
@@ -1520,6 +1531,7 @@ pub struct DiagnosticTelemetry {
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
     pub mapper1_mmc1: Mapper1Mmc1Telemetry,
+    pub mapper1_mmc1_32k_prg: Mapper1Mmc1Prg32kTelemetry,
     pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
     pub mapper4_mmc3: Mapper4Mmc3Telemetry,
     pub mapper4_mmc3_edge: Mapper4Mmc3EdgeTelemetry,
@@ -1605,6 +1617,31 @@ pub struct Mapper1Mmc1Telemetry {
     pub expected_mirror_values_hex: Vec<String>,
     pub observed_mirror_values: Vec<u8>,
     pub observed_mirror_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper1Mmc1Prg32kTelemetry {
+    pub mapper: u8,
+    pub prg_banks: u8,
+    pub chr_8k_banks: u8,
+    pub low_read_addr: u16,
+    pub low_read_addr_hex: String,
+    pub high_read_addr: u16,
+    pub high_read_addr_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub control_writes: Vec<u8>,
+    pub control_writes_hex: Vec<String>,
+    pub prg_bank_writes: Vec<u8>,
+    pub prg_bank_writes_hex: Vec<String>,
+    pub expected_values: Vec<u8>,
+    pub expected_values_hex: Vec<String>,
+    pub observed_values: Vec<u8>,
+    pub observed_values_hex: Vec<String>,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -2690,6 +2727,56 @@ fn build_mapper1_mmc1_chr_rom() -> Vec<u8> {
     chr
 }
 
+fn build_mapper1_mmc1_32k_prg_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper1_mmc1_32k_prg_variant_program_with_labels()?;
+    if program.len() > PRG_BANK_SIZE {
+        return Err(format!(
+            "Mapper 1 32 KiB PRG diagnostic program is too large: {} bytes > {} bytes",
+            program.len(),
+            PRG_BANK_SIZE
+        ));
+    }
+
+    let prg_size = MAPPER1_PRG_BANKS as usize * PRG_BANK_SIZE;
+    let mut rom = Vec::with_capacity(16 + prg_size + MAPPER1_CHR_8K_BANKS as usize * CHR_BANK_SIZE);
+    rom.extend_from_slice(b"NES\x1A");
+    rom.push(MAPPER1_PRG_BANKS);
+    rom.push(MAPPER1_CHR_8K_BANKS);
+    rom.push((MAPPER1_MAPPER & 0x0F) << 4);
+    rom.push(MAPPER1_MAPPER & 0xF0);
+    rom.extend_from_slice(&[0; 8]);
+
+    let mut prg = vec![0xEA; prg_size];
+    let low_offset = (MAPPER1_32K_LOW_READ_ADDR - 0x8000) as usize;
+    let high_offset = (MAPPER1_32K_HIGH_READ_ADDR - 0xC000) as usize;
+    prg[low_offset] = MAPPER1_32K_BANK_SENTINELS[0];
+    prg[PRG_BANK_SIZE + high_offset] = MAPPER1_32K_BANK_SENTINELS[1];
+    prg[2 * PRG_BANK_SIZE + low_offset] = MAPPER1_32K_BANK_SENTINELS[2];
+    prg[3 * PRG_BANK_SIZE + high_offset] = MAPPER1_32K_BANK_SENTINELS[3];
+
+    for bank in [1usize, 3usize] {
+        let program_offset = bank * PRG_BANK_SIZE + (PROGRAM_BASE - 0xC000) as usize;
+        prg[program_offset..program_offset + program.len()].copy_from_slice(&program);
+    }
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER1_PRG_BANKS,
+        0xFFFA,
+        label_addr(&labels, "nmi")?,
+    );
+    write_vector_for_banks(&mut prg, MAPPER1_PRG_BANKS, 0xFFFC, PROGRAM_BASE);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER1_PRG_BANKS,
+        0xFFFE,
+        label_addr(&labels, "irq")?,
+    );
+
+    rom.extend_from_slice(&prg);
+    rom.extend_from_slice(&build_mapper1_mmc1_chr_rom());
+    Ok(rom)
+}
+
 fn build_mapper4_mmc3_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_mapper4_mmc3_variant_program_with_labels()?;
     if program.len() > 0x2000 {
@@ -2939,6 +3026,110 @@ fn build_mapper1_mmc1_variant_program_with_labels(
         .sta_abs(MAPPER1_MMC1_MIRROR_OBSERVED_BASE_ADDR + 2);
     program.expect_a_eq(MAPPER1_MIRROR_EXPECTED_VALUES[2], 0xCB);
     program.increment_abs(MAPPER1_MMC1_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
+fn build_mapper1_mmc1_32k_prg_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER1_MMC1_32K_PRG_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
+    for offset in 0..MAPPER1_32K_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+
+    program.asm.lda_imm(0x80);
+    program.asm.sta_abs(0x8000);
+    program.write_mmc1_register(0x8000, MAPPER1_32K_CONTROL_WRITES[0]);
+
+    let mut observed_index = 0usize;
+    for bank_write in MAPPER1_32K_PRG_BANK_WRITES.iter().copied().take(4) {
+        program.write_mmc1_register(0xE000, bank_write);
+        program.asm.lda_abs(MAPPER1_32K_LOW_READ_ADDR);
+        program
+            .asm
+            .sta_abs(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + observed_index as u16);
+        program.expect_a_eq(
+            MAPPER1_32K_EXPECTED_VALUES[observed_index],
+            0xD0 + observed_index as u8,
+        );
+        program.increment_abs(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
+        observed_index += 1;
+
+        program.asm.lda_abs(MAPPER1_32K_HIGH_READ_ADDR);
+        program
+            .asm
+            .sta_abs(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + observed_index as u16);
+        program.expect_a_eq(
+            MAPPER1_32K_EXPECTED_VALUES[observed_index],
+            0xD0 + observed_index as u8,
+        );
+        program.increment_abs(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
+        observed_index += 1;
+    }
+
+    program.write_mmc1_register(0x8000, MAPPER1_32K_CONTROL_WRITES[1]);
+    program.write_mmc1_register(0xE000, MAPPER1_32K_PRG_BANK_WRITES[4]);
+    program.asm.lda_abs(MAPPER1_32K_LOW_READ_ADDR);
+    program
+        .asm
+        .sta_abs(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + observed_index as u16);
+    program.expect_a_eq(
+        MAPPER1_32K_EXPECTED_VALUES[observed_index],
+        0xD0 + observed_index as u8,
+    );
+    program.increment_abs(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
+    observed_index += 1;
+
+    program.asm.lda_abs(MAPPER1_32K_HIGH_READ_ADDR);
+    program
+        .asm
+        .sta_abs(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + observed_index as u16);
+    program.expect_a_eq(
+        MAPPER1_32K_EXPECTED_VALUES[observed_index],
+        0xD0 + observed_index as u8,
+    );
+    program.increment_abs(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -3883,6 +4074,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &ppu_scroll_wrap,
     );
     let mapper1_mmc1 = mapper1_mmc1_telemetry(&run_mapper1_mmc1_variant());
+    let mapper1_mmc1_32k_prg = mapper1_mmc1_32k_prg_telemetry(&run_mapper1_mmc1_32k_prg_variant());
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
     let mapper4_mmc3 = mapper4_mmc3_telemetry(&run_mapper4_mmc3_variant());
     let mapper4_mmc3_edge = mapper4_mmc3_edge_telemetry(&run_mapper4_mmc3_edge_variant());
@@ -3917,6 +4109,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper1_mmc1: &mapper1_mmc1,
+        mapper1_mmc1_32k_prg: &mapper1_mmc1_32k_prg,
         mapper3_chr_bank: &mapper3_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
@@ -3953,6 +4146,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper1_mmc1: &mapper1_mmc1,
+        mapper1_mmc1_32k_prg: &mapper1_mmc1_32k_prg,
         mapper3_chr_bank: &mapper3_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
@@ -4002,6 +4196,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         suite: suite_telemetry(),
         cartridge: cartridge_info,
         mapper1_mmc1,
+        mapper1_mmc1_32k_prg,
         mapper3_chr_bank,
         mapper4_mmc3,
         mapper4_mmc3_edge,
@@ -4581,6 +4776,53 @@ fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Mapper 1 error | {} |",
         optional_string(telemetry.mapper1_mmc1.error.as_deref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG read addresses | {} / {} |",
+        telemetry.mapper1_mmc1_32k_prg.low_read_addr_hex,
+        telemetry.mapper1_mmc1_32k_prg.high_read_addr_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG control writes | {:?} |",
+        telemetry.mapper1_mmc1_32k_prg.control_writes_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG bank writes | {:?} |",
+        telemetry.mapper1_mmc1_32k_prg.prg_bank_writes_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG observed / expected | {:?} / {:?} |",
+        telemetry.mapper1_mmc1_32k_prg.observed_values_hex,
+        telemetry.mapper1_mmc1_32k_prg.expected_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG cases / expected | {} / {} |",
+        telemetry.mapper1_mmc1_32k_prg.observed_case_count,
+        telemetry.mapper1_mmc1_32k_prg.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper1_mmc1_32k_prg.cycles,
+        telemetry.mapper1_mmc1_32k_prg.frames,
+        telemetry.mapper1_mmc1_32k_prg.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 1 32 KiB PRG error | {} |",
+        optional_string(telemetry.mapper1_mmc1_32k_prg.error.as_deref())
     )
     .expect("write report");
     writeln!(
@@ -6706,6 +6948,7 @@ struct HostValidationInput<'a> {
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper1_mmc1: &'a Mapper1Mmc1Telemetry,
+    mapper1_mmc1_32k_prg: &'a Mapper1Mmc1Prg32kTelemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
@@ -6735,6 +6978,7 @@ struct ProbeTelemetryInput<'a> {
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper1_mmc1: &'a Mapper1Mmc1Telemetry,
+    mapper1_mmc1_32k_prg: &'a Mapper1Mmc1Prg32kTelemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
@@ -6963,6 +7207,19 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.mapper1_mmc1.expected_case_count,
             input.mapper1_mmc1.cycles,
             optional_string(input.mapper1_mmc1.error.as_deref())
+        ));
+    }
+    if !input.mapper1_mmc1_32k_prg.passed {
+        failures.push(format!(
+            "Mapper 1 MMC1 32 KiB PRG variant mismatch: control writes {:?}, PRG writes {:?}, observed {:?} expected {:?}, cases {}/{}, cycles={}, error {}",
+            input.mapper1_mmc1_32k_prg.control_writes_hex,
+            input.mapper1_mmc1_32k_prg.prg_bank_writes_hex,
+            input.mapper1_mmc1_32k_prg.observed_values_hex,
+            input.mapper1_mmc1_32k_prg.expected_values_hex,
+            input.mapper1_mmc1_32k_prg.observed_case_count,
+            input.mapper1_mmc1_32k_prg.expected_case_count,
+            input.mapper1_mmc1_32k_prg.cycles,
+            optional_string(input.mapper1_mmc1_32k_prg.error.as_deref())
         ));
     }
     if !input.mapper3_chr_bank.passed {
@@ -7595,6 +7852,40 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.mapper1_mmc1.cycles,
                 input.mapper1_mmc1.frames,
                 optional_string(input.mapper1_mmc1.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper1_mmc1".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper1.mmc1_32k_prg_mode".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER1_MMC1_32K_PRG_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper1_mmc1_32k_prg.passed),
+            description:
+                "Generated Mapper 1 variant validates MMC1 32 KiB PRG modes and ignored low PRG bank bit"
+                    .to_string(),
+            expected: format!(
+                "mapper {}, control writes {:?}, PRG writes {:?}, read addrs {}/{}, values {:?}, cases {}",
+                input.mapper1_mmc1_32k_prg.mapper,
+                input.mapper1_mmc1_32k_prg.control_writes_hex,
+                input.mapper1_mmc1_32k_prg.prg_bank_writes_hex,
+                input.mapper1_mmc1_32k_prg.low_read_addr_hex,
+                input.mapper1_mmc1_32k_prg.high_read_addr_hex,
+                input.mapper1_mmc1_32k_prg.expected_values_hex,
+                input.mapper1_mmc1_32k_prg.expected_case_count
+            ),
+            observed: format!(
+                "values {:?}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper1_mmc1_32k_prg.observed_values_hex,
+                input.mapper1_mmc1_32k_prg.observed_case_count,
+                input.mapper1_mmc1_32k_prg.expected_case_count,
+                input.mapper1_mmc1_32k_prg.cycles,
+                input.mapper1_mmc1_32k_prg.frames,
+                optional_string(input.mapper1_mmc1_32k_prg.error.as_deref())
             ),
             likely_domain: "cartridge.mapper1_mmc1".to_string(),
         },
@@ -10515,6 +10806,51 @@ fn mapper1_mmc1_telemetry(observation: &Mapper1Mmc1Observation) -> Mapper1Mmc1Te
     }
 }
 
+fn mapper1_mmc1_32k_prg_telemetry(
+    observation: &Mapper1Mmc1Prg32kObservation,
+) -> Mapper1Mmc1Prg32kTelemetry {
+    let control_writes = MAPPER1_32K_CONTROL_WRITES.to_vec();
+    let prg_bank_writes = MAPPER1_32K_PRG_BANK_WRITES.to_vec();
+    let expected_values = MAPPER1_32K_EXPECTED_VALUES.to_vec();
+    let observed_values = observation.observed_values.to_vec();
+
+    Mapper1Mmc1Prg32kTelemetry {
+        mapper: MAPPER1_MAPPER,
+        prg_banks: MAPPER1_PRG_BANKS,
+        chr_8k_banks: MAPPER1_CHR_8K_BANKS,
+        low_read_addr: MAPPER1_32K_LOW_READ_ADDR,
+        low_read_addr_hex: format!("0x{:04X}", MAPPER1_32K_LOW_READ_ADDR),
+        high_read_addr: MAPPER1_32K_HIGH_READ_ADDR,
+        high_read_addr_hex: format!("0x{:04X}", MAPPER1_32K_HIGH_READ_ADDR),
+        expected_case_count: MAPPER1_32K_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        control_writes: control_writes.clone(),
+        control_writes_hex: control_writes
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        prg_bank_writes: prg_bank_writes.clone(),
+        prg_bank_writes_hex: prg_bank_writes
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        expected_values: expected_values.clone(),
+        expected_values_hex: expected_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_values: observed_values.clone(),
+        observed_values_hex: observed_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn mapper3_chr_bank_telemetry(observation: &Mapper3ChrBankObservation) -> Mapper3ChrBankTelemetry {
     let expected_values = MAPPER3_CHR_BANK_EXPECTED_VALUES.to_vec();
     let observed_values = observation.observed_values.to_vec();
@@ -10919,6 +11255,29 @@ impl Mapper1Mmc1Observation {
 }
 
 #[derive(Debug, Clone)]
+struct Mapper1Mmc1Prg32kObservation {
+    observed_values: [u8; 10],
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper1Mmc1Prg32kObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            observed_values: [0; 10],
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct Mapper3ChrBankObservation {
     observed_values: [u8; 4],
     observed_case_count: u8,
@@ -11309,6 +11668,87 @@ fn read_mapper1_mmc1_mirror_observed_values(bus: &mut Bus) -> [u8; 3] {
     let mut values = [0; 3];
     for (index, value) in values.iter_mut().enumerate() {
         *value = bus.cpu_read(MAPPER1_MMC1_MIRROR_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn run_mapper1_mmc1_32k_prg_variant() -> Mapper1Mmc1Prg32kObservation {
+    match try_run_mapper1_mmc1_32k_prg_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper1Mmc1Prg32kObservation::failed(error),
+    }
+}
+
+fn try_run_mapper1_mmc1_32k_prg_variant() -> Result<Mapper1Mmc1Prg32kObservation, String> {
+    let rom = build_mapper1_mmc1_32k_prg_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 50_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed_values = read_mapper1_mmc1_32k_prg_observed_values(&mut bus);
+            let observed_case_count = bus.cpu_read(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && observed_case_count == MAPPER1_32K_EXPECTED_CASE_COUNT
+                && observed_values == MAPPER1_32K_EXPECTED_VALUES;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 1 MMC1 32 KiB PRG variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(
+                    "Mapper 1 MMC1 32 KiB PRG variant reached PASS with mismatched host observations"
+                        .to_string(),
+                )
+            };
+            return Ok(Mapper1Mmc1Prg32kObservation {
+                observed_values,
+                observed_case_count,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    Ok(Mapper1Mmc1Prg32kObservation {
+        observed_values: read_mapper1_mmc1_32k_prg_observed_values(&mut bus),
+        observed_case_count: bus.cpu_read(MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR),
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 1 MMC1 32 KiB PRG variant timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_mapper1_mmc1_32k_prg_observed_values(bus: &mut Bus) -> [u8; 10] {
+    let mut values = [0; 10];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR + index as u16);
     }
     values
 }
