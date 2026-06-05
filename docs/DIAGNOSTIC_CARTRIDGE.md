@@ -254,7 +254,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 30 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 31 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -308,8 +308,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 38
-scenarios match their expected health and focus-domain contracts, the 30
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 39
+scenarios match their expected health and focus-domain contracts, the 31
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -321,7 +321,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 30 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 31 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -414,6 +414,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `cpu_stack_matrix_fault`,
 `cpu_interrupt_matrix_fault`,
 `cpu_accumulator_matrix_fault`,
+`cpu_compare_matrix_fault`,
 `input_port_matrix_fault`,
 `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -467,6 +468,7 @@ with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_stack_matrix_fault`,
 `cpu_interrupt_matrix_fault`,
 `cpu_accumulator_matrix_fault`,
+`cpu_compare_matrix_fault`,
 `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -542,6 +544,10 @@ localize to `cpu.interrupt.brk_rti_matrix`.
 before the generated cartridge exercises ASL A, LSR A, ROL A, and ROR A,
 proving accumulator-form shift/rotate result and flag regressions localize to
 `cpu.accumulator.shift_rotate`.
+`cpu_compare_matrix_fault` corrupts the compare-matrix less-than outcome mask
+before the generated cartridge exercises CMP, CPX, and CPY equal, greater-than,
+and less-than cases, proving register compare carry, zero, and negative flag
+regressions localize to `cpu.compare.flags`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -698,7 +704,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 30 accepted AI routes into deterministic debugger startup plans
+turning all 31 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -1284,6 +1290,12 @@ test, top-level `cpu_accumulator_matrix` telemetry, and the
 ASL, LSR, ROL, and ROR results, a carry/zero/negative flag coverage mask, and
 case count.
 
+Schema version `65` adds the `cpu_compare_register_matrix` cartridge test,
+top-level `cpu_compare_matrix` telemetry, and the
+`cpu.compare_matrix.results` probe. The cartridge records CMP, CPX, and CPY
+equal, greater-than, and less-than carry/zero/negative flag outcomes through
+compact per-outcome masks and a case counter.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1330,3 +1342,9 @@ negative fixture. The fault corrupts the accumulator shift/rotate flag mask
 immediately before test 42 executes, so the suite can localize accumulator-form
 ASL, LSR, ROL, and ROR result and flag regressions to
 `cpu.accumulator.shift_rotate` with a paired AI route and replay command.
+
+Scenario suite schema version `16` adds the `cpu_compare_matrix_fault` negative
+fixture. The fault corrupts the compare-matrix less-than mask immediately before
+test 43 executes, so the suite can localize CMP, CPX, and CPY carry, zero, and
+negative flag regressions to `cpu.compare.flags` with a paired AI route and
+replay command.
