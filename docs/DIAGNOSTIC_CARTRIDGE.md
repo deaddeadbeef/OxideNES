@@ -755,7 +755,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   PPU-visible pattern-table reads
 - Mapper 4/MMC3 PRG R6/R7 bank switching, fixed-last PRG reads, 2 KiB and
   1 KiB CHR bank switching, horizontal/vertical mirroring control, and
-  scanline IRQ delivery
+  scanline IRQ delivery, plus a fixed-`$E000` edge variant for PRG-mode
+  inversion, CHR inversion, and IRQ reload phases
 - Mapper 7/AxROM 32 KiB PRG bank switching and single-screen lower/upper
   nametable mirroring through CPU and PPU bus paths
 - Joypad strobe and shift reads with configurable expected masks
@@ -1180,6 +1181,14 @@ through CPU and PPUDATA paths, toggles horizontal and vertical mirroring through
 `$A000`, enables rendering long enough for the PPU to clock the MMC3 scanline
 counter, observes one mapper IRQ through the CPU IRQ vector, and exposes
 top-level `mapper4_mmc3` telemetry plus the `mapper4.mmc3_banks_irq` probe.
+
+Schema version `56` adds a second generated Mapper 4/MMC3 edge variant. This
+variant runs from the fixed `$E000-$FFFF` PRG window so it can safely set MMC3
+PRG inversion, read the fixed second-last bank at `$8000`, R7 at `$A000`, and
+R6 at `$C000`, then sets CHR inversion and reads all eight 1 KiB CHR windows
+through PPUDATA. It also runs two IRQ reload phases, including a zero-latch
+reload, and exposes top-level `mapper4_mmc3_edge` telemetry plus the
+`mapper4.mmc3_inversion_irq_reload` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
