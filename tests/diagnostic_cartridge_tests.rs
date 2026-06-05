@@ -45,10 +45,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         telemetry.analysis.debug_focus.health,
         DiagnosticHealth::Healthy
     );
-    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 43);
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 44);
     assert_eq!(
         telemetry.analysis.debug_focus.focus_test_name,
-        Some("cpu_compare_register_matrix")
+        Some("cpu_load_store_transfer_matrix")
     );
     assert_eq!(telemetry.analysis.debug_focus.focus_domain, None);
     assert_eq!(telemetry.analysis.debug_focus.failure_kind, None);
@@ -68,7 +68,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             .terminal_instruction
             .as_ref()
             .and_then(|instruction| instruction.current_test_name),
-        Some("cpu_compare_register_matrix")
+        Some("cpu_load_store_transfer_matrix")
     );
     assert_eq!(
         telemetry
@@ -85,7 +85,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 13));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Cpu && entry.total == 14));
     assert!(telemetry
         .analysis
         .coverage
@@ -154,6 +154,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         failure.code == 0xBE
             && failure.test_name == Some("cpu_compare_register_matrix")
             && failure.likely_domain == "cpu.compare.flags"
+    }));
+    assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
+        failure.code == 0xC4
+            && failure.test_name == Some("cpu_load_store_transfer_matrix")
+            && failure.likely_domain == "cpu.load_store.transfer_matrix"
     }));
     assert!(telemetry.suite.failure_catalog.iter().any(|failure| {
         failure.code == 0xCA
@@ -431,6 +436,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && test.intent.contains("CMP, CPX, and CPY")
             && test.passed
     }));
+    assert!(telemetry.tests.iter().any(|test| {
+        test.name == "cpu_load_store_transfer_matrix"
+            && test.intent.contains("LDA/LDX/LDY")
+            && test.passed
+    }));
     assert!(telemetry.cpu_accumulator_matrix.passed);
     assert_eq!(telemetry.cpu_accumulator_matrix.observed_case_count, 4);
     assert_eq!(telemetry.cpu_accumulator_matrix.asl_result_hex, "0x00");
@@ -452,6 +462,38 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "cpu.compare_matrix.results"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "cpu.compare.flags"
+    }));
+    assert!(telemetry.cpu_load_store_matrix.passed);
+    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 11);
+    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x0F");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_mask_hex, "0x07");
+    assert_eq!(telemetry.cpu_load_store_matrix.transfer_mask_hex, "0x0F");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_a_result_hex, "0x5A");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_x_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_y_result_hex, "0x7E");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_a_result_hex, "0xC3");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_x_result_hex, "0x5E");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_y_result_hex, "0xA7");
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tax_result_hex,
+        "0x44"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tay_result_hex,
+        "0x00"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_txa_result_hex,
+        "0x80"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tya_result_hex,
+        "0x7F"
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cpu.load_store_matrix.results"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "cpu.load_store.transfer_matrix"
     }));
     assert!(telemetry.input_port_matrix.passed);
     assert_eq!(telemetry.input_port_matrix.observed_case_count, 24);
@@ -1560,7 +1602,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Input mask sweep passed | true |"));
     assert!(report.contains("| Input mask sweep error | none |"));
     assert!(report.contains("## Debug Focus"));
-    assert!(report.contains("| Focus test | cpu_compare_register_matrix (43) |"));
+    assert!(report.contains("| Focus test | cpu_load_store_transfer_matrix (44) |"));
     assert!(report.contains("| Terminal instruction | seq "));
     assert!(report.contains("## Coverage"));
     assert!(report.contains("## Known Coverage Gaps"));
@@ -1785,6 +1827,14 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Less mask / expected | 0x07 / 0x07 |"));
     assert!(report.contains("| Compare matrix cases / expected | 9 / 9 |"));
     assert!(report.contains("| Compare matrix passed | true |"));
+    assert!(report.contains("## CPU Load/Store/Transfer Matrix"));
+    assert!(report.contains("| Load/store/transfer masks | 0x0F / 0x07 / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x0F / 0x07 / 0x0F |"));
+    assert!(report.contains("| Load A/X/Y results | 0x5A / 0x80 / 0x7E |"));
+    assert!(report.contains("| Store A/X/Y results | 0xC3 / 0x5E / 0xA7 |"));
+    assert!(report.contains("| Transfer TAX/TAY/TXA/TYA results | 0x44 / 0x00 / 0x80 / 0x7F |"));
+    assert!(report.contains("| Load/store/transfer cases / expected | 11 / 11 |"));
+    assert!(report.contains("| Load/store/transfer matrix passed | true |"));
     assert!(report.contains("## Observation Probes"));
     assert!(report.contains("| Passed probes |"));
     assert!(report.contains("| passed | ram.signature | host_observation | bus | none |"));
@@ -1821,6 +1871,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         report.contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | passed |")
     );
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | passed |"));
+    assert!(report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | passed |"));
     assert!(report.contains("## Instruction Trace Tail"));
     assert!(report.contains(
         "| Seq | Cycle | Frame | Test | PC | Instruction | Symbol | CPU A/X/Y | SP/P | Result |"
@@ -1860,10 +1911,10 @@ fn generated_diagnostic_cartridge_runs_configured_input_mask_matrix_to_pass() {
 
         assert!(telemetry.verdict.passed);
         assert_eq!(telemetry.analysis.health, DiagnosticHealth::Healthy);
-        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 43);
+        assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 44);
         assert_eq!(
             telemetry.analysis.debug_focus.focus_test_name,
-            Some("cpu_compare_register_matrix")
+            Some("cpu_load_store_transfer_matrix")
         );
         assert_eq!(telemetry.input.joypad1_mask_hex, joypad1_mask_hex);
         assert_eq!(telemetry.input.joypad1_expected_mask_hex, joypad1_mask_hex);
@@ -2214,7 +2265,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure
         Some("dma_oam_transfer")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 43);
+    assert_eq!(telemetry.verdict.current_test, 44);
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
     let failure = telemetry
@@ -2563,10 +2614,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_fail
         Some("ppu_sprite_priority")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 43);
+    assert_eq!(telemetry.verdict.current_test, 44);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_compare_register_matrix")
+        Some("cpu_load_store_transfer_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -2666,10 +2717,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
         Some("ppu_scroll_seam")
     );
     assert_eq!(telemetry.verdict.status, 0x80);
-    assert_eq!(telemetry.verdict.current_test, 43);
+    assert_eq!(telemetry.verdict.current_test, 44);
     assert_eq!(
         telemetry.verdict.current_test_name,
-        Some("cpu_compare_register_matrix")
+        Some("cpu_load_store_transfer_matrix")
     );
     assert_eq!(telemetry.verdict.failure_code, 0x00);
 
@@ -3304,13 +3355,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failur
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 4
+        DIAGNOSTIC_TESTS.len() - 5
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 4
+        DIAGNOSTIC_TESTS.len() - 5
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 5);
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Focus test | cpu_branch_condition_matrix (39) |"));
     assert!(report.contains("| Focus domain | cpu.branch.condition_matrix |"));
@@ -3325,6 +3376,9 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failur
     assert!(report
         .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | not_started |"));
+    assert!(
+        report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | not_started |")
+    );
 }
 
 #[test]
@@ -3392,13 +3446,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 3
+        DIAGNOSTIC_TESTS.len() - 4
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 3
+        DIAGNOSTIC_TESTS.len() - 4
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 4);
     let report = format_diagnostic_report(&telemetry);
     assert!(report.contains("| Focus test | cpu_stack_status_matrix (40) |"));
     assert!(report.contains("| Focus domain | cpu.stack.status_matrix |"));
@@ -3412,6 +3466,9 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure
     assert!(report
         .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | not_started |"));
+    assert!(
+        report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | not_started |")
+    );
 }
 
 #[test]
@@ -3486,13 +3543,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_fai
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 2
+        DIAGNOSTIC_TESTS.len() - 3
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 2
+        DIAGNOSTIC_TESTS.len() - 3
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 3);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -3508,6 +3565,9 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_fai
     assert!(report
         .contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | not_started |"));
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | not_started |"));
+    assert!(
+        report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | not_started |")
+    );
 }
 
 #[test]
@@ -3578,13 +3638,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_accumulator_matrix_f
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len() - 1
+        DIAGNOSTIC_TESTS.len() - 2
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len() - 1
+        DIAGNOSTIC_TESTS.len() - 2
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 2);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -3601,6 +3661,9 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_accumulator_matrix_f
         report.contains("| 42 | cpu_accumulator_shift_rotate_matrix | cpu | edge_case | failed |")
     );
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | not_started |"));
+    assert!(
+        report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | not_started |")
+    );
 }
 
 #[test]
@@ -3672,13 +3735,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_compare_matrix_failu
     }));
     assert_eq!(
         telemetry.analysis.timing.started_tests,
-        DIAGNOSTIC_TESTS.len()
+        DIAGNOSTIC_TESTS.len() - 1
     );
     assert_eq!(
         telemetry.analysis.timing.ended_tests,
-        DIAGNOSTIC_TESTS.len()
+        DIAGNOSTIC_TESTS.len() - 1
     );
-    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 1);
     assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
         .symbol
         .as_ref()
@@ -3694,6 +3757,128 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_compare_matrix_failu
     assert!(report.contains("| Compare matrix cases / expected | 9 / 9 |"));
     assert!(report.contains("| Compare matrix passed | false |"));
     assert!(report.contains("| 43 | cpu_compare_register_matrix | cpu | edge_case | failed |"));
+    assert!(
+        report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | not_started |")
+    );
+}
+
+#[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuLoadStoreTransferMatrix),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported CPU load/store/transfer-matrix failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_load_store_matrix")
+    );
+    assert_eq!(telemetry.verdict.current_test, 44);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_load_store_transfer_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0xC4);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include CPU load/store/transfer-matrix localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 44);
+    assert_eq!(failure.test_name, Some("cpu_load_store_transfer_matrix"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Cpu));
+    assert_eq!(failure.failure_code_hex, "0xC4");
+    assert_eq!(failure.likely_domain, "cpu.load_store.transfer_matrix");
+    assert!(failure
+        .assertion
+        .contains("records every opcode family subcase"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Cpu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("cpu_load_store_transfer_matrix")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("cpu.load_store.transfer_matrix")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 44);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("cpu.load_store.transfer_matrix")
+    );
+    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x0F");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_mask_hex, "0x87");
+    assert_eq!(telemetry.cpu_load_store_matrix.transfer_mask_hex, "0x0F");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_a_result_hex, "0x5A");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_x_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_y_result_hex, "0x7E");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_a_result_hex, "0xC3");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_x_result_hex, "0x5E");
+    assert_eq!(telemetry.cpu_load_store_matrix.store_y_result_hex, "0xA7");
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tax_result_hex,
+        "0x44"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tay_result_hex,
+        "0x00"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_txa_result_hex,
+        "0x80"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.transfer_tya_result_hex,
+        "0x7F"
+    );
+    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 11);
+    assert!(!telemetry.cpu_load_store_matrix.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.44.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(44)
+            && probe.likely_domain == "cpu.load_store.transfer_matrix"
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cpu.load_store_matrix.results"
+            && probe.status == DiagnosticProbeStatus::Skipped
+            && probe.test_id == Some(44)
+            && probe.likely_domain == "cpu.load_store.transfer_matrix"
+    }));
+    assert_eq!(
+        telemetry.analysis.timing.started_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(
+        telemetry.analysis.timing.ended_tests,
+        DIAGNOSTIC_TESTS.len()
+    );
+    assert_eq!(telemetry.analysis.timing.not_started_tests, 0);
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_load_store_matrix_before_summary")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_load_store_transfer_matrix (44) |"));
+    assert!(report.contains("| Focus domain | cpu.load_store.transfer_matrix |"));
+    assert!(report.contains("| Likely domain | cpu.load_store.transfer_matrix |"));
+    assert!(report.contains("| Load/store/transfer masks | 0x0F / 0x87 / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x0F / 0x07 / 0x0F |"));
+    assert!(report.contains("| Load A/X/Y results | 0x5A / 0x80 / 0x7E |"));
+    assert!(report.contains("| Store A/X/Y results | 0xC3 / 0x5E / 0xA7 |"));
+    assert!(report.contains("| Transfer TAX/TAY/TXA/TYA results | 0x44 / 0x00 / 0x80 / 0x7F |"));
+    assert!(report.contains("| Load/store/transfer cases / expected | 11 / 11 |"));
+    assert!(report.contains("| Load/store/transfer matrix passed | false |"));
+    assert!(report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | failed |"));
 }
 
 #[test]
