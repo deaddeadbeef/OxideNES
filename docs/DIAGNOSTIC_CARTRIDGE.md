@@ -753,6 +753,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
   PPU-visible pattern-table reads
+- Mapper 4/MMC3 PRG R6/R7 bank switching, fixed-last PRG reads, 2 KiB and
+  1 KiB CHR bank switching, horizontal/vertical mirroring control, and
+  scanline IRQ delivery
 - Mapper 7/AxROM 32 KiB PRG bank switching and single-screen lower/upper
   nametable mirroring through CPU and PPU bus paths
 - Joypad strobe and shift reads with configurable expected masks
@@ -1169,6 +1172,14 @@ after only four serial bits, commits the fifth bit, reads switchable and fixed
 PRG sentinels, reads 4 KiB CHR bank sentinels through PPUDATA, toggles
 single-screen lower/upper mirroring, and exposes top-level `mapper1_mmc1`
 telemetry plus the `mapper1.mmc1_shift_register` probe.
+
+Schema version `55` adds a generated Mapper 4/MMC3 variant cartridge to the
+host diagnostic run. The variant writes MMC3 bank-select/data registers for
+R6/R7 PRG banking plus R0/R1/R2/R3 CHR banking, reads PRG and CHR sentinels
+through CPU and PPUDATA paths, toggles horizontal and vertical mirroring through
+`$A000`, enables rendering long enough for the PPU to clock the MMC3 scanline
+counter, observes one mapper IRQ through the CPU IRQ vector, and exposes
+top-level `mapper4_mmc3` telemetry plus the `mapper4.mmc3_banks_irq` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

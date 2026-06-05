@@ -953,6 +953,79 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.mapper3_chr_bank.observed_case_count, 4);
     assert!(telemetry.mapper3_chr_bank.cycles > 0);
     assert_eq!(telemetry.mapper3_chr_bank.error, None);
+    assert!(telemetry.mapper4_mmc3.passed);
+    assert_eq!(telemetry.mapper4_mmc3.mapper, 4);
+    assert_eq!(telemetry.mapper4_mmc3.prg_16k_banks, 4);
+    assert_eq!(telemetry.mapper4_mmc3.prg_8k_banks, 8);
+    assert_eq!(telemetry.mapper4_mmc3.chr_8k_banks, 1);
+    assert_eq!(telemetry.mapper4_mmc3.chr_1k_banks, 8);
+    assert_eq!(
+        telemetry.mapper4_mmc3.prg_read_addrs_hex,
+        vec![
+            "0x8000".to_string(),
+            "0xA000".to_string(),
+            "0xE100".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.chr_read_addrs_hex,
+        vec![
+            "0x0010".to_string(),
+            "0x0410".to_string(),
+            "0x0810".to_string(),
+            "0x1010".to_string(),
+            "0x1410".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.prg_register_writes_hex,
+        vec!["R6:0x02".to_string(), "R7:0x03".to_string()]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.chr_register_writes_hex,
+        vec![
+            "R0:0x02".to_string(),
+            "R1:0x04".to_string(),
+            "R2:0x06".to_string(),
+            "R3:0x07".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.expected_prg_values_hex,
+        vec!["0xC2".to_string(), "0xD3".to_string(), "0xF7".to_string()]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.observed_prg_values_hex,
+        telemetry.mapper4_mmc3.expected_prg_values_hex
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.expected_chr_values_hex,
+        vec![
+            "0x32".to_string(),
+            "0x43".to_string(),
+            "0x54".to_string(),
+            "0x76".to_string(),
+            "0x87".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.observed_chr_values_hex,
+        telemetry.mapper4_mmc3.expected_chr_values_hex
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.expected_mirror_values_hex,
+        vec!["0x5A".to_string(), "0xA5".to_string()]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3.observed_mirror_values_hex,
+        telemetry.mapper4_mmc3.expected_mirror_values_hex
+    );
+    assert_eq!(telemetry.mapper4_mmc3.irq_latch_hex, "0x02");
+    assert_eq!(telemetry.mapper4_mmc3.observed_irq_count, 1);
+    assert_eq!(telemetry.mapper4_mmc3.expected_irq_count, 1);
+    assert_eq!(telemetry.mapper4_mmc3.observed_case_count, 11);
+    assert!(telemetry.mapper4_mmc3.cycles > 0);
+    assert_eq!(telemetry.mapper4_mmc3.error, None);
     assert!(telemetry.mapper7_axrom.passed);
     assert_eq!(telemetry.mapper7_axrom.mapper, 7);
     assert_eq!(telemetry.mapper7_axrom.prg_banks, 8);
@@ -1032,6 +1105,16 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.expected.contains("0x44")
             && probe.observed.contains("0x44")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper4.mmc3_banks_irq"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(33)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("R6:0x02")
+            && probe.expected.contains("0xF7")
+            && probe.observed.contains("IRQ 1")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "mapper7.axrom_switching"
@@ -1128,6 +1211,31 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     ));
     assert!(report.contains("| Mapper 3 CHR cases / expected | 4 / 4 |"));
     assert!(report.contains("| Mapper 3 CHR error | none |"));
+    assert!(
+        report.contains("| Mapper 4 variant mapper / PRG 16K banks / CHR 8K banks | 4 / 4 / 1 |")
+    );
+    assert!(
+        report.contains("| Mapper 4 PRG read addresses | [\"0x8000\", \"0xA000\", \"0xE100\"] |")
+    );
+    assert!(report.contains(
+        "| Mapper 4 CHR read addresses | [\"0x0010\", \"0x0410\", \"0x0810\", \"0x1010\", \"0x1410\"] |"
+    ));
+    assert!(report.contains("| Mapper 4 PRG register writes | [\"R6:0x02\", \"R7:0x03\"] |"));
+    assert!(report.contains(
+        "| Mapper 4 CHR register writes | [\"R0:0x02\", \"R1:0x04\", \"R2:0x06\", \"R3:0x07\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 4 PRG observed / expected | [\"0xC2\", \"0xD3\", \"0xF7\"] / [\"0xC2\", \"0xD3\", \"0xF7\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 4 CHR observed / expected | [\"0x32\", \"0x43\", \"0x54\", \"0x76\", \"0x87\"] / [\"0x32\", \"0x43\", \"0x54\", \"0x76\", \"0x87\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 4 mirror observed / expected | [\"0x5A\", \"0xA5\"] / [\"0x5A\", \"0xA5\"] |"
+    ));
+    assert!(report.contains("| Mapper 4 IRQ observed / expected | 1 / 1 |"));
+    assert!(report.contains("| Mapper 4 cases / expected | 11 / 11 |"));
+    assert!(report.contains("| Mapper 4 error | none |"));
     assert!(report.contains("| Mapper 7 variant mapper / PRG banks / CHR banks | 7 / 8 / 0 |"));
     assert!(report.contains("| Mapper 7 PRG read address | 0x8000 |"));
     assert!(report.contains(

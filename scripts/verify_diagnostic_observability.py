@@ -20,13 +20,13 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 54
+EXPECTED_TELEMETRY_SCHEMA = 55
 EXPECTED_SCENARIO_COUNT = 31
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 23
 EXPECTED_PASS_SCENARIO_COUNT = 8
 EXPECTED_CARTRIDGE_TEST_COUNT = 28
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 59
+EXPECTED_PROBE_COUNT = 60
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -643,6 +643,7 @@ class ObservabilityVerifier:
             "ppu.sprite_overflow.status",
             "ppu.sprite_zero_hit.status",
             "mapper3.chr_bank_switch",
+            "mapper4.mmc3_banks_irq",
             "mapper7.axrom_switching",
             "joypad.input_mask_sweep.results",
             "mapper1.mmc1_shift_register",
