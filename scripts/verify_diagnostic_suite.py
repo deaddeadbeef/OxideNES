@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 10
+EXPECTED_SCENARIO_SUITE_SCHEMA = 11
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 59
+EXPECTED_TELEMETRY_SCHEMA = 60
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -34,6 +34,7 @@ EXPECTED_SCENARIOS = {
     "cpu_indirect_jmp_fault",
     "cpu_addressing_matrix_fault",
     "cpu_rmw_matrix_fault",
+    "cpu_rmw_addressing_matrix_fault",
     "input_port_matrix_fault",
     "ppu_nmi_timeout_fault",
     "ppu_read_buffer_fault",
@@ -201,6 +202,7 @@ class SuiteVerifier:
             "cpu_indirect_jmp_fault",
             "cpu_addressing_matrix_fault",
             "cpu_rmw_matrix_fault",
+            "cpu_rmw_addressing_matrix_fault",
             "input_port_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
@@ -906,6 +908,39 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.37.result",
             rmw_evidence,
             "CPU RMW matrix observer evidence",
+        )
+        rmw_addressing = by_scenario.get("cpu_rmw_addressing_matrix_fault")
+        if not isinstance(rmw_addressing, dict):
+            self.errors.append("missing observer action for cpu_rmw_addressing_matrix_fault")
+            return
+
+        self.expect_equal(
+            rmw_addressing.get("priority"),
+            "known_divergence",
+            "CPU RMW addressing matrix observer action priority",
+        )
+        self.expect_equal(
+            rmw_addressing.get("action_type"),
+            "inspect_known_divergence",
+            "CPU RMW addressing matrix observer action type",
+        )
+        self.expect_equal(
+            rmw_addressing.get("primary_artifact"),
+            "cpu_rmw_addressing_matrix_fault/comparison.json",
+            "CPU RMW addressing matrix observer primary_artifact",
+        )
+        rmw_addressing_evidence = self.expect_list(
+            rmw_addressing.get("evidence"), "CPU RMW addressing matrix observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.rmw.absolute_asl",
+            rmw_addressing_evidence,
+            "CPU RMW addressing matrix observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.38.result",
+            rmw_addressing_evidence,
+            "CPU RMW addressing matrix observer evidence",
         )
         input_port = by_scenario.get("input_port_matrix_fault")
         if not isinstance(input_port, dict):
@@ -1639,6 +1674,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_rmw_matrix_fault")
+
+        rmw_addressing = by_scenario.get("cpu_rmw_addressing_matrix_fault")
+        if isinstance(rmw_addressing, dict):
+            self.expect_equal(
+                rmw_addressing.get("role"),
+                "expected_failure_fixture",
+                "CPU RMW addressing matrix observer role",
+            )
+            self.expect_equal(
+                rmw_addressing.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU RMW addressing matrix observer outcome",
+            )
+            self.expect_equal(
+                rmw_addressing.get("health"),
+                "cartridge_assertion_failed",
+                "CPU RMW addressing matrix observer health",
+            )
+            self.expect_equal(
+                rmw_addressing.get("focus_domain"),
+                "cpu.rmw.absolute_asl",
+                "CPU RMW addressing matrix observer focus_domain",
+            )
+            self.expect_equal(
+                rmw_addressing.get("next_artifact"),
+                "cpu_rmw_addressing_matrix_fault/comparison.json",
+                "CPU RMW addressing matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_rmw_addressing_matrix_fault")
 
         input_port = by_scenario.get("input_port_matrix_fault")
         if isinstance(input_port, dict):
