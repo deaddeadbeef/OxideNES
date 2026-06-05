@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 54;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 55;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v54";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v55";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -43,6 +43,7 @@ const MAPPER3_CHR_BANK_TEST_ID: u8 = 29;
 const INPUT_MASK_SWEEP_TEST_ID: u8 = 30;
 const MAPPER7_AXROM_TEST_ID: u8 = 31;
 const MAPPER1_MMC1_TEST_ID: u8 = 32;
+const MAPPER4_MMC3_TEST_ID: u8 = 33;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -66,6 +67,34 @@ const MAPPER3_CHR_READ_ADDR: u16 = 0x0010;
 const MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT: u8 = 4;
 const MAPPER3_CHR_BANK_EXPECTED_BANKS: [u8; 4] = [0, 1, 2, 3];
 const MAPPER3_CHR_BANK_EXPECTED_VALUES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
+const MAPPER4_MAPPER: u8 = 4;
+const MAPPER4_PRG_16K_BANKS: u8 = 4;
+const MAPPER4_PRG_8K_BANKS: usize = 8;
+const MAPPER4_CHR_8K_BANKS: u8 = 1;
+const MAPPER4_CHR_1K_BANKS: usize = 8;
+const MAPPER4_PRG_R6_READ_ADDR: u16 = 0x8000;
+const MAPPER4_PRG_R7_READ_ADDR: u16 = 0xA000;
+const MAPPER4_PRG_FIXED_READ_ADDR: u16 = 0xE100;
+const MAPPER4_CHR_READ_ADDRS: [u16; 5] = [0x0010, 0x0410, 0x0810, 0x1010, 0x1410];
+const MAPPER4_EXPECTED_CASE_COUNT: u8 = 11;
+const MAPPER4_PRG_REGISTER_WRITES: [(u8, u8); 2] = [(0x06, 0x02), (0x07, 0x03)];
+const MAPPER4_PRG_EXPECTED_VALUES: [u8; 3] = [0xC2, 0xD3, 0xF7];
+const MAPPER4_PRG_BANK_SENTINELS: [(usize, u16, u8); 3] = [
+    (2, MAPPER4_PRG_R6_READ_ADDR, MAPPER4_PRG_EXPECTED_VALUES[0]),
+    (3, MAPPER4_PRG_R7_READ_ADDR, MAPPER4_PRG_EXPECTED_VALUES[1]),
+    (
+        MAPPER4_PRG_8K_BANKS - 1,
+        MAPPER4_PRG_FIXED_READ_ADDR,
+        MAPPER4_PRG_EXPECTED_VALUES[2],
+    ),
+];
+const MAPPER4_CHR_REGISTER_WRITES: [(u8, u8); 4] =
+    [(0x00, 0x02), (0x01, 0x04), (0x02, 0x06), (0x03, 0x07)];
+const MAPPER4_CHR_BANK_SENTINELS: [u8; 8] = [0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87];
+const MAPPER4_CHR_EXPECTED_VALUES: [u8; 5] = [0x32, 0x43, 0x54, 0x76, 0x87];
+const MAPPER4_MIRROR_EXPECTED_VALUES: [u8; 2] = [0x5A, 0xA5];
+const MAPPER4_IRQ_LATCH: u8 = 0x02;
+const MAPPER4_EXPECTED_IRQ_COUNT: u8 = 1;
 const MAPPER7_MAPPER: u8 = 7;
 const MAPPER7_PRG_BANKS: u8 = 8;
 const MAPPER7_CHR_BANKS: u8 = 0;
@@ -168,6 +197,12 @@ const MAPPER1_MMC1_CASE_COUNT_ADDR: u16 = 0x0276;
 const MAPPER1_MMC1_PRG_OBSERVED_BASE_ADDR: u16 = 0x0277;
 const MAPPER1_MMC1_CHR_OBSERVED_BASE_ADDR: u16 = 0x027C;
 const MAPPER1_MMC1_MIRROR_OBSERVED_BASE_ADDR: u16 = 0x0280;
+const MAPPER4_MMC3_CASE_COUNT_ADDR: u16 = 0x0283;
+const MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR: u16 = 0x0284;
+const MAPPER4_MMC3_CHR_OBSERVED_BASE_ADDR: u16 = 0x0287;
+const MAPPER4_MMC3_MIRROR_OBSERVED_BASE_ADDR: u16 = 0x028C;
+const MAPPER4_MMC3_IRQ_COUNT_ADDR: u16 = 0x028E;
+const MAPPER4_MMC3_IRQ_OBSERVED_ADDR: u16 = 0x028F;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1265,8 +1300,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
         risk: "The diagnostic cartridges now exercise several simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
-        current_coverage: "The generated Mapper 1/MMC1 variant validates serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
-        missing_coverage: "IRQ-generating mappers, MMC1 32 KiB PRG mode, MMC3 register edge cases, battery-backed RAM persistence, and CHR/PRG switches during active rendering.",
+        current_coverage: "The generated Mapper 1/MMC1 variant validates serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; a generated Mapper 4/MMC3 variant validates R6/R7 PRG bank writes, fixed-last PRG reads, 2 KiB and 1 KiB CHR bank reads, mirroring control, and scanline IRQ delivery; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
+        missing_coverage: "MMC1 32 KiB PRG mode, MMC3 PRG-mode inversion, CHR inversion, IRQ reload edge cases, battery-backed RAM persistence, and CHR/PRG switches during active rendering.",
         suggested_next_test: "Generate MMC-style synthetic cartridges that switch CHR/PRG banks during rendering and assert selected pattern/table data through PPU-visible pixels and mapper IRQ timing.",
     },
     DiagnosticCoverageGapSpec {
@@ -1444,6 +1479,7 @@ pub struct DiagnosticTelemetry {
     pub cartridge: CartridgeTelemetry,
     pub mapper1_mmc1: Mapper1Mmc1Telemetry,
     pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
+    pub mapper4_mmc3: Mapper4Mmc3Telemetry,
     pub mapper7_axrom: Mapper7AxromTelemetry,
     pub input_mask_sweep: InputMaskSweepTelemetry,
     pub input: DiagnosticInputTelemetry,
@@ -1546,6 +1582,45 @@ pub struct Mapper3ChrBankTelemetry {
     pub expected_values_hex: Vec<String>,
     pub observed_values: Vec<u8>,
     pub observed_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper4Mmc3Telemetry {
+    pub mapper: u8,
+    pub prg_16k_banks: u8,
+    pub prg_8k_banks: usize,
+    pub chr_8k_banks: u8,
+    pub chr_1k_banks: usize,
+    pub prg_read_addrs: Vec<u16>,
+    pub prg_read_addrs_hex: Vec<String>,
+    pub chr_read_addrs: Vec<u16>,
+    pub chr_read_addrs_hex: Vec<String>,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub prg_register_writes: Vec<(u8, u8)>,
+    pub prg_register_writes_hex: Vec<String>,
+    pub chr_register_writes: Vec<(u8, u8)>,
+    pub chr_register_writes_hex: Vec<String>,
+    pub irq_latch: u8,
+    pub irq_latch_hex: String,
+    pub expected_irq_count: u8,
+    pub observed_irq_count: u8,
+    pub expected_prg_values: Vec<u8>,
+    pub expected_prg_values_hex: Vec<String>,
+    pub observed_prg_values: Vec<u8>,
+    pub observed_prg_values_hex: Vec<String>,
+    pub expected_chr_values: Vec<u8>,
+    pub expected_chr_values_hex: Vec<String>,
+    pub observed_chr_values: Vec<u8>,
+    pub observed_chr_values_hex: Vec<String>,
+    pub expected_mirror_values: Vec<u8>,
+    pub expected_mirror_values_hex: Vec<String>,
+    pub observed_mirror_values: Vec<u8>,
+    pub observed_mirror_values_hex: Vec<String>,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -2535,6 +2610,58 @@ fn build_mapper1_mmc1_chr_rom() -> Vec<u8> {
     chr
 }
 
+fn build_mapper4_mmc3_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper4_mmc3_variant_program_with_labels()?;
+    if program.len() > 0x2000 {
+        return Err(format!(
+            "Mapper 4 diagnostic program is too large for fixed $C000-$DFFF execution: {} bytes > {} bytes",
+            program.len(),
+            0x2000
+        ));
+    }
+
+    let prg_size = MAPPER4_PRG_16K_BANKS as usize * PRG_BANK_SIZE;
+    let mut rom = Vec::with_capacity(16 + prg_size + MAPPER4_CHR_8K_BANKS as usize * CHR_BANK_SIZE);
+    rom.extend_from_slice(b"NES\x1A");
+    rom.push(MAPPER4_PRG_16K_BANKS);
+    rom.push(MAPPER4_CHR_8K_BANKS);
+    rom.push((MAPPER4_MAPPER & 0x0F) << 4);
+    rom.push(MAPPER4_MAPPER & 0xF0);
+    rom.extend_from_slice(&[0; 8]);
+
+    let mut prg = vec![0xEA; prg_size];
+    for (bank, addr, value) in MAPPER4_PRG_BANK_SENTINELS {
+        write_mapper4_8k_cpu_byte(&mut prg, bank, addr, value);
+    }
+    let program_offset = (MAPPER4_PRG_16K_BANKS as usize - 1) * PRG_BANK_SIZE;
+    prg[program_offset..program_offset + program.len()].copy_from_slice(&program);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFA,
+        label_addr(&labels, "nmi")?,
+    );
+    write_vector_for_banks(&mut prg, MAPPER4_PRG_16K_BANKS, 0xFFFC, PROGRAM_BASE);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFE,
+        label_addr(&labels, "irq")?,
+    );
+
+    rom.extend_from_slice(&prg);
+    rom.extend_from_slice(&build_mapper4_mmc3_chr_rom());
+    Ok(rom)
+}
+
+fn build_mapper4_mmc3_chr_rom() -> Vec<u8> {
+    let mut chr = vec![0; MAPPER4_CHR_8K_BANKS as usize * CHR_BANK_SIZE];
+    for (bank, sentinel) in MAPPER4_CHR_BANK_SENTINELS.iter().enumerate() {
+        chr[bank * 0x0400 + (MAPPER4_CHR_READ_ADDRS[0] & 0x03FF) as usize] = *sentinel;
+    }
+    chr
+}
+
 fn build_mapper7_axrom_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_mapper7_axrom_variant_program_with_labels()?;
     if program.len() > PRG_BANK_SIZE {
@@ -2775,6 +2902,147 @@ fn build_mapper3_chr_bank_variant_program_with_labels(
     program.asm.inc_zp(NMI_COUNT_ADDR);
     program.asm.rti();
     program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
+fn build_mapper4_mmc3_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER4_MMC3_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_IRQ_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_IRQ_OBSERVED_ADDR);
+    for offset in 0..MAPPER4_PRG_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    for offset in 0..MAPPER4_CHR_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_CHR_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    for offset in 0..MAPPER4_MIRROR_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_MIRROR_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+    program.asm.sta_abs(0xE000);
+
+    for &(register, value) in &MAPPER4_PRG_REGISTER_WRITES {
+        program.write_mmc3_bank_register(register, value);
+    }
+    program.asm.lda_abs(MAPPER4_PRG_R6_READ_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR);
+    program.expect_a_eq(MAPPER4_PRG_EXPECTED_VALUES[0], 0xD0);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+    program.asm.lda_abs(MAPPER4_PRG_R7_READ_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR + 1);
+    program.expect_a_eq(MAPPER4_PRG_EXPECTED_VALUES[1], 0xD1);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+    program.asm.lda_abs(MAPPER4_PRG_FIXED_READ_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR + 2);
+    program.expect_a_eq(MAPPER4_PRG_EXPECTED_VALUES[2], 0xD2);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+
+    for &(register, value) in &MAPPER4_CHR_REGISTER_WRITES {
+        program.write_mmc3_bank_register(register, value);
+    }
+    for (index, (&addr, &expected)) in MAPPER4_CHR_READ_ADDRS
+        .iter()
+        .zip(MAPPER4_CHR_EXPECTED_VALUES.iter())
+        .enumerate()
+    {
+        program.read_ppu_data_into_a(addr);
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_CHR_OBSERVED_BASE_ADDR + index as u16);
+        program.expect_a_eq(expected, 0xD3 + index as u8);
+        program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+    }
+
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xA000);
+    program.write_ppu_data(0x2000, MAPPER4_MIRROR_EXPECTED_VALUES[0]);
+    program.read_ppu_data_into_a(0x2800);
+    program.asm.sta_abs(MAPPER4_MMC3_MIRROR_OBSERVED_BASE_ADDR);
+    program.expect_a_eq(MAPPER4_MIRROR_EXPECTED_VALUES[0], 0xD8);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(0x01);
+    program.asm.sta_abs(0xA000);
+    program.write_ppu_data(0x2000, MAPPER4_MIRROR_EXPECTED_VALUES[1]);
+    program.read_ppu_data_into_a(0x2400);
+    program
+        .asm
+        .sta_abs(MAPPER4_MMC3_MIRROR_OBSERVED_BASE_ADDR + 1);
+    program.expect_a_eq(MAPPER4_MIRROR_EXPECTED_VALUES[1], 0xD9);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(MAPPER4_IRQ_LATCH);
+    program.asm.sta_abs(0xC000);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xC001);
+    program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x08);
+    program.asm.sta_abs(0x2001);
+    program.asm.cli();
+    program.asm.label("wait_irq")?;
+    program.asm.lda_abs(MAPPER4_MMC3_IRQ_COUNT_ADDR);
+    program.asm.cmp_imm(MAPPER4_EXPECTED_IRQ_COUNT);
+    program.asm.bne("wait_irq");
+    program.asm.sei();
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x2001);
+    program.asm.lda_abs(MAPPER4_MMC3_IRQ_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_IRQ_OBSERVED_ADDR);
+    program.expect_a_eq(MAPPER4_EXPECTED_IRQ_COUNT, 0xDA);
+    program.increment_abs(MAPPER4_MMC3_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.sei();
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xE000);
+    program.asm.lda_abs(MAPPER4_MMC3_IRQ_COUNT_ADDR);
+    program.asm.clc();
+    program.asm.adc_imm(0x01);
+    program.asm.sta_abs(MAPPER4_MMC3_IRQ_COUNT_ADDR);
     program.asm.rti();
     program.asm.label("hang")?;
     program.asm.jmp_label("hang");
@@ -3350,6 +3618,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     );
     let mapper1_mmc1 = mapper1_mmc1_telemetry(&run_mapper1_mmc1_variant());
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
+    let mapper4_mmc3 = mapper4_mmc3_telemetry(&run_mapper4_mmc3_variant());
     let mapper7_axrom = mapper7_axrom_telemetry(&run_mapper7_axrom_variant());
     let input_mask_sweep = input_mask_sweep_telemetry(&run_input_mask_sweep_variant());
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
@@ -3382,6 +3651,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper1_mmc1: &mapper1_mmc1,
         mapper3_chr_bank: &mapper3_chr_bank,
+        mapper4_mmc3: &mapper4_mmc3,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
@@ -3416,6 +3686,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper1_mmc1: &mapper1_mmc1,
         mapper3_chr_bank: &mapper3_chr_bank,
+        mapper4_mmc3: &mapper4_mmc3,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
@@ -3463,6 +3734,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cartridge: cartridge_info,
         mapper1_mmc1,
         mapper3_chr_bank,
+        mapper4_mmc3,
         mapper7_axrom,
         input_mask_sweep,
         input: diagnostic_input_telemetry(&config),
@@ -4087,6 +4359,83 @@ fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Mapper 3 CHR error | {} |",
         optional_string(telemetry.mapper3_chr_bank.error.as_deref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 variant mapper / PRG 16K banks / CHR 8K banks | {} / {} / {} |",
+        telemetry.mapper4_mmc3.mapper,
+        telemetry.mapper4_mmc3.prg_16k_banks,
+        telemetry.mapper4_mmc3.chr_8k_banks
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG read addresses | {:?} |",
+        telemetry.mapper4_mmc3.prg_read_addrs_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 CHR read addresses | {:?} |",
+        telemetry.mapper4_mmc3.chr_read_addrs_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG register writes | {:?} |",
+        telemetry.mapper4_mmc3.prg_register_writes_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 CHR register writes | {:?} |",
+        telemetry.mapper4_mmc3.chr_register_writes_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG observed / expected | {:?} / {:?} |",
+        telemetry.mapper4_mmc3.observed_prg_values_hex,
+        telemetry.mapper4_mmc3.expected_prg_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 CHR observed / expected | {:?} / {:?} |",
+        telemetry.mapper4_mmc3.observed_chr_values_hex,
+        telemetry.mapper4_mmc3.expected_chr_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 mirror observed / expected | {:?} / {:?} |",
+        telemetry.mapper4_mmc3.observed_mirror_values_hex,
+        telemetry.mapper4_mmc3.expected_mirror_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 IRQ observed / expected | {} / {} |",
+        telemetry.mapper4_mmc3.observed_irq_count, telemetry.mapper4_mmc3.expected_irq_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 cases / expected | {} / {} |",
+        telemetry.mapper4_mmc3.observed_case_count, telemetry.mapper4_mmc3.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper4_mmc3.cycles, telemetry.mapper4_mmc3.frames, telemetry.mapper4_mmc3.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 error | {} |",
+        optional_string(telemetry.mapper4_mmc3.error.as_deref())
     )
     .expect("write report");
     writeln!(
@@ -6015,6 +6364,7 @@ struct HostValidationInput<'a> {
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper1_mmc1: &'a Mapper1Mmc1Telemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
+    mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -6042,6 +6392,7 @@ struct ProbeTelemetryInput<'a> {
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper1_mmc1: &'a Mapper1Mmc1Telemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
+    mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -6279,6 +6630,23 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.mapper3_chr_bank.expected_case_count,
             input.mapper3_chr_bank.cycles,
             optional_string(input.mapper3_chr_bank.error.as_deref())
+        ));
+    }
+    if !input.mapper4_mmc3.passed {
+        failures.push(format!(
+            "Mapper 4 MMC3 variant mismatch: PRG observed {:?} expected {:?}, CHR observed {:?} expected {:?}, mirror observed {:?} expected {:?}, IRQ {}/{}, cases {}/{}, cycles={}, error {}",
+            input.mapper4_mmc3.observed_prg_values_hex,
+            input.mapper4_mmc3.expected_prg_values_hex,
+            input.mapper4_mmc3.observed_chr_values_hex,
+            input.mapper4_mmc3.expected_chr_values_hex,
+            input.mapper4_mmc3.observed_mirror_values_hex,
+            input.mapper4_mmc3.expected_mirror_values_hex,
+            input.mapper4_mmc3.observed_irq_count,
+            input.mapper4_mmc3.expected_irq_count,
+            input.mapper4_mmc3.observed_case_count,
+            input.mapper4_mmc3.expected_case_count,
+            input.mapper4_mmc3.cycles,
+            optional_string(input.mapper4_mmc3.error.as_deref())
         ));
     }
     if !input.mapper7_axrom.passed {
@@ -6901,6 +7269,44 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 optional_string(input.mapper3_chr_bank.error.as_deref())
             ),
             likely_domain: "cartridge.mapper3_chr_bank".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper4.mmc3_banks_irq".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER4_MMC3_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper4_mmc3.passed),
+            description:
+                "Generated Mapper 4 variant switches MMC3 PRG/CHR banks, toggles mirroring, and observes a scanline IRQ"
+                    .to_string(),
+            expected: format!(
+                "mapper {}, PRG writes {:?}, CHR writes {:?}, PRG values {:?}, CHR values {:?}, mirror values {:?}, IRQ {}, cases {}",
+                input.mapper4_mmc3.mapper,
+                input.mapper4_mmc3.prg_register_writes_hex,
+                input.mapper4_mmc3.chr_register_writes_hex,
+                input.mapper4_mmc3.expected_prg_values_hex,
+                input.mapper4_mmc3.expected_chr_values_hex,
+                input.mapper4_mmc3.expected_mirror_values_hex,
+                input.mapper4_mmc3.expected_irq_count,
+                input.mapper4_mmc3.expected_case_count
+            ),
+            observed: format!(
+                "PRG values {:?}, CHR values {:?}, mirror values {:?}, IRQ {}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper4_mmc3.observed_prg_values_hex,
+                input.mapper4_mmc3.observed_chr_values_hex,
+                input.mapper4_mmc3.observed_mirror_values_hex,
+                input.mapper4_mmc3.observed_irq_count,
+                input.mapper4_mmc3.observed_case_count,
+                input.mapper4_mmc3.expected_case_count,
+                input.mapper4_mmc3.cycles,
+                input.mapper4_mmc3.frames,
+                optional_string(input.mapper4_mmc3.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper4_mmc3".to_string(),
         },
     );
     push_probe(
@@ -7650,6 +8056,13 @@ impl DiagnosticProgram {
             self.asm.lda_imm((value >> bit) & 0x01);
             self.asm.sta_abs(addr);
         }
+    }
+
+    fn write_mmc3_bank_register(&mut self, register: u8, value: u8) {
+        self.asm.lda_imm(register);
+        self.asm.sta_abs(0x8000);
+        self.asm.lda_imm(value);
+        self.asm.sta_abs(0x8001);
     }
 
     fn increment_abs(&mut self, addr: u16) {
@@ -9228,6 +9641,10 @@ impl Assembler {
         self.emit(0x78);
     }
 
+    fn cli(&mut self) {
+        self.emit(0x58);
+    }
+
     fn cld(&mut self) {
         self.emit(0xD8);
     }
@@ -9294,6 +9711,11 @@ fn diagnostic_prg_offset_for_cpu_addr_with_banks(addr: u16, prg_banks: u8) -> us
 
 fn write_prg_cpu_byte_for_banks(prg: &mut [u8], prg_banks: u8, addr: u16, value: u8) {
     let index = diagnostic_prg_offset_for_cpu_addr_with_banks(addr, prg_banks);
+    prg[index] = value;
+}
+
+fn write_mapper4_8k_cpu_byte(prg: &mut [u8], bank: usize, addr: u16, value: u8) {
+    let index = bank * 0x2000 + (addr & 0x1FFF) as usize;
     prg[index] = value;
 }
 
@@ -9712,6 +10134,91 @@ fn mapper3_chr_bank_telemetry(observation: &Mapper3ChrBankObservation) -> Mapper
     }
 }
 
+fn mapper4_mmc3_telemetry(observation: &Mapper4Mmc3Observation) -> Mapper4Mmc3Telemetry {
+    let prg_read_addrs = vec![
+        MAPPER4_PRG_R6_READ_ADDR,
+        MAPPER4_PRG_R7_READ_ADDR,
+        MAPPER4_PRG_FIXED_READ_ADDR,
+    ];
+    let chr_read_addrs = MAPPER4_CHR_READ_ADDRS.to_vec();
+    let prg_register_writes = MAPPER4_PRG_REGISTER_WRITES.to_vec();
+    let chr_register_writes = MAPPER4_CHR_REGISTER_WRITES.to_vec();
+    let expected_prg_values = MAPPER4_PRG_EXPECTED_VALUES.to_vec();
+    let observed_prg_values = observation.observed_prg_values.to_vec();
+    let expected_chr_values = MAPPER4_CHR_EXPECTED_VALUES.to_vec();
+    let observed_chr_values = observation.observed_chr_values.to_vec();
+    let expected_mirror_values = MAPPER4_MIRROR_EXPECTED_VALUES.to_vec();
+    let observed_mirror_values = observation.observed_mirror_values.to_vec();
+
+    Mapper4Mmc3Telemetry {
+        mapper: MAPPER4_MAPPER,
+        prg_16k_banks: MAPPER4_PRG_16K_BANKS,
+        prg_8k_banks: MAPPER4_PRG_8K_BANKS,
+        chr_8k_banks: MAPPER4_CHR_8K_BANKS,
+        chr_1k_banks: MAPPER4_CHR_1K_BANKS,
+        prg_read_addrs: prg_read_addrs.clone(),
+        prg_read_addrs_hex: prg_read_addrs
+            .iter()
+            .map(|value| format!("0x{value:04X}"))
+            .collect(),
+        chr_read_addrs: chr_read_addrs.clone(),
+        chr_read_addrs_hex: chr_read_addrs
+            .iter()
+            .map(|value| format!("0x{value:04X}"))
+            .collect(),
+        expected_case_count: MAPPER4_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        prg_register_writes: prg_register_writes.clone(),
+        prg_register_writes_hex: prg_register_writes
+            .iter()
+            .map(|(register, value)| format!("R{register}:{}", hex_byte(*value)))
+            .collect(),
+        chr_register_writes: chr_register_writes.clone(),
+        chr_register_writes_hex: chr_register_writes
+            .iter()
+            .map(|(register, value)| format!("R{register}:{}", hex_byte(*value)))
+            .collect(),
+        irq_latch: MAPPER4_IRQ_LATCH,
+        irq_latch_hex: hex_byte(MAPPER4_IRQ_LATCH),
+        expected_irq_count: MAPPER4_EXPECTED_IRQ_COUNT,
+        observed_irq_count: observation.observed_irq_count,
+        expected_prg_values: expected_prg_values.clone(),
+        expected_prg_values_hex: expected_prg_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_prg_values: observed_prg_values.clone(),
+        observed_prg_values_hex: observed_prg_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        expected_chr_values: expected_chr_values.clone(),
+        expected_chr_values_hex: expected_chr_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_chr_values: observed_chr_values.clone(),
+        observed_chr_values_hex: observed_chr_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        expected_mirror_values: expected_mirror_values.clone(),
+        expected_mirror_values_hex: expected_mirror_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_mirror_values: observed_mirror_values.clone(),
+        observed_mirror_values_hex: observed_mirror_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn mapper7_axrom_telemetry(observation: &Mapper7AxromObservation) -> Mapper7AxromTelemetry {
     let bank_writes = MAPPER7_PRG_BANK_WRITES.to_vec();
     let expected_prg_values = MAPPER7_PRG_EXPECTED_VALUES.to_vec();
@@ -9939,6 +10446,35 @@ impl Mapper3ChrBankObservation {
     fn failed(message: impl Into<String>) -> Self {
         Self {
             observed_values: [0; 4],
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Mapper4Mmc3Observation {
+    observed_prg_values: [u8; 3],
+    observed_chr_values: [u8; 5],
+    observed_mirror_values: [u8; 2],
+    observed_irq_count: u8,
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper4Mmc3Observation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            observed_prg_values: [0; 3],
+            observed_chr_values: [0; 5],
+            observed_mirror_values: [0; 2],
+            observed_irq_count: 0,
             observed_case_count: 0,
             cycles: 0,
             frames: 0,
@@ -10260,6 +10796,115 @@ fn read_mapper1_mmc1_mirror_observed_values(bus: &mut Bus) -> [u8; 3] {
     let mut values = [0; 3];
     for (index, value) in values.iter_mut().enumerate() {
         *value = bus.cpu_read(MAPPER1_MMC1_MIRROR_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn run_mapper4_mmc3_variant() -> Mapper4Mmc3Observation {
+    match try_run_mapper4_mmc3_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper4Mmc3Observation::failed(error),
+    }
+}
+
+fn try_run_mapper4_mmc3_variant() -> Result<Mapper4Mmc3Observation, String> {
+    let rom = build_mapper4_mmc3_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 120_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed_prg_values = read_mapper4_mmc3_prg_observed_values(&mut bus);
+            let observed_chr_values = read_mapper4_mmc3_chr_observed_values(&mut bus);
+            let observed_mirror_values = read_mapper4_mmc3_mirror_observed_values(&mut bus);
+            let observed_irq_count = bus.cpu_read(MAPPER4_MMC3_IRQ_OBSERVED_ADDR);
+            let observed_case_count = bus.cpu_read(MAPPER4_MMC3_CASE_COUNT_ADDR);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && observed_case_count == MAPPER4_EXPECTED_CASE_COUNT
+                && observed_prg_values == MAPPER4_PRG_EXPECTED_VALUES
+                && observed_chr_values == MAPPER4_CHR_EXPECTED_VALUES
+                && observed_mirror_values == MAPPER4_MIRROR_EXPECTED_VALUES
+                && observed_irq_count == MAPPER4_EXPECTED_IRQ_COUNT;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 4 MMC3 variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(
+                    "Mapper 4 MMC3 variant reached PASS with mismatched host observations"
+                        .to_string(),
+                )
+            };
+            return Ok(Mapper4Mmc3Observation {
+                observed_prg_values,
+                observed_chr_values,
+                observed_mirror_values,
+                observed_irq_count,
+                observed_case_count,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    Ok(Mapper4Mmc3Observation {
+        observed_prg_values: read_mapper4_mmc3_prg_observed_values(&mut bus),
+        observed_chr_values: read_mapper4_mmc3_chr_observed_values(&mut bus),
+        observed_mirror_values: read_mapper4_mmc3_mirror_observed_values(&mut bus),
+        observed_irq_count: bus.cpu_read(MAPPER4_MMC3_IRQ_OBSERVED_ADDR),
+        observed_case_count: bus.cpu_read(MAPPER4_MMC3_CASE_COUNT_ADDR),
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 4 MMC3 variant timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_mapper4_mmc3_prg_observed_values(bus: &mut Bus) -> [u8; 3] {
+    let mut values = [0; 3];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER4_MMC3_PRG_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn read_mapper4_mmc3_chr_observed_values(bus: &mut Bus) -> [u8; 5] {
+    let mut values = [0; 5];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER4_MMC3_CHR_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn read_mapper4_mmc3_mirror_observed_values(bus: &mut Bus) -> [u8; 2] {
+    let mut values = [0; 2];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER4_MMC3_MIRROR_OBSERVED_BASE_ADDR + index as u16);
     }
     values
 }

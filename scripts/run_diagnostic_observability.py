@@ -188,6 +188,21 @@ FOCUS_DOMAIN_CODE_MAP = {
             "prg_bank",
         ],
     },
+    "cartridge.mapper4_mmc3": {
+        "subsystem": "mapper",
+        "description": "Generated Mapper 4/MMC3 variant validates PRG and CHR bank registers, mirroring control, and scanline IRQ delivery.",
+        "source_files": ["src/mapper.rs", "src/ppu.rs", "src/bus.rs", "src/cartridge.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/mapper_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "Mapper004",
+            "mapper4_mmc3",
+            "mmc3_banks_irq",
+            "clock_scanline",
+            "irq_reload",
+            "prg_bank_mode",
+            "chr_inversion",
+        ],
+    },
     "cartridge.mapper7_axrom": {
         "subsystem": "mapper",
         "description": "Generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching and single-screen mirroring.",
