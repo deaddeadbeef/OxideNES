@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 9;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 10;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
@@ -1829,7 +1829,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
         config: default.clone(),
         expected_passed: true,
         expected_health: DiagnosticHealth::Healthy,
-        expected_focus_test_id: Some(28),
+        expected_focus_test_id: Some(37),
         expected_focus_domain: None,
     }];
     specs.extend(input_mask_scenario_specs(&default));
@@ -1951,6 +1951,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(22),
             expected_focus_domain: Some("cpu.addressing.page_cross_load"),
+        },
+        DiagnosticScenarioSpec {
+            id: "cpu_rmw_matrix_fault",
+            title: "Intentional CPU read-modify-write matrix assertion failure",
+            purpose: "Failure-localization fixture for zero-page RMW opcode write-back regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuReadModifyWriteMatrix),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(37),
+            expected_focus_domain: Some("cpu.rmw.asl"),
         },
         DiagnosticScenarioSpec {
             id: "input_port_matrix_fault",
@@ -2227,7 +2240,7 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(28),
+            expected_focus_test_id: Some(37),
             expected_focus_domain: None,
         })
         .collect()

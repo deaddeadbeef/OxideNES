@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 58;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 59;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v58";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v59";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -47,6 +47,7 @@ const MAPPER4_MMC3_TEST_ID: u8 = 33;
 const MAPPER4_MMC3_EDGE_TEST_ID: u8 = 34;
 const MAPPER1_MMC1_32K_PRG_TEST_ID: u8 = 35;
 const MAPPER4_MMC3_PRG_RAM_TEST_ID: u8 = 36;
+const CPU_RMW_MATRIX_TEST_ID: u8 = 37;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -287,6 +288,7 @@ const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
 const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_page_cross_read";
+const CPU_RMW_MATRIX_FAULT_LABEL: &str = "cpu_rmw_matrix_before_asl";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -363,6 +365,14 @@ const PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X: usize = 2;
 const PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y: usize = 20;
 const PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR: u32 = 0x64B0FF;
 const PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR: u32 = 0xB53120;
+const CPU_RMW_MATRIX_ASL_RESULT_ADDR: u16 = 0x02B5;
+const CPU_RMW_MATRIX_ROL_RESULT_ADDR: u16 = 0x02B6;
+const CPU_RMW_MATRIX_LSR_RESULT_ADDR: u16 = 0x02B7;
+const CPU_RMW_MATRIX_ROR_RESULT_ADDR: u16 = 0x02B8;
+const CPU_RMW_MATRIX_INC_RESULT_ADDR: u16 = 0x02B9;
+const CPU_RMW_MATRIX_DEC_RESULT_ADDR: u16 = 0x02BA;
+const CPU_RMW_MATRIX_CASE_COUNT_ADDR: u16 = 0x02BB;
+const CPU_RMW_MATRIX_EXPECTED_CASE_COUNT: u8 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -705,6 +715,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "coarse-X samples prove an 8-pixel scroll shifts the viewport into the next background tile",
             "nametable-wrap samples prove a 248-pixel scroll crosses from nametable $2000 into vertical-mirrored nametable $2400",
             "top and bottom samples straddle a vertical scroll tile seam",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_RMW_MATRIX_TEST_ID,
+        name: "cpu_read_modify_write_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify zero-page read-modify-write CPU opcodes update memory through the CPU execution path.",
+        expected_observations: &[
+            "ASL and LSR write shifted zero-page memory results",
+            "ROL and ROR consume carry-in while writing zero-page memory results",
+            "INC and DEC wrap memory and expose zero/negative-result cases",
         ],
     },
 ];
@@ -1233,6 +1255,60 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect indirect,Y zero-page pointer wrapping, Y indexing, and page-cross cycle penalty handling.",
     },
     DiagnosticFailureSpec {
+        code: 0xB5,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "ASL zero-page shifts memory left and writes the result back",
+        expected: "ASL $30 turns 0x40 into 0x80 in zero-page RAM",
+        observed: "$0030 did not contain the ASL write-back sentinel",
+        likely_domain: "cpu.rmw.asl",
+        remediation_hint: "Inspect ASL zero-page read/modify/write sequencing, carry-out, and memory write-back behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB6,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "ROL zero-page consumes carry-in and writes the rotated result back",
+        expected: "SEC; ROL $31 turns 0x80 into 0x01 in zero-page RAM",
+        observed: "$0031 did not contain the ROL write-back sentinel",
+        likely_domain: "cpu.rmw.rol",
+        remediation_hint: "Inspect ROL zero-page carry-in/carry-out handling and memory write-back behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB7,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "LSR zero-page shifts memory right and writes the result back",
+        expected: "LSR $32 turns 0x81 into 0x40 in zero-page RAM",
+        observed: "$0032 did not contain the LSR write-back sentinel",
+        likely_domain: "cpu.rmw.lsr",
+        remediation_hint: "Inspect LSR zero-page read/modify/write sequencing, carry-out, and memory write-back behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB8,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "ROR zero-page consumes carry-in and writes the rotated result back",
+        expected: "SEC; ROR $33 turns 0x01 into 0x80 in zero-page RAM",
+        observed: "$0033 did not contain the ROR write-back sentinel",
+        likely_domain: "cpu.rmw.ror",
+        remediation_hint: "Inspect ROR zero-page carry-in/carry-out handling and memory write-back behavior.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xB9,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "INC zero-page wraps 0xFF to 0x00 and writes the result back",
+        expected: "INC $34 turns 0xFF into 0x00 in zero-page RAM",
+        observed: "$0034 did not contain the INC write-back sentinel",
+        likely_domain: "cpu.rmw.inc",
+        remediation_hint: "Inspect INC zero-page memory write-back and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xBA,
+        test_id: CPU_RMW_MATRIX_TEST_ID,
+        assertion: "DEC zero-page wraps 0x00 to 0xFF and writes the result back",
+        expected: "DEC $35 turns 0x00 into 0xFF in zero-page RAM",
+        observed: "$0035 did not contain the DEC write-back sentinel",
+        likely_domain: "cpu.rmw.dec",
+        remediation_hint: "Inspect DEC zero-page memory write-back and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
         code: 0xD0,
         test_id: 14,
         assertion: "PPUDATA read from $2000 returns the buffered VRAM byte on the second read",
@@ -1347,9 +1423,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, indirect JMP page-wrap behavior, and a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, write/modify addressing-mode combinations, and broader cycle-accurate addressing penalties.",
-        suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, and a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, non-zero-page read/modify/write addressing modes, and broader cycle-accurate addressing penalties.",
+        suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
     DiagnosticCoverageGapSpec {
         id: "ppu_pixel_pipeline",
@@ -1437,6 +1513,7 @@ pub enum DiagnosticFaultInjection {
     CpuAddressingModeMatrix,
     CpuIndirectJmpPageWrap,
     CpuRamMirroring,
+    CpuReadModifyWriteMatrix,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
     DmaPhaseMatrix,
@@ -1457,11 +1534,12 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 21] = [
+    pub const ALL: [DiagnosticFaultInjection; 22] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuRamMirroring,
+        DiagnosticFaultInjection::CpuReadModifyWriteMatrix,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
         DiagnosticFaultInjection::DmaPhaseMatrix,
@@ -1487,6 +1565,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
+            DiagnosticFaultInjection::CpuReadModifyWriteMatrix => "cpu_rmw_matrix",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::DmaPhaseMatrix => "dma_phase_matrix",
@@ -1517,6 +1596,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuReadModifyWriteMatrix => CPU_RMW_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::DmaPhaseMatrix => DMA_PHASE_MATRIX_FAULT_LABEL,
@@ -1559,6 +1639,7 @@ pub struct DiagnosticTelemetry {
     pub frames: u64,
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
+    pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub apu_dmc_status: ApuDmcStatusTelemetry,
@@ -2086,6 +2167,25 @@ pub struct CpuAddressingMatrixTelemetry {
     pub abs_x_page_cross_result_hex: String,
     pub indirect_y_page_cross_result: u8,
     pub indirect_y_page_cross_result_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuRmwMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub passed: bool,
+    pub asl_result: u8,
+    pub asl_result_hex: String,
+    pub rol_result: u8,
+    pub rol_result_hex: String,
+    pub lsr_result: u8,
+    pub lsr_result_hex: String,
+    pub ror_result: u8,
+    pub ror_result_hex: String,
+    pub inc_result: u8,
+    pub inc_result_hex: String,
+    pub dec_result: u8,
+    pub dec_result_hex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -4245,12 +4345,14 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         audio_sum_abs,
         audio_sum_squares,
     );
+    let cpu_rmw_matrix = cpu_rmw_matrix_telemetry(&ram);
     let mut host_failures = host_validate(HostValidationInput {
         status,
         timeout,
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
         input_mask_sweep: &input_mask_sweep,
         apu_status_matrix: &apu_status_matrix,
@@ -4289,6 +4391,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         tests: &test_results,
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
+        cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
         input_mask_sweep: &input_mask_sweep,
         apu_status_matrix: &apu_status_matrix,
@@ -4364,6 +4467,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         frames,
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
+        cpu_rmw_matrix,
         input_port_matrix,
         apu_status_matrix,
         apu_dmc_status,
@@ -7148,6 +7252,7 @@ struct HostValidationInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     input_mask_sweep: &'a InputMaskSweepTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
@@ -7179,6 +7284,7 @@ struct ProbeTelemetryInput<'a> {
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
+    cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
     input_mask_sweep: &'a InputMaskSweepTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
@@ -7246,6 +7352,19 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_addressing_matrix.indirect_y_page_cross_result_hex,
             input.cpu_addressing_matrix.observed_case_count,
             input.cpu_addressing_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_rmw_matrix.passed {
+        failures.push(format!(
+            "CPU read-modify-write matrix mismatch: asl={}, rol={}, lsr={}, ror={}, inc={}, dec={}, cases {}/{}",
+            input.cpu_rmw_matrix.asl_result_hex,
+            input.cpu_rmw_matrix.rol_result_hex,
+            input.cpu_rmw_matrix.lsr_result_hex,
+            input.cpu_rmw_matrix.ror_result_hex,
+            input.cpu_rmw_matrix.inc_result_hex,
+            input.cpu_rmw_matrix.dec_result_hex,
+            input.cpu_rmw_matrix.observed_case_count,
+            input.cpu_rmw_matrix.expected_case_count
         ));
     }
     if !input.input_port_matrix.passed {
@@ -7744,6 +7863,34 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_addressing_matrix.expected_case_count
             ),
             likely_domain: "cpu.addressing.page_cross_load".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.rmw_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_RMW_MATRIX_TEST_ID),
+            test_name: test_name(CPU_RMW_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_rmw_matrix.passed),
+            description:
+                "CPU read-modify-write matrix retained expected zero-page memory write-back results"
+                    .to_string(),
+            expected: "ASL=0x80, ROL=0x01, LSR=0x40, ROR=0x80, INC=0x00, DEC=0xFF, cases=6"
+                .to_string(),
+            observed: format!(
+                "ASL {}, ROL {}, LSR {}, ROR {}, INC {}, DEC {}, cases {}/{}",
+                input.cpu_rmw_matrix.asl_result_hex,
+                input.cpu_rmw_matrix.rol_result_hex,
+                input.cpu_rmw_matrix.lsr_result_hex,
+                input.cpu_rmw_matrix.ror_result_hex,
+                input.cpu_rmw_matrix.inc_result_hex,
+                input.cpu_rmw_matrix.dec_result_hex,
+                input.cpu_rmw_matrix.observed_case_count,
+                input.cpu_rmw_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.rmw.asl".to_string(),
         },
     );
     push_probe(
@@ -8903,6 +9050,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_sprite_overflow();
     program.ppu_sprite_priority();
     program.ppu_scroll_seam();
+    program.cpu_read_modify_write_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -9701,6 +9849,63 @@ impl DiagnosticProgram {
         self.asm.lda_imm(CPU_ADDRESSING_MATRIX_EXPECTED_CASE_COUNT);
         self.asm.sta_abs(CPU_ADDRESSING_MATRIX_CASE_COUNT_ADDR);
         self.pass_test(22);
+    }
+
+    fn cpu_read_modify_write_matrix(&mut self) {
+        self.begin_test(CPU_RMW_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_RMW_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_imm(0x40);
+        self.asm.sta_zp(0x30);
+        self.asm
+            .label(CPU_RMW_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.asl_zp(0x30);
+        self.asm.lda_zp(0x30);
+        self.asm.sta_abs(CPU_RMW_MATRIX_ASL_RESULT_ADDR);
+        self.expect_a_eq(0x80, 0xB5);
+
+        self.asm.lda_imm(0x80);
+        self.asm.sta_zp(0x31);
+        self.asm.sec();
+        self.asm.rol_zp(0x31);
+        self.asm.lda_zp(0x31);
+        self.asm.sta_abs(CPU_RMW_MATRIX_ROL_RESULT_ADDR);
+        self.expect_a_eq(0x01, 0xB6);
+
+        self.asm.lda_imm(0x81);
+        self.asm.sta_zp(0x32);
+        self.asm.lsr_zp(0x32);
+        self.asm.lda_zp(0x32);
+        self.asm.sta_abs(CPU_RMW_MATRIX_LSR_RESULT_ADDR);
+        self.expect_a_eq(0x40, 0xB7);
+
+        self.asm.lda_imm(0x01);
+        self.asm.sta_zp(0x33);
+        self.asm.sec();
+        self.asm.ror_zp(0x33);
+        self.asm.lda_zp(0x33);
+        self.asm.sta_abs(CPU_RMW_MATRIX_ROR_RESULT_ADDR);
+        self.expect_a_eq(0x80, 0xB8);
+
+        self.asm.lda_imm(0xFF);
+        self.asm.sta_zp(0x34);
+        self.asm.inc_zp(0x34);
+        self.asm.lda_zp(0x34);
+        self.asm.sta_abs(CPU_RMW_MATRIX_INC_RESULT_ADDR);
+        self.expect_a_eq(0x00, 0xB9);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_zp(0x35);
+        self.asm.dec_zp(0x35);
+        self.asm.lda_zp(0x35);
+        self.asm.sta_abs(CPU_RMW_MATRIX_DEC_RESULT_ADDR);
+        self.expect_a_eq(0xFF, 0xBA);
+
+        self.asm.lda_imm(CPU_RMW_MATRIX_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(CPU_RMW_MATRIX_CASE_COUNT_ADDR);
+        self.pass_test(CPU_RMW_MATRIX_TEST_ID);
     }
 
     fn input_port_serial_matrix(&mut self) {
@@ -10575,8 +10780,28 @@ impl Assembler {
         self.op_abs_label(0x20, label);
     }
 
+    fn asl_zp(&mut self, addr: u8) {
+        self.op_zp(0x06, addr);
+    }
+
+    fn rol_zp(&mut self, addr: u8) {
+        self.op_zp(0x26, addr);
+    }
+
+    fn lsr_zp(&mut self, addr: u8) {
+        self.op_zp(0x46, addr);
+    }
+
+    fn ror_zp(&mut self, addr: u8) {
+        self.op_zp(0x66, addr);
+    }
+
     fn inc_zp(&mut self, addr: u8) {
         self.op_zp(0xE6, addr);
+    }
+
+    fn dec_zp(&mut self, addr: u8) {
+        self.op_zp(0xC6, addr);
     }
 
     fn inx(&mut self) {
@@ -10819,6 +11044,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuRamMirroring => {
             bus.cpu_write(0x0002, 0x00);
         }
+        DiagnosticFaultInjection::CpuReadModifyWriteMatrix => {
+            bus.cpu_write(0x0030, 0x01);
+        }
         DiagnosticFaultInjection::CpuZeroPageIndexWrap => {
             bus.cpu_write(0x0080, 0x00);
         }
@@ -10924,6 +11152,39 @@ fn cpu_addressing_matrix_telemetry(ram: &[u8]) -> CpuAddressingMatrixTelemetry {
         abs_x_page_cross_result_hex: hex_byte(abs_x_page_cross_result),
         indirect_y_page_cross_result,
         indirect_y_page_cross_result_hex: hex_byte(indirect_y_page_cross_result),
+    }
+}
+
+fn cpu_rmw_matrix_telemetry(ram: &[u8]) -> CpuRmwMatrixTelemetry {
+    let asl_result = ram[(CPU_RMW_MATRIX_ASL_RESULT_ADDR & 0x07FF) as usize];
+    let rol_result = ram[(CPU_RMW_MATRIX_ROL_RESULT_ADDR & 0x07FF) as usize];
+    let lsr_result = ram[(CPU_RMW_MATRIX_LSR_RESULT_ADDR & 0x07FF) as usize];
+    let ror_result = ram[(CPU_RMW_MATRIX_ROR_RESULT_ADDR & 0x07FF) as usize];
+    let inc_result = ram[(CPU_RMW_MATRIX_INC_RESULT_ADDR & 0x07FF) as usize];
+    let dec_result = ram[(CPU_RMW_MATRIX_DEC_RESULT_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_RMW_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuRmwMatrixTelemetry {
+        expected_case_count: CPU_RMW_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        passed: observed_case_count == CPU_RMW_MATRIX_EXPECTED_CASE_COUNT
+            && asl_result == 0x80
+            && rol_result == 0x01
+            && lsr_result == 0x40
+            && ror_result == 0x80
+            && inc_result == 0x00
+            && dec_result == 0xFF,
+        asl_result,
+        asl_result_hex: hex_byte(asl_result),
+        rol_result,
+        rol_result_hex: hex_byte(rol_result),
+        lsr_result,
+        lsr_result_hex: hex_byte(lsr_result),
+        ror_result,
+        ror_result_hex: hex_byte(ror_result),
+        inc_result,
+        inc_result_hex: hex_byte(inc_result),
+        dec_result,
+        dec_result_hex: hex_byte(dec_result),
     }
 }
 

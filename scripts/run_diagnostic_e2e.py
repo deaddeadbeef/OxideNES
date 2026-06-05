@@ -1104,7 +1104,13 @@ def main() -> int:
     summary_json = args.summary_json or suite_dir / "diagnostic-e2e-report.json"
     summary_report = args.summary_report or suite_dir / "diagnostic-e2e-report.md"
     suite_dir.mkdir(parents=True, exist_ok=True)
-    for stale_output in (summary_json, summary_report):
+    stale_outputs = (
+        summary_json,
+        summary_report,
+        suite_dir / "diagnostic-ai-artifact-verification.json",
+        suite_dir / "diagnostic-ai-artifact-verification.md",
+    )
+    for stale_output in stale_outputs:
         if stale_output.exists():
             stale_output.unlink()
 

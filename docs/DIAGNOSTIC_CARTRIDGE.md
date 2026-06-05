@@ -254,7 +254,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 24 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 25 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -308,8 +308,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 32
-scenarios match their expected health and focus-domain contracts, the 24
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 33
+scenarios match their expected health and focus-domain contracts, the 25
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -321,7 +321,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 24 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 25 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -409,7 +409,8 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `joypad1_mismatch`, `joypad2_mismatch`, `dma_oam_transfer_fault`,
 `dma_phase_matrix_fault`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
-`cpu_addressing_matrix_fault`, `input_port_matrix_fault`, `ppu_read_buffer_fault`,
+`cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`, `input_port_matrix_fault`,
+`ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `ppu_sprite_zero_hit_fault`,
 `ppu_sprite_overflow_fault`, `ppu_sprite_priority_fault`, `ppu_scroll_seam_fault`,
@@ -456,7 +457,7 @@ reports matched, changed, or regressed verdicts with replay args and current-run
 artifact pointers for any regression. Use `--fail-on-comparison-regression`
 with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
-`cpu_addressing_matrix_fault`, `input_port_matrix_fault`, and
+`cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`, `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
 assertion reads them, while `dma_oam_transfer_fault` corrupts the host-observed
@@ -508,6 +509,9 @@ localize to `joypad.strobe_high_hold`.
 `cpu_addressing_matrix_fault` corrupts the page-cross sentinel before the
 generated cartridge exercises absolute,X and indirect,Y loads, proving CPU load
 addressing regressions localize to `cpu.addressing.page_cross_load`.
+`cpu_rmw_matrix_fault` corrupts the ASL zero-page source byte before the
+generated cartridge exercises read-modify-write opcodes, proving RMW memory
+write-back regressions localize to `cpu.rmw.asl`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -663,7 +667,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 24 accepted AI routes into deterministic debugger startup plans
+turning all 25 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -734,6 +738,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Stack, `JSR`, and `RTS`
 - Zero-page indexed read/write wraparound
 - Indirect `JMP ($xxFF)` page-wrap behavior
+- Zero-page read-modify-write memory write-back for `ASL`, `ROL`, `LSR`,
+  `ROR`, `INC`, and `DEC`
 - 2 KiB CPU RAM mirroring
 - PPU palette register write/read
 - PPU non-palette PPUDATA read buffering, PPUCTRL-driven increment-by-32
@@ -1206,6 +1212,12 @@ captures mapper SRAM and restores it into a fresh cartridge. It exposes top-leve
 `mapper4_mmc3_prg_ram` telemetry plus the
 `mapper4.mmc3_prg_ram_persistence` probe.
 
+Schema version `59` adds the `cpu_read_modify_write_matrix` cartridge test,
+top-level `cpu_rmw_matrix` telemetry, and the `cpu.rmw_matrix.results` probe.
+The cartridge records zero-page `ASL`, `ROL`, `LSR`, `ROR`, `INC`, and `DEC`
+write-back sentinels and localizes the intentional `cpu_rmw_matrix_fault`
+fixture to `cpu.rmw.asl`.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1217,3 +1229,8 @@ fixture. The fault corrupts the low CPU RAM sentinel immediately before the
 test 3 `$0802` mirror read, so the suite can localize internal RAM mirror
 regressions to `bus.cpu_ram_mirroring` with a paired AI route and replay
 command.
+
+Scenario suite schema version `10` adds the `cpu_rmw_matrix_fault` negative
+fixture. The fault corrupts the ASL zero-page source byte immediately before
+test 37 executes, so the suite can localize read-modify-write write-back
+regressions to `cpu.rmw.asl` with a paired AI route and replay command.
