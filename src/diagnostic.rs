@@ -268,6 +268,7 @@ const MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR: u16 = 0x02B1;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
+const CPU_RAM_MIRRORING_FAULT_LABEL: &str = "cpu_ram_mirroring_before_first_mirror_read";
 const CPU_ZERO_PAGE_WRAP_FAULT_LABEL: &str = "cpu_zero_page_index_wrap_before_read";
 const CPU_INDIRECT_JMP_FAULT_LABEL: &str = "cpu_indirect_jmp_page_wrap_before_jump";
 const DMA_OAM_TRANSFER_FAULT_LABEL: &str = "oam_dma_transfer_before_dma";
@@ -1435,6 +1436,7 @@ pub enum DiagnosticFaultInjection {
     ApuStatusRegister,
     CpuAddressingModeMatrix,
     CpuIndirectJmpPageWrap,
+    CpuRamMirroring,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
     DmaPhaseMatrix,
@@ -1455,10 +1457,11 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 20] = [
+    pub const ALL: [DiagnosticFaultInjection; 21] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
+        DiagnosticFaultInjection::CpuRamMirroring,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
         DiagnosticFaultInjection::DmaPhaseMatrix,
@@ -1483,6 +1486,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
+            DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::DmaPhaseMatrix => "dma_phase_matrix",
@@ -1512,6 +1516,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::DmaPhaseMatrix => DMA_PHASE_MATRIX_FAULT_LABEL,
@@ -9127,6 +9132,9 @@ impl DiagnosticProgram {
         self.begin_test(3);
         self.asm.lda_imm(0x5A);
         self.asm.sta_abs(0x0002);
+        self.asm
+            .label(CPU_RAM_MIRRORING_FAULT_LABEL)
+            .expect("CPU RAM mirroring fault label should be unique");
         self.asm.lda_abs(0x0802);
         self.expect_a_eq(0x5A, 0x31);
         self.asm.lda_imm(0xA5);
@@ -10807,6 +10815,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
             let wrong_target_high = bus.cpu_read(0x0500);
             bus.cpu_write(0x0400, wrong_target_high);
+        }
+        DiagnosticFaultInjection::CpuRamMirroring => {
+            bus.cpu_write(0x0002, 0x00);
         }
         DiagnosticFaultInjection::CpuZeroPageIndexWrap => {
             bus.cpu_write(0x0080, 0x00);

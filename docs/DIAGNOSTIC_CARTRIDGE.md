@@ -254,7 +254,7 @@ python scripts/run_diagnostic_ai_route_matrix.py --suite-dir target/diagnostics/
 
 This writes `diagnostic-ai-route-matrix.json` plus
 `diagnostic-ai-route-matrix.md`, with per-route diagnosis and fix-handoff files
-under `ai-route-matrix/<route>/`. A passed matrix means all 23 focus-domain
+under `ai-route-matrix/<route>/`. A passed matrix means all 24 focus-domain
 routes replay, run their mapped narrow tests, resolve source/test anchors, and
 meet their stop conditions.
 
@@ -308,8 +308,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 31
-scenarios match their expected health and focus-domain contracts, the 23
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 32
+scenarios match their expected health and focus-domain contracts, the 24
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -321,7 +321,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 23 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 24 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -663,7 +663,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 23 accepted AI routes into deterministic debugger startup plans
+turning all 24 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -1211,3 +1211,9 @@ Scenario suite schema version `8` and observer schema version `2` add
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
 with the exact cycle, joypad, expected mask, and fault-injection settings needed
 to regenerate that one bundle.
+
+Scenario suite schema version `9` adds the `cpu_ram_mirroring_fault` negative
+fixture. The fault corrupts the low CPU RAM sentinel immediately before the
+test 3 `$0802` mirror read, so the suite can localize internal RAM mirror
+regressions to `bus.cpu_ram_mirroring` with a paired AI route and replay
+command.

@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 8;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 9;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
@@ -1859,6 +1859,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(11),
             expected_focus_domain: Some("joypad2.strobe_shift"),
+        },
+        DiagnosticScenarioSpec {
+            id: "cpu_ram_mirroring_fault",
+            title: "Intentional CPU RAM mirroring assertion failure",
+            purpose: "Failure-localization fixture for $0000-$1FFF CPU RAM mirror regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuRamMirroring),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(3),
+            expected_focus_domain: Some("bus.cpu_ram_mirroring"),
         },
         DiagnosticScenarioSpec {
             id: "dma_oam_transfer_fault",

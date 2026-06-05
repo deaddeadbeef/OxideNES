@@ -1923,6 +1923,71 @@ fn generated_diagnostic_cartridge_localizes_intentional_joypad2_failure() {
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_cpu_ram_mirroring_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::CpuRamMirroring),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported bus RAM-mirroring failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("cpu_ram_mirroring")
+    );
+    assert_eq!(telemetry.verdict.current_test, 3);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_ram_mirroring")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x31);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include bus RAM-mirroring localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::CartridgeAssertion);
+    assert_eq!(failure.test_id, 3);
+    assert_eq!(failure.test_name, Some("cpu_ram_mirroring"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Bus));
+    assert_eq!(failure.failure_code_hex, "0x31");
+    assert_eq!(failure.likely_domain, "bus.cpu_ram_mirroring");
+    assert!(failure.assertion.contains("CPU RAM mirror at $0802"));
+
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Bus)
+    );
+    assert_eq!(telemetry.analysis.failing_test, Some("cpu_ram_mirroring"));
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("bus.cpu_ram_mirroring")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 3);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("bus.cpu_ram_mirroring")
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "cartridge.test.3.result"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(3)
+            && probe.likely_domain == "bus.cpu_ram_mirroring"
+    }));
+    assert!(telemetry.instruction_trace.tail.iter().any(|entry| entry
+        .symbol
+        .as_ref()
+        .is_some_and(|symbol| symbol.name == "cpu_ram_mirroring_before_first_mirror_read")));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | cpu_ram_mirroring (3) |"));
+    assert!(report.contains("| Focus domain | bus.cpu_ram_mirroring |"));
+    assert!(report.contains("| Likely domain | bus.cpu_ram_mirroring |"));
+    assert!(report.contains("| 3 | cpu_ram_mirroring | bus | smoke | failed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_dma_oam_transfer_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::DmaOamTransfer),

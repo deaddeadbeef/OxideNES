@@ -149,7 +149,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(8));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(9));
     assert_eq!(manifest["telemetry_schema_version"], Value::from(58));
     assert_eq!(manifest["triage_schema_version"], Value::from(6));
     assert_eq!(manifest["bundle_schema_version"], Value::from(3));
@@ -159,7 +159,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["baseline_scenario_id"],
         Value::String("pass".to_string())
     );
-    assert_eq!(manifest["scenario_count"], Value::from(31));
+    assert_eq!(manifest["scenario_count"], Value::from(32));
     assert_eq!(
         manifest["artifacts"]["scenario_suite_json"],
         Value::String("scenario-suite.json".to_string())
@@ -180,10 +180,10 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         manifest["analysis"]["status"],
         Value::String("passed".to_string())
     );
-    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(31));
+    assert_eq!(manifest["analysis"]["scenario_count"], Value::from(32));
     assert_eq!(
         manifest["analysis"]["expectation_met_count"],
-        Value::from(31)
+        Value::from(32)
     );
     assert_eq!(
         manifest["analysis"]["expectation_mismatch_count"],
@@ -195,7 +195,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     );
     assert_eq!(
         manifest["analysis"]["baseline_divergence_count"],
-        Value::from(23)
+        Value::from(24)
     );
     assert_eq!(
         manifest["analysis"]["critical_scenario_ids"],
@@ -260,6 +260,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .as_array()
         .expect("known divergence scenario ids should be an array")
         .iter()
+        .any(|id| id == &Value::String("cpu_ram_mirroring_fault".to_string())));
+    assert!(manifest["analysis"]["known_divergence_scenario_ids"]
+        .as_array()
+        .expect("known divergence scenario ids should be an array")
+        .iter()
         .any(|id| id == &Value::String("dma_phase_matrix_fault".to_string())));
     assert!(manifest["analysis"]["known_divergence_scenario_ids"]
         .as_array()
@@ -284,7 +289,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let attention_queue = manifest["analysis"]["attention_queue"]
         .as_array()
         .expect("attention queue should be an array");
-    assert_eq!(attention_queue.len(), 23);
+    assert_eq!(attention_queue.len(), 24);
     let timeout_attention = find_attention_item(attention_queue, "timeout_cycle_limit");
     assert_eq!(
         timeout_attention["priority"],
@@ -316,6 +321,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert_eq!(
         ppu_attention["next_artifact"],
         Value::String("ppu_read_buffer_fault/comparison.json".to_string())
+    );
+    let bus_attention = find_attention_item(attention_queue, "cpu_ram_mirroring_fault");
+    assert_eq!(
+        bus_attention["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        bus_attention["focus_domain"],
+        Value::String("bus.cpu_ram_mirroring".to_string())
+    );
+    assert_eq!(
+        bus_attention["next_artifact"],
+        Value::String("cpu_ram_mirroring_fault/comparison.json".to_string())
     );
     let ppu_mirroring_attention =
         find_attention_item(attention_queue, "ppu_nametable_mirroring_fault");
@@ -551,19 +569,19 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
     assert_eq!(observer["observer_schema_version"], Value::from(2));
-    assert_eq!(observer["scenario_suite_schema_version"], Value::from(8));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(9));
     assert_eq!(observer["telemetry_schema_version"], Value::from(58));
     assert_eq!(observer["triage_schema_version"], Value::from(6));
     assert_eq!(observer["bundle_schema_version"], Value::from(3));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
-    assert_eq!(observer["scenario_count"], Value::from(31));
+    assert_eq!(observer["scenario_count"], Value::from(32));
     assert_eq!(observer["contract_mismatch_count"], Value::from(0));
-    assert_eq!(observer["baseline_divergence_count"], Value::from(23));
+    assert_eq!(observer["baseline_divergence_count"], Value::from(24));
     let observer_actions = observer["next_actions"]
         .as_array()
         .expect("observer next_actions should be an array");
-    assert_eq!(observer_actions.len(), 23);
+    assert_eq!(observer_actions.len(), 24);
     let timeout_action = find_observer_action(observer_actions, "timeout_cycle_limit");
     assert_eq!(
         timeout_action["priority"],
@@ -589,6 +607,24 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
         .any(|entry| entry
             .as_str()
             .is_some_and(|text| text.starts_with("comparison_difference_count="))));
+    let bus_action = find_observer_action(observer_actions, "cpu_ram_mirroring_fault");
+    assert_eq!(
+        bus_action["priority"],
+        Value::String("known_divergence".to_string())
+    );
+    assert_eq!(
+        bus_action["action_type"],
+        Value::String("inspect_known_divergence".to_string())
+    );
+    assert_eq!(
+        bus_action["primary_artifact"],
+        Value::String("cpu_ram_mirroring_fault/comparison.json".to_string())
+    );
+    assert!(bus_action["evidence"]
+        .as_array()
+        .expect("bus action evidence should be an array")
+        .iter()
+        .any(|entry| entry == &Value::String("focus_domain=bus.cpu_ram_mirroring".to_string())));
     assert!(timeout_action["evidence"]
         .as_array()
         .expect("timeout action evidence should be an array")
@@ -963,7 +999,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let observations = observer["observations"]
         .as_array()
         .expect("observer observations should be an array");
-    assert_eq!(observations.len(), 31);
+    assert_eq!(observations.len(), 32);
     let pass_observation = find_observer_observation(observations, "pass");
     assert_eq!(
         pass_observation["role"],
@@ -1594,6 +1630,7 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(observer_report.contains("| mapper2_bank_switch_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_bank_switch |"));
     assert!(observer_report.contains("| mapper2_prg_ram_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | mapper.uxrom.prg_ram |"));
     assert!(observer_report.contains("| ppu_nmi_timeout_fault | expected_failure_fixture | expected_baseline_divergence | timed_out | ppu.nmi |"));
+    assert!(observer_report.contains("| cpu_ram_mirroring_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | bus.cpu_ram_mirroring |"));
     assert!(observer_report.contains("| cpu_indirect_jmp_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.control_flow.indirect_jmp_page_wrap |"));
     assert!(observer_report.contains("| cpu_addressing_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | cpu.addressing.page_cross_load |"));
     assert!(observer_report.contains("| input_port_matrix_fault | expected_failure_fixture | expected_baseline_divergence | cartridge_assertion_failed | joypad.input_port_matrix |"));
@@ -1607,12 +1644,13 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     assert!(suite_report.contains("# Diagnostic Scenario Suite"));
     assert!(suite_report.contains("## Suite Analysis"));
     assert!(suite_report.contains("| Status | passed |"));
-    assert!(suite_report.contains("| Baseline divergences | 23 |"));
+    assert!(suite_report.contains("| Baseline divergences | 24 |"));
     assert!(suite_report.contains("## Attention Queue"));
     assert!(suite_report.contains("| known_divergence | timeout_cycle_limit | scenario_diverges_from_pass_baseline | timed_out | emulator.progress_or_infinite_loop |"));
     assert!(suite_report.contains("| known_divergence | dma_oam_transfer_fault | scenario_diverges_from_pass_baseline | host_validation_failed | dma.oam_transfer |"));
     assert!(suite_report.contains("| known_divergence | dma_phase_matrix_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | dma.oam_phase_matrix |"));
     assert!(suite_report.contains("| known_divergence | apu_status_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | apu.status |"));
+    assert!(suite_report.contains("| known_divergence | cpu_ram_mirroring_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | bus.cpu_ram_mirroring |"));
     assert!(suite_report.contains("| known_divergence | ppu_read_buffer_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.registers.ppudata_buffer |"));
     assert!(suite_report.contains("| known_divergence | ppu_nametable_mirroring_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.nametables.horizontal_mirroring |"));
     assert!(suite_report.contains("| known_divergence | ppu_sprite_zero_hit_fault | scenario_diverges_from_pass_baseline | cartridge_assertion_failed | ppu.sprite_zero_hit |"));
