@@ -1,6 +1,6 @@
 [package]
 name = "oxidenes"
-version = "0.3.22"
+version = "0.3.23"
 edition = "2021"
 default-run = "oxidenes"
 authors = ["pf-github-code"]
