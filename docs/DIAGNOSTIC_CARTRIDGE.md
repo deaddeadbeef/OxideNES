@@ -411,6 +411,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `apu_status_fault`, `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
 `cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`,
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
+`cpu_stack_matrix_fault`,
 `input_port_matrix_fault`,
 `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -461,6 +462,7 @@ with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_zero_page_wrap_fault`, `cpu_indirect_jmp_fault`,
 `cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`,
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
+`cpu_stack_matrix_fault`,
 `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -524,6 +526,10 @@ regressions localize to `cpu.rmw.absolute_asl`.
 generated cartridge exercises all conditional branch taken/not-taken flag
 states plus a page-crossing branch target, proving conditional branch
 regressions localize to `cpu.branch.condition_matrix`.
+`cpu_stack_matrix_fault` corrupts the stack/status matrix case counter before
+the generated cartridge exercises TXS/TSX, PHA/PLA, PHP/PLP, and JSR/RTS stack
+paths, proving stack pointer, status push/pull, and subroutine-return
+regressions localize to `cpu.stack.status_matrix`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -536,6 +542,7 @@ to `ppu.registers.status_latch_reset`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
+CPU stack/status behavior,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
 joypad mask-table fixtures, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
@@ -1273,3 +1280,9 @@ fixture. The fault corrupts the branch-matrix case counter immediately before
 test 39 executes, so the suite can localize conditional branch flag-state and
 page-cross target regressions to `cpu.branch.condition_matrix` with a paired AI
 route and replay command.
+
+Scenario suite schema version `13` adds the `cpu_stack_matrix_fault` negative
+fixture. The fault corrupts the stack/status matrix case counter immediately
+before test 40 executes, so the suite can localize stack pointer, push/pop,
+status push/pull, and JSR/RTS regressions to `cpu.stack.status_matrix` with a
+paired AI route and replay command.

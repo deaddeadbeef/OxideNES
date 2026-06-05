@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 12
+EXPECTED_SCENARIO_SUITE_SCHEMA = 13
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 61
+EXPECTED_TELEMETRY_SCHEMA = 62
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -34,6 +34,7 @@ EXPECTED_SCENARIOS = {
     "cpu_indirect_jmp_fault",
     "cpu_addressing_matrix_fault",
     "cpu_branch_matrix_fault",
+    "cpu_stack_matrix_fault",
     "cpu_rmw_matrix_fault",
     "cpu_rmw_addressing_matrix_fault",
     "input_port_matrix_fault",
@@ -205,6 +206,7 @@ class SuiteVerifier:
             "cpu_rmw_matrix_fault",
             "cpu_rmw_addressing_matrix_fault",
             "cpu_branch_matrix_fault",
+            "cpu_stack_matrix_fault",
             "input_port_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
@@ -912,6 +914,39 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.39.result",
             branch_evidence,
             "CPU branch matrix observer evidence",
+        )
+        stack = by_scenario.get("cpu_stack_matrix_fault")
+        if not isinstance(stack, dict):
+            self.errors.append("missing observer action for cpu_stack_matrix_fault")
+            return
+
+        self.expect_equal(
+            stack.get("priority"),
+            "known_divergence",
+            "CPU stack matrix observer action priority",
+        )
+        self.expect_equal(
+            stack.get("action_type"),
+            "inspect_known_divergence",
+            "CPU stack matrix observer action type",
+        )
+        self.expect_equal(
+            stack.get("primary_artifact"),
+            "cpu_stack_matrix_fault/comparison.json",
+            "CPU stack matrix observer primary_artifact",
+        )
+        stack_evidence = self.expect_list(
+            stack.get("evidence"), "CPU stack matrix observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.stack.status_matrix",
+            stack_evidence,
+            "CPU stack matrix observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.40.result",
+            stack_evidence,
+            "CPU stack matrix observer evidence",
         )
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if not isinstance(rmw, dict):
@@ -1709,6 +1744,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_branch_matrix_fault")
+
+        stack = by_scenario.get("cpu_stack_matrix_fault")
+        if isinstance(stack, dict):
+            self.expect_equal(
+                stack.get("role"),
+                "expected_failure_fixture",
+                "CPU stack matrix observer role",
+            )
+            self.expect_equal(
+                stack.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU stack matrix observer outcome",
+            )
+            self.expect_equal(
+                stack.get("health"),
+                "cartridge_assertion_failed",
+                "CPU stack matrix observer health",
+            )
+            self.expect_equal(
+                stack.get("focus_domain"),
+                "cpu.stack.status_matrix",
+                "CPU stack matrix observer focus_domain",
+            )
+            self.expect_equal(
+                stack.get("next_artifact"),
+                "cpu_stack_matrix_fault/comparison.json",
+                "CPU stack matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_stack_matrix_fault")
 
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if isinstance(rmw, dict):
