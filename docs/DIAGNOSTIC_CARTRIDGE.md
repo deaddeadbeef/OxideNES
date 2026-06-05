@@ -754,6 +754,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Joypad mid-stream strobe reset behavior
 - Joypad strobe-high hold behavior
 - Combined `$4016`/`$4017` strobe-high, serial-shift, and overread matrix
+- Generated `$4016`/`$4017` input-mask sweep variant across 16 host-applied
+  controller mask pairs
 - Taken CPU branch crossing a page boundary
 - Joypad reads after the eighth latched button
 - PPU NMI delivery, host-observed vblank timing windows, PPUSTATUS
@@ -1140,6 +1142,13 @@ host diagnostic run. The variant writes CHR bank values `0` through `3` to
 `$8000`, performs buffered PPUDATA reads from CHR address `$0010`, records the
 four observed bank-specific sentinel bytes in RAM, and exposes top-level
 `mapper3_chr_bank` telemetry plus the `mapper3.chr_bank_switch` probe.
+
+Schema version `52` adds a generated input-mask sweep variant cartridge to the
+host diagnostic run. The variant receives joypad-1 and joypad-2 expected masks
+from the host, strobes `$4016`, reconstructs both ports' eight serial bits into
+RAM, compares the reconstructed bytes to the expected masks, and exposes
+top-level `input_mask_sweep` telemetry plus the
+`joypad.input_mask_sweep.results` probe across 16 stratified mask pairs.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

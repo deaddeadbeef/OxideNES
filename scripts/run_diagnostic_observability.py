@@ -147,6 +147,19 @@ FOCUS_DOMAIN_CODE_MAP = {
             "set_button_pressed",
         ],
     },
+    "joypad.input_mask_sweep": {
+        "subsystem": "joypad",
+        "description": "Generated input-mask sweep variant reconstructs both $4016 and $4017 serial bytes across host-applied mask pairs.",
+        "source_files": ["src/joypad.rs", "src/bus.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/joypad_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "$4016",
+            "$4017",
+            "input_mask_sweep",
+            "set_button_pressed",
+            "read_joypad_port_mask_into",
+        ],
+    },
     "mapper.uxrom.prg_bank_switch": {
         "subsystem": "mapper",
         "description": "Mapper 2/UXROM switchable PRG bank selection and fixed-bank reads.",

@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 51;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 52;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v51";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v52";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -40,6 +40,7 @@ const MAPPER2_PRG_RAM_HIGH_ADDR: u16 = 0x7FFF;
 const MAPPER2_PRG_RAM_LOW_SENTINEL: u8 = 0x5C;
 const MAPPER2_PRG_RAM_HIGH_SENTINEL: u8 = 0xA7;
 const MAPPER3_CHR_BANK_TEST_ID: u8 = 29;
+const INPUT_MASK_SWEEP_TEST_ID: u8 = 30;
 const MAPPER3_MAPPER: u8 = 3;
 const MAPPER3_PRG_BANKS: u8 = 2;
 const MAPPER3_CHR_BANKS: u8 = 4;
@@ -47,6 +48,25 @@ const MAPPER3_CHR_READ_ADDR: u16 = 0x0010;
 const MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT: u8 = 4;
 const MAPPER3_CHR_BANK_EXPECTED_BANKS: [u8; 4] = [0, 1, 2, 3];
 const MAPPER3_CHR_BANK_EXPECTED_VALUES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
+const INPUT_MASK_SWEEP_CASES: [(u8, u8); 16] = [
+    (0x00, 0x00),
+    (0xFF, 0xFF),
+    (0xAA, 0x55),
+    (0x55, 0xAA),
+    (0x81, 0x28),
+    (0x18, 0x42),
+    (0x24, 0x81),
+    (0xC3, 0x3C),
+    (0x01, 0x00),
+    (0x00, 0x80),
+    (0x7E, 0xE7),
+    (0x99, 0x66),
+    (0x10, 0x08),
+    (0xEF, 0xF7),
+    (0xA5, 0x5A),
+    (0x3C, 0xC3),
+];
+const INPUT_MASK_SWEEP_EXPECTED_CASE_COUNT: u8 = INPUT_MASK_SWEEP_CASES.len() as u8;
 
 const STATUS_ADDR: u8 = 0xF0;
 const CURRENT_TEST_ADDR: u8 = 0xF1;
@@ -111,6 +131,9 @@ const APU_DMC_STATUS_OBSERVED_BIT_ADDR: u16 = 0x0264;
 const APU_DMC_STATUS_CASE_COUNT_ADDR: u16 = 0x0265;
 const MAPPER3_CHR_BANK_CASE_COUNT_ADDR: u16 = 0x0266;
 const MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR: u16 = 0x0267;
+const INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR: u16 = 0x026B;
+const INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR: u16 = 0x026C;
+const INPUT_MASK_SWEEP_CASE_COUNT_ADDR: u16 = 0x026D;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1232,9 +1255,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, and a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads.",
-        missing_coverage: "Broader exhaustive per-port mask sweeps beyond the representative sparse/dense fixtures, disconnected-controller electrical defaults beyond all-released masks, and host input remapping.",
-        suggested_next_test: "Run the serial-read program across a stratified or exhaustive per-port mask table plus host-remapping fixtures.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, and a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs.",
+        missing_coverage: "Exhaustive 65,536 two-port mask sweeps, disconnected-controller electrical defaults beyond all-released masks, and host input remapping.",
+        suggested_next_test: "Add an optional exhaustive input-port sweep mode and host-remapping fixtures.",
     },
 ];
 
@@ -1386,6 +1409,7 @@ pub struct DiagnosticTelemetry {
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
     pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
+    pub input_mask_sweep: InputMaskSweepTelemetry,
     pub input: DiagnosticInputTelemetry,
     pub verdict: VerdictTelemetry,
     pub analysis: DiagnosticAnalysisTelemetry,
@@ -1448,6 +1472,35 @@ pub struct Mapper3ChrBankTelemetry {
     pub expected_values_hex: Vec<String>,
     pub observed_values: Vec<u8>,
     pub observed_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InputMaskSweepTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub passed_case_count: usize,
+    pub failed_case_count: usize,
+    pub cases: Vec<InputMaskSweepCaseTelemetry>,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InputMaskSweepCaseTelemetry {
+    pub index: usize,
+    pub joypad1_expected_mask: u8,
+    pub joypad1_expected_mask_hex: String,
+    pub joypad1_observed_mask: u8,
+    pub joypad1_observed_mask_hex: String,
+    pub joypad2_expected_mask: u8,
+    pub joypad2_expected_mask_hex: String,
+    pub joypad2_observed_mask: u8,
+    pub joypad2_observed_mask_hex: String,
+    pub observed_case_count: u8,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -2325,6 +2378,11 @@ fn build_mapper3_chr_bank_variant_cartridge() -> Result<Vec<u8>, String> {
     )
 }
 
+fn build_input_mask_sweep_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_input_mask_sweep_variant_program_with_labels()?;
+    build_diagnostic_cartridge_from_program_with_flags6(&program, &labels, 0)
+}
+
 fn build_mapper3_chr_bank_variant_program_with_labels(
 ) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
     let mut program = DiagnosticProgram::new();
@@ -2372,6 +2430,67 @@ fn build_mapper3_chr_bank_variant_program_with_labels(
         program.asm.sta_abs(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
     }
 
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
+fn build_input_mask_sweep_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(INPUT_MASK_SWEEP_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR);
+    program.asm.sta_abs(INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR);
+    program.asm.sta_abs(INPUT_MASK_SWEEP_CASE_COUNT_ADDR);
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+
+    program.asm.lda_imm(0x01);
+    program.asm.sta_abs(0x4016);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x4016);
+    program.read_joypad_port_mask_into(0x4016, INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR);
+    program.read_joypad_port_mask_into(0x4017, INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR);
+
+    program.asm.lda_abs(INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR);
+    program.expect_a_eq_zp(JOYPAD1_EXPECTED_MASK_ADDR, 0xA0);
+    program.asm.lda_abs(INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR);
+    program.expect_a_eq_zp(JOYPAD2_EXPECTED_MASK_ADDR, 0xA1);
+    program.asm.lda_imm(0x01);
+    program.asm.sta_abs(INPUT_MASK_SWEEP_CASE_COUNT_ADDR);
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
     program.asm.jmp_label("hang");
@@ -2800,6 +2919,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &ppu_scroll_wrap,
     );
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
+    let input_mask_sweep = input_mask_sweep_telemetry(&run_input_mask_sweep_variant());
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
     let ppu_sprite_priority = ppu_sprite_priority_telemetry(
         &ram,
@@ -2820,6 +2940,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        input_mask_sweep: &input_mask_sweep,
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
@@ -2851,6 +2972,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         input_port_matrix: &input_port_matrix,
+        input_mask_sweep: &input_mask_sweep,
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
@@ -2904,6 +3026,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         suite: suite_telemetry(),
         cartridge: cartridge_info,
         mapper3_chr_bank,
+        input_mask_sweep,
         input: diagnostic_input_telemetry(&config),
         verdict,
         analysis,
@@ -3297,6 +3420,31 @@ fn write_input_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Joypad 2 mask / expected | {} / {} |",
         telemetry.input.joypad2_mask_hex, telemetry.input.joypad2_expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Input mask sweep cases / expected | {} / {} |",
+        telemetry.input_mask_sweep.observed_case_count,
+        telemetry.input_mask_sweep.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Input mask sweep passed / failed | {} / {} |",
+        telemetry.input_mask_sweep.passed_case_count, telemetry.input_mask_sweep.failed_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Input mask sweep passed | {} |",
+        telemetry.input_mask_sweep.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Input mask sweep error | {} |",
+        optional_string(telemetry.input_mask_sweep.error.as_deref())
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -5294,6 +5442,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    input_mask_sweep: &'a InputMaskSweepTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
@@ -5318,6 +5467,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
+    input_mask_sweep: &'a InputMaskSweepTelemetry,
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
@@ -5392,6 +5542,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.input_port_matrix.joypad2_overread_second_hex,
             input.input_port_matrix.observed_case_count,
             input.input_port_matrix.expected_case_count
+        ));
+    }
+    if !input.input_mask_sweep.passed {
+        failures.push(format!(
+            "input mask sweep mismatch: cases {}/{}, passed {}, failed {}, error {}",
+            input.input_mask_sweep.observed_case_count,
+            input.input_mask_sweep.expected_case_count,
+            input.input_mask_sweep.passed_case_count,
+            input.input_mask_sweep.failed_case_count,
+            optional_string(input.input_mask_sweep.error.as_deref())
         ));
     }
     if !input.apu_status_matrix.passed {
@@ -5804,6 +5964,33 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.input_port_matrix.expected_case_count
             ),
             likely_domain: "joypad.input_port_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "joypad.input_mask_sweep.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Joypad),
+            test_id: Some(INPUT_MASK_SWEEP_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.input_mask_sweep.passed),
+            description:
+                "Generated input-mask sweep variant reconstructed serial bytes for both input ports across host-applied mask pairs"
+                    .to_string(),
+            expected: format!(
+                "{} mask pairs each reconstruct matching $4016 and $4017 serial bytes",
+                input.input_mask_sweep.expected_case_count
+            ),
+            observed: format!(
+                "cases {}/{}, passed {}, failed {}, error {}",
+                input.input_mask_sweep.observed_case_count,
+                input.input_mask_sweep.expected_case_count,
+                input.input_mask_sweep.passed_case_count,
+                input.input_mask_sweep.failed_case_count,
+                optional_string(input.input_mask_sweep.error.as_deref())
+            ),
+            likely_domain: "joypad.input_mask_sweep".to_string(),
         },
     );
     push_probe(
@@ -6754,6 +6941,16 @@ impl DiagnosticProgram {
             .expect("unique label should not collide");
     }
 
+    fn expect_a_eq_zp(&mut self, expected_addr: u8, fail_code: u8) {
+        let ok = self.unique_label("ok");
+        self.asm.cmp_zp(expected_addr);
+        self.asm.beq(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
     fn fail_with_code(&mut self, fail_code: u8) {
         self.asm.lda_imm(fail_code);
         self.asm.sta_zp(FAILURE_CODE_ADDR);
@@ -6815,6 +7012,24 @@ impl DiagnosticProgram {
         self.asm
             .label(&ok)
             .expect("unique label should not collide");
+    }
+
+    fn read_joypad_port_mask_into(&mut self, port_addr: u16, observed_addr: u16) {
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(observed_addr);
+        for bit in 0..8 {
+            let clear_bit = self.unique_label("joypad_bit_clear");
+            self.asm.lda_abs(port_addr);
+            self.asm.and_imm(0x01);
+            self.asm.cmp_imm(0x00);
+            self.asm.beq(&clear_bit);
+            self.asm.lda_abs(observed_addr);
+            self.asm.ora_imm(1 << bit);
+            self.asm.sta_abs(observed_addr);
+            self.asm
+                .label(&clear_bit)
+                .expect("unique label should not collide");
+        }
     }
 
     fn unique_label(&mut self, prefix: &str) -> String {
@@ -8263,8 +8478,16 @@ impl Assembler {
         self.op_imm(0x29, value);
     }
 
+    fn ora_imm(&mut self, value: u8) {
+        self.op_imm(0x09, value);
+    }
+
     fn cmp_imm(&mut self, value: u8) {
         self.op_imm(0xC9, value);
+    }
+
+    fn cmp_zp(&mut self, addr: u8) {
+        self.op_zp(0xC5, addr);
     }
 
     fn beq(&mut self, label: &str) {
@@ -8729,6 +8952,60 @@ fn mapper3_chr_bank_telemetry(observation: &Mapper3ChrBankObservation) -> Mapper
     }
 }
 
+fn input_mask_sweep_telemetry(observation: &InputMaskSweepObservation) -> InputMaskSweepTelemetry {
+    let cases: Vec<InputMaskSweepCaseTelemetry> = observation
+        .cases
+        .iter()
+        .map(|case| InputMaskSweepCaseTelemetry {
+            index: case.index,
+            joypad1_expected_mask: case.joypad1_expected_mask,
+            joypad1_expected_mask_hex: hex_byte(case.joypad1_expected_mask),
+            joypad1_observed_mask: case.joypad1_observed_mask,
+            joypad1_observed_mask_hex: hex_byte(case.joypad1_observed_mask),
+            joypad2_expected_mask: case.joypad2_expected_mask,
+            joypad2_expected_mask_hex: hex_byte(case.joypad2_expected_mask),
+            joypad2_observed_mask: case.joypad2_observed_mask,
+            joypad2_observed_mask_hex: hex_byte(case.joypad2_observed_mask),
+            observed_case_count: case.observed_case_count,
+            cycles: case.cycles,
+            frames: case.frames,
+            passed: case.passed,
+            error: case.error.clone(),
+        })
+        .collect();
+    let observed_case_count = cases
+        .iter()
+        .filter(|case| case.observed_case_count == 1)
+        .count() as u8;
+    let passed_case_count = cases.iter().filter(|case| case.passed).count();
+    let failed_case_count = cases.len().saturating_sub(passed_case_count);
+    let passed = observation.error.is_none()
+        && observed_case_count == INPUT_MASK_SWEEP_EXPECTED_CASE_COUNT
+        && passed_case_count == INPUT_MASK_SWEEP_CASES.len();
+    let error = if passed {
+        None
+    } else {
+        observation.error.clone().or_else(|| {
+            cases
+                .iter()
+                .find_map(|case| case.error.clone())
+                .or_else(|| {
+                    Some("input mask sweep retained mismatched host observations".to_string())
+                })
+        })
+    };
+
+    InputMaskSweepTelemetry {
+        expected_case_count: INPUT_MASK_SWEEP_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        passed_case_count,
+        failed_case_count,
+        cases,
+        passed,
+        error,
+    }
+}
+
 fn ppu_sprite_zero_hit_telemetry(ram: &[u8]) -> PpuSpriteZeroHitTelemetry {
     let observed_status_bit = ram[(PPU_SPRITE_ZERO_HIT_STATUS_ADDR & 0x07FF) as usize];
     let observed_case_count = ram[(PPU_SPRITE_ZERO_HIT_CASE_COUNT_ADDR & 0x07FF) as usize];
@@ -8842,6 +9119,57 @@ impl Mapper3ChrBankObservation {
 }
 
 #[derive(Debug, Clone)]
+struct InputMaskSweepObservation {
+    cases: Vec<InputMaskSweepCaseObservation>,
+    error: Option<String>,
+}
+
+impl InputMaskSweepObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            cases: Vec::new(),
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct InputMaskSweepCaseObservation {
+    index: usize,
+    joypad1_expected_mask: u8,
+    joypad1_observed_mask: u8,
+    joypad2_expected_mask: u8,
+    joypad2_observed_mask: u8,
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl InputMaskSweepCaseObservation {
+    fn failed(
+        index: usize,
+        joypad1_mask: u8,
+        joypad2_mask: u8,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            index,
+            joypad1_expected_mask: joypad1_mask,
+            joypad1_observed_mask: 0,
+            joypad2_expected_mask: joypad2_mask,
+            joypad2_observed_mask: 0,
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct PpuScrollNametableWrapObservation {
     left_color: u32,
     right_color: u32,
@@ -8862,6 +9190,118 @@ impl PpuScrollNametableWrapObservation {
             error: Some(message.into()),
         }
     }
+}
+
+fn run_input_mask_sweep_variant() -> InputMaskSweepObservation {
+    match try_run_input_mask_sweep_variant() {
+        Ok(observation) => observation,
+        Err(error) => InputMaskSweepObservation::failed(error),
+    }
+}
+
+fn try_run_input_mask_sweep_variant() -> Result<InputMaskSweepObservation, String> {
+    let rom = build_input_mask_sweep_variant_cartridge()?;
+    let mut cases = Vec::with_capacity(INPUT_MASK_SWEEP_CASES.len());
+    for (index, (joypad1_mask, joypad2_mask)) in INPUT_MASK_SWEEP_CASES.iter().copied().enumerate()
+    {
+        let case = try_run_input_mask_sweep_variant_case(&rom, index, joypad1_mask, joypad2_mask)
+            .unwrap_or_else(|error| {
+                InputMaskSweepCaseObservation::failed(index, joypad1_mask, joypad2_mask, error)
+            });
+        cases.push(case);
+    }
+
+    Ok(InputMaskSweepObservation { cases, error: None })
+}
+
+fn try_run_input_mask_sweep_variant_case(
+    rom: &[u8],
+    index: usize,
+    joypad1_mask: u8,
+    joypad2_mask: u8,
+) -> Result<InputMaskSweepCaseObservation, String> {
+    let cartridge = Cartridge::new(rom)?;
+    let mut bus = Bus::new(cartridge);
+    apply_joypad_mask(&mut bus, joypad1_mask);
+    apply_joypad2_mask(&mut bus, joypad2_mask);
+    bus.cpu_write(JOYPAD1_EXPECTED_MASK_ADDR as u16, joypad1_mask);
+    bus.cpu_write(JOYPAD2_EXPECTED_MASK_ADDR as u16, joypad2_mask);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 20_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed = read_input_mask_sweep_observed(&mut bus);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && observed.0 == joypad1_mask
+                && observed.1 == joypad2_mask
+                && observed.2 == 1;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "input mask sweep case {index} reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(format!(
+                    "input mask sweep case {index} reached PASS with mismatched host observations"
+                ))
+            };
+            return Ok(InputMaskSweepCaseObservation {
+                index,
+                joypad1_expected_mask: joypad1_mask,
+                joypad1_observed_mask: observed.0,
+                joypad2_expected_mask: joypad2_mask,
+                joypad2_observed_mask: observed.1,
+                observed_case_count: observed.2,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    let observed = read_input_mask_sweep_observed(&mut bus);
+    Ok(InputMaskSweepCaseObservation {
+        index,
+        joypad1_expected_mask: joypad1_mask,
+        joypad1_observed_mask: observed.0,
+        joypad2_expected_mask: joypad2_mask,
+        joypad2_observed_mask: observed.1,
+        observed_case_count: observed.2,
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "input mask sweep case {index} timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_input_mask_sweep_observed(bus: &mut Bus) -> (u8, u8, u8) {
+    (
+        bus.cpu_read(INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR),
+        bus.cpu_read(INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR),
+        bus.cpu_read(INPUT_MASK_SWEEP_CASE_COUNT_ADDR),
+    )
 }
 
 fn run_mapper3_chr_bank_variant() -> Mapper3ChrBankObservation {

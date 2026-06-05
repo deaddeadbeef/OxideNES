@@ -310,6 +310,42 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "joypad.input_port_matrix"
     }));
+    assert!(telemetry.input_mask_sweep.passed);
+    assert_eq!(telemetry.input_mask_sweep.expected_case_count, 16);
+    assert_eq!(telemetry.input_mask_sweep.observed_case_count, 16);
+    assert_eq!(telemetry.input_mask_sweep.passed_case_count, 16);
+    assert_eq!(telemetry.input_mask_sweep.failed_case_count, 0);
+    assert_eq!(telemetry.input_mask_sweep.error, None);
+    assert!(telemetry.input_mask_sweep.cases.iter().any(|case| {
+        case.index == 0
+            && case.joypad1_expected_mask_hex == "0x00"
+            && case.joypad1_observed_mask_hex == "0x00"
+            && case.joypad2_expected_mask_hex == "0x00"
+            && case.joypad2_observed_mask_hex == "0x00"
+            && case.passed
+    }));
+    assert!(telemetry.input_mask_sweep.cases.iter().any(|case| {
+        case.index == 1
+            && case.joypad1_expected_mask_hex == "0xFF"
+            && case.joypad1_observed_mask_hex == "0xFF"
+            && case.joypad2_expected_mask_hex == "0xFF"
+            && case.joypad2_observed_mask_hex == "0xFF"
+            && case.passed
+    }));
+    assert!(telemetry.input_mask_sweep.cases.iter().any(|case| {
+        case.index == 4
+            && case.joypad1_expected_mask_hex == "0x81"
+            && case.joypad1_observed_mask_hex == "0x81"
+            && case.joypad2_expected_mask_hex == "0x28"
+            && case.joypad2_observed_mask_hex == "0x28"
+            && case.passed
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "joypad.input_mask_sweep.results"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.likely_domain == "joypad.input_mask_sweep"
+            && probe.observed.contains("cases 16/16")
+    }));
     assert!(telemetry.apu_status_matrix.passed);
     assert_eq!(telemetry.apu_status_matrix.expected_mask_hex, "0x0F");
     assert_eq!(telemetry.apu_status_matrix.observed_mask_hex, "0x0F");
@@ -942,6 +978,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Health | healthy |"));
     assert!(report.contains("## Input Configuration"));
     assert!(report.contains("| Joypad 2 mask / expected | 0x28 / 0x28 |"));
+    assert!(report.contains("| Input mask sweep cases / expected | 16 / 16 |"));
+    assert!(report.contains("| Input mask sweep passed / failed | 16 / 0 |"));
+    assert!(report.contains("| Input mask sweep passed | true |"));
+    assert!(report.contains("| Input mask sweep error | none |"));
     assert!(report.contains("## Debug Focus"));
     assert!(report.contains("| Focus test | ppu_scroll_seam_matrix (28) |"));
     assert!(report.contains("| Terminal instruction | seq "));
