@@ -748,8 +748,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - APU pulse-channel status register plus host-observed sample-count, peak,
   RMS, and mean absolute output envelope checks
 - Mapper 1/MMC1 serial-register PRG bank switching, delayed commit after four
-  writes, 4 KiB CHR bank switching, fixed-last PRG reads, and single-screen
-  lower/upper nametable mirroring
+  writes, 4 KiB CHR bank switching, fixed-last PRG reads, 32 KiB PRG modes
+  0/1 with ignored low PRG bank bit, and single-screen lower/upper nametable
+  mirroring
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
 - Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
   PPU-visible pattern-table reads
@@ -1189,6 +1190,13 @@ R6 at `$C000`, then sets CHR inversion and reads all eight 1 KiB CHR windows
 through PPUDATA. It also runs two IRQ reload phases, including a zero-latch
 reload, and exposes top-level `mapper4_mmc3_edge` telemetry plus the
 `mapper4.mmc3_inversion_irq_reload` probe.
+
+Schema version `57` adds a second generated Mapper 1/MMC1 PRG variant for
+32 KiB PRG modes. The variant copies its diagnostic program and vectors into
+both 32 KiB bank pairs, writes MMC1 control values for PRG modes 0 and 1, reads
+paired sentinels at `$8000` and `$E000`, proves odd PRG bank writes ignore bit 0
+in 32 KiB mode, and exposes top-level `mapper1_mmc1_32k_prg` telemetry plus the
+`mapper1.mmc1_32k_prg_mode` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
