@@ -733,6 +733,7 @@ impl Mapper for Mapper004 {
         data.push(if self.irq_pending { 1 } else { 0 });
         data.push(if self.irq_reload_flag { 1 } else { 0 });
         data.push(self.mirror_mode);
+        data.extend_from_slice(&self.prg_ram);
         data
     }
 
@@ -749,6 +750,10 @@ impl Mapper for Mapper004 {
             self.irq_reload_flag = data[15] != 0;
             if data.len() >= 17 {
                 self.mirror_mode = data[16];
+            }
+            let prg_ram_len = self.prg_ram.len();
+            if data.len() >= 17 + prg_ram_len {
+                self.prg_ram.copy_from_slice(&data[17..17 + prg_ram_len]);
             }
         }
     }

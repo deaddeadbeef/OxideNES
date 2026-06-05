@@ -1151,6 +1151,54 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.mapper4_mmc3_edge.observed_case_count, 13);
     assert!(telemetry.mapper4_mmc3_edge.cycles > 0);
     assert_eq!(telemetry.mapper4_mmc3_edge.error, None);
+    assert!(telemetry.mapper4_mmc3_prg_ram.passed);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.mapper, 4);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.prg_16k_banks, 4);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.prg_8k_banks, 8);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.chr_8k_banks, 1);
+    assert!(telemetry.mapper4_mmc3_prg_ram.battery_backed);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.prg_ram_size, 0x2000);
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.read_addrs_hex,
+        vec![
+            "0x6000".to_string(),
+            "0x67FF".to_string(),
+            "0x7FFF".to_string(),
+            "0x6000".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.restored_addrs_hex,
+        vec![
+            "0x6000".to_string(),
+            "0x67FF".to_string(),
+            "0x7FFF".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.expected_values_hex,
+        vec![
+            "0x5A".to_string(),
+            "0xC3".to_string(),
+            "0xA7".to_string(),
+            "0x3C".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.observed_values_hex,
+        telemetry.mapper4_mmc3_prg_ram.expected_values_hex
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.sram_snapshot_values_hex,
+        vec!["0x3C".to_string(), "0xC3".to_string(), "0xA7".to_string()]
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_prg_ram.restored_values_hex,
+        telemetry.mapper4_mmc3_prg_ram.sram_snapshot_values_hex
+    );
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.observed_case_count, 4);
+    assert!(telemetry.mapper4_mmc3_prg_ram.cycles > 0);
+    assert_eq!(telemetry.mapper4_mmc3_prg_ram.error, None);
     assert!(telemetry.mapper7_axrom.passed);
     assert_eq!(telemetry.mapper7_axrom.mapper, 7);
     assert_eq!(telemetry.mapper7_axrom.prg_banks, 8);
@@ -1262,6 +1310,18 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.expected.contains("select 0x46:0x02")
             && probe.expected.contains("0x65")
             && probe.observed.contains("IRQ counts [1, 2]")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper4.mmc3_prg_ram_persistence"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(36)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("battery true")
+            && probe.expected.contains("0x7FFF")
+            && probe.expected.contains("0x3C")
+            && probe.observed.contains("battery true")
+            && probe.observed.contains("restored")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "mapper7.axrom_switching"
@@ -1416,6 +1476,20 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     ));
     assert!(report.contains("| Mapper 4 edge cases / expected | 13 / 13 |"));
     assert!(report.contains("| Mapper 4 edge error | none |"));
+    assert!(report.contains("| Mapper 4 PRG RAM mapper / PRG 16K banks / battery | 4 / 4 / true |"));
+    assert!(report.contains(
+        "| Mapper 4 PRG RAM read addresses | [\"0x6000\", \"0x67FF\", \"0x7FFF\", \"0x6000\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 4 PRG RAM observed / expected | [\"0x5A\", \"0xC3\", \"0xA7\", \"0x3C\"] / [\"0x5A\", \"0xC3\", \"0xA7\", \"0x3C\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 4 PRG RAM SRAM snapshot / restored | [\"0x3C\", \"0xC3\", \"0xA7\"] / [\"0x3C\", \"0xC3\", \"0xA7\"] |"
+    ));
+    assert!(report
+        .contains("| Mapper 4 PRG RAM restore addresses | [\"0x6000\", \"0x67FF\", \"0x7FFF\"] |"));
+    assert!(report.contains("| Mapper 4 PRG RAM cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Mapper 4 PRG RAM error | none |"));
     assert!(report.contains("| Mapper 7 variant mapper / PRG banks / CHR banks | 7 / 8 / 0 |"));
     assert!(report.contains("| Mapper 7 PRG read address | 0x8000 |"));
     assert!(report.contains(
