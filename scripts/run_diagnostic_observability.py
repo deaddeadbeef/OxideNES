@@ -110,6 +110,19 @@ FOCUS_DOMAIN_CODE_MAP = {
             "cpu_stack_status_matrix",
         ],
     },
+    "cpu.interrupt.brk_rti_matrix": {
+        "subsystem": "cpu",
+        "description": "6502 BRK/IRQ vector dispatch, interrupt stack-frame depth, processor-status restore, and RTI return behavior observed through diagnostic sentinels.",
+        "source_files": ["src/cpu.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "BRK",
+            "RTI",
+            "IRQ",
+            "interrupt",
+            "cpu_interrupt_brk_rti_matrix",
+        ],
+    },
     "cpu.rmw.asl": {
         "subsystem": "cpu",
         "description": "6502 read-modify-write zero-page opcode sequencing and memory write-back behavior.",
@@ -386,6 +399,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
     "cpu_branch_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_branch_matrix_failure",
     "cpu_stack_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_stack_matrix_failure",
+    "cpu_interrupt_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_interrupt_matrix_failure",
     "cpu_rmw_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matrix_failure",
     "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
