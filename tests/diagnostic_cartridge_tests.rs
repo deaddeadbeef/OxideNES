@@ -893,6 +893,44 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.mapper3_chr_bank.observed_case_count, 4);
     assert!(telemetry.mapper3_chr_bank.cycles > 0);
     assert_eq!(telemetry.mapper3_chr_bank.error, None);
+    assert!(telemetry.mapper7_axrom.passed);
+    assert_eq!(telemetry.mapper7_axrom.mapper, 7);
+    assert_eq!(telemetry.mapper7_axrom.prg_banks, 8);
+    assert_eq!(telemetry.mapper7_axrom.chr_banks, 0);
+    assert_eq!(telemetry.mapper7_axrom.prg_read_addr_hex, "0x8000");
+    assert_eq!(
+        telemetry.mapper7_axrom.bank_writes_hex,
+        vec![
+            "0x00".to_string(),
+            "0x01".to_string(),
+            "0x02".to_string(),
+            "0x03".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper7_axrom.expected_prg_values_hex,
+        vec![
+            "0xA0".to_string(),
+            "0xB1".to_string(),
+            "0xC2".to_string(),
+            "0xD3".to_string()
+        ]
+    );
+    assert_eq!(
+        telemetry.mapper7_axrom.observed_prg_values_hex,
+        telemetry.mapper7_axrom.expected_prg_values_hex
+    );
+    assert_eq!(
+        telemetry.mapper7_axrom.expected_mirror_values_hex,
+        vec!["0x5A".to_string(), "0xA5".to_string(), "0x5A".to_string()]
+    );
+    assert_eq!(
+        telemetry.mapper7_axrom.observed_mirror_values_hex,
+        telemetry.mapper7_axrom.expected_mirror_values_hex
+    );
+    assert_eq!(telemetry.mapper7_axrom.observed_case_count, 7);
+    assert!(telemetry.mapper7_axrom.cycles > 0);
+    assert_eq!(telemetry.mapper7_axrom.error, None);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "ram.signature"
             && probe.expected.contains("0xA5")
@@ -924,6 +962,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.expected.contains("0x44")
             && probe.observed.contains("0x44")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper7.axrom_switching"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(31)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("0xD3")
+            && probe.observed.contains("0xA5")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "dma.oam_active_cycles"
@@ -997,6 +1044,16 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     ));
     assert!(report.contains("| Mapper 3 CHR cases / expected | 4 / 4 |"));
     assert!(report.contains("| Mapper 3 CHR error | none |"));
+    assert!(report.contains("| Mapper 7 variant mapper / PRG banks / CHR banks | 7 / 8 / 0 |"));
+    assert!(report.contains("| Mapper 7 PRG read address | 0x8000 |"));
+    assert!(report.contains(
+        "| Mapper 7 PRG observed / expected | [\"0xA0\", \"0xB1\", \"0xC2\", \"0xD3\"] / [\"0xA0\", \"0xB1\", \"0xC2\", \"0xD3\"] |"
+    ));
+    assert!(report.contains(
+        "| Mapper 7 mirror observed / expected | [\"0x5A\", \"0xA5\", \"0x5A\"] / [\"0x5A\", \"0xA5\", \"0x5A\"] |"
+    ));
+    assert!(report.contains("| Mapper 7 cases / expected | 7 / 7 |"));
+    assert!(report.contains("| Mapper 7 error | none |"));
     assert!(report.contains("## PPU Pixel Pipeline"));
     assert!(report.contains("| First NMI cycle / latency |"));
     assert!(report.contains("| Second NMI cycle / inter-NMI cycles |"));

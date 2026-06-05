@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 52;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 53;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v52";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v53";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -41,6 +41,7 @@ const MAPPER2_PRG_RAM_LOW_SENTINEL: u8 = 0x5C;
 const MAPPER2_PRG_RAM_HIGH_SENTINEL: u8 = 0xA7;
 const MAPPER3_CHR_BANK_TEST_ID: u8 = 29;
 const INPUT_MASK_SWEEP_TEST_ID: u8 = 30;
+const MAPPER7_AXROM_TEST_ID: u8 = 31;
 const MAPPER3_MAPPER: u8 = 3;
 const MAPPER3_PRG_BANKS: u8 = 2;
 const MAPPER3_CHR_BANKS: u8 = 4;
@@ -48,6 +49,15 @@ const MAPPER3_CHR_READ_ADDR: u16 = 0x0010;
 const MAPPER3_CHR_BANK_EXPECTED_CASE_COUNT: u8 = 4;
 const MAPPER3_CHR_BANK_EXPECTED_BANKS: [u8; 4] = [0, 1, 2, 3];
 const MAPPER3_CHR_BANK_EXPECTED_VALUES: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
+const MAPPER7_MAPPER: u8 = 7;
+const MAPPER7_PRG_BANKS: u8 = 8;
+const MAPPER7_CHR_BANKS: u8 = 0;
+const MAPPER7_32K_BANKS: usize = 4;
+const MAPPER7_PRG_SENTINEL_ADDR: u16 = 0x8000;
+const MAPPER7_EXPECTED_CASE_COUNT: u8 = 7;
+const MAPPER7_PRG_BANK_WRITES: [u8; 4] = [0x00, 0x01, 0x02, 0x03];
+const MAPPER7_PRG_EXPECTED_VALUES: [u8; 4] = [0xA0, 0xB1, 0xC2, 0xD3];
+const MAPPER7_MIRROR_EXPECTED_VALUES: [u8; 3] = [0x5A, 0xA5, 0x5A];
 const INPUT_MASK_SWEEP_CASES: [(u8, u8); 16] = [
     (0x00, 0x00),
     (0xFF, 0xFF),
@@ -134,6 +144,9 @@ const MAPPER3_CHR_BANK_OBSERVED_BASE_ADDR: u16 = 0x0267;
 const INPUT_MASK_SWEEP_JOYPAD1_OBSERVED_ADDR: u16 = 0x026B;
 const INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR: u16 = 0x026C;
 const INPUT_MASK_SWEEP_CASE_COUNT_ADDR: u16 = 0x026D;
+const MAPPER7_AXROM_CASE_COUNT_ADDR: u16 = 0x026E;
+const MAPPER7_AXROM_PRG_OBSERVED_BASE_ADDR: u16 = 0x026F;
+const MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR: u16 = 0x0273;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1230,9 +1243,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
-        risk: "The diagnostic cartridges now exercise two simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
-        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks.",
-        missing_coverage: "IRQ-generating mappers, other mirroring modes, MMC register edge cases, battery-backed RAM persistence, and CHR/PRG switches during active rendering.",
+        risk: "The diagnostic cartridges now exercise several simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
+        current_coverage: "The generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
+        missing_coverage: "IRQ-generating mappers, MMC register edge cases, battery-backed RAM persistence, and CHR/PRG switches during active rendering.",
         suggested_next_test: "Generate MMC-style synthetic cartridges that switch CHR/PRG banks during rendering and assert selected pattern/table data through PPU-visible pixels and mapper IRQ timing.",
     },
     DiagnosticCoverageGapSpec {
@@ -1409,6 +1422,7 @@ pub struct DiagnosticTelemetry {
     pub suite: DiagnosticSuiteTelemetry,
     pub cartridge: CartridgeTelemetry,
     pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
+    pub mapper7_axrom: Mapper7AxromTelemetry,
     pub input_mask_sweep: InputMaskSweepTelemetry,
     pub input: DiagnosticInputTelemetry,
     pub verdict: VerdictTelemetry,
@@ -1472,6 +1486,31 @@ pub struct Mapper3ChrBankTelemetry {
     pub expected_values_hex: Vec<String>,
     pub observed_values: Vec<u8>,
     pub observed_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper7AxromTelemetry {
+    pub mapper: u8,
+    pub prg_banks: u8,
+    pub chr_banks: u8,
+    pub prg_read_addr: u16,
+    pub prg_read_addr_hex: String,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub bank_writes: Vec<u8>,
+    pub bank_writes_hex: Vec<String>,
+    pub expected_prg_values: Vec<u8>,
+    pub expected_prg_values_hex: Vec<String>,
+    pub observed_prg_values: Vec<u8>,
+    pub observed_prg_values_hex: Vec<String>,
+    pub expected_mirror_values: Vec<u8>,
+    pub expected_mirror_values_hex: Vec<String>,
+    pub observed_mirror_values: Vec<u8>,
+    pub observed_mirror_values_hex: Vec<String>,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -2378,6 +2417,44 @@ fn build_mapper3_chr_bank_variant_cartridge() -> Result<Vec<u8>, String> {
     )
 }
 
+fn build_mapper7_axrom_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper7_axrom_variant_program_with_labels()?;
+    if program.len() > PRG_BANK_SIZE {
+        return Err(format!(
+            "Mapper 7 diagnostic program is too large: {} bytes > {} bytes",
+            program.len(),
+            PRG_BANK_SIZE
+        ));
+    }
+
+    let prg_size = MAPPER7_PRG_BANKS as usize * PRG_BANK_SIZE;
+    let mut rom = Vec::with_capacity(16 + prg_size);
+    rom.extend_from_slice(b"NES\x1A");
+    rom.push(MAPPER7_PRG_BANKS);
+    rom.push(MAPPER7_CHR_BANKS);
+    rom.push((MAPPER7_MAPPER & 0x0F) << 4);
+    rom.push(MAPPER7_MAPPER & 0xF0);
+    rom.extend_from_slice(&[0; 8]);
+
+    let mut prg = vec![0xEA; prg_size];
+    for (bank, expected_value) in MAPPER7_PRG_EXPECTED_VALUES
+        .iter()
+        .enumerate()
+        .take(MAPPER7_32K_BANKS)
+    {
+        let bank_base = bank * 0x8000;
+        prg[bank_base + (MAPPER7_PRG_SENTINEL_ADDR - 0x8000) as usize] = *expected_value;
+        let program_offset = bank_base + (PROGRAM_BASE - 0x8000) as usize;
+        prg[program_offset..program_offset + program.len()].copy_from_slice(&program);
+        write_mapper7_32k_vector(&mut prg, bank, 0xFFFA, label_addr(&labels, "nmi")?);
+        write_mapper7_32k_vector(&mut prg, bank, 0xFFFC, PROGRAM_BASE);
+        write_mapper7_32k_vector(&mut prg, bank, 0xFFFE, label_addr(&labels, "irq")?);
+    }
+
+    rom.extend_from_slice(&prg);
+    Ok(rom)
+}
+
 fn build_input_mask_sweep_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_input_mask_sweep_variant_program_with_labels()?;
     build_diagnostic_cartridge_from_program_with_flags6(&program, &labels, 0)
@@ -2429,6 +2506,104 @@ fn build_mapper3_chr_bank_variant_program_with_labels(
         program.asm.adc_imm(0x01);
         program.asm.sta_abs(MAPPER3_CHR_BANK_CASE_COUNT_ADDR);
     }
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
+fn build_mapper7_axrom_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER7_AXROM_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER7_AXROM_CASE_COUNT_ADDR);
+    for offset in 0..MAPPER7_PRG_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER7_AXROM_PRG_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    for offset in 0..MAPPER7_MIRROR_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+
+    for (case_index, (&bank_write, &expected)) in MAPPER7_PRG_BANK_WRITES
+        .iter()
+        .zip(MAPPER7_PRG_EXPECTED_VALUES.iter())
+        .enumerate()
+    {
+        program.asm.lda_imm(bank_write);
+        program.asm.sta_abs(0x8000);
+        program.asm.lda_abs(MAPPER7_PRG_SENTINEL_ADDR);
+        program
+            .asm
+            .sta_abs(MAPPER7_AXROM_PRG_OBSERVED_BASE_ADDR + case_index as u16);
+        program.expect_a_eq(expected, 0xB0 + case_index as u8);
+        program.increment_abs(MAPPER7_AXROM_CASE_COUNT_ADDR);
+    }
+
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x8000);
+    program.write_ppu_data(0x2000, MAPPER7_MIRROR_EXPECTED_VALUES[0]);
+    program.read_ppu_data_into_a(0x2400);
+    program.asm.sta_abs(MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR);
+    program.expect_a_eq(MAPPER7_MIRROR_EXPECTED_VALUES[0], 0xB4);
+    program.increment_abs(MAPPER7_AXROM_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(0x10);
+    program.asm.sta_abs(0x8000);
+    program.write_ppu_data(0x2000, MAPPER7_MIRROR_EXPECTED_VALUES[1]);
+    program.read_ppu_data_into_a(0x2400);
+    program
+        .asm
+        .sta_abs(MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR + 1);
+    program.expect_a_eq(MAPPER7_MIRROR_EXPECTED_VALUES[1], 0xB5);
+    program.increment_abs(MAPPER7_AXROM_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x8000);
+    program.read_ppu_data_into_a(0x2400);
+    program
+        .asm
+        .sta_abs(MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR + 2);
+    program.expect_a_eq(MAPPER7_MIRROR_EXPECTED_VALUES[2], 0xB6);
+    program.increment_abs(MAPPER7_AXROM_CASE_COUNT_ADDR);
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -2919,6 +3094,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &ppu_scroll_wrap,
     );
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
+    let mapper7_axrom = mapper7_axrom_telemetry(&run_mapper7_axrom_variant());
     let input_mask_sweep = input_mask_sweep_telemetry(&run_input_mask_sweep_variant());
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
     let ppu_sprite_priority = ppu_sprite_priority_telemetry(
@@ -2949,6 +3125,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper3_chr_bank: &mapper3_chr_bank,
+        mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -2981,6 +3158,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ppu_sprite_priority: &ppu_sprite_priority,
         ppu_sprite_zero_hit: &ppu_sprite_zero_hit,
         mapper3_chr_bank: &mapper3_chr_bank,
+        mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
         frame: &frame,
@@ -3026,6 +3204,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         suite: suite_telemetry(),
         cartridge: cartridge_info,
         mapper3_chr_bank,
+        mapper7_axrom,
         input_mask_sweep,
         input: diagnostic_input_telemetry(&config),
         verdict,
@@ -3578,6 +3757,60 @@ fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Mapper 3 CHR error | {} |",
         optional_string(telemetry.mapper3_chr_bank.error.as_deref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 variant mapper / PRG banks / CHR banks | {} / {} / {} |",
+        telemetry.mapper7_axrom.mapper,
+        telemetry.mapper7_axrom.prg_banks,
+        telemetry.mapper7_axrom.chr_banks
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 PRG read address | {} |",
+        telemetry.mapper7_axrom.prg_read_addr_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 bank writes | {:?} |",
+        telemetry.mapper7_axrom.bank_writes_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 PRG observed / expected | {:?} / {:?} |",
+        telemetry.mapper7_axrom.observed_prg_values_hex,
+        telemetry.mapper7_axrom.expected_prg_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 mirror observed / expected | {:?} / {:?} |",
+        telemetry.mapper7_axrom.observed_mirror_values_hex,
+        telemetry.mapper7_axrom.expected_mirror_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 cases / expected | {} / {} |",
+        telemetry.mapper7_axrom.observed_case_count, telemetry.mapper7_axrom.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper7_axrom.cycles,
+        telemetry.mapper7_axrom.frames,
+        telemetry.mapper7_axrom.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 7 error | {} |",
+        optional_string(telemetry.mapper7_axrom.error.as_deref())
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -5451,6 +5684,7 @@ struct HostValidationInput<'a> {
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
+    mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -5476,6 +5710,7 @@ struct ProbeTelemetryInput<'a> {
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
     ppu_sprite_zero_hit: &'a PpuSpriteZeroHitTelemetry,
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
+    mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
     frame: &'a FrameTelemetry,
@@ -5697,6 +5932,19 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.mapper3_chr_bank.expected_case_count,
             input.mapper3_chr_bank.cycles,
             optional_string(input.mapper3_chr_bank.error.as_deref())
+        ));
+    }
+    if !input.mapper7_axrom.passed {
+        failures.push(format!(
+            "Mapper 7 AxROM variant mismatch: PRG observed {:?} expected {:?}, mirror observed {:?} expected {:?}, cases {}/{}, cycles={}, error {}",
+            input.mapper7_axrom.observed_prg_values_hex,
+            input.mapper7_axrom.expected_prg_values_hex,
+            input.mapper7_axrom.observed_mirror_values_hex,
+            input.mapper7_axrom.expected_mirror_values_hex,
+            input.mapper7_axrom.observed_case_count,
+            input.mapper7_axrom.expected_case_count,
+            input.mapper7_axrom.cycles,
+            optional_string(input.mapper7_axrom.error.as_deref())
         ));
     }
     if input.oam.checksum != input.oam.expected_checksum {
@@ -6270,6 +6518,39 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 optional_string(input.mapper3_chr_bank.error.as_deref())
             ),
             likely_domain: "cartridge.mapper3_chr_bank".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper7.axrom_switching".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER7_AXROM_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper7_axrom.passed),
+            description:
+                "Generated Mapper 7 variant switches 32 KiB AxROM PRG banks and single-screen mirroring through CPU and PPU bus paths"
+                    .to_string(),
+            expected: format!(
+                "mapper {}, writes {:?}, PRG values {:?}, mirror values {:?}, cases {}",
+                input.mapper7_axrom.mapper,
+                input.mapper7_axrom.bank_writes_hex,
+                input.mapper7_axrom.expected_prg_values_hex,
+                input.mapper7_axrom.expected_mirror_values_hex,
+                input.mapper7_axrom.expected_case_count
+            ),
+            observed: format!(
+                "PRG values {:?}, mirror values {:?}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper7_axrom.observed_prg_values_hex,
+                input.mapper7_axrom.observed_mirror_values_hex,
+                input.mapper7_axrom.observed_case_count,
+                input.mapper7_axrom.expected_case_count,
+                input.mapper7_axrom.cycles,
+                input.mapper7_axrom.frames,
+                optional_string(input.mapper7_axrom.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper7_axrom".to_string(),
         },
     );
     let active_ppu_render_test = input.timeout && input.current_test == 10;
@@ -6975,6 +7256,13 @@ impl DiagnosticProgram {
         self.asm.sta_abs(0x2006);
         self.asm.lda_abs(0x2007);
         self.asm.lda_abs(0x2007);
+    }
+
+    fn increment_abs(&mut self, addr: u16) {
+        self.asm.lda_abs(addr);
+        self.asm.clc();
+        self.asm.adc_imm(0x01);
+        self.asm.sta_abs(addr);
     }
 
     fn wait_for_vblank(&mut self, label_prefix: &str) {
@@ -8621,6 +8909,12 @@ fn write_vector_for_banks(prg: &mut [u8], prg_banks: u8, vector_addr: u16, value
     prg[index + 1] = (value >> 8) as u8;
 }
 
+fn write_mapper7_32k_vector(prg: &mut [u8], bank: usize, vector_addr: u16, value: u16) {
+    let index = bank * 0x8000 + (vector_addr - 0x8000) as usize;
+    prg[index] = value as u8;
+    prg[index + 1] = (value >> 8) as u8;
+}
+
 fn result_addr(test_id: u8) -> u16 {
     RESULT_BASE + test_id as u16 - 1
 }
@@ -8952,6 +9246,49 @@ fn mapper3_chr_bank_telemetry(observation: &Mapper3ChrBankObservation) -> Mapper
     }
 }
 
+fn mapper7_axrom_telemetry(observation: &Mapper7AxromObservation) -> Mapper7AxromTelemetry {
+    let bank_writes = MAPPER7_PRG_BANK_WRITES.to_vec();
+    let expected_prg_values = MAPPER7_PRG_EXPECTED_VALUES.to_vec();
+    let observed_prg_values = observation.observed_prg_values.to_vec();
+    let expected_mirror_values = MAPPER7_MIRROR_EXPECTED_VALUES.to_vec();
+    let observed_mirror_values = observation.observed_mirror_values.to_vec();
+    Mapper7AxromTelemetry {
+        mapper: MAPPER7_MAPPER,
+        prg_banks: MAPPER7_PRG_BANKS,
+        chr_banks: MAPPER7_CHR_BANKS,
+        prg_read_addr: MAPPER7_PRG_SENTINEL_ADDR,
+        prg_read_addr_hex: format!("0x{:04X}", MAPPER7_PRG_SENTINEL_ADDR),
+        expected_case_count: MAPPER7_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        bank_writes: bank_writes.clone(),
+        bank_writes_hex: bank_writes.iter().map(|value| hex_byte(*value)).collect(),
+        expected_prg_values: expected_prg_values.clone(),
+        expected_prg_values_hex: expected_prg_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_prg_values: observed_prg_values.clone(),
+        observed_prg_values_hex: observed_prg_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        expected_mirror_values: expected_mirror_values.clone(),
+        expected_mirror_values_hex: expected_mirror_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_mirror_values: observed_mirror_values.clone(),
+        observed_mirror_values_hex: observed_mirror_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn input_mask_sweep_telemetry(observation: &InputMaskSweepObservation) -> InputMaskSweepTelemetry {
     let cases: Vec<InputMaskSweepCaseTelemetry> = observation
         .cases
@@ -9109,6 +9446,31 @@ impl Mapper3ChrBankObservation {
     fn failed(message: impl Into<String>) -> Self {
         Self {
             observed_values: [0; 4],
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Mapper7AxromObservation {
+    observed_prg_values: [u8; 4],
+    observed_mirror_values: [u8; 3],
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper7AxromObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            observed_prg_values: [0; 4],
+            observed_mirror_values: [0; 3],
             observed_case_count: 0,
             cycles: 0,
             frames: 0,
@@ -9302,6 +9664,99 @@ fn read_input_mask_sweep_observed(bus: &mut Bus) -> (u8, u8, u8) {
         bus.cpu_read(INPUT_MASK_SWEEP_JOYPAD2_OBSERVED_ADDR),
         bus.cpu_read(INPUT_MASK_SWEEP_CASE_COUNT_ADDR),
     )
+}
+
+fn run_mapper7_axrom_variant() -> Mapper7AxromObservation {
+    match try_run_mapper7_axrom_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper7AxromObservation::failed(error),
+    }
+}
+
+fn try_run_mapper7_axrom_variant() -> Result<Mapper7AxromObservation, String> {
+    let rom = build_mapper7_axrom_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 40_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed_prg_values = read_mapper7_axrom_prg_observed_values(&mut bus);
+            let observed_mirror_values = read_mapper7_axrom_mirror_observed_values(&mut bus);
+            let observed_case_count = bus.cpu_read(MAPPER7_AXROM_CASE_COUNT_ADDR);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && observed_case_count == MAPPER7_EXPECTED_CASE_COUNT
+                && observed_prg_values == MAPPER7_PRG_EXPECTED_VALUES
+                && observed_mirror_values == MAPPER7_MIRROR_EXPECTED_VALUES;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 7 AxROM variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(
+                    "Mapper 7 AxROM variant reached PASS with mismatched host observations"
+                        .to_string(),
+                )
+            };
+            return Ok(Mapper7AxromObservation {
+                observed_prg_values,
+                observed_mirror_values,
+                observed_case_count,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    Ok(Mapper7AxromObservation {
+        observed_prg_values: read_mapper7_axrom_prg_observed_values(&mut bus),
+        observed_mirror_values: read_mapper7_axrom_mirror_observed_values(&mut bus),
+        observed_case_count: bus.cpu_read(MAPPER7_AXROM_CASE_COUNT_ADDR),
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 7 AxROM variant timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_mapper7_axrom_prg_observed_values(bus: &mut Bus) -> [u8; 4] {
+    let mut values = [0; 4];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER7_AXROM_PRG_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn read_mapper7_axrom_mirror_observed_values(bus: &mut Bus) -> [u8; 3] {
+    let mut values = [0; 3];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER7_AXROM_MIRROR_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
 }
 
 fn run_mapper3_chr_bank_variant() -> Mapper3ChrBankObservation {

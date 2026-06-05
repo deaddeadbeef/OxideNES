@@ -174,6 +174,19 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/mapper_tests.rs", "tests/cartridge_tests.rs"],
         "search_terms": ["prg_ram", "$6000", "$7FFF", "mapper2_prg_ram"],
     },
+    "cartridge.mapper7_axrom": {
+        "subsystem": "mapper",
+        "description": "Generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching and single-screen mirroring.",
+        "source_files": ["src/mapper.rs", "src/ppu.rs", "src/cartridge.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/mapper_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "Mapper007",
+            "mapper7_axrom",
+            "SingleScreenLower",
+            "SingleScreenUpper",
+            "mirroring_bit",
+        ],
+    },
     "ppu.nametables.horizontal_mirroring": {
         "subsystem": "ppu",
         "description": "Mapper-declared horizontal nametable mirroring through PPUDATA.",
