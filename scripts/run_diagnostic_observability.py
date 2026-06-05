@@ -192,19 +192,22 @@ FOCUS_DOMAIN_CODE_MAP = {
     },
     "cartridge.mapper4_mmc3": {
         "subsystem": "mapper",
-        "description": "Generated Mapper 4/MMC3 variants validate PRG and CHR bank registers, PRG/CHR inversion modes, mirroring control, scanline IRQ delivery, and IRQ reload phases.",
+        "description": "Generated Mapper 4/MMC3 variants validate PRG and CHR bank registers, PRG/CHR inversion modes, mirroring control, scanline IRQ delivery, IRQ reload phases, and battery-backed PRG RAM persistence.",
         "source_files": ["src/mapper.rs", "src/ppu.rs", "src/bus.rs", "src/cartridge.rs", "src/diagnostic.rs"],
         "test_files": ["tests/mapper_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
         "search_terms": [
             "Mapper004",
             "mapper4_mmc3",
             "mapper4_mmc3_edge",
+            "mapper4_mmc3_prg_ram",
             "mmc3_banks_irq",
             "mmc3_inversion_irq_reload",
+            "mmc3_prg_ram_persistence",
             "clock_scanline",
             "irq_reload",
             "prg_bank_mode",
             "chr_inversion",
+            "prg_ram",
         ],
     },
     "cartridge.mapper7_axrom": {

@@ -307,6 +307,31 @@ fn mapper_save_load_state() {
     }
 }
 
+#[test]
+fn mapper4_save_load_state_preserves_prg_ram() {
+    let rom = make_rom(2, 1, 4, 0x02);
+    let mut cart = Cartridge::new(&rom).unwrap();
+    assert!(cart.has_battery);
+
+    cart.mapper.write_prg(0x6000, 0x3C);
+    cart.mapper.write_prg(0x67FF, 0xC3);
+    cart.mapper.write_prg(0x7FFF, 0xA7);
+    let state = cart.mapper.save_state();
+
+    cart.mapper.write_prg(0x6000, 0x00);
+    cart.mapper.write_prg(0x67FF, 0x00);
+    cart.mapper.write_prg(0x7FFF, 0x00);
+    assert_eq!(cart.mapper.read_prg(0x6000), 0x00);
+    assert_eq!(cart.mapper.read_prg(0x67FF), 0x00);
+    assert_eq!(cart.mapper.read_prg(0x7FFF), 0x00);
+
+    cart.mapper.load_state(&state);
+
+    assert_eq!(cart.mapper.read_prg(0x6000), 0x3C);
+    assert_eq!(cart.mapper.read_prg(0x67FF), 0xC3);
+    assert_eq!(cart.mapper.read_prg(0x7FFF), 0xA7);
+}
+
 // -- Mapper 4 (MMC3) IRQ ---------------------------------------------------
 
 #[test]

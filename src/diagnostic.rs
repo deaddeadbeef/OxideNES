@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 57;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 58;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v57";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v58";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -46,6 +46,7 @@ const MAPPER1_MMC1_TEST_ID: u8 = 32;
 const MAPPER4_MMC3_TEST_ID: u8 = 33;
 const MAPPER4_MMC3_EDGE_TEST_ID: u8 = 34;
 const MAPPER1_MMC1_32K_PRG_TEST_ID: u8 = 35;
+const MAPPER4_MMC3_PRG_RAM_TEST_ID: u8 = 36;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -141,6 +142,12 @@ const MAPPER4_EDGE_PRG_BANK_SENTINELS: [(usize, u16, u8); 3] = [
 const MAPPER4_EDGE_CHR_EXPECTED_VALUES: [u8; 8] = [0x76, 0x87, 0x10, 0x21, 0x32, 0x43, 0x54, 0x65];
 const MAPPER4_EDGE_IRQ_LATCHES: [u8; 2] = [0x03, 0x00];
 const MAPPER4_EDGE_EXPECTED_IRQ_COUNTS: [u8; 2] = [0x01, 0x02];
+const MAPPER4_PRG_RAM_SIZE: usize = 0x2000;
+const MAPPER4_PRG_RAM_READ_ADDRS: [u16; 4] = [0x6000, 0x67FF, 0x7FFF, 0x6000];
+const MAPPER4_PRG_RAM_EXPECTED_VALUES: [u8; 4] = [0x5A, 0xC3, 0xA7, 0x3C];
+const MAPPER4_PRG_RAM_RESTORED_ADDRS: [u16; 3] = [0x6000, 0x67FF, 0x7FFF];
+const MAPPER4_PRG_RAM_RESTORED_VALUES: [u8; 3] = [0x3C, 0xC3, 0xA7];
+const MAPPER4_PRG_RAM_EXPECTED_CASE_COUNT: u8 = 4;
 const MAPPER7_MAPPER: u8 = 7;
 const MAPPER7_PRG_BANKS: u8 = 8;
 const MAPPER7_CHR_BANKS: u8 = 0;
@@ -256,6 +263,8 @@ const MAPPER4_MMC3_EDGE_IRQ_COUNT_ADDR: u16 = 0x029C;
 const MAPPER4_MMC3_EDGE_IRQ_OBSERVED_BASE_ADDR: u16 = 0x029D;
 const MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR: u16 = 0x02A0;
 const MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR: u16 = 0x02A1;
+const MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR: u16 = 0x02B0;
+const MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR: u16 = 0x02B1;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -1353,8 +1362,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "mapper_banking_runtime",
         subsystem: "cartridge",
         risk: "The diagnostic cartridges now exercise several simple bank-switching mappers, but broader mapper behavior can still regress outside these fixtures.",
-        current_coverage: "The generated Mapper 1/MMC1 variants validate serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, MMC1 32 KiB PRG modes 0/1 with ignored low PRG bank bit, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; generated Mapper 4/MMC3 variants validate R6/R7 PRG bank writes, fixed-last PRG reads, 2 KiB and 1 KiB CHR bank reads, mirroring control, scanline IRQ delivery, PRG-mode inversion, CHR inversion across all eight 1 KiB windows, and IRQ reload phases including a zero-latch reload; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
-        missing_coverage: "MMC3 battery-backed RAM persistence, active-render CHR/PRG switches, deeper MMC3 IRQ A12 filtering behavior, and broader mapper-family coverage beyond the generated variants.",
+        current_coverage: "The generated Mapper 1/MMC1 variants validate serial shift-register commits, delayed PRG bank commit after four writes, fixed-last PRG mode, MMC1 32 KiB PRG modes 0/1 with ignored low PRG bank bit, 4 KiB CHR bank switching, and single-screen lower/upper mirroring end to end; the generated Mapper 2/UXROM cartridge validates CPU-visible PRG bank switching, the fixed final-bank window, PRG RAM round-trips, and header-declared horizontal nametable mirroring end to end; a generated Mapper 3/CNROM variant validates CPU bank-select writes and PPU-visible CHR bank reads across four CHR banks; generated Mapper 4/MMC3 variants validate R6/R7 PRG bank writes, fixed-last PRG reads, 2 KiB and 1 KiB CHR bank reads, mirroring control, scanline IRQ delivery, PRG-mode inversion, CHR inversion across all eight 1 KiB windows, IRQ reload phases including a zero-latch reload, and battery-backed PRG RAM write/read plus host SRAM restore behavior; a generated Mapper 7/AxROM variant validates 32 KiB PRG bank switching plus single-screen lower/upper mirroring through CPU and PPU bus paths.",
+        missing_coverage: "Active-render CHR/PRG switches, deeper MMC3 IRQ A12 filtering behavior, and broader mapper-family coverage beyond the generated variants.",
         suggested_next_test: "Generate MMC-style synthetic cartridges that switch CHR/PRG banks during rendering and assert selected pattern/table data through PPU-visible pixels and mapper IRQ timing.",
     },
     DiagnosticCoverageGapSpec {
@@ -1535,6 +1544,7 @@ pub struct DiagnosticTelemetry {
     pub mapper3_chr_bank: Mapper3ChrBankTelemetry,
     pub mapper4_mmc3: Mapper4Mmc3Telemetry,
     pub mapper4_mmc3_edge: Mapper4Mmc3EdgeTelemetry,
+    pub mapper4_mmc3_prg_ram: Mapper4Mmc3PrgRamTelemetry,
     pub mapper7_axrom: Mapper7AxromTelemetry,
     pub input_mask_sweep: InputMaskSweepTelemetry,
     pub input: DiagnosticInputTelemetry,
@@ -1738,6 +1748,34 @@ pub struct Mapper4Mmc3EdgeTelemetry {
     pub expected_chr_values_hex: Vec<String>,
     pub observed_chr_values: Vec<u8>,
     pub observed_chr_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper4Mmc3PrgRamTelemetry {
+    pub mapper: u8,
+    pub prg_16k_banks: u8,
+    pub prg_8k_banks: usize,
+    pub chr_8k_banks: u8,
+    pub battery_backed: bool,
+    pub prg_ram_size: usize,
+    pub read_addrs: Vec<u16>,
+    pub read_addrs_hex: Vec<String>,
+    pub restored_addrs: Vec<u16>,
+    pub restored_addrs_hex: Vec<String>,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_values: Vec<u8>,
+    pub expected_values_hex: Vec<String>,
+    pub observed_values: Vec<u8>,
+    pub observed_values_hex: Vec<String>,
+    pub sram_snapshot_values: Vec<u8>,
+    pub sram_snapshot_values_hex: Vec<String>,
+    pub restored_values: Vec<u8>,
+    pub restored_values_hex: Vec<String>,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -2869,6 +2907,47 @@ fn build_mapper4_mmc3_edge_variant_cartridge() -> Result<Vec<u8>, String> {
     Ok(rom)
 }
 
+fn build_mapper4_mmc3_prg_ram_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper4_mmc3_prg_ram_variant_program_with_labels()?;
+    if program.len() > 0x2000 {
+        return Err(format!(
+            "Mapper 4 PRG RAM diagnostic program is too large for fixed $C000-$DFFF execution: {} bytes > {} bytes",
+            program.len(),
+            0x2000
+        ));
+    }
+
+    let prg_size = MAPPER4_PRG_16K_BANKS as usize * PRG_BANK_SIZE;
+    let mut rom = Vec::with_capacity(16 + prg_size + MAPPER4_CHR_8K_BANKS as usize * CHR_BANK_SIZE);
+    rom.extend_from_slice(b"NES\x1A");
+    rom.push(MAPPER4_PRG_16K_BANKS);
+    rom.push(MAPPER4_CHR_8K_BANKS);
+    rom.push(((MAPPER4_MAPPER & 0x0F) << 4) | 0x02);
+    rom.push(MAPPER4_MAPPER & 0xF0);
+    rom.extend_from_slice(&[0; 8]);
+
+    let mut prg = vec![0xEA; prg_size];
+    let program_offset = (MAPPER4_PRG_16K_BANKS as usize - 1) * PRG_BANK_SIZE;
+    prg[program_offset..program_offset + program.len()].copy_from_slice(&program);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFA,
+        label_addr(&labels, "nmi")?,
+    );
+    write_vector_for_banks(&mut prg, MAPPER4_PRG_16K_BANKS, 0xFFFC, PROGRAM_BASE);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFE,
+        label_addr(&labels, "irq")?,
+    );
+
+    rom.extend_from_slice(&prg);
+    rom.extend_from_slice(&build_mapper4_mmc3_chr_rom());
+    Ok(rom)
+}
+
 fn build_mapper7_axrom_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_mapper7_axrom_variant_program_with_labels()?;
     if program.len() > PRG_BANK_SIZE {
@@ -3509,6 +3588,73 @@ fn build_mapper4_mmc3_edge_variant_program_with_labels(
     Ok((bytes, labels))
 }
 
+fn build_mapper4_mmc3_prg_ram_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER4_MMC3_PRG_RAM_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR);
+    for offset in 0..MAPPER4_PRG_RAM_EXPECTED_VALUES.len() {
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR + offset as u16);
+    }
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+    program.asm.sta_abs(0xE000);
+
+    for (index, (&addr, &expected)) in MAPPER4_PRG_RAM_READ_ADDRS
+        .iter()
+        .zip(MAPPER4_PRG_RAM_EXPECTED_VALUES.iter())
+        .enumerate()
+    {
+        program.asm.lda_imm(expected);
+        program.asm.sta_abs(addr);
+        program.asm.lda_abs(addr);
+        program
+            .asm
+            .sta_abs(MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR + index as u16);
+        program.expect_a_eq(expected, 0xEA + index as u8);
+        program.increment_abs(MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR);
+    }
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
 fn build_mapper7_axrom_variant_program_with_labels(
 ) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
     let mut program = DiagnosticProgram::new();
@@ -4078,6 +4224,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
     let mapper4_mmc3 = mapper4_mmc3_telemetry(&run_mapper4_mmc3_variant());
     let mapper4_mmc3_edge = mapper4_mmc3_edge_telemetry(&run_mapper4_mmc3_edge_variant());
+    let mapper4_mmc3_prg_ram = mapper4_mmc3_prg_ram_telemetry(&run_mapper4_mmc3_prg_ram_variant());
     let mapper7_axrom = mapper7_axrom_telemetry(&run_mapper7_axrom_variant());
     let input_mask_sweep = input_mask_sweep_telemetry(&run_input_mask_sweep_variant());
     let ppu_sprite_overflow = ppu_sprite_overflow_telemetry(&ram);
@@ -4113,6 +4260,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_chr_bank: &mapper3_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
+        mapper4_mmc3_prg_ram: &mapper4_mmc3_prg_ram,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
@@ -4150,6 +4298,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_chr_bank: &mapper3_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
+        mapper4_mmc3_prg_ram: &mapper4_mmc3_prg_ram,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
         oam: &oam,
@@ -4200,6 +4349,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_chr_bank,
         mapper4_mmc3,
         mapper4_mmc3_edge,
+        mapper4_mmc3_prg_ram,
         mapper7_axrom,
         input_mask_sweep,
         input: diagnostic_input_telemetry(&config),
@@ -5021,6 +5171,61 @@ fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Mapper 4 edge error | {} |",
         optional_string(telemetry.mapper4_mmc3_edge.error.as_deref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM mapper / PRG 16K banks / battery | {} / {} / {} |",
+        telemetry.mapper4_mmc3_prg_ram.mapper,
+        telemetry.mapper4_mmc3_prg_ram.prg_16k_banks,
+        telemetry.mapper4_mmc3_prg_ram.battery_backed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM read addresses | {:?} |",
+        telemetry.mapper4_mmc3_prg_ram.read_addrs_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM observed / expected | {:?} / {:?} |",
+        telemetry.mapper4_mmc3_prg_ram.observed_values_hex,
+        telemetry.mapper4_mmc3_prg_ram.expected_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM SRAM snapshot / restored | {:?} / {:?} |",
+        telemetry.mapper4_mmc3_prg_ram.sram_snapshot_values_hex,
+        telemetry.mapper4_mmc3_prg_ram.restored_values_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM restore addresses | {:?} |",
+        telemetry.mapper4_mmc3_prg_ram.restored_addrs_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM cases / expected | {} / {} |",
+        telemetry.mapper4_mmc3_prg_ram.observed_case_count,
+        telemetry.mapper4_mmc3_prg_ram.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper4_mmc3_prg_ram.cycles,
+        telemetry.mapper4_mmc3_prg_ram.frames,
+        telemetry.mapper4_mmc3_prg_ram.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 PRG RAM error | {} |",
+        optional_string(telemetry.mapper4_mmc3_prg_ram.error.as_deref())
     )
     .expect("write report");
     writeln!(
@@ -6952,6 +7157,7 @@ struct HostValidationInput<'a> {
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
+    mapper4_mmc3_prg_ram: &'a Mapper4Mmc3PrgRamTelemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -6982,6 +7188,7 @@ struct ProbeTelemetryInput<'a> {
     mapper3_chr_bank: &'a Mapper3ChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
+    mapper4_mmc3_prg_ram: &'a Mapper4Mmc3PrgRamTelemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
     oam: &'a OamTelemetry,
@@ -7264,6 +7471,25 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.mapper4_mmc3_edge.expected_case_count,
             input.mapper4_mmc3_edge.cycles,
             optional_string(input.mapper4_mmc3_edge.error.as_deref())
+        ));
+    }
+    if !input.mapper4_mmc3_prg_ram.passed {
+        failures.push(format!(
+            "Mapper 4 MMC3 PRG RAM variant mismatch: battery={}, read addrs {:?}, observed {:?} expected {:?}, SRAM snapshot {:?}, restored {:?} expected {:?}, cases {}/{}, cycles={}, error {}",
+            input.mapper4_mmc3_prg_ram.battery_backed,
+            input.mapper4_mmc3_prg_ram.read_addrs_hex,
+            input.mapper4_mmc3_prg_ram.observed_values_hex,
+            input.mapper4_mmc3_prg_ram.expected_values_hex,
+            input.mapper4_mmc3_prg_ram.sram_snapshot_values_hex,
+            input.mapper4_mmc3_prg_ram.restored_values_hex,
+            MAPPER4_PRG_RAM_RESTORED_VALUES
+                .iter()
+                .map(|value| hex_byte(*value))
+                .collect::<Vec<_>>(),
+            input.mapper4_mmc3_prg_ram.observed_case_count,
+            input.mapper4_mmc3_prg_ram.expected_case_count,
+            input.mapper4_mmc3_prg_ram.cycles,
+            optional_string(input.mapper4_mmc3_prg_ram.error.as_deref())
         ));
     }
     if !input.mapper7_axrom.passed {
@@ -7993,6 +8219,46 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.mapper4_mmc3_edge.cycles,
                 input.mapper4_mmc3_edge.frames,
                 optional_string(input.mapper4_mmc3_edge.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper4_mmc3".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper4.mmc3_prg_ram_persistence".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER4_MMC3_PRG_RAM_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper4_mmc3_prg_ram.passed),
+            description:
+                "Generated Mapper 4 variant validates battery-backed PRG RAM writes and host SRAM restore into a fresh cartridge"
+                    .to_string(),
+            expected: format!(
+                "mapper {}, battery true, PRG RAM {} bytes, read addrs {:?}, values {:?}, restored {:?} at {:?}, cases {}",
+                input.mapper4_mmc3_prg_ram.mapper,
+                input.mapper4_mmc3_prg_ram.prg_ram_size,
+                input.mapper4_mmc3_prg_ram.read_addrs_hex,
+                input.mapper4_mmc3_prg_ram.expected_values_hex,
+                MAPPER4_PRG_RAM_RESTORED_VALUES
+                    .iter()
+                    .map(|value| hex_byte(*value))
+                    .collect::<Vec<_>>(),
+                input.mapper4_mmc3_prg_ram.restored_addrs_hex,
+                input.mapper4_mmc3_prg_ram.expected_case_count
+            ),
+            observed: format!(
+                "battery {}, values {:?}, SRAM snapshot {:?}, restored {:?}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper4_mmc3_prg_ram.battery_backed,
+                input.mapper4_mmc3_prg_ram.observed_values_hex,
+                input.mapper4_mmc3_prg_ram.sram_snapshot_values_hex,
+                input.mapper4_mmc3_prg_ram.restored_values_hex,
+                input.mapper4_mmc3_prg_ram.observed_case_count,
+                input.mapper4_mmc3_prg_ram.expected_case_count,
+                input.mapper4_mmc3_prg_ram.cycles,
+                input.mapper4_mmc3_prg_ram.frames,
+                optional_string(input.mapper4_mmc3_prg_ram.error.as_deref())
             ),
             likely_domain: "cartridge.mapper4_mmc3".to_string(),
         },
@@ -11041,6 +11307,62 @@ fn mapper4_mmc3_edge_telemetry(
     }
 }
 
+fn mapper4_mmc3_prg_ram_telemetry(
+    observation: &Mapper4Mmc3PrgRamObservation,
+) -> Mapper4Mmc3PrgRamTelemetry {
+    let read_addrs = MAPPER4_PRG_RAM_READ_ADDRS.to_vec();
+    let restored_addrs = MAPPER4_PRG_RAM_RESTORED_ADDRS.to_vec();
+    let expected_values = MAPPER4_PRG_RAM_EXPECTED_VALUES.to_vec();
+    let observed_values = observation.observed_values.to_vec();
+    let sram_snapshot_values = observation.sram_snapshot_values.to_vec();
+    let restored_values = observation.restored_values.to_vec();
+
+    Mapper4Mmc3PrgRamTelemetry {
+        mapper: MAPPER4_MAPPER,
+        prg_16k_banks: MAPPER4_PRG_16K_BANKS,
+        prg_8k_banks: MAPPER4_PRG_8K_BANKS,
+        chr_8k_banks: MAPPER4_CHR_8K_BANKS,
+        battery_backed: observation.battery_backed,
+        prg_ram_size: MAPPER4_PRG_RAM_SIZE,
+        read_addrs: read_addrs.clone(),
+        read_addrs_hex: read_addrs
+            .iter()
+            .map(|value| format!("0x{value:04X}"))
+            .collect(),
+        restored_addrs: restored_addrs.clone(),
+        restored_addrs_hex: restored_addrs
+            .iter()
+            .map(|value| format!("0x{value:04X}"))
+            .collect(),
+        expected_case_count: MAPPER4_PRG_RAM_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        expected_values: expected_values.clone(),
+        expected_values_hex: expected_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        observed_values: observed_values.clone(),
+        observed_values_hex: observed_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        sram_snapshot_values: sram_snapshot_values.clone(),
+        sram_snapshot_values_hex: sram_snapshot_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        restored_values: restored_values.clone(),
+        restored_values_hex: restored_values
+            .iter()
+            .map(|value| hex_byte(*value))
+            .collect(),
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn mapper7_axrom_telemetry(observation: &Mapper7AxromObservation) -> Mapper7AxromTelemetry {
     let bank_writes = MAPPER7_PRG_BANK_WRITES.to_vec();
     let expected_prg_values = MAPPER7_PRG_EXPECTED_VALUES.to_vec();
@@ -11348,6 +11670,35 @@ impl Mapper4Mmc3EdgeObservation {
             observed_chr_values: [0; 8],
             observed_irq_counts: [0; 2],
             observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Mapper4Mmc3PrgRamObservation {
+    observed_values: [u8; 4],
+    sram_snapshot_values: [u8; 3],
+    restored_values: [u8; 3],
+    observed_case_count: u8,
+    battery_backed: bool,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper4Mmc3PrgRamObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            observed_values: [0; 4],
+            sram_snapshot_values: [0; 3],
+            restored_values: [0; 3],
+            observed_case_count: 0,
+            battery_backed: false,
             cycles: 0,
             frames: 0,
             passed: false,
@@ -11965,6 +12316,127 @@ fn read_mapper4_mmc3_edge_irq_observed_counts(bus: &mut Bus) -> [u8; 2] {
         *value = bus.cpu_read(MAPPER4_MMC3_EDGE_IRQ_OBSERVED_BASE_ADDR + index as u16);
     }
     values
+}
+
+fn run_mapper4_mmc3_prg_ram_variant() -> Mapper4Mmc3PrgRamObservation {
+    match try_run_mapper4_mmc3_prg_ram_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper4Mmc3PrgRamObservation::failed(error),
+    }
+}
+
+fn try_run_mapper4_mmc3_prg_ram_variant() -> Result<Mapper4Mmc3PrgRamObservation, String> {
+    let rom = build_mapper4_mmc3_prg_ram_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let battery_backed = cartridge.has_battery;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 50_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let observed_values = read_mapper4_mmc3_prg_ram_observed_values(&mut bus);
+            let observed_case_count = bus.cpu_read(MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR);
+            let sram = bus.get_sram();
+            let sram_snapshot_values = read_mapper4_prg_ram_sram_values(&sram);
+            let restored_values = restored_mapper4_prg_ram_values(&rom, &sram)?;
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && battery_backed
+                && observed_case_count == MAPPER4_PRG_RAM_EXPECTED_CASE_COUNT
+                && observed_values == MAPPER4_PRG_RAM_EXPECTED_VALUES
+                && sram_snapshot_values == MAPPER4_PRG_RAM_RESTORED_VALUES
+                && restored_values == MAPPER4_PRG_RAM_RESTORED_VALUES;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 4 MMC3 PRG RAM variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(format!(
+                    "Mapper 4 MMC3 PRG RAM variant reached PASS with mismatched host observations: battery_backed={}, observed {:?}, SRAM snapshot {:?}, restored {:?}, cases {}/{}",
+                    battery_backed,
+                    observed_values,
+                    sram_snapshot_values,
+                    restored_values,
+                    observed_case_count,
+                    MAPPER4_PRG_RAM_EXPECTED_CASE_COUNT
+                ))
+            };
+            return Ok(Mapper4Mmc3PrgRamObservation {
+                observed_values,
+                sram_snapshot_values,
+                restored_values,
+                observed_case_count,
+                battery_backed,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    let sram = bus.get_sram();
+    let sram_snapshot_values = read_mapper4_prg_ram_sram_values(&sram);
+    let restored_values = restored_mapper4_prg_ram_values(&rom, &sram)?;
+    Ok(Mapper4Mmc3PrgRamObservation {
+        observed_values: read_mapper4_mmc3_prg_ram_observed_values(&mut bus),
+        sram_snapshot_values,
+        restored_values,
+        observed_case_count: bus.cpu_read(MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR),
+        battery_backed,
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 4 MMC3 PRG RAM variant timed out after {cycle_limit} cycles"
+        )),
+    })
+}
+
+fn read_mapper4_mmc3_prg_ram_observed_values(bus: &mut Bus) -> [u8; 4] {
+    let mut values = [0; 4];
+    for (index, value) in values.iter_mut().enumerate() {
+        *value = bus.cpu_read(MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR + index as u16);
+    }
+    values
+}
+
+fn read_mapper4_prg_ram_sram_values(sram: &[u8]) -> [u8; 3] {
+    let mut values = [0; 3];
+    for (index, &addr) in MAPPER4_PRG_RAM_RESTORED_ADDRS.iter().enumerate() {
+        let offset = (addr - 0x6000) as usize;
+        values[index] = sram.get(offset).copied().unwrap_or(0);
+    }
+    values
+}
+
+fn restored_mapper4_prg_ram_values(rom: &[u8], sram: &[u8]) -> Result<[u8; 3], String> {
+    let mut cartridge = Cartridge::new(rom)?;
+    cartridge.mapper.set_sram(sram);
+    let mut values = [0; 3];
+    for (index, &addr) in MAPPER4_PRG_RAM_RESTORED_ADDRS.iter().enumerate() {
+        values[index] = cartridge.mapper.read_prg(addr);
+    }
+    Ok(values)
 }
 
 fn run_mapper7_axrom_variant() -> Mapper7AxromObservation {

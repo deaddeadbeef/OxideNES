@@ -757,7 +757,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Mapper 4/MMC3 PRG R6/R7 bank switching, fixed-last PRG reads, 2 KiB and
   1 KiB CHR bank switching, horizontal/vertical mirroring control, and
   scanline IRQ delivery, plus a fixed-`$E000` edge variant for PRG-mode
-  inversion, CHR inversion, and IRQ reload phases
+  inversion, CHR inversion, and IRQ reload phases, and a battery-backed PRG
+  RAM variant that validates `$6000-$7FFF` writes plus host SRAM restore
 - Mapper 7/AxROM 32 KiB PRG bank switching and single-screen lower/upper
   nametable mirroring through CPU and PPU bus paths
 - Joypad strobe and shift reads with configurable expected masks
@@ -1197,6 +1198,13 @@ both 32 KiB bank pairs, writes MMC1 control values for PRG modes 0 and 1, reads
 paired sentinels at `$8000` and `$E000`, proves odd PRG bank writes ignore bit 0
 in 32 KiB mode, and exposes top-level `mapper1_mmc1_32k_prg` telemetry plus the
 `mapper1.mmc1_32k_prg_mode` probe.
+
+Schema version `58` adds a generated Mapper 4/MMC3 battery-backed PRG RAM
+variant. The variant declares the iNES battery flag, writes and reads `$6000`,
+`$67FF`, and `$7FFF`, rewrites `$6000` to prove mutability, then the host runner
+captures mapper SRAM and restores it into a fresh cartridge. It exposes top-level
+`mapper4_mmc3_prg_ram` telemetry plus the
+`mapper4.mmc3_prg_ram_persistence` probe.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
