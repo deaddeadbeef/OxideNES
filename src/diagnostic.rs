@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 63;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 64;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v63";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v64";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -52,6 +52,7 @@ const CPU_RMW_ADDRESSING_MATRIX_TEST_ID: u8 = 38;
 const CPU_BRANCH_MATRIX_TEST_ID: u8 = 39;
 const CPU_STACK_MATRIX_TEST_ID: u8 = 40;
 const CPU_INTERRUPT_MATRIX_TEST_ID: u8 = 41;
+const CPU_ACCUMULATOR_MATRIX_TEST_ID: u8 = 42;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -297,6 +298,7 @@ const CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_rmw_addressing_matrix_b
 const CPU_BRANCH_MATRIX_FAULT_LABEL: &str = "cpu_branch_condition_matrix_before_cases";
 const CPU_STACK_MATRIX_FAULT_LABEL: &str = "cpu_stack_status_matrix_before_cases";
 const CPU_INTERRUPT_MATRIX_FAULT_LABEL: &str = "cpu_interrupt_matrix_before_brk";
+const CPU_ACCUMULATOR_MATRIX_FAULT_LABEL: &str = "cpu_accumulator_matrix_before_cases";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -420,6 +422,18 @@ const CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER: u8 = 0x66;
 const CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT: u8 = 0xA5;
 const CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT: u8 = 1;
 const CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT: u8 = 5;
+const CPU_ACCUMULATOR_MATRIX_ASL_RESULT_ADDR: u16 = 0x02D4;
+const CPU_ACCUMULATOR_MATRIX_LSR_RESULT_ADDR: u16 = 0x02D5;
+const CPU_ACCUMULATOR_MATRIX_ROL_RESULT_ADDR: u16 = 0x02D6;
+const CPU_ACCUMULATOR_MATRIX_ROR_RESULT_ADDR: u16 = 0x02D7;
+const CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR: u16 = 0x02D8;
+const CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR: u16 = 0x02D9;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_ASL_RESULT: u8 = 0x00;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_LSR_RESULT: u8 = 0x00;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_ROL_RESULT: u8 = 0x01;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_ROR_RESULT: u8 = 0x80;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK: u8 = 0x0F;
+const CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT: u8 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -824,6 +838,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "RTI returns to the instruction after BRK padding with the handler accumulator sentinel",
             "zero and carry flags survive the BRK/RTI round trip",
             "the final stack pointer returns to the selected pre-interrupt stack depth",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        name: "cpu_accumulator_shift_rotate_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify accumulator-form shift and rotate opcodes update A plus carry, zero, and negative flags.",
+        expected_observations: &[
+            "ASL A and LSR A produce zero results while setting carry and zero",
+            "ROL A and ROR A consume carry-in and record carry-out through accumulator results",
+            "ROR A sets the negative flag when bit 7 is rotated into the accumulator",
+            "the matrix records every shift/rotate subcase in its case mask and case count",
         ],
     },
 ];
@@ -1350,6 +1377,51 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         observed: "the interrupt matrix case count did not match the expected BRK/RTI cases",
         likely_domain: "cpu.interrupt.brk_rti_matrix",
         remediation_hint: "Inspect interrupt matrix execution flow and any early exits before broadening the CPU opcode matrix further.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8E,
+        test_id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        assertion: "ASL accumulator shifts bit 7 into carry and produces zero",
+        expected: "ASL A turns 0x80 into 0x00 with carry and zero set and negative clear",
+        observed: "ASL A did not preserve the expected accumulator result or status flags",
+        likely_domain: "cpu.accumulator.shift_rotate",
+        remediation_hint: "Inspect ASL accumulator dispatch, carry-out from bit 7, zero/negative flag updates, and accumulator writeback.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8F,
+        test_id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        assertion: "LSR accumulator shifts bit 0 into carry and produces zero",
+        expected: "LSR A turns 0x01 into 0x00 with carry and zero set and negative clear",
+        observed: "LSR A did not preserve the expected accumulator result or status flags",
+        likely_domain: "cpu.accumulator.shift_rotate",
+        remediation_hint: "Inspect LSR accumulator dispatch, carry-out from bit 0, zero/negative flag updates, and accumulator writeback.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x9C,
+        test_id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        assertion: "ROL accumulator consumes carry-in and preserves carry-out",
+        expected: "SEC; ROL A turns 0x80 into 0x01 with carry set, zero clear, and negative clear",
+        observed: "ROL A did not preserve the expected accumulator result or status flags",
+        likely_domain: "cpu.accumulator.shift_rotate",
+        remediation_hint: "Inspect ROL accumulator carry-in/carry-out handling, accumulator writeback, and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x9D,
+        test_id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        assertion: "ROR accumulator consumes carry-in and sets negative when bit 7 is filled",
+        expected: "SEC; ROR A turns 0x01 into 0x80 with carry and negative set and zero clear",
+        observed: "ROR A did not preserve the expected accumulator result or status flags",
+        likely_domain: "cpu.accumulator.shift_rotate",
+        remediation_hint: "Inspect ROR accumulator carry-in/carry-out handling, accumulator writeback, and negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x9E,
+        test_id: CPU_ACCUMULATOR_MATRIX_TEST_ID,
+        assertion: "Accumulator shift/rotate matrix records every subcase",
+        expected: "flag mask == 0x0F and case count == 4",
+        observed: "the accumulator shift/rotate matrix did not record all expected subcases",
+        likely_domain: "cpu.accumulator.shift_rotate",
+        remediation_hint: "Inspect accumulator matrix execution flow and the ASL/LSR/ROL/ROR accumulator opcode paths before broadening opcode coverage.",
     },
     DiagnosticFailureSpec {
         code: 0xB0,
@@ -1904,6 +1976,7 @@ fn diagnostic_render_frame_signature_validation(config: &DiagnosticConfig) -> (b
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticFaultInjection {
     ApuStatusRegister,
+    CpuAccumulatorShiftRotateMatrix,
     CpuAddressingModeMatrix,
     CpuBranchConditionMatrix,
     CpuInterruptMatrix,
@@ -1932,8 +2005,9 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 26] = [
+    pub const ALL: [DiagnosticFaultInjection; 27] = [
         DiagnosticFaultInjection::ApuStatusRegister,
+        DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
         DiagnosticFaultInjection::CpuInterruptMatrix,
@@ -1964,6 +2038,7 @@ impl DiagnosticFaultInjection {
     pub fn as_str(self) -> &'static str {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
+            DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix => "cpu_accumulator_matrix",
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuBranchConditionMatrix => "cpu_branch_condition_matrix",
             DiagnosticFaultInjection::CpuInterruptMatrix => "cpu_interrupt_matrix",
@@ -2001,6 +2076,9 @@ impl DiagnosticFaultInjection {
     fn injection_label(self) -> &'static str {
         match self {
             DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix => {
+                CPU_ACCUMULATOR_MATRIX_FAULT_LABEL
+            }
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuBranchConditionMatrix => CPU_BRANCH_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuInterruptMatrix => CPU_INTERRUPT_MATRIX_FAULT_LABEL,
@@ -2052,6 +2130,7 @@ pub struct DiagnosticTelemetry {
     pub cycles: u64,
     pub frames: u64,
     pub cpu: CpuTelemetry,
+    pub cpu_accumulator_matrix: CpuAccumulatorMatrixTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
     pub cpu_interrupt_matrix: CpuInterruptMatrixTelemetry,
@@ -2643,6 +2722,25 @@ pub struct CpuInterruptMatrixTelemetry {
     pub final_stack_pointer_hex: String,
     pub irq_count: u8,
     pub irq_count_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuAccumulatorMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_flag_mask: u8,
+    pub expected_flag_mask_hex: String,
+    pub flag_mask: u8,
+    pub flag_mask_hex: String,
+    pub asl_result: u8,
+    pub asl_result_hex: String,
+    pub lsr_result: u8,
+    pub lsr_result_hex: String,
+    pub rol_result: u8,
+    pub rol_result_hex: String,
+    pub ror_result: u8,
+    pub ror_result_hex: String,
     pub passed: bool,
 }
 
@@ -4809,6 +4907,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         )
     });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
+    let cpu_accumulator_matrix = cpu_accumulator_matrix_telemetry(&ram);
     let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
     let cpu_interrupt_matrix = cpu_interrupt_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
@@ -4851,6 +4950,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         timeout,
         tests: &test_results,
         ram: &ram,
+        cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -4894,6 +4994,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         failure_code,
         tests: &test_results,
         ram: &ram,
+        cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -4974,6 +5075,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cycles,
         frames,
         cpu: cpu_telemetry(&cpu),
+        cpu_accumulator_matrix,
         cpu_addressing_matrix,
         cpu_branch_matrix,
         cpu_interrupt_matrix,
@@ -5220,6 +5322,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_ppu_section(&mut report, telemetry);
     write_dma_section(&mut report, telemetry);
     write_audio_section(&mut report, telemetry);
+    write_cpu_accumulator_section(&mut report, telemetry);
     write_cpu_branch_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
     write_cpu_interrupt_section(&mut report, telemetry);
@@ -6518,6 +6621,48 @@ fn write_audio_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         telemetry.apu_dmc_status.observed_case_count,
         telemetry.apu_dmc_status.expected_case_count,
         telemetry.apu_dmc_status.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
+fn write_cpu_accumulator_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Accumulator Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| ASL/LSR results | {} / {} |",
+        telemetry.cpu_accumulator_matrix.asl_result_hex,
+        telemetry.cpu_accumulator_matrix.lsr_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| ROL/ROR results | {} / {} |",
+        telemetry.cpu_accumulator_matrix.rol_result_hex,
+        telemetry.cpu_accumulator_matrix.ror_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Flag mask / expected | {} / {} |",
+        telemetry.cpu_accumulator_matrix.flag_mask_hex,
+        telemetry.cpu_accumulator_matrix.expected_flag_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Accumulator matrix cases / expected | {} / {} |",
+        telemetry.cpu_accumulator_matrix.observed_case_count,
+        telemetry.cpu_accumulator_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Accumulator matrix passed | {} |",
+        telemetry.cpu_accumulator_matrix.passed
     )
     .expect("write report");
     writeln!(report).expect("write report");
@@ -7936,6 +8081,7 @@ struct HostValidationInput<'a> {
     timeout: bool,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -7972,6 +8118,7 @@ struct ProbeTelemetryInput<'a> {
     failure_code: u8,
     tests: &'a [TestTelemetry],
     ram: &'a [u8],
+    cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -8036,6 +8183,18 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
                 test.id, test.name, test.result
             ));
         }
+    }
+    if !input.cpu_accumulator_matrix.passed {
+        failures.push(format!(
+            "CPU accumulator matrix mismatch: asl={}, lsr={}, rol={}, ror={}, flag_mask={}, cases {}/{}",
+            input.cpu_accumulator_matrix.asl_result_hex,
+            input.cpu_accumulator_matrix.lsr_result_hex,
+            input.cpu_accumulator_matrix.rol_result_hex,
+            input.cpu_accumulator_matrix.ror_result_hex,
+            input.cpu_accumulator_matrix.flag_mask_hex,
+            input.cpu_accumulator_matrix.observed_case_count,
+            input.cpu_accumulator_matrix.expected_case_count
+        ));
     }
     if !input.cpu_addressing_matrix.passed {
         failures.push(format!(
@@ -8580,6 +8739,33 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     }
 
     let passed_suite = input.status == STATUS_PASS;
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.accumulator_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_ACCUMULATOR_MATRIX_TEST_ID),
+            test_name: test_name(CPU_ACCUMULATOR_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_accumulator_matrix.passed),
+            description:
+                "CPU accumulator shift/rotate matrix retained expected A, carry, zero, and negative flag observations"
+                    .to_string(),
+            expected: "ASL=0x00, LSR=0x00, ROL=0x01, ROR=0x80, flag_mask=0x0F, cases=4"
+                .to_string(),
+            observed: format!(
+                "ASL {}, LSR {}, ROL {}, ROR {}, flag_mask {}, cases {}/{}",
+                input.cpu_accumulator_matrix.asl_result_hex,
+                input.cpu_accumulator_matrix.lsr_result_hex,
+                input.cpu_accumulator_matrix.rol_result_hex,
+                input.cpu_accumulator_matrix.ror_result_hex,
+                input.cpu_accumulator_matrix.flag_mask_hex,
+                input.cpu_accumulator_matrix.observed_case_count,
+                input.cpu_accumulator_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.accumulator.shift_rotate".to_string(),
+        },
+    );
     push_probe(
         &mut probes,
         ProbeTelemetryRecord {
@@ -9904,6 +10090,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_branch_condition_matrix();
     program.cpu_stack_status_matrix();
     program.cpu_interrupt_brk_rti_matrix();
+    program.cpu_accumulator_shift_rotate_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -10007,6 +10194,33 @@ impl DiagnosticProgram {
             .expect("unique label should not collide");
     }
 
+    fn expect_z_clear(&mut self, fail_code: u8) {
+        let ok = self.unique_label("zero_clear_ok");
+        self.asm.bne(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn expect_n_set(&mut self, fail_code: u8) {
+        let ok = self.unique_label("negative_set_ok");
+        self.asm.bmi(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn expect_n_clear(&mut self, fail_code: u8) {
+        let ok = self.unique_label("negative_clear_ok");
+        self.asm.bpl(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
     fn expect_c_clear(&mut self, fail_code: u8) {
         let ok = self.unique_label("carry_clear_ok");
         self.asm.bcc(&ok);
@@ -10067,6 +10281,13 @@ impl DiagnosticProgram {
         self.asm.ora_imm(mask_bit);
         self.asm.sta_abs(mask_addr);
         self.asm.inc_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn mark_accumulator_matrix_case(&mut self, mask_bit: u8) {
+        self.asm.lda_abs(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR);
+        self.asm.inc_abs(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR);
     }
 
     fn set_overflow_flag(&mut self) {
@@ -10553,6 +10774,65 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT, 0x8D);
         self.pass_test(CPU_INTERRUPT_MATRIX_TEST_ID);
+    }
+
+    fn cpu_accumulator_shift_rotate_matrix(&mut self) {
+        self.begin_test(CPU_ACCUMULATOR_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ASL_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_LSR_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ROL_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ROR_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR);
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_ACCUMULATOR_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.lda_imm(0x80);
+        self.asm.asl_accumulator();
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ASL_RESULT_ADDR);
+        self.expect_c_set(0x8E);
+        self.expect_z_set(0x8E);
+        self.expect_n_clear(0x8E);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_ASL_RESULT, 0x8E);
+        self.mark_accumulator_matrix_case(0x01);
+
+        self.asm.lda_imm(0x01);
+        self.asm.lsr_accumulator();
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_LSR_RESULT_ADDR);
+        self.expect_c_set(0x8F);
+        self.expect_z_set(0x8F);
+        self.expect_n_clear(0x8F);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_LSR_RESULT, 0x8F);
+        self.mark_accumulator_matrix_case(0x02);
+
+        self.asm.sec();
+        self.asm.lda_imm(0x80);
+        self.asm.rol_accumulator();
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ROL_RESULT_ADDR);
+        self.expect_c_set(0x9C);
+        self.expect_z_clear(0x9C);
+        self.expect_n_clear(0x9C);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_ROL_RESULT, 0x9C);
+        self.mark_accumulator_matrix_case(0x04);
+
+        self.asm.sec();
+        self.asm.lda_imm(0x01);
+        self.asm.ror_accumulator();
+        self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_ROR_RESULT_ADDR);
+        self.expect_c_set(0x9D);
+        self.expect_z_clear(0x9D);
+        self.expect_n_set(0x9D);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_ROR_RESULT, 0x9D);
+        self.mark_accumulator_matrix_case(0x08);
+
+        self.asm.lda_abs(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK, 0x9E);
+        self.asm.lda_abs(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT, 0x9E);
+        self.pass_test(CPU_ACCUMULATOR_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -11967,6 +12247,14 @@ impl Assembler {
         self.op_rel(0xB0, label);
     }
 
+    fn bpl(&mut self, label: &str) {
+        self.op_rel(0x10, label);
+    }
+
+    fn bmi(&mut self, label: &str) {
+        self.op_rel(0x30, label);
+    }
+
     fn bne(&mut self, label: &str) {
         self.op_rel(0xD0, label);
     }
@@ -11987,12 +12275,20 @@ impl Assembler {
         self.op_zp(0x06, addr);
     }
 
+    fn asl_accumulator(&mut self) {
+        self.emit(0x0A);
+    }
+
     fn asl_abs(&mut self, addr: u16) {
         self.op_abs(0x0E, addr);
     }
 
     fn rol_zp(&mut self, addr: u8) {
         self.op_zp(0x26, addr);
+    }
+
+    fn rol_accumulator(&mut self) {
+        self.emit(0x2A);
     }
 
     fn rol_abs_x(&mut self, addr: u16) {
@@ -12003,12 +12299,20 @@ impl Assembler {
         self.op_zp(0x46, addr);
     }
 
+    fn lsr_accumulator(&mut self) {
+        self.emit(0x4A);
+    }
+
     fn lsr_abs(&mut self, addr: u16) {
         self.op_abs(0x4E, addr);
     }
 
     fn ror_zp(&mut self, addr: u8) {
         self.op_zp(0x66, addr);
+    }
+
+    fn ror_accumulator(&mut self) {
+        self.emit(0x6A);
     }
 
     fn ror_abs_x(&mut self, addr: u16) {
@@ -12282,6 +12586,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::ApuStatusRegister => {
             bus.cpu_write(0x4015, 0x00);
         }
+        DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix => {
+            bus.cpu_write(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR, 0x80);
+        }
         DiagnosticFaultInjection::CpuAddressingModeMatrix => {
             bus.cpu_write(0x0500, 0x00);
         }
@@ -12507,6 +12814,37 @@ fn cpu_interrupt_matrix_telemetry(ram: &[u8]) -> CpuInterruptMatrixTelemetry {
             && status_result == CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT
             && final_stack_pointer == CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER
             && irq_count == CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT,
+    }
+}
+
+fn cpu_accumulator_matrix_telemetry(ram: &[u8]) -> CpuAccumulatorMatrixTelemetry {
+    let asl_result = ram[(CPU_ACCUMULATOR_MATRIX_ASL_RESULT_ADDR & 0x07FF) as usize];
+    let lsr_result = ram[(CPU_ACCUMULATOR_MATRIX_LSR_RESULT_ADDR & 0x07FF) as usize];
+    let rol_result = ram[(CPU_ACCUMULATOR_MATRIX_ROL_RESULT_ADDR & 0x07FF) as usize];
+    let ror_result = ram[(CPU_ACCUMULATOR_MATRIX_ROR_RESULT_ADDR & 0x07FF) as usize];
+    let flag_mask = ram[(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuAccumulatorMatrixTelemetry {
+        expected_case_count: CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_flag_mask: CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK,
+        expected_flag_mask_hex: hex_byte(CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK),
+        flag_mask,
+        flag_mask_hex: hex_byte(flag_mask),
+        asl_result,
+        asl_result_hex: hex_byte(asl_result),
+        lsr_result,
+        lsr_result_hex: hex_byte(lsr_result),
+        rol_result,
+        rol_result_hex: hex_byte(rol_result),
+        ror_result,
+        ror_result_hex: hex_byte(ror_result),
+        passed: observed_case_count == CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT
+            && flag_mask == CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK
+            && asl_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_ASL_RESULT
+            && lsr_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_LSR_RESULT
+            && rol_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_ROL_RESULT
+            && ror_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_ROR_RESULT,
     }
 }
 
@@ -15934,6 +16272,13 @@ fn compare_observation_checksums(
         &["cpu", "pending_cycles"][..],
         &["ram", "nmi_count"][..],
         &["ram", "checksum"][..],
+        &["cpu_accumulator_matrix", "asl_result"][..],
+        &["cpu_accumulator_matrix", "lsr_result"][..],
+        &["cpu_accumulator_matrix", "rol_result"][..],
+        &["cpu_accumulator_matrix", "ror_result"][..],
+        &["cpu_accumulator_matrix", "flag_mask"][..],
+        &["cpu_accumulator_matrix", "observed_case_count"][..],
+        &["cpu_accumulator_matrix", "passed"][..],
         &["cpu_branch_matrix", "taken_mask"][..],
         &["cpu_branch_matrix", "not_taken_mask"][..],
         &["cpu_branch_matrix", "page_cross_result"][..],
