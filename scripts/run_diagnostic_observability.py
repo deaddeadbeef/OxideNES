@@ -41,6 +41,13 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/apu_tests.rs"],
         "search_terms": ["0x4015", "status", "pub fn read", "self.apu.read"],
     },
+    "bus.cpu_ram_mirroring": {
+        "subsystem": "bus",
+        "description": "2 KiB internal CPU RAM mirroring across the $0000-$1FFF bus window.",
+        "source_files": ["src/bus.rs"],
+        "test_files": ["tests/bus_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": ["0x0000..=0x1FFF", "addr & 0x07FF", "cpu_ram_mirroring"],
+    },
     "cpu.addressing.zero_page_x_wrap": {
         "subsystem": "cpu",
         "description": "6502 zero-page indexed addressing wraparound for reads and writes.",
@@ -314,6 +321,7 @@ FOCUS_DOMAIN_CODE_MAP = {
 
 SCENARIO_TEST_FILTERS = {
     "apu_status_fault": "generated_diagnostic_cartridge_localizes_intentional_apu_status_failure",
+    "cpu_ram_mirroring_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_ram_mirroring_failure",
     "cpu_indirect_jmp_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_indirect_jmp_failure",
     "cpu_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_addressing_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 8
+EXPECTED_SCENARIO_SUITE_SCHEMA = 9
 EXPECTED_OBSERVER_SCHEMA = 2
 EXPECTED_TELEMETRY_SCHEMA = 58
 EXPECTED_TRIAGE_SCHEMA = 6
@@ -26,6 +26,7 @@ EXPECTED_SCENARIOS = {
     "input_mask_nibble_split_pass",
     "joypad1_mismatch",
     "joypad2_mismatch",
+    "cpu_ram_mirroring_fault",
     "dma_oam_transfer_fault",
     "dma_phase_matrix_fault",
     "apu_status_fault",
@@ -97,7 +98,7 @@ class SuiteVerifier:
         )
         self.expect_equal(
             analysis.get("baseline_divergence_count"),
-            23,
+            24,
             "analysis baseline_divergence_count",
         )
 
@@ -147,13 +148,13 @@ class SuiteVerifier:
         )
         self.expect_equal(
             observer.get("baseline_divergence_count"),
-            23,
+            24,
             "observer baseline_divergence_count",
         )
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
-        self.expect_equal(len(actions), 23, "observer next_actions count")
+        self.expect_equal(len(actions), 24, "observer next_actions count")
         self.expect_equal(len(observations), len(EXPECTED_SCENARIOS), "observer observations count")
         self.verify_observer_actions(actions)
         self.verify_observer_observations(observations)
@@ -187,6 +188,7 @@ class SuiteVerifier:
         expected_action_ids = {
             "joypad1_mismatch",
             "joypad2_mismatch",
+            "cpu_ram_mirroring_fault",
             "dma_oam_transfer_fault",
             "dma_phase_matrix_fault",
             "apu_status_fault",
@@ -210,6 +212,40 @@ class SuiteVerifier:
             "timeout_cycle_limit",
         }
         self.expect_equal(set(by_scenario), expected_action_ids, "observer action scenario ids")
+
+        bus = by_scenario.get("cpu_ram_mirroring_fault")
+        if not isinstance(bus, dict):
+            self.errors.append("missing observer action for cpu_ram_mirroring_fault")
+            return
+
+        self.expect_equal(
+            bus.get("priority"),
+            "known_divergence",
+            "CPU RAM mirroring observer action priority",
+        )
+        self.expect_equal(
+            bus.get("action_type"),
+            "inspect_known_divergence",
+            "CPU RAM mirroring observer action type",
+        )
+        self.expect_equal(
+            bus.get("primary_artifact"),
+            "cpu_ram_mirroring_fault/comparison.json",
+            "CPU RAM mirroring observer primary_artifact",
+        )
+        bus_evidence = self.expect_list(
+            bus.get("evidence"), "CPU RAM mirroring observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=bus.cpu_ram_mirroring",
+            bus_evidence,
+            "CPU RAM mirroring observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.3.result",
+            bus_evidence,
+            "CPU RAM mirroring observer evidence",
+        )
 
         timeout = by_scenario.get("timeout_cycle_limit")
         if not isinstance(timeout, dict):
