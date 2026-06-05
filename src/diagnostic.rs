@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 64;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 65;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v64";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v65";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -53,6 +53,7 @@ const CPU_BRANCH_MATRIX_TEST_ID: u8 = 39;
 const CPU_STACK_MATRIX_TEST_ID: u8 = 40;
 const CPU_INTERRUPT_MATRIX_TEST_ID: u8 = 41;
 const CPU_ACCUMULATOR_MATRIX_TEST_ID: u8 = 42;
+const CPU_COMPARE_MATRIX_TEST_ID: u8 = 43;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -299,6 +300,8 @@ const CPU_BRANCH_MATRIX_FAULT_LABEL: &str = "cpu_branch_condition_matrix_before_
 const CPU_STACK_MATRIX_FAULT_LABEL: &str = "cpu_stack_status_matrix_before_cases";
 const CPU_INTERRUPT_MATRIX_FAULT_LABEL: &str = "cpu_interrupt_matrix_before_brk";
 const CPU_ACCUMULATOR_MATRIX_FAULT_LABEL: &str = "cpu_accumulator_matrix_before_cases";
+const CPU_COMPARE_MATRIX_FAULT_LABEL: &str = "cpu_compare_matrix_before_cases";
+const CPU_COMPARE_MATRIX_SUMMARY_LABEL: &str = "cpu_compare_matrix_before_summary";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -434,6 +437,12 @@ const CPU_ACCUMULATOR_MATRIX_EXPECTED_ROL_RESULT: u8 = 0x01;
 const CPU_ACCUMULATOR_MATRIX_EXPECTED_ROR_RESULT: u8 = 0x80;
 const CPU_ACCUMULATOR_MATRIX_EXPECTED_FLAG_MASK: u8 = 0x0F;
 const CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT: u8 = 4;
+const CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR: u16 = 0x02DA;
+const CPU_COMPARE_MATRIX_GREATER_MASK_ADDR: u16 = 0x02DB;
+const CPU_COMPARE_MATRIX_LESS_MASK_ADDR: u16 = 0x02DC;
+const CPU_COMPARE_MATRIX_CASE_COUNT_ADDR: u16 = 0x02DD;
+const CPU_COMPARE_MATRIX_EXPECTED_MASK: u8 = 0x07;
+const CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT: u8 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -851,6 +860,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "ROL A and ROR A consume carry-in and record carry-out through accumulator results",
             "ROR A sets the negative flag when bit 7 is rotated into the accumulator",
             "the matrix records every shift/rotate subcase in its case mask and case count",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_COMPARE_MATRIX_TEST_ID,
+        name: "cpu_compare_register_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify CMP, CPX, and CPY set carry, zero, and negative flags for equal, greater-than, and less-than register comparisons.",
+        expected_observations: &[
+            "CMP records equal, greater-than, and less-than flag outcomes without mutating the accumulator",
+            "CPX records equal, greater-than, and less-than flag outcomes for the X register",
+            "CPY records equal, greater-than, and less-than flag outcomes for the Y register",
+            "the matrix records all compare opcodes across all three outcome classes",
         ],
     },
 ];
@@ -1424,6 +1446,42 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect accumulator matrix execution flow and the ASL/LSR/ROL/ROR accumulator opcode paths before broadening opcode coverage.",
     },
     DiagnosticFailureSpec {
+        code: 0xBB,
+        test_id: CPU_COMPARE_MATRIX_TEST_ID,
+        assertion: "CMP sets carry, zero, and negative flags for equal, greater-than, and less-than accumulator comparisons",
+        expected: "CMP records equal, greater-than, and less-than outcome bits with the expected status flags",
+        observed: "CMP did not preserve the expected compare result flags across the matrix",
+        likely_domain: "cpu.compare.flags",
+        remediation_hint: "Inspect CMP dispatch, subtraction-without-writeback semantics, carry set/clear behavior, and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xBC,
+        test_id: CPU_COMPARE_MATRIX_TEST_ID,
+        assertion: "CPX sets carry, zero, and negative flags for equal, greater-than, and less-than X comparisons",
+        expected: "CPX records equal, greater-than, and less-than outcome bits with the expected status flags",
+        observed: "CPX did not preserve the expected compare result flags across the matrix",
+        likely_domain: "cpu.compare.flags",
+        remediation_hint: "Inspect CPX dispatch, X-register operand selection, carry set/clear behavior, and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xBD,
+        test_id: CPU_COMPARE_MATRIX_TEST_ID,
+        assertion: "CPY sets carry, zero, and negative flags for equal, greater-than, and less-than Y comparisons",
+        expected: "CPY records equal, greater-than, and less-than outcome bits with the expected status flags",
+        observed: "CPY did not preserve the expected compare result flags across the matrix",
+        likely_domain: "cpu.compare.flags",
+        remediation_hint: "Inspect CPY dispatch, Y-register operand selection, carry set/clear behavior, and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xBE,
+        test_id: CPU_COMPARE_MATRIX_TEST_ID,
+        assertion: "Compare register matrix records every opcode and outcome class",
+        expected: "equal mask == 0x07, greater mask == 0x07, less mask == 0x07, and case count == 9",
+        observed: "the compare register matrix did not record every CMP/CPX/CPY outcome subcase",
+        likely_domain: "cpu.compare.flags",
+        remediation_hint: "Inspect compare matrix execution flow and the CMP/CPX/CPY opcode paths before broadening opcode coverage further.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -1889,8 +1947,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, and a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but accumulator and broader addressing/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, and CMP/CPX/CPY equal, greater-than, and less-than flag outcomes.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
     DiagnosticCoverageGapSpec {
@@ -1979,6 +2037,7 @@ pub enum DiagnosticFaultInjection {
     CpuAccumulatorShiftRotateMatrix,
     CpuAddressingModeMatrix,
     CpuBranchConditionMatrix,
+    CpuCompareRegisterMatrix,
     CpuInterruptMatrix,
     CpuIndirectJmpPageWrap,
     CpuRamMirroring,
@@ -2005,11 +2064,12 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 27] = [
+    pub const ALL: [DiagnosticFaultInjection; 28] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
+        DiagnosticFaultInjection::CpuCompareRegisterMatrix,
         DiagnosticFaultInjection::CpuInterruptMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuRamMirroring,
@@ -2041,6 +2101,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix => "cpu_accumulator_matrix",
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuBranchConditionMatrix => "cpu_branch_condition_matrix",
+            DiagnosticFaultInjection::CpuCompareRegisterMatrix => "cpu_compare_matrix",
             DiagnosticFaultInjection::CpuInterruptMatrix => "cpu_interrupt_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
@@ -2081,6 +2142,7 @@ impl DiagnosticFaultInjection {
             }
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuBranchConditionMatrix => CPU_BRANCH_MATRIX_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuCompareRegisterMatrix => CPU_COMPARE_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuInterruptMatrix => CPU_INTERRUPT_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
@@ -2133,6 +2195,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_accumulator_matrix: CpuAccumulatorMatrixTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
+    pub cpu_compare_matrix: CpuCompareMatrixTelemetry,
     pub cpu_interrupt_matrix: CpuInterruptMatrixTelemetry,
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
@@ -2741,6 +2804,21 @@ pub struct CpuAccumulatorMatrixTelemetry {
     pub rol_result_hex: String,
     pub ror_result: u8,
     pub ror_result_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuCompareMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_mask: u8,
+    pub expected_mask_hex: String,
+    pub equal_mask: u8,
+    pub equal_mask_hex: String,
+    pub greater_mask: u8,
+    pub greater_mask_hex: String,
+    pub less_mask: u8,
+    pub less_mask_hex: String,
     pub passed: bool,
 }
 
@@ -4909,6 +4987,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let cpu_accumulator_matrix = cpu_accumulator_matrix_telemetry(&ram);
     let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
+    let cpu_compare_matrix = cpu_compare_matrix_telemetry(&ram);
     let cpu_interrupt_matrix = cpu_interrupt_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
@@ -4953,6 +5032,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
@@ -4997,6 +5077,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_accumulator_matrix: &cpu_accumulator_matrix,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
@@ -5078,6 +5159,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_accumulator_matrix,
         cpu_addressing_matrix,
         cpu_branch_matrix,
+        cpu_compare_matrix,
         cpu_interrupt_matrix,
         cpu_stack_matrix,
         cpu_rmw_addressing_matrix,
@@ -5324,6 +5406,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_audio_section(&mut report, telemetry);
     write_cpu_accumulator_section(&mut report, telemetry);
     write_cpu_branch_section(&mut report, telemetry);
+    write_cpu_compare_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
     write_cpu_interrupt_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
@@ -6709,6 +6792,46 @@ fn write_cpu_branch_section(report: &mut String, telemetry: &DiagnosticTelemetry
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_compare_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Compare Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Equal mask / expected | {} / {} |",
+        telemetry.cpu_compare_matrix.equal_mask_hex, telemetry.cpu_compare_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Greater mask / expected | {} / {} |",
+        telemetry.cpu_compare_matrix.greater_mask_hex,
+        telemetry.cpu_compare_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Less mask / expected | {} / {} |",
+        telemetry.cpu_compare_matrix.less_mask_hex, telemetry.cpu_compare_matrix.expected_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Compare matrix cases / expected | {} / {} |",
+        telemetry.cpu_compare_matrix.observed_case_count,
+        telemetry.cpu_compare_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Compare matrix passed | {} |",
+        telemetry.cpu_compare_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## CPU Stack Matrix").expect("write report");
     writeln!(report).expect("write report");
@@ -8084,6 +8207,7 @@ struct HostValidationInput<'a> {
     cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
@@ -8121,6 +8245,7 @@ struct ProbeTelemetryInput<'a> {
     cpu_accumulator_matrix: &'a CpuAccumulatorMatrixTelemetry,
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
@@ -8214,6 +8339,16 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_branch_matrix.page_cross_result_hex,
             input.cpu_branch_matrix.observed_case_count,
             input.cpu_branch_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_compare_matrix.passed {
+        failures.push(format!(
+            "CPU compare matrix mismatch: equal={}, greater={}, less={}, cases {}/{}",
+            input.cpu_compare_matrix.equal_mask_hex,
+            input.cpu_compare_matrix.greater_mask_hex,
+            input.cpu_compare_matrix.less_mask_hex,
+            input.cpu_compare_matrix.observed_case_count,
+            input.cpu_compare_matrix.expected_case_count
         ));
     }
     if !input.cpu_stack_matrix.passed {
@@ -8814,6 +8949,30 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_branch_matrix.expected_case_count
             ),
             likely_domain: "cpu.branch.condition_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.compare_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_COMPARE_MATRIX_TEST_ID),
+            test_name: test_name(CPU_COMPARE_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_compare_matrix.passed),
+            description:
+                "CPU compare register matrix retained expected CMP, CPX, and CPY flag observations"
+                    .to_string(),
+            expected: "equal=0x07, greater=0x07, less=0x07, cases=9".to_string(),
+            observed: format!(
+                "equal {}, greater {}, less {}, cases {}/{}",
+                input.cpu_compare_matrix.equal_mask_hex,
+                input.cpu_compare_matrix.greater_mask_hex,
+                input.cpu_compare_matrix.less_mask_hex,
+                input.cpu_compare_matrix.observed_case_count,
+                input.cpu_compare_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.compare.flags".to_string(),
         },
     );
     push_probe(
@@ -10091,6 +10250,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_stack_status_matrix();
     program.cpu_interrupt_brk_rti_matrix();
     program.cpu_accumulator_shift_rotate_matrix();
+    program.cpu_compare_register_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -10288,6 +10448,13 @@ impl DiagnosticProgram {
         self.asm.ora_imm(mask_bit);
         self.asm.sta_abs(CPU_ACCUMULATOR_MATRIX_FLAG_MASK_ADDR);
         self.asm.inc_abs(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn mark_compare_matrix_case(&mut self, mask_addr: u16, mask_bit: u8) {
+        self.asm.lda_abs(mask_addr);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(mask_addr);
+        self.asm.inc_abs(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR);
     }
 
     fn set_overflow_flag(&mut self) {
@@ -10833,6 +11000,95 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_ACCUMULATOR_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_ACCUMULATOR_MATRIX_EXPECTED_CASE_COUNT, 0x9E);
         self.pass_test(CPU_ACCUMULATOR_MATRIX_TEST_ID);
+    }
+
+    fn cpu_compare_register_matrix(&mut self) {
+        self.begin_test(CPU_COMPARE_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR);
+        self.asm.sta_abs(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR);
+        self.asm.sta_abs(CPU_COMPARE_MATRIX_LESS_MASK_ADDR);
+        self.asm.sta_abs(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_COMPARE_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.lda_imm(0x40);
+        self.asm.cmp_imm(0x40);
+        self.expect_c_set(0xBB);
+        self.expect_z_set(0xBB);
+        self.expect_n_clear(0xBB);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x40);
+        self.asm.cmp_imm(0x10);
+        self.expect_c_set(0xBB);
+        self.expect_z_clear(0xBB);
+        self.expect_n_clear(0xBB);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x10);
+        self.asm.cmp_imm(0x40);
+        self.expect_c_clear(0xBB);
+        self.expect_z_clear(0xBB);
+        self.expect_n_set(0xBB);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_LESS_MASK_ADDR, 0x01);
+
+        self.asm.ldx_imm(0x40);
+        self.asm.cpx_imm(0x40);
+        self.expect_c_set(0xBC);
+        self.expect_z_set(0xBC);
+        self.expect_n_clear(0xBC);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR, 0x02);
+
+        self.asm.ldx_imm(0x40);
+        self.asm.cpx_imm(0x10);
+        self.expect_c_set(0xBC);
+        self.expect_z_clear(0xBC);
+        self.expect_n_clear(0xBC);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR, 0x02);
+
+        self.asm.ldx_imm(0x10);
+        self.asm.cpx_imm(0x40);
+        self.expect_c_clear(0xBC);
+        self.expect_z_clear(0xBC);
+        self.expect_n_set(0xBC);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_LESS_MASK_ADDR, 0x02);
+
+        self.asm.ldy_imm(0x40);
+        self.asm.cpy_imm(0x40);
+        self.expect_c_set(0xBD);
+        self.expect_z_set(0xBD);
+        self.expect_n_clear(0xBD);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR, 0x04);
+
+        self.asm.ldy_imm(0x40);
+        self.asm.cpy_imm(0x10);
+        self.expect_c_set(0xBD);
+        self.expect_z_clear(0xBD);
+        self.expect_n_clear(0xBD);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR, 0x04);
+
+        self.asm.ldy_imm(0x10);
+        self.asm.cpy_imm(0x40);
+        self.expect_c_clear(0xBD);
+        self.expect_z_clear(0xBD);
+        self.expect_n_set(0xBD);
+        self.mark_compare_matrix_case(CPU_COMPARE_MATRIX_LESS_MASK_ADDR, 0x04);
+
+        self.asm
+            .label(CPU_COMPARE_MATRIX_SUMMARY_LABEL)
+            .expect("diagnostic compare summary label should not collide");
+        self.asm.lda_abs(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR);
+        self.expect_a_eq(CPU_COMPARE_MATRIX_EXPECTED_MASK, 0xBE);
+        self.asm.lda_abs(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR);
+        self.expect_a_eq(CPU_COMPARE_MATRIX_EXPECTED_MASK, 0xBE);
+        self.asm.lda_abs(CPU_COMPARE_MATRIX_LESS_MASK_ADDR);
+        self.expect_a_eq(CPU_COMPARE_MATRIX_EXPECTED_MASK, 0xBE);
+        self.asm.lda_abs(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT, 0xBE);
+        self.pass_test(CPU_COMPARE_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -12235,6 +12491,10 @@ impl Assembler {
         self.op_imm(0xE0, value);
     }
 
+    fn cpy_imm(&mut self, value: u8) {
+        self.op_imm(0xC0, value);
+    }
+
     fn beq(&mut self, label: &str) {
         self.op_rel(0xF0, label);
     }
@@ -12595,6 +12855,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuBranchConditionMatrix => {
             bus.cpu_write(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR, 0x80);
         }
+        DiagnosticFaultInjection::CpuCompareRegisterMatrix => {
+            bus.cpu_write(CPU_COMPARE_MATRIX_LESS_MASK_ADDR, 0x80);
+        }
         DiagnosticFaultInjection::CpuInterruptMatrix => {
             bus.cpu_write(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR, 0x80);
         }
@@ -12845,6 +13108,29 @@ fn cpu_accumulator_matrix_telemetry(ram: &[u8]) -> CpuAccumulatorMatrixTelemetry
             && lsr_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_LSR_RESULT
             && rol_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_ROL_RESULT
             && ror_result == CPU_ACCUMULATOR_MATRIX_EXPECTED_ROR_RESULT,
+    }
+}
+
+fn cpu_compare_matrix_telemetry(ram: &[u8]) -> CpuCompareMatrixTelemetry {
+    let equal_mask = ram[(CPU_COMPARE_MATRIX_EQUAL_MASK_ADDR & 0x07FF) as usize];
+    let greater_mask = ram[(CPU_COMPARE_MATRIX_GREATER_MASK_ADDR & 0x07FF) as usize];
+    let less_mask = ram[(CPU_COMPARE_MATRIX_LESS_MASK_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuCompareMatrixTelemetry {
+        expected_case_count: CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_mask: CPU_COMPARE_MATRIX_EXPECTED_MASK,
+        expected_mask_hex: hex_byte(CPU_COMPARE_MATRIX_EXPECTED_MASK),
+        equal_mask,
+        equal_mask_hex: hex_byte(equal_mask),
+        greater_mask,
+        greater_mask_hex: hex_byte(greater_mask),
+        less_mask,
+        less_mask_hex: hex_byte(less_mask),
+        passed: observed_case_count == CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT
+            && equal_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK
+            && greater_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK
+            && less_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK,
     }
 }
 
@@ -16279,6 +16565,11 @@ fn compare_observation_checksums(
         &["cpu_accumulator_matrix", "flag_mask"][..],
         &["cpu_accumulator_matrix", "observed_case_count"][..],
         &["cpu_accumulator_matrix", "passed"][..],
+        &["cpu_compare_matrix", "equal_mask"][..],
+        &["cpu_compare_matrix", "greater_mask"][..],
+        &["cpu_compare_matrix", "less_mask"][..],
+        &["cpu_compare_matrix", "observed_case_count"][..],
+        &["cpu_compare_matrix", "passed"][..],
         &["cpu_branch_matrix", "taken_mask"][..],
         &["cpu_branch_matrix", "not_taken_mask"][..],
         &["cpu_branch_matrix", "page_cross_result"][..],

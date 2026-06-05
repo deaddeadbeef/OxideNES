@@ -14,7 +14,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 15;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 16;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Serialize)]
@@ -1829,7 +1829,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
         config: default.clone(),
         expected_passed: true,
         expected_health: DiagnosticHealth::Healthy,
-        expected_focus_test_id: Some(42),
+        expected_focus_test_id: Some(43),
         expected_focus_domain: None,
     }];
     specs.extend(input_mask_scenario_specs(&default));
@@ -2029,6 +2029,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(42),
             expected_focus_domain: Some("cpu.accumulator.shift_rotate"),
+        },
+        DiagnosticScenarioSpec {
+            id: "cpu_compare_matrix_fault",
+            title: "Intentional CPU compare register matrix assertion failure",
+            purpose: "Failure-localization fixture for CMP/CPX/CPY carry, zero, and negative flag regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuCompareRegisterMatrix),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(43),
+            expected_focus_domain: Some("cpu.compare.flags"),
         },
         DiagnosticScenarioSpec {
             id: "input_port_matrix_fault",
@@ -2305,7 +2318,7 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(42),
+            expected_focus_test_id: Some(43),
             expected_focus_domain: None,
         })
         .collect()
