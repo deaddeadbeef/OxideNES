@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 62;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 63;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v62";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v63";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -51,6 +51,7 @@ const CPU_RMW_MATRIX_TEST_ID: u8 = 37;
 const CPU_RMW_ADDRESSING_MATRIX_TEST_ID: u8 = 38;
 const CPU_BRANCH_MATRIX_TEST_ID: u8 = 39;
 const CPU_STACK_MATRIX_TEST_ID: u8 = 40;
+const CPU_INTERRUPT_MATRIX_TEST_ID: u8 = 41;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -295,6 +296,7 @@ const CPU_RMW_MATRIX_FAULT_LABEL: &str = "cpu_rmw_matrix_before_asl";
 const CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_rmw_addressing_matrix_before_absolute_asl";
 const CPU_BRANCH_MATRIX_FAULT_LABEL: &str = "cpu_branch_condition_matrix_before_cases";
 const CPU_STACK_MATRIX_FAULT_LABEL: &str = "cpu_stack_status_matrix_before_cases";
+const CPU_INTERRUPT_MATRIX_FAULT_LABEL: &str = "cpu_interrupt_matrix_before_brk";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -405,6 +407,19 @@ const CPU_STACK_MATRIX_EXPECTED_PULL_RESULT: u8 = 0xA6;
 const CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT: u8 = 0xA9;
 const CPU_STACK_MATRIX_EXPECTED_JSR_RESULT: u8 = 0x77;
 const CPU_STACK_MATRIX_EXPECTED_CASE_COUNT: u8 = 5;
+const CPU_INTERRUPT_MATRIX_BRK_MARKER_ADDR: u16 = 0x02CD;
+const CPU_INTERRUPT_MATRIX_HANDLER_SP_ADDR: u16 = 0x02CE;
+const CPU_INTERRUPT_MATRIX_RETURN_A_ADDR: u16 = 0x02CF;
+const CPU_INTERRUPT_MATRIX_STATUS_RESULT_ADDR: u16 = 0x02D0;
+const CPU_INTERRUPT_MATRIX_FINAL_SP_ADDR: u16 = 0x02D1;
+const CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR: u16 = 0x02D2;
+const CPU_INTERRUPT_MATRIX_IRQ_COUNT_ADDR: u16 = 0x02D3;
+const CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER: u8 = 0xF0;
+const CPU_INTERRUPT_MATRIX_EXPECTED_HANDLER_STACK_POINTER: u8 = 0xED;
+const CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER: u8 = 0x66;
+const CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT: u8 = 0xA5;
+const CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT: u8 = 1;
+const CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT: u8 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -796,6 +811,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "PHA/PLA restores a pushed accumulator byte and preserves the stack depth",
             "PHP/PLP restores zero/carry status flags after intervening flag mutations",
             "JSR/RTS returns with the expected accumulator sentinel and final stack pointer",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        name: "cpu_interrupt_brk_rti_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify BRK vectors through the IRQ handler, pushes the expected stack frame, and RTI restores PC and status flags.",
+        expected_observations: &[
+            "BRK enters the cartridge IRQ vector and the handler records its stack pointer before RTI",
+            "RTI returns to the instruction after BRK padding with the handler accumulator sentinel",
+            "zero and carry flags survive the BRK/RTI round trip",
+            "the final stack pointer returns to the selected pre-interrupt stack depth",
         ],
     },
 ];
@@ -1259,6 +1287,69 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         observed: "PPUSTATUS sprite-overflow bit was not set after the deterministic overflow scene",
         likely_domain: "ppu.sprite_overflow",
         remediation_hint: "Inspect secondary OAM sprite evaluation, overflow-bit setting, and PPUSTATUS bit-5 lifetime across vblank.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x87,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "BRK/RTI restores zero and carry status flags",
+        expected: "BEQ and BCS both succeed immediately after RTI returns from BRK",
+        observed: "RTI did not restore the zero/carry status flags saved by BRK",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect BRK pushed status, IRQ-vector handler RTI status pull, and break/unused bit normalization.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x88,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "BRK handler accumulator sentinel survives return",
+        expected: "the first instruction after BRK padding observes accumulator sentinel 0x66",
+        observed: "A differed from the BRK handler sentinel after RTI returned",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect BRK return PC, RTI pull order, and whether the instruction after BRK padding is skipped correctly.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x89,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "BRK enters the cartridge IRQ vector",
+        expected: "the IRQ handler stores marker 0x66 before RTI",
+        observed: "the diagnostic IRQ handler marker was not written",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect BRK vector fetch from $FFFE/$FFFF and IRQ-handler dispatch from the generated cartridge.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8A,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "BRK pushes a three-byte interrupt stack frame",
+        expected: "handler TSX reads stack pointer 0xED after starting from 0xF0",
+        observed: "handler stack pointer did not show the expected three pushed bytes",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect BRK PC/status push order, stack decrement timing, and stack-page addressing.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8B,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "RTI restores final stack depth",
+        expected: "final TSX reads stack pointer 0xF0 after BRK/RTI",
+        observed: "final stack pointer did not return to the selected pre-interrupt depth",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect RTI status/PC pull order and stack increment timing.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8C,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "BRK handler runs exactly once",
+        expected: "IRQ handler count == 1",
+        observed: "IRQ handler count did not match one BRK entry",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect BRK return address, handler RTI, and any unintended re-entry into the BRK padding byte.",
+    },
+    DiagnosticFailureSpec {
+        code: 0x8D,
+        test_id: CPU_INTERRUPT_MATRIX_TEST_ID,
+        assertion: "Interrupt matrix records its expected case count",
+        expected: "case count == 5",
+        observed: "the interrupt matrix case count did not match the expected BRK/RTI cases",
+        likely_domain: "cpu.interrupt.brk_rti_matrix",
+        remediation_hint: "Inspect interrupt matrix execution flow and any early exits before broadening the CPU opcode matrix further.",
     },
     DiagnosticFailureSpec {
         code: 0xB0,
@@ -1815,6 +1906,7 @@ pub enum DiagnosticFaultInjection {
     ApuStatusRegister,
     CpuAddressingModeMatrix,
     CpuBranchConditionMatrix,
+    CpuInterruptMatrix,
     CpuIndirectJmpPageWrap,
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
@@ -1840,10 +1932,11 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 25] = [
+    pub const ALL: [DiagnosticFaultInjection; 26] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
+        DiagnosticFaultInjection::CpuInterruptMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
         DiagnosticFaultInjection::CpuRamMirroring,
         DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix,
@@ -1873,6 +1966,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::ApuStatusRegister => "apu_status_register",
             DiagnosticFaultInjection::CpuAddressingModeMatrix => "cpu_addressing_mode_matrix",
             DiagnosticFaultInjection::CpuBranchConditionMatrix => "cpu_branch_condition_matrix",
+            DiagnosticFaultInjection::CpuInterruptMatrix => "cpu_interrupt_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
@@ -1909,6 +2003,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::ApuStatusRegister => APU_STATUS_FAULT_LABEL,
             DiagnosticFaultInjection::CpuAddressingModeMatrix => CPU_ADDRESSING_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuBranchConditionMatrix => CPU_BRANCH_MATRIX_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuInterruptMatrix => CPU_INTERRUPT_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
@@ -1959,6 +2054,7 @@ pub struct DiagnosticTelemetry {
     pub cpu: CpuTelemetry,
     pub cpu_addressing_matrix: CpuAddressingMatrixTelemetry,
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
+    pub cpu_interrupt_matrix: CpuInterruptMatrixTelemetry,
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
     pub cpu_stack_matrix: CpuStackMatrixTelemetry,
@@ -2524,6 +2620,29 @@ pub struct CpuStackMatrixTelemetry {
     pub jsr_result_hex: String,
     pub final_stack_pointer: u8,
     pub final_stack_pointer_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuInterruptMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_stack_pointer: u8,
+    pub expected_stack_pointer_hex: String,
+    pub expected_handler_stack_pointer: u8,
+    pub expected_handler_stack_pointer_hex: String,
+    pub brk_marker: u8,
+    pub brk_marker_hex: String,
+    pub handler_stack_pointer: u8,
+    pub handler_stack_pointer_hex: String,
+    pub return_a: u8,
+    pub return_a_hex: String,
+    pub status_result: u8,
+    pub status_result_hex: String,
+    pub final_stack_pointer: u8,
+    pub final_stack_pointer_hex: String,
+    pub irq_count: u8,
+    pub irq_count_hex: String,
     pub passed: bool,
 }
 
@@ -4691,6 +4810,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
+    let cpu_interrupt_matrix = cpu_interrupt_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
@@ -4733,6 +4853,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_interrupt_matrix: &cpu_interrupt_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
@@ -4775,6 +4896,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_interrupt_matrix: &cpu_interrupt_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
@@ -4854,6 +4976,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         cpu_branch_matrix,
+        cpu_interrupt_matrix,
         cpu_stack_matrix,
         cpu_rmw_addressing_matrix,
         cpu_rmw_matrix,
@@ -5099,6 +5222,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_audio_section(&mut report, telemetry);
     write_cpu_branch_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
+    write_cpu_interrupt_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_instruction_trace_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
@@ -6496,6 +6620,71 @@ fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry)
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_interrupt_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Interrupt Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| BRK handler marker / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.brk_marker_hex,
+        hex_byte(CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Handler stack pointer / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.handler_stack_pointer_hex,
+        telemetry
+            .cpu_interrupt_matrix
+            .expected_handler_stack_pointer_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Return accumulator / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.return_a_hex,
+        hex_byte(CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status restore result / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.status_result_hex,
+        hex_byte(CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Final stack pointer / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.final_stack_pointer_hex,
+        telemetry.cpu_interrupt_matrix.expected_stack_pointer_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| IRQ handler count / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.irq_count_hex,
+        hex_byte(CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Interrupt matrix cases / expected | {} / {} |",
+        telemetry.cpu_interrupt_matrix.observed_case_count,
+        telemetry.cpu_interrupt_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Interrupt matrix passed | {} |",
+        telemetry.cpu_interrupt_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_timing_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Timing").expect("write report");
     writeln!(report).expect("write report");
@@ -6933,6 +7122,7 @@ struct OpcodeDecode {
 
 fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
     let decode = match opcode {
+        0x00 => OpcodeDecode::implied("BRK"),
         0x08 => OpcodeDecode::implied("PHP"),
         0x18 => OpcodeDecode::implied("CLC"),
         0x20 => OpcodeDecode::absolute("JSR"),
@@ -6960,6 +7150,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xA5 => OpcodeDecode::zero_page("LDA"),
         0xA9 => OpcodeDecode::immediate("LDA"),
         0xAD => OpcodeDecode::absolute("LDA"),
+        0xB0 => OpcodeDecode::relative("BCS"),
         0xB1 => OpcodeDecode::indirect_y("LDA"),
         0xB5 => OpcodeDecode::zero_page_x("LDA"),
         0xBA => OpcodeDecode::implied("TSX"),
@@ -7747,6 +7938,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
@@ -7782,6 +7974,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
@@ -7874,6 +8067,19 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_stack_matrix.final_stack_pointer_hex,
             input.cpu_stack_matrix.observed_case_count,
             input.cpu_stack_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_interrupt_matrix.passed {
+        failures.push(format!(
+            "CPU interrupt matrix mismatch: marker={}, handler_sp={}, return_a={}, status={}, final_sp={}, irq_count={}, cases {}/{}",
+            input.cpu_interrupt_matrix.brk_marker_hex,
+            input.cpu_interrupt_matrix.handler_stack_pointer_hex,
+            input.cpu_interrupt_matrix.return_a_hex,
+            input.cpu_interrupt_matrix.status_result_hex,
+            input.cpu_interrupt_matrix.final_stack_pointer_hex,
+            input.cpu_interrupt_matrix.irq_count_hex,
+            input.cpu_interrupt_matrix.observed_case_count,
+            input.cpu_interrupt_matrix.expected_case_count
         ));
     }
     if !input.cpu_rmw_matrix.passed {
@@ -8449,6 +8655,35 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_stack_matrix.expected_case_count
             ),
             likely_domain: "cpu.stack.status_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.interrupt_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_INTERRUPT_MATRIX_TEST_ID),
+            test_name: test_name(CPU_INTERRUPT_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_interrupt_matrix.passed),
+            description:
+                "CPU interrupt matrix retained expected BRK vector, RTI status/PC, and stack-depth observations"
+                    .to_string(),
+            expected:
+                "marker=0x66, handler_sp=0xED, return_a=0x66, status=0xA5, final_sp=0xF0, irq_count=0x01, cases=5"
+                    .to_string(),
+            observed: format!(
+                "marker {}, handler_sp {}, return_a {}, status {}, final_sp {}, irq_count {}, cases {}/{}",
+                input.cpu_interrupt_matrix.brk_marker_hex,
+                input.cpu_interrupt_matrix.handler_stack_pointer_hex,
+                input.cpu_interrupt_matrix.return_a_hex,
+                input.cpu_interrupt_matrix.status_result_hex,
+                input.cpu_interrupt_matrix.final_stack_pointer_hex,
+                input.cpu_interrupt_matrix.irq_count_hex,
+                input.cpu_interrupt_matrix.observed_case_count,
+                input.cpu_interrupt_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.interrupt.brk_rti_matrix".to_string(),
         },
     );
     push_probe(
@@ -9668,6 +9903,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_rmw_addressing_matrix();
     program.cpu_branch_condition_matrix();
     program.cpu_stack_status_matrix();
+    program.cpu_interrupt_brk_rti_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -9690,6 +9926,19 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.asm.rti();
 
     program.asm.label("irq")?;
+    program.asm.lda_zp(CURRENT_TEST_ADDR);
+    program.asm.cmp_imm(CPU_INTERRUPT_MATRIX_TEST_ID);
+    program.asm.beq("cpu_interrupt_matrix_irq");
+    program.asm.rti();
+
+    program.asm.label("cpu_interrupt_matrix_irq")?;
+    program.asm.inc_abs(CPU_INTERRUPT_MATRIX_IRQ_COUNT_ADDR);
+    program.asm.tsx();
+    program.asm.stx_abs(CPU_INTERRUPT_MATRIX_HANDLER_SP_ADDR);
+    program
+        .asm
+        .lda_imm(CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER);
+    program.asm.sta_abs(CPU_INTERRUPT_MATRIX_BRK_MARKER_ADDR);
     program.asm.rti();
 
     let labels = program.asm.labels.clone();
@@ -9761,6 +10010,15 @@ impl DiagnosticProgram {
     fn expect_c_clear(&mut self, fail_code: u8) {
         let ok = self.unique_label("carry_clear_ok");
         self.asm.bcc(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn expect_c_set(&mut self, fail_code: u8) {
+        let ok = self.unique_label("carry_set_ok");
+        self.asm.bcs(&ok);
         self.fail_with_code(fail_code);
         self.asm
             .label(&ok)
@@ -10239,6 +10497,62 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_STACK_MATRIX_EXPECTED_CASE_COUNT, 0xAE);
         self.pass_test(CPU_STACK_MATRIX_TEST_ID);
+    }
+
+    fn cpu_interrupt_brk_rti_matrix(&mut self) {
+        self.begin_test(CPU_INTERRUPT_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_BRK_MARKER_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_HANDLER_SP_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_RETURN_A_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_STATUS_RESULT_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_FINAL_SP_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_IRQ_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_INTERRUPT_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm
+            .ldx_imm(CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER);
+        self.asm.txs();
+        self.asm.sec();
+        self.asm.lda_imm(0x00);
+        self.asm.brk();
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_RETURN_A_ADDR);
+        self.expect_z_set(0x87);
+        self.expect_c_set(0x87);
+        self.asm
+            .lda_imm(CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT);
+        self.asm.sta_abs(CPU_INTERRUPT_MATRIX_STATUS_RESULT_ADDR);
+        self.asm.inc_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_INTERRUPT_MATRIX_RETURN_A_ADDR);
+        self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER, 0x88);
+        self.asm.inc_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_INTERRUPT_MATRIX_BRK_MARKER_ADDR);
+        self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER, 0x89);
+        self.asm.inc_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_INTERRUPT_MATRIX_HANDLER_SP_ADDR);
+        self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_HANDLER_STACK_POINTER, 0x8A);
+
+        self.asm.tsx();
+        self.asm.stx_abs(CPU_INTERRUPT_MATRIX_FINAL_SP_ADDR);
+        self.asm
+            .cpx_imm(CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER);
+        self.expect_z_set(0x8B);
+        self.asm.inc_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_INTERRUPT_MATRIX_IRQ_COUNT_ADDR);
+        self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT, 0x8C);
+        self.asm.inc_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT, 0x8D);
+        self.pass_test(CPU_INTERRUPT_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -11649,6 +11963,10 @@ impl Assembler {
         self.op_rel(0x90, label);
     }
 
+    fn bcs(&mut self, label: &str) {
+        self.op_rel(0xB0, label);
+    }
+
     fn bne(&mut self, label: &str) {
         self.op_rel(0xD0, label);
     }
@@ -11751,6 +12069,11 @@ impl Assembler {
 
     fn rti(&mut self) {
         self.emit(0x40);
+    }
+
+    fn brk(&mut self) {
+        self.emit(0x00);
+        self.emit(0xEA);
     }
 
     fn sei(&mut self) {
@@ -11965,6 +12288,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuBranchConditionMatrix => {
             bus.cpu_write(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR, 0x80);
         }
+        DiagnosticFaultInjection::CpuInterruptMatrix => {
+            bus.cpu_write(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR, 0x80);
+        }
         DiagnosticFaultInjection::CpuStackStatusMatrix => {
             bus.cpu_write(CPU_STACK_MATRIX_CASE_COUNT_ADDR, 0x80);
         }
@@ -12142,6 +12468,45 @@ fn cpu_stack_matrix_telemetry(ram: &[u8]) -> CpuStackMatrixTelemetry {
             && status_result == CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT
             && jsr_result == CPU_STACK_MATRIX_EXPECTED_JSR_RESULT
             && final_stack_pointer == CPU_STACK_MATRIX_EXPECTED_STACK_POINTER,
+    }
+}
+
+fn cpu_interrupt_matrix_telemetry(ram: &[u8]) -> CpuInterruptMatrixTelemetry {
+    let brk_marker = ram[(CPU_INTERRUPT_MATRIX_BRK_MARKER_ADDR & 0x07FF) as usize];
+    let handler_stack_pointer = ram[(CPU_INTERRUPT_MATRIX_HANDLER_SP_ADDR & 0x07FF) as usize];
+    let return_a = ram[(CPU_INTERRUPT_MATRIX_RETURN_A_ADDR & 0x07FF) as usize];
+    let status_result = ram[(CPU_INTERRUPT_MATRIX_STATUS_RESULT_ADDR & 0x07FF) as usize];
+    let final_stack_pointer = ram[(CPU_INTERRUPT_MATRIX_FINAL_SP_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let irq_count = ram[(CPU_INTERRUPT_MATRIX_IRQ_COUNT_ADDR & 0x07FF) as usize];
+    CpuInterruptMatrixTelemetry {
+        expected_case_count: CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_stack_pointer: CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER,
+        expected_stack_pointer_hex: hex_byte(CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER),
+        expected_handler_stack_pointer: CPU_INTERRUPT_MATRIX_EXPECTED_HANDLER_STACK_POINTER,
+        expected_handler_stack_pointer_hex: hex_byte(
+            CPU_INTERRUPT_MATRIX_EXPECTED_HANDLER_STACK_POINTER,
+        ),
+        brk_marker,
+        brk_marker_hex: hex_byte(brk_marker),
+        handler_stack_pointer,
+        handler_stack_pointer_hex: hex_byte(handler_stack_pointer),
+        return_a,
+        return_a_hex: hex_byte(return_a),
+        status_result,
+        status_result_hex: hex_byte(status_result),
+        final_stack_pointer,
+        final_stack_pointer_hex: hex_byte(final_stack_pointer),
+        irq_count,
+        irq_count_hex: hex_byte(irq_count),
+        passed: observed_case_count == CPU_INTERRUPT_MATRIX_EXPECTED_CASE_COUNT
+            && brk_marker == CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER
+            && handler_stack_pointer == CPU_INTERRUPT_MATRIX_EXPECTED_HANDLER_STACK_POINTER
+            && return_a == CPU_INTERRUPT_MATRIX_EXPECTED_BRK_MARKER
+            && status_result == CPU_INTERRUPT_MATRIX_EXPECTED_STATUS_RESULT
+            && final_stack_pointer == CPU_INTERRUPT_MATRIX_EXPECTED_STACK_POINTER
+            && irq_count == CPU_INTERRUPT_MATRIX_EXPECTED_IRQ_COUNT,
     }
 }
 
@@ -15581,6 +15946,14 @@ fn compare_observation_checksums(
         &["cpu_stack_matrix", "final_stack_pointer"][..],
         &["cpu_stack_matrix", "observed_case_count"][..],
         &["cpu_stack_matrix", "passed"][..],
+        &["cpu_interrupt_matrix", "brk_marker"][..],
+        &["cpu_interrupt_matrix", "handler_stack_pointer"][..],
+        &["cpu_interrupt_matrix", "return_a"][..],
+        &["cpu_interrupt_matrix", "status_result"][..],
+        &["cpu_interrupt_matrix", "final_stack_pointer"][..],
+        &["cpu_interrupt_matrix", "irq_count"][..],
+        &["cpu_interrupt_matrix", "observed_case_count"][..],
+        &["cpu_interrupt_matrix", "passed"][..],
     ] {
         compare_optional_value(
             baseline,

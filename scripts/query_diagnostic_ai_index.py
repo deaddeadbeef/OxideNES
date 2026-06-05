@@ -242,13 +242,13 @@ def build_smoke_summary(
             errors.append(f"smoke check failed: {name}")
 
     add_check("index_status", index.get("status") == "passed", index.get("status"))
-    add_check("scenario_cards", summary.get("scenario_count") == 36, summary.get("scenario_count"))
+    add_check("scenario_cards", summary.get("scenario_count") == 37, summary.get("scenario_count"))
     add_check(
         "actionable_scenarios",
-        summary.get("actionable_scenario_count") == 28,
+        summary.get("actionable_scenario_count") == 29,
         summary.get("actionable_scenario_count"),
     )
-    add_check("focus_domains", summary.get("focus_domain_count") == 28, summary.get("focus_domain_count"))
+    add_check("focus_domains", summary.get("focus_domain_count") == 29, summary.get("focus_domain_count"))
     add_check(
         "top_route",
         bool(top.get("route_id") and top.get("domain") and top.get("scenario")),

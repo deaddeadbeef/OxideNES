@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 13
+EXPECTED_SCENARIO_SUITE_SCHEMA = 14
 EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 62
+EXPECTED_TELEMETRY_SCHEMA = 63
 EXPECTED_TRIAGE_SCHEMA = 6
 EXPECTED_BUNDLE_SCHEMA = 3
 EXPECTED_SCENARIOS = {
@@ -35,6 +35,7 @@ EXPECTED_SCENARIOS = {
     "cpu_addressing_matrix_fault",
     "cpu_branch_matrix_fault",
     "cpu_stack_matrix_fault",
+    "cpu_interrupt_matrix_fault",
     "cpu_rmw_matrix_fault",
     "cpu_rmw_addressing_matrix_fault",
     "input_port_matrix_fault",
@@ -207,6 +208,7 @@ class SuiteVerifier:
             "cpu_rmw_addressing_matrix_fault",
             "cpu_branch_matrix_fault",
             "cpu_stack_matrix_fault",
+            "cpu_interrupt_matrix_fault",
             "input_port_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
@@ -947,6 +949,39 @@ class SuiteVerifier:
             "failed_probe_ids=cartridge.status.pass,cartridge.test.40.result",
             stack_evidence,
             "CPU stack matrix observer evidence",
+        )
+        interrupt = by_scenario.get("cpu_interrupt_matrix_fault")
+        if not isinstance(interrupt, dict):
+            self.errors.append("missing observer action for cpu_interrupt_matrix_fault")
+            return
+
+        self.expect_equal(
+            interrupt.get("priority"),
+            "known_divergence",
+            "CPU interrupt matrix observer action priority",
+        )
+        self.expect_equal(
+            interrupt.get("action_type"),
+            "inspect_known_divergence",
+            "CPU interrupt matrix observer action type",
+        )
+        self.expect_equal(
+            interrupt.get("primary_artifact"),
+            "cpu_interrupt_matrix_fault/comparison.json",
+            "CPU interrupt matrix observer primary_artifact",
+        )
+        interrupt_evidence = self.expect_list(
+            interrupt.get("evidence"), "CPU interrupt matrix observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=cpu.interrupt.brk_rti_matrix",
+            interrupt_evidence,
+            "CPU interrupt matrix observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=cartridge.status.pass,cartridge.test.41.result",
+            interrupt_evidence,
+            "CPU interrupt matrix observer evidence",
         )
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if not isinstance(rmw, dict):
@@ -1774,6 +1809,36 @@ class SuiteVerifier:
             )
         else:
             self.errors.append("missing observer observation for cpu_stack_matrix_fault")
+
+        interrupt = by_scenario.get("cpu_interrupt_matrix_fault")
+        if isinstance(interrupt, dict):
+            self.expect_equal(
+                interrupt.get("role"),
+                "expected_failure_fixture",
+                "CPU interrupt matrix observer role",
+            )
+            self.expect_equal(
+                interrupt.get("outcome"),
+                "expected_baseline_divergence",
+                "CPU interrupt matrix observer outcome",
+            )
+            self.expect_equal(
+                interrupt.get("health"),
+                "cartridge_assertion_failed",
+                "CPU interrupt matrix observer health",
+            )
+            self.expect_equal(
+                interrupt.get("focus_domain"),
+                "cpu.interrupt.brk_rti_matrix",
+                "CPU interrupt matrix observer focus_domain",
+            )
+            self.expect_equal(
+                interrupt.get("next_artifact"),
+                "cpu_interrupt_matrix_fault/comparison.json",
+                "CPU interrupt matrix observer next_artifact",
+            )
+        else:
+            self.errors.append("missing observer observation for cpu_interrupt_matrix_fault")
 
         rmw = by_scenario.get("cpu_rmw_matrix_fault")
         if isinstance(rmw, dict):

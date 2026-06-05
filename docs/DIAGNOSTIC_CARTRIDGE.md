@@ -412,6 +412,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`,
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
 `cpu_stack_matrix_fault`,
+`cpu_interrupt_matrix_fault`,
 `input_port_matrix_fault`,
 `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -463,6 +464,7 @@ with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_addressing_matrix_fault`, `cpu_rmw_matrix_fault`,
 `cpu_rmw_addressing_matrix_fault`, `cpu_branch_matrix_fault`,
 `cpu_stack_matrix_fault`,
+`cpu_interrupt_matrix_fault`,
 `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -530,6 +532,10 @@ regressions localize to `cpu.branch.condition_matrix`.
 the generated cartridge exercises TXS/TSX, PHA/PLA, PHP/PLP, and JSR/RTS stack
 paths, proving stack pointer, status push/pull, and subroutine-return
 regressions localize to `cpu.stack.status_matrix`.
+`cpu_interrupt_matrix_fault` corrupts the BRK/RTI matrix case counter before
+the generated cartridge executes BRK, proving interrupt vector dispatch,
+IRQ/BRK stack-frame depth, processor-status restore, and RTI return regressions
+localize to `cpu.interrupt.brk_rti_matrix`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -542,7 +548,7 @@ to `ppu.registers.status_latch_reset`.
 `ppu_nmi_timeout_fault` disables PPU NMI delivery after the render-frame test
 enables NMI, proving timeout localization can stay focused on `ppu.nmi` and the
 active cartridge test. The suite can prove CPU addressing, CPU control-flow,
-CPU stack/status behavior,
+CPU stack/status behavior, CPU BRK/IRQ/RTI behavior,
 mapper PRG switching, mapper PRG RAM, PPU nametable mirroring, configurable
 joypad mask-table fixtures, joypad strobe-reset behavior, joypad strobe-high hold behavior,
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
@@ -795,6 +801,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
 - Generated `$4016`/`$4017` input-mask sweep variant across 16 host-applied
   controller mask pairs
 - Taken CPU branch crossing a page boundary
+- CPU stack pointer, push/pop, status push/pull, and JSR/RTS behavior
+- CPU BRK vector dispatch, IRQ/BRK stack-frame depth, status restore, and RTI
+  return behavior
 - Joypad reads after the eighth latched button
 - PPU NMI delivery, host-observed vblank timing windows, PPUSTATUS
   vblank set/clear dot-edge timing, rendered frame production, and an expected
@@ -1252,6 +1261,17 @@ top-level `cpu_branch_matrix` telemetry, and the
 masks for `BPL`, `BMI`, `BVC`, `BVS`, `BCC`, `BCS`, `BNE`, and `BEQ`, plus a
 page-crossing `BNE` target sentinel.
 
+Schema version `62` adds the `cpu_stack_status_matrix` cartridge test,
+top-level `cpu_stack_matrix` telemetry, and the `cpu.stack_matrix.results`
+probe. The cartridge records TXS/TSX, PHA/PLA, PHP/PLP, JSR/RTS, final stack
+pointer, and case-count sentinels.
+
+Schema version `63` adds the `cpu_interrupt_brk_rti_matrix` cartridge test,
+top-level `cpu_interrupt_matrix` telemetry, and the
+`cpu.interrupt_matrix.results` probe. The cartridge records the BRK handler
+marker, handler stack pointer, RTI-return accumulator, status-restore sentinel,
+final stack pointer, IRQ/BRK handler count, and case count.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1286,3 +1306,9 @@ fixture. The fault corrupts the stack/status matrix case counter immediately
 before test 40 executes, so the suite can localize stack pointer, push/pop,
 status push/pull, and JSR/RTS regressions to `cpu.stack.status_matrix` with a
 paired AI route and replay command.
+
+Scenario suite schema version `14` adds the `cpu_interrupt_matrix_fault`
+negative fixture. The fault corrupts the BRK/RTI matrix case counter
+immediately before test 41 executes, so the suite can localize interrupt vector
+dispatch, IRQ/BRK stack-frame depth, status restore, and RTI return regressions
+to `cpu.interrupt.brk_rti_matrix` with a paired AI route and replay command.
