@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 65;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 66;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v65";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v66";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -54,6 +54,7 @@ const CPU_STACK_MATRIX_TEST_ID: u8 = 40;
 const CPU_INTERRUPT_MATRIX_TEST_ID: u8 = 41;
 const CPU_ACCUMULATOR_MATRIX_TEST_ID: u8 = 42;
 const CPU_COMPARE_MATRIX_TEST_ID: u8 = 43;
+const CPU_LOAD_STORE_MATRIX_TEST_ID: u8 = 44;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -302,6 +303,8 @@ const CPU_INTERRUPT_MATRIX_FAULT_LABEL: &str = "cpu_interrupt_matrix_before_brk"
 const CPU_ACCUMULATOR_MATRIX_FAULT_LABEL: &str = "cpu_accumulator_matrix_before_cases";
 const CPU_COMPARE_MATRIX_FAULT_LABEL: &str = "cpu_compare_matrix_before_cases";
 const CPU_COMPARE_MATRIX_SUMMARY_LABEL: &str = "cpu_compare_matrix_before_summary";
+const CPU_LOAD_STORE_MATRIX_FAULT_LABEL: &str = "cpu_load_store_matrix_before_cases";
+const CPU_LOAD_STORE_MATRIX_SUMMARY_LABEL: &str = "cpu_load_store_matrix_before_summary";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -443,6 +446,24 @@ const CPU_COMPARE_MATRIX_LESS_MASK_ADDR: u16 = 0x02DC;
 const CPU_COMPARE_MATRIX_CASE_COUNT_ADDR: u16 = 0x02DD;
 const CPU_COMPARE_MATRIX_EXPECTED_MASK: u8 = 0x07;
 const CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT: u8 = 9;
+const CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR: u16 = 0x02DE;
+const CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR: u16 = 0x02DF;
+const CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR: u16 = 0x02E0;
+const CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR: u16 = 0x02E1;
+const CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR: u16 = 0x02E2;
+const CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR: u16 = 0x02E3;
+const CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR: u16 = 0x02E4;
+const CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR: u16 = 0x02E5;
+const CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR: u16 = 0x02E6;
+const CPU_LOAD_STORE_MATRIX_TRANSFER_TAX_RESULT_ADDR: u16 = 0x02E7;
+const CPU_LOAD_STORE_MATRIX_TRANSFER_TAY_RESULT_ADDR: u16 = 0x02E8;
+const CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR: u16 = 0x02E9;
+const CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR: u16 = 0x02EA;
+const CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR: u16 = 0x02EB;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK: u8 = 0x0F;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK: u8 = 0x07;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK: u8 = 0x0F;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -873,6 +894,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "CPX records equal, greater-than, and less-than flag outcomes for the X register",
             "CPY records equal, greater-than, and less-than flag outcomes for the Y register",
             "the matrix records all compare opcodes across all three outcome classes",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_LOAD_STORE_MATRIX_TEST_ID,
+        name: "cpu_load_store_transfer_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify representative LDA/LDX/LDY, STA/STX/STY, and TAX/TAY/TXA/TYA opcodes preserve register flags and memory side effects.",
+        expected_observations: &[
+            "LDA, LDX, and LDY cover positive, zero, and negative flag outcomes across indexed addressing cases",
+            "STA, STX, and STY write expected bytes through absolute,Y, zero-page,Y, and zero-page,X stores",
+            "TAX, TAY, TXA, and TYA transfer register values while updating zero and negative flags",
+            "the matrix records every load, store, and transfer subcase in masks and case count",
         ],
     },
 ];
@@ -1482,6 +1516,42 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect compare matrix execution flow and the CMP/CPX/CPY opcode paths before broadening opcode coverage further.",
     },
     DiagnosticFailureSpec {
+        code: 0xBF,
+        test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
+        assertion: "Load matrix covers LDA, LDX, and LDY result and flag outcomes",
+        expected: "LDA indexed-indirect reads 0x5A, LDA absolute,Y can set zero, LDX absolute,Y can set negative, and LDY absolute,X reads 0x7E",
+        observed: "one or more load opcodes did not preserve the expected result or zero/negative flag state",
+        likely_domain: "cpu.load_store.transfer_matrix",
+        remediation_hint: "Inspect LDA/LDX/LDY dispatch, indexed addressing, and zero/negative flag updates before broadening the CPU opcode matrix.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC2,
+        test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
+        assertion: "Store matrix covers STA, STX, and STY memory side effects",
+        expected: "STA absolute,Y, STX zero-page,Y, and STY zero-page,X write the expected RAM sentinels",
+        observed: "one or more store opcodes did not write the expected effective address",
+        likely_domain: "cpu.load_store.transfer_matrix",
+        remediation_hint: "Inspect STA/STX/STY effective-address resolution and memory writeback for the matrix addressing modes.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC3,
+        test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
+        assertion: "Transfer matrix covers TAX, TAY, TXA, and TYA result and flag outcomes",
+        expected: "TAX, TAY, TXA, and TYA transfer register values and update zero/negative flags",
+        observed: "one or more transfer opcodes did not preserve the expected register result or status flags",
+        likely_domain: "cpu.load_store.transfer_matrix",
+        remediation_hint: "Inspect transfer opcode register writeback and zero/negative flag updates.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xC4,
+        test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
+        assertion: "Load/store/transfer matrix records every opcode family subcase",
+        expected: "load mask == 0x0F, store mask == 0x07, transfer mask == 0x0F, and case count == 11",
+        observed: "the load/store/transfer matrix did not record every expected subcase",
+        likely_domain: "cpu.load_store.transfer_matrix",
+        remediation_hint: "Inspect matrix execution flow and the load/store/transfer opcode paths before broadening opcode coverage further.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -1947,8 +2017,8 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, and CMP/CPX/CPY equal, greater-than, and less-than flag outcomes.",
-        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, and a load/store/transfer matrix covering LDA/LDX/LDY indexed loads, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes.",
+        missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader logical/arithmetic/addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
     DiagnosticCoverageGapSpec {
@@ -2040,6 +2110,7 @@ pub enum DiagnosticFaultInjection {
     CpuCompareRegisterMatrix,
     CpuInterruptMatrix,
     CpuIndirectJmpPageWrap,
+    CpuLoadStoreTransferMatrix,
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
     CpuReadModifyWriteMatrix,
@@ -2064,7 +2135,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 28] = [
+    pub const ALL: [DiagnosticFaultInjection; 29] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
@@ -2072,6 +2143,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::CpuCompareRegisterMatrix,
         DiagnosticFaultInjection::CpuInterruptMatrix,
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap,
+        DiagnosticFaultInjection::CpuLoadStoreTransferMatrix,
         DiagnosticFaultInjection::CpuRamMirroring,
         DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix,
         DiagnosticFaultInjection::CpuReadModifyWriteMatrix,
@@ -2104,6 +2176,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuCompareRegisterMatrix => "cpu_compare_matrix",
             DiagnosticFaultInjection::CpuInterruptMatrix => "cpu_interrupt_matrix",
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => "cpu_indirect_jmp_page_wrap",
+            DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => "cpu_load_store_matrix",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 "cpu_rmw_addressing_matrix"
@@ -2145,6 +2218,9 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuCompareRegisterMatrix => CPU_COMPARE_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuInterruptMatrix => CPU_INTERRUPT_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuIndirectJmpPageWrap => CPU_INDIRECT_JMP_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => {
+                CPU_LOAD_STORE_MATRIX_FAULT_LABEL
+            }
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL
@@ -2197,6 +2273,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
     pub cpu_compare_matrix: CpuCompareMatrixTelemetry,
     pub cpu_interrupt_matrix: CpuInterruptMatrixTelemetry,
+    pub cpu_load_store_matrix: CpuLoadStoreMatrixTelemetry,
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
     pub cpu_stack_matrix: CpuStackMatrixTelemetry,
@@ -2819,6 +2896,45 @@ pub struct CpuCompareMatrixTelemetry {
     pub greater_mask_hex: String,
     pub less_mask: u8,
     pub less_mask_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuLoadStoreMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_load_mask: u8,
+    pub expected_load_mask_hex: String,
+    pub load_mask: u8,
+    pub load_mask_hex: String,
+    pub expected_store_mask: u8,
+    pub expected_store_mask_hex: String,
+    pub store_mask: u8,
+    pub store_mask_hex: String,
+    pub expected_transfer_mask: u8,
+    pub expected_transfer_mask_hex: String,
+    pub transfer_mask: u8,
+    pub transfer_mask_hex: String,
+    pub load_a_result: u8,
+    pub load_a_result_hex: String,
+    pub load_x_result: u8,
+    pub load_x_result_hex: String,
+    pub load_y_result: u8,
+    pub load_y_result_hex: String,
+    pub store_a_result: u8,
+    pub store_a_result_hex: String,
+    pub store_x_result: u8,
+    pub store_x_result_hex: String,
+    pub store_y_result: u8,
+    pub store_y_result_hex: String,
+    pub transfer_tax_result: u8,
+    pub transfer_tax_result_hex: String,
+    pub transfer_tay_result: u8,
+    pub transfer_tay_result_hex: String,
+    pub transfer_txa_result: u8,
+    pub transfer_txa_result_hex: String,
+    pub transfer_tya_result: u8,
+    pub transfer_tya_result_hex: String,
     pub passed: bool,
 }
 
@@ -4989,6 +5105,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
     let cpu_compare_matrix = cpu_compare_matrix_telemetry(&ram);
     let cpu_interrupt_matrix = cpu_interrupt_matrix_telemetry(&ram);
+    let cpu_load_store_matrix = cpu_load_store_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
@@ -5034,6 +5151,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
+        cpu_load_store_matrix: &cpu_load_store_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
@@ -5079,6 +5197,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
+        cpu_load_store_matrix: &cpu_load_store_matrix,
         cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
@@ -5161,6 +5280,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_branch_matrix,
         cpu_compare_matrix,
         cpu_interrupt_matrix,
+        cpu_load_store_matrix,
         cpu_stack_matrix,
         cpu_rmw_addressing_matrix,
         cpu_rmw_matrix,
@@ -5407,6 +5527,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_cpu_accumulator_section(&mut report, telemetry);
     write_cpu_branch_section(&mut report, telemetry);
     write_cpu_compare_section(&mut report, telemetry);
+    write_cpu_load_store_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
     write_cpu_interrupt_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
@@ -6832,6 +6953,68 @@ fn write_cpu_compare_section(report: &mut String, telemetry: &DiagnosticTelemetr
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_load_store_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Load/Store/Transfer Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| Load/store/transfer masks | {} / {} / {} |",
+        telemetry.cpu_load_store_matrix.load_mask_hex,
+        telemetry.cpu_load_store_matrix.store_mask_hex,
+        telemetry.cpu_load_store_matrix.transfer_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Expected masks | {} / {} / {} |",
+        telemetry.cpu_load_store_matrix.expected_load_mask_hex,
+        telemetry.cpu_load_store_matrix.expected_store_mask_hex,
+        telemetry.cpu_load_store_matrix.expected_transfer_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Load A/X/Y results | {} / {} / {} |",
+        telemetry.cpu_load_store_matrix.load_a_result_hex,
+        telemetry.cpu_load_store_matrix.load_x_result_hex,
+        telemetry.cpu_load_store_matrix.load_y_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Store A/X/Y results | {} / {} / {} |",
+        telemetry.cpu_load_store_matrix.store_a_result_hex,
+        telemetry.cpu_load_store_matrix.store_x_result_hex,
+        telemetry.cpu_load_store_matrix.store_y_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Transfer TAX/TAY/TXA/TYA results | {} / {} / {} / {} |",
+        telemetry.cpu_load_store_matrix.transfer_tax_result_hex,
+        telemetry.cpu_load_store_matrix.transfer_tay_result_hex,
+        telemetry.cpu_load_store_matrix.transfer_txa_result_hex,
+        telemetry.cpu_load_store_matrix.transfer_tya_result_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Load/store/transfer cases / expected | {} / {} |",
+        telemetry.cpu_load_store_matrix.observed_case_count,
+        telemetry.cpu_load_store_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Load/store/transfer matrix passed | {} |",
+        telemetry.cpu_load_store_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## CPU Stack Matrix").expect("write report");
     writeln!(report).expect("write report");
@@ -7405,24 +7588,43 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x68 => OpcodeDecode::implied("PLA"),
         0x69 => OpcodeDecode::immediate("ADC"),
         0x78 => OpcodeDecode::implied("SEI"),
+        0x84 => OpcodeDecode::zero_page("STY"),
         0x85 => OpcodeDecode::zero_page("STA"),
+        0x86 => OpcodeDecode::zero_page("STX"),
         0x8A => OpcodeDecode::implied("TXA"),
+        0x8C => OpcodeDecode::absolute("STY"),
         0x8D => OpcodeDecode::absolute("STA"),
         0x8E => OpcodeDecode::absolute("STX"),
         0x90 => OpcodeDecode::relative("BCC"),
+        0x94 => OpcodeDecode::zero_page_x("STY"),
         0x95 => OpcodeDecode::zero_page_x("STA"),
+        0x96 => OpcodeDecode::zero_page_y("STX"),
+        0x98 => OpcodeDecode::implied("TYA"),
+        0x99 => OpcodeDecode::absolute_y("STA"),
         0x9A => OpcodeDecode::implied("TXS"),
         0x9D => OpcodeDecode::absolute_x("STA"),
         0xA0 => OpcodeDecode::immediate("LDY"),
+        0xA1 => OpcodeDecode::indexed_indirect("LDA"),
         0xA2 => OpcodeDecode::immediate("LDX"),
+        0xA4 => OpcodeDecode::zero_page("LDY"),
         0xA5 => OpcodeDecode::zero_page("LDA"),
+        0xA6 => OpcodeDecode::zero_page("LDX"),
+        0xA8 => OpcodeDecode::implied("TAY"),
         0xA9 => OpcodeDecode::immediate("LDA"),
+        0xAA => OpcodeDecode::implied("TAX"),
+        0xAC => OpcodeDecode::absolute("LDY"),
         0xAD => OpcodeDecode::absolute("LDA"),
+        0xAE => OpcodeDecode::absolute("LDX"),
         0xB0 => OpcodeDecode::relative("BCS"),
         0xB1 => OpcodeDecode::indirect_y("LDA"),
+        0xB4 => OpcodeDecode::zero_page_x("LDY"),
         0xB5 => OpcodeDecode::zero_page_x("LDA"),
+        0xB6 => OpcodeDecode::zero_page_y("LDX"),
+        0xB9 => OpcodeDecode::absolute_y("LDA"),
         0xBA => OpcodeDecode::implied("TSX"),
+        0xBC => OpcodeDecode::absolute_x("LDY"),
         0xBD => OpcodeDecode::absolute_x("LDA"),
+        0xBE => OpcodeDecode::absolute_y("LDX"),
         0xC9 => OpcodeDecode::immediate("CMP"),
         0xD0 => OpcodeDecode::relative("BNE"),
         0xD8 => OpcodeDecode::implied("CLD"),
@@ -7470,6 +7672,14 @@ impl OpcodeDecode {
         }
     }
 
+    fn zero_page_y(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "zero_page_y",
+            byte_len: 2,
+        }
+    }
+
     fn absolute(mnemonic: &'static str) -> Self {
         Self {
             mnemonic,
@@ -7482,6 +7692,14 @@ impl OpcodeDecode {
         Self {
             mnemonic,
             addressing_mode: "absolute_x",
+            byte_len: 3,
+        }
+    }
+
+    fn absolute_y(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "absolute_y",
             byte_len: 3,
         }
     }
@@ -7502,6 +7720,14 @@ impl OpcodeDecode {
         }
     }
 
+    fn indexed_indirect(mnemonic: &'static str) -> Self {
+        Self {
+            mnemonic,
+            addressing_mode: "indexed_indirect",
+            byte_len: 2,
+        }
+    }
+
     fn relative(mnemonic: &'static str) -> Self {
         Self {
             mnemonic,
@@ -7516,6 +7742,7 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
         "immediate" => format!("{} #${:02X}", decode.mnemonic, operand_bytes[0]),
         "zero_page" => format!("{} ${:02X}", decode.mnemonic, operand_bytes[0]),
         "zero_page_x" => format!("{} ${:02X},X", decode.mnemonic, operand_bytes[0]),
+        "zero_page_y" => format!("{} ${:02X},Y", decode.mnemonic, operand_bytes[0]),
         "absolute" => format!(
             "{} {}",
             decode.mnemonic,
@@ -7526,11 +7753,17 @@ fn format_instruction_text(decode: OpcodeDecode, pc: u16, operand_bytes: &[u8]) 
             decode.mnemonic,
             format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
         ),
+        "absolute_y" => format!(
+            "{} {},Y",
+            decode.mnemonic,
+            format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
+        ),
         "indirect" => format!(
             "{} ({})",
             decode.mnemonic,
             format_pc(u16::from_le_bytes([operand_bytes[0], operand_bytes[1]]))
         ),
+        "indexed_indirect" => format!("{} (${:02X},X)", decode.mnemonic, operand_bytes[0]),
         "indirect_y" => format!("{} (${:02X}),Y", decode.mnemonic, operand_bytes[0]),
         "relative" => {
             let target = (pc as i32 + 2 + operand_bytes[0] as i8 as i32) as u16;
@@ -8209,6 +8442,7 @@ struct HostValidationInput<'a> {
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
+    cpu_load_store_matrix: &'a CpuLoadStoreMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
@@ -8247,6 +8481,7 @@ struct ProbeTelemetryInput<'a> {
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
+    cpu_load_store_matrix: &'a CpuLoadStoreMatrixTelemetry,
     cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
@@ -8349,6 +8584,26 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_compare_matrix.less_mask_hex,
             input.cpu_compare_matrix.observed_case_count,
             input.cpu_compare_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_load_store_matrix.passed {
+        failures.push(format!(
+            "CPU load/store/transfer matrix mismatch: load_mask={}, store_mask={}, transfer_mask={}, load A/X/Y={}/{}/{}, store A/X/Y={}/{}/{}, transfer TAX/TAY/TXA/TYA={}/{}/{}/{}, cases {}/{}",
+            input.cpu_load_store_matrix.load_mask_hex,
+            input.cpu_load_store_matrix.store_mask_hex,
+            input.cpu_load_store_matrix.transfer_mask_hex,
+            input.cpu_load_store_matrix.load_a_result_hex,
+            input.cpu_load_store_matrix.load_x_result_hex,
+            input.cpu_load_store_matrix.load_y_result_hex,
+            input.cpu_load_store_matrix.store_a_result_hex,
+            input.cpu_load_store_matrix.store_x_result_hex,
+            input.cpu_load_store_matrix.store_y_result_hex,
+            input.cpu_load_store_matrix.transfer_tax_result_hex,
+            input.cpu_load_store_matrix.transfer_tay_result_hex,
+            input.cpu_load_store_matrix.transfer_txa_result_hex,
+            input.cpu_load_store_matrix.transfer_tya_result_hex,
+            input.cpu_load_store_matrix.observed_case_count,
+            input.cpu_load_store_matrix.expected_case_count
         ));
     }
     if !input.cpu_stack_matrix.passed {
@@ -8973,6 +9228,41 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_compare_matrix.expected_case_count
             ),
             likely_domain: "cpu.compare.flags".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.load_store_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_LOAD_STORE_MATRIX_TEST_ID),
+            test_name: test_name(CPU_LOAD_STORE_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_load_store_matrix.passed),
+            description:
+                "CPU load/store/transfer matrix retained expected register flags and memory side effects"
+                    .to_string(),
+            expected: "load=0x0F, store=0x07, transfer=0x0F, load A/X/Y=0x5A/0x80/0x7E, store A/X/Y=0xC3/0x5E/0xA7, transfer TAX/TAY/TXA/TYA=0x44/0x00/0x80/0x7F, cases=11"
+                .to_string(),
+            observed: format!(
+                "load {}, store {}, transfer {}, load A/X/Y {}/{}/{}, store A/X/Y {}/{}/{}, transfer TAX/TAY/TXA/TYA {}/{}/{}/{}, cases {}/{}",
+                input.cpu_load_store_matrix.load_mask_hex,
+                input.cpu_load_store_matrix.store_mask_hex,
+                input.cpu_load_store_matrix.transfer_mask_hex,
+                input.cpu_load_store_matrix.load_a_result_hex,
+                input.cpu_load_store_matrix.load_x_result_hex,
+                input.cpu_load_store_matrix.load_y_result_hex,
+                input.cpu_load_store_matrix.store_a_result_hex,
+                input.cpu_load_store_matrix.store_x_result_hex,
+                input.cpu_load_store_matrix.store_y_result_hex,
+                input.cpu_load_store_matrix.transfer_tax_result_hex,
+                input.cpu_load_store_matrix.transfer_tay_result_hex,
+                input.cpu_load_store_matrix.transfer_txa_result_hex,
+                input.cpu_load_store_matrix.transfer_tya_result_hex,
+                input.cpu_load_store_matrix.observed_case_count,
+                input.cpu_load_store_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.load_store.transfer_matrix".to_string(),
         },
     );
     push_probe(
@@ -10251,6 +10541,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_interrupt_brk_rti_matrix();
     program.cpu_accumulator_shift_rotate_matrix();
     program.cpu_compare_register_matrix();
+    program.cpu_load_store_transfer_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -10455,6 +10746,13 @@ impl DiagnosticProgram {
         self.asm.ora_imm(mask_bit);
         self.asm.sta_abs(mask_addr);
         self.asm.inc_abs(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn mark_load_store_matrix_case(&mut self, mask_addr: u16, mask_bit: u8) {
+        self.asm.lda_abs(mask_addr);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(mask_addr);
+        self.asm.inc_abs(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR);
     }
 
     fn set_overflow_flag(&mut self) {
@@ -11089,6 +11387,152 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_COMPARE_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_COMPARE_MATRIX_EXPECTED_CASE_COUNT, 0xBE);
         self.pass_test(CPU_COMPARE_MATRIX_TEST_ID);
+    }
+
+    fn cpu_load_store_transfer_matrix(&mut self) {
+        self.begin_test(CPU_LOAD_STORE_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TAX_RESULT_ADDR);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TAY_RESULT_ADDR);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_LOAD_STORE_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.lda_imm(0x60);
+        self.asm.sta_zp(0x24);
+        self.asm.lda_imm(0x04);
+        self.asm.sta_zp(0x25);
+        self.asm.lda_imm(0x5A);
+        self.asm.sta_abs(0x0460);
+        self.asm.ldx_imm(0x04);
+        self.asm.lda_indexed_indirect(0x20);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR);
+        self.expect_z_clear(0xBF);
+        self.expect_n_clear(0xBF);
+        self.expect_a_eq(0x5A, 0xBF);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x0500);
+        self.asm.ldy_imm(0x01);
+        self.asm.lda_abs_y(0x04FF);
+        self.expect_z_set(0xBF);
+        self.expect_n_clear(0xBF);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x02);
+
+        self.asm.lda_imm(0x80);
+        self.asm.sta_abs(0x0501);
+        self.asm.ldy_imm(0x02);
+        self.asm.ldx_abs_y(0x04FF);
+        self.expect_z_clear(0xBF);
+        self.expect_n_set(0xBF);
+        self.asm.stx_abs(CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR);
+        self.asm.cpx_imm(0x80);
+        self.expect_z_set(0xBF);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x04);
+
+        self.asm.lda_imm(0x7E);
+        self.asm.sta_abs(0x0502);
+        self.asm.ldx_imm(0x05);
+        self.asm.ldy_abs_x(0x04FD);
+        self.expect_z_clear(0xBF);
+        self.expect_n_clear(0xBF);
+        self.asm.sty_abs(CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR);
+        self.asm.cpy_imm(0x7E);
+        self.expect_z_set(0xBF);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x08);
+
+        self.asm.lda_imm(0xC3);
+        self.asm.ldy_imm(0x11);
+        self.asm.sta_abs_y(0x0500);
+        self.asm.lda_abs(0x0511);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR);
+        self.expect_a_eq(0xC3, 0xC2);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x01);
+
+        self.asm.ldx_imm(0x5E);
+        self.asm.ldy_imm(0x04);
+        self.asm.stx_zp_y(0x3C);
+        self.asm.lda_zp(0x40);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR);
+        self.expect_a_eq(0x5E, 0xC2);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x02);
+
+        self.asm.ldy_imm(0xA7);
+        self.asm.ldx_imm(0x05);
+        self.asm.sty_zp_x(0x3C);
+        self.asm.lda_zp(0x41);
+        self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR);
+        self.expect_a_eq(0xA7, 0xC2);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x04);
+
+        self.asm.lda_imm(0x44);
+        self.asm.tax();
+        self.expect_z_clear(0xC3);
+        self.expect_n_clear(0xC3);
+        self.asm
+            .stx_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TAX_RESULT_ADDR);
+        self.asm.cpx_imm(0x44);
+        self.expect_z_set(0xC3);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x00);
+        self.asm.tay();
+        self.expect_z_set(0xC3);
+        self.expect_n_clear(0xC3);
+        self.asm
+            .sty_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TAY_RESULT_ADDR);
+        self.asm.cpy_imm(0x00);
+        self.expect_z_set(0xC3);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR, 0x02);
+
+        self.asm.ldx_imm(0x80);
+        self.asm.txa();
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR);
+        self.expect_z_clear(0xC3);
+        self.expect_n_set(0xC3);
+        self.expect_a_eq(0x80, 0xC3);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR, 0x04);
+
+        self.asm.ldy_imm(0x7F);
+        self.asm.tya();
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR);
+        self.expect_z_clear(0xC3);
+        self.expect_n_clear(0xC3);
+        self.expect_a_eq(0x7F, 0xC3);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR, 0x08);
+
+        self.asm
+            .label(CPU_LOAD_STORE_MATRIX_SUMMARY_LABEL)
+            .expect("diagnostic load/store summary label should not collide");
+        self.asm.lda_abs(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR);
+        self.expect_a_eq(CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK, 0xC4);
+        self.asm.lda_abs(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR);
+        self.expect_a_eq(CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK, 0xC4);
+        self.asm.lda_abs(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR);
+        self.expect_a_eq(CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK, 0xC4);
+        self.asm.lda_abs(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT, 0xC4);
+        self.pass_test(CPU_LOAD_STORE_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -12423,12 +12867,20 @@ impl Assembler {
         self.op_zp(0xB5, addr);
     }
 
+    fn lda_indexed_indirect(&mut self, addr: u8) {
+        self.op_zp(0xA1, addr);
+    }
+
     fn lda_abs(&mut self, addr: u16) {
         self.op_abs(0xAD, addr);
     }
 
     fn lda_abs_x(&mut self, addr: u16) {
         self.op_abs(0xBD, addr);
+    }
+
+    fn lda_abs_y(&mut self, addr: u16) {
+        self.op_abs(0xB9, addr);
     }
 
     fn lda_indirect_y(&mut self, addr: u8) {
@@ -12439,8 +12891,16 @@ impl Assembler {
         self.op_imm(0xA2, value);
     }
 
+    fn ldx_abs_y(&mut self, addr: u16) {
+        self.op_abs(0xBE, addr);
+    }
+
     fn ldy_imm(&mut self, value: u8) {
         self.op_imm(0xA0, value);
+    }
+
+    fn ldy_abs_x(&mut self, addr: u16) {
+        self.op_abs(0xBC, addr);
     }
 
     fn sta_zp(&mut self, addr: u8) {
@@ -12459,8 +12919,24 @@ impl Assembler {
         self.op_abs(0x9D, addr);
     }
 
+    fn sta_abs_y(&mut self, addr: u16) {
+        self.op_abs(0x99, addr);
+    }
+
     fn stx_abs(&mut self, addr: u16) {
         self.op_abs(0x8E, addr);
+    }
+
+    fn stx_zp_y(&mut self, addr: u8) {
+        self.op_zp(0x96, addr);
+    }
+
+    fn sty_abs(&mut self, addr: u16) {
+        self.op_abs(0x8C, addr);
+    }
+
+    fn sty_zp_x(&mut self, addr: u8) {
+        self.op_zp(0x94, addr);
     }
 
     fn adc_imm(&mut self, value: u8) {
@@ -12599,8 +13075,20 @@ impl Assembler {
         self.emit(0xE8);
     }
 
+    fn tax(&mut self) {
+        self.emit(0xAA);
+    }
+
+    fn tay(&mut self) {
+        self.emit(0xA8);
+    }
+
     fn txa(&mut self) {
         self.emit(0x8A);
+    }
+
+    fn tya(&mut self) {
+        self.emit(0x98);
     }
 
     fn txs(&mut self) {
@@ -12860,6 +13348,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::CpuInterruptMatrix => {
             bus.cpu_write(CPU_INTERRUPT_MATRIX_CASE_COUNT_ADDR, 0x80);
+        }
+        DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => {
+            bus.cpu_write(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x80);
         }
         DiagnosticFaultInjection::CpuStackStatusMatrix => {
             bus.cpu_write(CPU_STACK_MATRIX_CASE_COUNT_ADDR, 0x80);
@@ -13131,6 +13622,78 @@ fn cpu_compare_matrix_telemetry(ram: &[u8]) -> CpuCompareMatrixTelemetry {
             && equal_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK
             && greater_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK
             && less_mask == CPU_COMPARE_MATRIX_EXPECTED_MASK,
+    }
+}
+
+fn cpu_load_store_matrix_telemetry(ram: &[u8]) -> CpuLoadStoreMatrixTelemetry {
+    let load_mask = ram[(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR & 0x07FF) as usize];
+    let store_mask = ram[(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR & 0x07FF) as usize];
+    let transfer_mask = ram[(CPU_LOAD_STORE_MATRIX_TRANSFER_MASK_ADDR & 0x07FF) as usize];
+    let load_a_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR & 0x07FF) as usize];
+    let load_x_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR & 0x07FF) as usize];
+    let load_y_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR & 0x07FF) as usize];
+    let store_a_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR & 0x07FF) as usize];
+    let store_x_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR & 0x07FF) as usize];
+    let store_y_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR & 0x07FF) as usize];
+    let transfer_tax_result =
+        ram[(CPU_LOAD_STORE_MATRIX_TRANSFER_TAX_RESULT_ADDR & 0x07FF) as usize];
+    let transfer_tay_result =
+        ram[(CPU_LOAD_STORE_MATRIX_TRANSFER_TAY_RESULT_ADDR & 0x07FF) as usize];
+    let transfer_txa_result =
+        ram[(CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR & 0x07FF) as usize];
+    let transfer_tya_result =
+        ram[(CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+
+    CpuLoadStoreMatrixTelemetry {
+        expected_case_count: CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_load_mask: CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK,
+        expected_load_mask_hex: hex_byte(CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK),
+        load_mask,
+        load_mask_hex: hex_byte(load_mask),
+        expected_store_mask: CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK,
+        expected_store_mask_hex: hex_byte(CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK),
+        store_mask,
+        store_mask_hex: hex_byte(store_mask),
+        expected_transfer_mask: CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK,
+        expected_transfer_mask_hex: hex_byte(CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK),
+        transfer_mask,
+        transfer_mask_hex: hex_byte(transfer_mask),
+        load_a_result,
+        load_a_result_hex: hex_byte(load_a_result),
+        load_x_result,
+        load_x_result_hex: hex_byte(load_x_result),
+        load_y_result,
+        load_y_result_hex: hex_byte(load_y_result),
+        store_a_result,
+        store_a_result_hex: hex_byte(store_a_result),
+        store_x_result,
+        store_x_result_hex: hex_byte(store_x_result),
+        store_y_result,
+        store_y_result_hex: hex_byte(store_y_result),
+        transfer_tax_result,
+        transfer_tax_result_hex: hex_byte(transfer_tax_result),
+        transfer_tay_result,
+        transfer_tay_result_hex: hex_byte(transfer_tay_result),
+        transfer_txa_result,
+        transfer_txa_result_hex: hex_byte(transfer_txa_result),
+        transfer_tya_result,
+        transfer_tya_result_hex: hex_byte(transfer_tya_result),
+        passed: observed_case_count == CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT
+            && load_mask == CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK
+            && store_mask == CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK
+            && transfer_mask == CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK
+            && load_a_result == 0x5A
+            && load_x_result == 0x80
+            && load_y_result == 0x7E
+            && store_a_result == 0xC3
+            && store_x_result == 0x5E
+            && store_y_result == 0xA7
+            && transfer_tax_result == 0x44
+            && transfer_tay_result == 0x00
+            && transfer_txa_result == 0x80
+            && transfer_tya_result == 0x7F,
     }
 }
 
@@ -16570,6 +17133,21 @@ fn compare_observation_checksums(
         &["cpu_compare_matrix", "less_mask"][..],
         &["cpu_compare_matrix", "observed_case_count"][..],
         &["cpu_compare_matrix", "passed"][..],
+        &["cpu_load_store_matrix", "load_mask"][..],
+        &["cpu_load_store_matrix", "store_mask"][..],
+        &["cpu_load_store_matrix", "transfer_mask"][..],
+        &["cpu_load_store_matrix", "load_a_result"][..],
+        &["cpu_load_store_matrix", "load_x_result"][..],
+        &["cpu_load_store_matrix", "load_y_result"][..],
+        &["cpu_load_store_matrix", "store_a_result"][..],
+        &["cpu_load_store_matrix", "store_x_result"][..],
+        &["cpu_load_store_matrix", "store_y_result"][..],
+        &["cpu_load_store_matrix", "transfer_tax_result"][..],
+        &["cpu_load_store_matrix", "transfer_tay_result"][..],
+        &["cpu_load_store_matrix", "transfer_txa_result"][..],
+        &["cpu_load_store_matrix", "transfer_tya_result"][..],
+        &["cpu_load_store_matrix", "observed_case_count"][..],
+        &["cpu_load_store_matrix", "passed"][..],
         &["cpu_branch_matrix", "taken_mask"][..],
         &["cpu_branch_matrix", "not_taken_mask"][..],
         &["cpu_branch_matrix", "page_cross_result"][..],
