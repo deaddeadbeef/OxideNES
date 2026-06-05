@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "oxidenes"
-version = "0.3.25"
+version = "0.3.26"
 dependencies = [
  "blip_buf",
  "cpal",
