@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 61;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 62;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v61";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v62";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -50,6 +50,7 @@ const MAPPER4_MMC3_PRG_RAM_TEST_ID: u8 = 36;
 const CPU_RMW_MATRIX_TEST_ID: u8 = 37;
 const CPU_RMW_ADDRESSING_MATRIX_TEST_ID: u8 = 38;
 const CPU_BRANCH_MATRIX_TEST_ID: u8 = 39;
+const CPU_STACK_MATRIX_TEST_ID: u8 = 40;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -293,6 +294,7 @@ const CPU_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_addressing_matrix_before_pa
 const CPU_RMW_MATRIX_FAULT_LABEL: &str = "cpu_rmw_matrix_before_asl";
 const CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL: &str = "cpu_rmw_addressing_matrix_before_absolute_asl";
 const CPU_BRANCH_MATRIX_FAULT_LABEL: &str = "cpu_branch_condition_matrix_before_cases";
+const CPU_STACK_MATRIX_FAULT_LABEL: &str = "cpu_stack_status_matrix_before_cases";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -392,6 +394,17 @@ const CPU_BRANCH_MATRIX_CASE_COUNT_ADDR: u16 = 0x02C6;
 const CPU_BRANCH_MATRIX_EXPECTED_MASK: u8 = 0xFF;
 const CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT: u8 = 0x5C;
 const CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT: u8 = 17;
+const CPU_STACK_MATRIX_TSX_RESULT_ADDR: u16 = 0x02C7;
+const CPU_STACK_MATRIX_PULL_RESULT_ADDR: u16 = 0x02C8;
+const CPU_STACK_MATRIX_STATUS_RESULT_ADDR: u16 = 0x02C9;
+const CPU_STACK_MATRIX_JSR_RESULT_ADDR: u16 = 0x02CA;
+const CPU_STACK_MATRIX_FINAL_SP_ADDR: u16 = 0x02CB;
+const CPU_STACK_MATRIX_CASE_COUNT_ADDR: u16 = 0x02CC;
+const CPU_STACK_MATRIX_EXPECTED_STACK_POINTER: u8 = 0xF0;
+const CPU_STACK_MATRIX_EXPECTED_PULL_RESULT: u8 = 0xA6;
+const CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT: u8 = 0xA9;
+const CPU_STACK_MATRIX_EXPECTED_JSR_RESULT: u8 = 0x77;
+const CPU_STACK_MATRIX_EXPECTED_CASE_COUNT: u8 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -770,6 +783,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "BPL, BMI, BVC, BVS, BCC, BCS, BNE, and BEQ all reach their taken targets when their condition is true",
             "the same branch opcodes all fall through when their condition is false",
             "a taken relative branch placed at page low byte 0xFC reaches a target on the next CPU page",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_STACK_MATRIX_TEST_ID,
+        name: "cpu_stack_status_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify stack pointer, push/pop, status push/pull, and JSR/RTS stack behavior through observable CPU RAM sentinels.",
+        expected_observations: &[
+            "TXS followed by TSX preserves the selected stack pointer",
+            "PHA/PLA restores a pushed accumulator byte and preserves the stack depth",
+            "PHP/PLP restores zero/carry status flags after intervening flag mutations",
+            "JSR/RTS returns with the expected accumulator sentinel and final stack pointer",
         ],
     },
 ];
@@ -1523,6 +1549,69 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect branch matrix execution flow and any early exits before broadening the CPU opcode search.",
     },
     DiagnosticFailureSpec {
+        code: 0xA8,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "TXS and TSX preserve the selected stack pointer",
+        expected: "TSX reads back stack pointer 0xF0 after TXS",
+        observed: "TSX did not return the stack pointer written by TXS",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect TXS/TSX transfer semantics and stack-pointer storage independent of accumulator flags.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xA9,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "PHA and PLA preserve the pushed accumulator byte",
+        expected: "PLA restores accumulator sentinel 0xA6",
+        observed: "PLA returned a different byte from the stack",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect stack page addressing plus pre/post stack-pointer increment and decrement behavior for PHA/PLA.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xAA,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "PLP restores the zero flag saved by PHP",
+        expected: "BEQ is taken after PHP saves Z=1 and PLP restores it",
+        observed: "the restored status did not preserve the zero flag",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect PHP pushed status bits and PLP restoration of the zero flag after intervening accumulator changes.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xAB,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "PLP restores the carry flag saved by PHP",
+        expected: "BCC is taken after PHP saves C=0 and PLP restores it",
+        observed: "the restored status did not preserve the carry flag",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect PHP/PLP status-mask handling, especially carry, break, and unused-bit normalization.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xAC,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "JSR and RTS round-trip through the stack",
+        expected: "RTS returns to the caller with accumulator sentinel 0x77",
+        observed: "JSR/RTS did not return to the expected continuation with the expected accumulator",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect JSR return-address push order, RTS pull order, and the post-return PC increment.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xAD,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "Stack matrix restores final stack depth",
+        expected: "final TSX reads stack pointer 0xF0 after push/pop and JSR/RTS cases",
+        observed: "the final stack pointer did not match the selected stack depth",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect whether push/pull, PHP/PLP, or JSR/RTS leave the stack pointer unbalanced.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xAE,
+        test_id: CPU_STACK_MATRIX_TEST_ID,
+        assertion: "Stack matrix records its expected case count",
+        expected: "case count == 5",
+        observed: "the stack matrix case count did not match the expected TXS/TSX, PHA/PLA, PHP/PLP, JSR/RTS, and final-SP cases",
+        likely_domain: "cpu.stack.status_matrix",
+        remediation_hint: "Inspect stack matrix execution flow and any early exits before broadening the CPU opcode matrix further.",
+    },
+    DiagnosticFailureSpec {
         code: 0xD0,
         test_id: 14,
         assertion: "PPUDATA read from $2000 returns the buffered VRAM byte on the second read",
@@ -1730,6 +1819,7 @@ pub enum DiagnosticFaultInjection {
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
     CpuReadModifyWriteMatrix,
+    CpuStackStatusMatrix,
     CpuZeroPageIndexWrap,
     DmaOamTransfer,
     DmaPhaseMatrix,
@@ -1750,7 +1840,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 24] = [
+    pub const ALL: [DiagnosticFaultInjection; 25] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
@@ -1758,6 +1848,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::CpuRamMirroring,
         DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix,
         DiagnosticFaultInjection::CpuReadModifyWriteMatrix,
+        DiagnosticFaultInjection::CpuStackStatusMatrix,
         DiagnosticFaultInjection::CpuZeroPageIndexWrap,
         DiagnosticFaultInjection::DmaOamTransfer,
         DiagnosticFaultInjection::DmaPhaseMatrix,
@@ -1788,6 +1879,7 @@ impl DiagnosticFaultInjection {
                 "cpu_rmw_addressing_matrix"
             }
             DiagnosticFaultInjection::CpuReadModifyWriteMatrix => "cpu_rmw_matrix",
+            DiagnosticFaultInjection::CpuStackStatusMatrix => "cpu_stack_status_matrix",
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => "cpu_zero_page_index_wrap",
             DiagnosticFaultInjection::DmaOamTransfer => "dma_oam_transfer",
             DiagnosticFaultInjection::DmaPhaseMatrix => "dma_phase_matrix",
@@ -1823,6 +1915,7 @@ impl DiagnosticFaultInjection {
                 CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL
             }
             DiagnosticFaultInjection::CpuReadModifyWriteMatrix => CPU_RMW_MATRIX_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuStackStatusMatrix => CPU_STACK_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuZeroPageIndexWrap => CPU_ZERO_PAGE_WRAP_FAULT_LABEL,
             DiagnosticFaultInjection::DmaOamTransfer => DMA_OAM_TRANSFER_FAULT_LABEL,
             DiagnosticFaultInjection::DmaPhaseMatrix => DMA_PHASE_MATRIX_FAULT_LABEL,
@@ -1868,6 +1961,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_branch_matrix: CpuBranchMatrixTelemetry,
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
+    pub cpu_stack_matrix: CpuStackMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub apu_dmc_status: ApuDmcStatusTelemetry,
@@ -2411,6 +2505,25 @@ pub struct CpuBranchMatrixTelemetry {
     pub expected_page_cross_result_hex: String,
     pub page_cross_result: u8,
     pub page_cross_result_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuStackMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_stack_pointer: u8,
+    pub expected_stack_pointer_hex: String,
+    pub tsx_result: u8,
+    pub tsx_result_hex: String,
+    pub pull_result: u8,
+    pub pull_result_hex: String,
+    pub status_result: u8,
+    pub status_result_hex: String,
+    pub jsr_result: u8,
+    pub jsr_result_hex: String,
+    pub final_stack_pointer: u8,
+    pub final_stack_pointer_hex: String,
     pub passed: bool,
 }
 
@@ -4578,6 +4691,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     });
     let cpu_addressing_matrix = cpu_addressing_matrix_telemetry(&ram);
     let cpu_branch_matrix = cpu_branch_matrix_telemetry(&ram);
+    let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
     let apu_dmc_status = apu_dmc_status_telemetry(&ram);
@@ -4619,6 +4733,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
@@ -4660,6 +4775,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         ram: &ram,
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
+        cpu_stack_matrix: &cpu_stack_matrix,
         cpu_rmw_addressing_matrix: &cpu_rmw_addressing_matrix,
         cpu_rmw_matrix: &cpu_rmw_matrix,
         input_port_matrix: &input_port_matrix,
@@ -4738,6 +4854,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu: cpu_telemetry(&cpu),
         cpu_addressing_matrix,
         cpu_branch_matrix,
+        cpu_stack_matrix,
         cpu_rmw_addressing_matrix,
         cpu_rmw_matrix,
         input_port_matrix,
@@ -4981,6 +5098,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_dma_section(&mut report, telemetry);
     write_audio_section(&mut report, telemetry);
     write_cpu_branch_section(&mut report, telemetry);
+    write_cpu_stack_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
     write_instruction_trace_section(&mut report, telemetry);
     write_probe_section(&mut report, telemetry);
@@ -6322,6 +6440,62 @@ fn write_cpu_branch_section(report: &mut String, telemetry: &DiagnosticTelemetry
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Stack Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| TXS/TSX stack pointer / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.tsx_result_hex,
+        telemetry.cpu_stack_matrix.expected_stack_pointer_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| PHA/PLA pull result / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.pull_result_hex,
+        hex_byte(CPU_STACK_MATRIX_EXPECTED_PULL_RESULT)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| PHP/PLP status result / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.status_result_hex,
+        hex_byte(CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| JSR/RTS result / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.jsr_result_hex,
+        hex_byte(CPU_STACK_MATRIX_EXPECTED_JSR_RESULT)
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Final stack pointer / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.final_stack_pointer_hex,
+        telemetry.cpu_stack_matrix.expected_stack_pointer_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Stack matrix cases / expected | {} / {} |",
+        telemetry.cpu_stack_matrix.observed_case_count,
+        telemetry.cpu_stack_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Stack matrix passed | {} |",
+        telemetry.cpu_stack_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_timing_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## Timing").expect("write report");
     writeln!(report).expect("write report");
@@ -6759,8 +6933,10 @@ struct OpcodeDecode {
 
 fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
     let decode = match opcode {
+        0x08 => OpcodeDecode::implied("PHP"),
         0x18 => OpcodeDecode::implied("CLC"),
         0x20 => OpcodeDecode::absolute("JSR"),
+        0x28 => OpcodeDecode::implied("PLP"),
         0x29 => OpcodeDecode::immediate("AND"),
         0x38 => OpcodeDecode::implied("SEC"),
         0x40 => OpcodeDecode::implied("RTI"),
@@ -6772,9 +6948,11 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x69 => OpcodeDecode::immediate("ADC"),
         0x78 => OpcodeDecode::implied("SEI"),
         0x85 => OpcodeDecode::zero_page("STA"),
-        0x95 => OpcodeDecode::zero_page_x("STA"),
         0x8A => OpcodeDecode::implied("TXA"),
         0x8D => OpcodeDecode::absolute("STA"),
+        0x8E => OpcodeDecode::absolute("STX"),
+        0x90 => OpcodeDecode::relative("BCC"),
+        0x95 => OpcodeDecode::zero_page_x("STA"),
         0x9A => OpcodeDecode::implied("TXS"),
         0x9D => OpcodeDecode::absolute_x("STA"),
         0xA0 => OpcodeDecode::immediate("LDY"),
@@ -6784,10 +6962,12 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xAD => OpcodeDecode::absolute("LDA"),
         0xB1 => OpcodeDecode::indirect_y("LDA"),
         0xB5 => OpcodeDecode::zero_page_x("LDA"),
+        0xBA => OpcodeDecode::implied("TSX"),
         0xBD => OpcodeDecode::absolute_x("LDA"),
         0xC9 => OpcodeDecode::immediate("CMP"),
         0xD0 => OpcodeDecode::relative("BNE"),
         0xD8 => OpcodeDecode::implied("CLD"),
+        0xE0 => OpcodeDecode::immediate("CPX"),
         0xE6 => OpcodeDecode::zero_page("INC"),
         0xE8 => OpcodeDecode::implied("INX"),
         0xE9 => OpcodeDecode::immediate("SBC"),
@@ -7567,6 +7747,7 @@ struct HostValidationInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
@@ -7601,6 +7782,7 @@ struct ProbeTelemetryInput<'a> {
     ram: &'a [u8],
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
+    cpu_stack_matrix: &'a CpuStackMatrixTelemetry,
     cpu_rmw_addressing_matrix: &'a CpuRmwAddressingMatrixTelemetry,
     cpu_rmw_matrix: &'a CpuRmwMatrixTelemetry,
     input_port_matrix: &'a InputPortMatrixTelemetry,
@@ -7680,6 +7862,18 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_branch_matrix.page_cross_result_hex,
             input.cpu_branch_matrix.observed_case_count,
             input.cpu_branch_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_stack_matrix.passed {
+        failures.push(format!(
+            "CPU stack matrix mismatch: tsx={}, pull={}, status={}, jsr={}, final_sp={}, cases {}/{}",
+            input.cpu_stack_matrix.tsx_result_hex,
+            input.cpu_stack_matrix.pull_result_hex,
+            input.cpu_stack_matrix.status_result_hex,
+            input.cpu_stack_matrix.jsr_result_hex,
+            input.cpu_stack_matrix.final_stack_pointer_hex,
+            input.cpu_stack_matrix.observed_case_count,
+            input.cpu_stack_matrix.expected_case_count
         ));
     }
     if !input.cpu_rmw_matrix.passed {
@@ -8228,6 +8422,33 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_branch_matrix.expected_case_count
             ),
             likely_domain: "cpu.branch.condition_matrix".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.stack_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_STACK_MATRIX_TEST_ID),
+            test_name: test_name(CPU_STACK_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_stack_matrix.passed),
+            description:
+                "CPU stack status matrix retained expected stack pointer, push/pop, status, and JSR/RTS observations"
+                    .to_string(),
+            expected: "tsx=0xF0, pull=0xA6, status=0xA9, jsr=0x77, final_sp=0xF0, cases=5"
+                .to_string(),
+            observed: format!(
+                "tsx {}, pull {}, status {}, jsr {}, final_sp {}, cases {}/{}",
+                input.cpu_stack_matrix.tsx_result_hex,
+                input.cpu_stack_matrix.pull_result_hex,
+                input.cpu_stack_matrix.status_result_hex,
+                input.cpu_stack_matrix.jsr_result_hex,
+                input.cpu_stack_matrix.final_stack_pointer_hex,
+                input.cpu_stack_matrix.observed_case_count,
+                input.cpu_stack_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.stack.status_matrix".to_string(),
         },
     );
     push_probe(
@@ -9446,6 +9667,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_read_modify_write_matrix();
     program.cpu_rmw_addressing_matrix();
     program.cpu_branch_condition_matrix();
+    program.cpu_stack_status_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -9521,6 +9743,24 @@ impl DiagnosticProgram {
         let ok = self.unique_label("ok");
         self.asm.cmp_zp(expected_addr);
         self.asm.beq(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn expect_z_set(&mut self, fail_code: u8) {
+        let ok = self.unique_label("zero_set_ok");
+        self.asm.beq(&ok);
+        self.fail_with_code(fail_code);
+        self.asm
+            .label(&ok)
+            .expect("unique label should not collide");
+    }
+
+    fn expect_c_clear(&mut self, fail_code: u8) {
+        let ok = self.unique_label("carry_clear_ok");
+        self.asm.bcc(&ok);
         self.fail_with_code(fail_code);
         self.asm
             .label(&ok)
@@ -9941,6 +10181,64 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_BRANCH_MATRIX_EXPECTED_CASE_COUNT, 0xDE);
         self.pass_test(CPU_BRANCH_MATRIX_TEST_ID);
+    }
+
+    fn cpu_stack_status_matrix(&mut self) {
+        self.begin_test(CPU_STACK_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_STACK_MATRIX_TSX_RESULT_ADDR);
+        self.asm.sta_abs(CPU_STACK_MATRIX_PULL_RESULT_ADDR);
+        self.asm.sta_abs(CPU_STACK_MATRIX_STATUS_RESULT_ADDR);
+        self.asm.sta_abs(CPU_STACK_MATRIX_JSR_RESULT_ADDR);
+        self.asm.sta_abs(CPU_STACK_MATRIX_FINAL_SP_ADDR);
+        self.asm.sta_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_STACK_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.ldx_imm(CPU_STACK_MATRIX_EXPECTED_STACK_POINTER);
+        self.asm.txs();
+        self.asm.tsx();
+        self.asm.stx_abs(CPU_STACK_MATRIX_TSX_RESULT_ADDR);
+        self.asm.cpx_imm(CPU_STACK_MATRIX_EXPECTED_STACK_POINTER);
+        self.expect_z_set(0xA8);
+        self.asm.inc_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_imm(CPU_STACK_MATRIX_EXPECTED_PULL_RESULT);
+        self.asm.pha();
+        self.asm.lda_imm(0x00);
+        self.asm.pla();
+        self.asm.sta_abs(CPU_STACK_MATRIX_PULL_RESULT_ADDR);
+        self.expect_a_eq(CPU_STACK_MATRIX_EXPECTED_PULL_RESULT, 0xA9);
+        self.asm.inc_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_imm(0x00);
+        self.asm.clc();
+        self.asm.php();
+        self.asm.lda_imm(0x80);
+        self.asm.sec();
+        self.asm.plp();
+        self.expect_z_set(0xAA);
+        self.expect_c_clear(0xAB);
+        self.asm.lda_imm(CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT);
+        self.asm.sta_abs(CPU_STACK_MATRIX_STATUS_RESULT_ADDR);
+        self.asm.inc_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.jsr_label("sub_stack_jsr");
+        self.asm.sta_abs(CPU_STACK_MATRIX_JSR_RESULT_ADDR);
+        self.expect_a_eq(CPU_STACK_MATRIX_EXPECTED_JSR_RESULT, 0xAC);
+        self.asm.inc_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.tsx();
+        self.asm.stx_abs(CPU_STACK_MATRIX_FINAL_SP_ADDR);
+        self.asm.cpx_imm(CPU_STACK_MATRIX_EXPECTED_STACK_POINTER);
+        self.expect_z_set(0xAD);
+        self.asm.inc_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm.lda_abs(CPU_STACK_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_STACK_MATRIX_EXPECTED_CASE_COUNT, 0xAE);
+        self.pass_test(CPU_STACK_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -11311,6 +11609,10 @@ impl Assembler {
         self.op_abs(0x9D, addr);
     }
 
+    fn stx_abs(&mut self, addr: u16) {
+        self.op_abs(0x8E, addr);
+    }
+
     fn adc_imm(&mut self, value: u8) {
         self.op_imm(0x69, value);
     }
@@ -11335,8 +11637,16 @@ impl Assembler {
         self.op_zp(0xC5, addr);
     }
 
+    fn cpx_imm(&mut self, value: u8) {
+        self.op_imm(0xE0, value);
+    }
+
     fn beq(&mut self, label: &str) {
         self.op_rel(0xF0, label);
+    }
+
+    fn bcc(&mut self, label: &str) {
+        self.op_rel(0x90, label);
     }
 
     fn bne(&mut self, label: &str) {
@@ -11415,12 +11725,24 @@ impl Assembler {
         self.emit(0x9A);
     }
 
+    fn tsx(&mut self) {
+        self.emit(0xBA);
+    }
+
     fn pha(&mut self) {
         self.emit(0x48);
     }
 
+    fn php(&mut self) {
+        self.emit(0x08);
+    }
+
     fn pla(&mut self) {
         self.emit(0x68);
+    }
+
+    fn plp(&mut self) {
+        self.emit(0x28);
     }
 
     fn rts(&mut self) {
@@ -11643,6 +11965,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         DiagnosticFaultInjection::CpuBranchConditionMatrix => {
             bus.cpu_write(CPU_BRANCH_MATRIX_CASE_COUNT_ADDR, 0x80);
         }
+        DiagnosticFaultInjection::CpuStackStatusMatrix => {
+            bus.cpu_write(CPU_STACK_MATRIX_CASE_COUNT_ADDR, 0x80);
+        }
         DiagnosticFaultInjection::CpuIndirectJmpPageWrap => {
             let wrong_target_high = bus.cpu_read(0x0500);
             bus.cpu_write(0x0400, wrong_target_high);
@@ -11786,6 +12111,37 @@ fn cpu_branch_matrix_telemetry(ram: &[u8]) -> CpuBranchMatrixTelemetry {
             && taken_mask == CPU_BRANCH_MATRIX_EXPECTED_MASK
             && not_taken_mask == CPU_BRANCH_MATRIX_EXPECTED_MASK
             && page_cross_result == CPU_BRANCH_MATRIX_EXPECTED_PAGE_CROSS_RESULT,
+    }
+}
+
+fn cpu_stack_matrix_telemetry(ram: &[u8]) -> CpuStackMatrixTelemetry {
+    let tsx_result = ram[(CPU_STACK_MATRIX_TSX_RESULT_ADDR & 0x07FF) as usize];
+    let pull_result = ram[(CPU_STACK_MATRIX_PULL_RESULT_ADDR & 0x07FF) as usize];
+    let status_result = ram[(CPU_STACK_MATRIX_STATUS_RESULT_ADDR & 0x07FF) as usize];
+    let jsr_result = ram[(CPU_STACK_MATRIX_JSR_RESULT_ADDR & 0x07FF) as usize];
+    let final_stack_pointer = ram[(CPU_STACK_MATRIX_FINAL_SP_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_STACK_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+    CpuStackMatrixTelemetry {
+        expected_case_count: CPU_STACK_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_stack_pointer: CPU_STACK_MATRIX_EXPECTED_STACK_POINTER,
+        expected_stack_pointer_hex: hex_byte(CPU_STACK_MATRIX_EXPECTED_STACK_POINTER),
+        tsx_result,
+        tsx_result_hex: hex_byte(tsx_result),
+        pull_result,
+        pull_result_hex: hex_byte(pull_result),
+        status_result,
+        status_result_hex: hex_byte(status_result),
+        jsr_result,
+        jsr_result_hex: hex_byte(jsr_result),
+        final_stack_pointer,
+        final_stack_pointer_hex: hex_byte(final_stack_pointer),
+        passed: observed_case_count == CPU_STACK_MATRIX_EXPECTED_CASE_COUNT
+            && tsx_result == CPU_STACK_MATRIX_EXPECTED_STACK_POINTER
+            && pull_result == CPU_STACK_MATRIX_EXPECTED_PULL_RESULT
+            && status_result == CPU_STACK_MATRIX_EXPECTED_STATUS_RESULT
+            && jsr_result == CPU_STACK_MATRIX_EXPECTED_JSR_RESULT
+            && final_stack_pointer == CPU_STACK_MATRIX_EXPECTED_STACK_POINTER,
     }
 }
 
@@ -15218,6 +15574,13 @@ fn compare_observation_checksums(
         &["cpu_branch_matrix", "page_cross_result"][..],
         &["cpu_branch_matrix", "observed_case_count"][..],
         &["cpu_branch_matrix", "passed"][..],
+        &["cpu_stack_matrix", "tsx_result"][..],
+        &["cpu_stack_matrix", "pull_result"][..],
+        &["cpu_stack_matrix", "status_result"][..],
+        &["cpu_stack_matrix", "jsr_result"][..],
+        &["cpu_stack_matrix", "final_stack_pointer"][..],
+        &["cpu_stack_matrix", "observed_case_count"][..],
+        &["cpu_stack_matrix", "passed"][..],
     ] {
         compare_optional_value(
             baseline,
