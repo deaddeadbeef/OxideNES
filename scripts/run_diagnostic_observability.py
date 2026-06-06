@@ -186,6 +186,20 @@ FOCUS_DOMAIN_CODE_MAP = {
             "cpu_alu_index_matrix",
         ],
     },
+    "cpu.arithmetic.adc_sbc_flags": {
+        "subsystem": "cpu",
+        "description": "6502 ADC/SBC carry, borrow, overflow, zero, and negative flag behavior observed through diagnostic arithmetic sentinels.",
+        "source_files": ["src/cpu.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "ADC",
+            "SBC",
+            "carry",
+            "borrow",
+            "overflow",
+            "cpu_arithmetic_flag_matrix",
+        ],
+    },
     "cpu.rmw.asl": {
         "subsystem": "cpu",
         "description": "6502 read-modify-write zero-page opcode sequencing and memory write-back behavior.",
@@ -467,6 +481,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_compare_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_compare_matrix_failure",
     "cpu_load_store_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_failure",
     "cpu_alu_index_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_alu_index_matrix_failure",
+    "cpu_arithmetic_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_arithmetic_matrix_failure",
     "cpu_rmw_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matrix_failure",
     "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
