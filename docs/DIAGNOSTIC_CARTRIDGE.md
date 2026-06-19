@@ -201,6 +201,19 @@ focus domains, source files, tests, diagnostic files, telemetry signals, and
 acceptance commands so the next cartridge fixture can be designed from one
 artifact without overstating current coverage.
 
+To add exhaustive host-side evidence for the current `input_port_matrix`
+coverage gap without slowing every cartridge run, write an input sweep artifact:
+
+```powershell
+cargo run --bin oxidenes-diagnostic -- --input-sweep-json target/diagnostics/input-sweep.json --input-sweep-report target/diagnostics/input-sweep.md --no-stdout
+```
+
+The sweep validates all 65,536 joypad-1/joypad-2 mask pairs through the emulator
+`Joypad` core, including strobe-high hold, eight serial low-strobe reads, and
+post-exhaustion reads. It is an optional companion artifact for coverage-gap
+work; the generated cartridge still provides the sampled healthy-mask fixtures
+and fault-localization scenarios used by the default AI diagnostic suite.
+
 To query an accepted suite without hand-joining JSON files, run:
 
 ```powershell

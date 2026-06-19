@@ -7,8 +7,10 @@ use oxidenes::diagnostic::{
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
     DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticDebugEventFocusTelemetry,
     DiagnosticDebugInstructionFocusTelemetry, DiagnosticFaultInjection, DiagnosticHealth,
-    DiagnosticProbeStatus, DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE,
+    DiagnosticProbeStatus, DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_SUITE_NAME,
+    DIAGNOSTIC_SUITE_VERSION, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
 };
+use oxidenes::joypad::{Joypad, JoypadButton};
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
@@ -16,6 +18,32 @@ const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
 const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 19;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
+const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 1;
+const INPUT_SWEEP_PORT_MASK_COUNT: usize = 256;
+const INPUT_SWEEP_PAIR_COUNT: usize = INPUT_SWEEP_PORT_MASK_COUNT * INPUT_SWEEP_PORT_MASK_COUNT;
+const INPUT_SWEEP_STROBE_HIGH_READS_PER_PORT: usize = 2;
+const INPUT_SWEEP_SERIAL_READS_PER_PORT: usize = 10;
+const INPUT_SWEEP_FAILURE_SAMPLE_LIMIT: usize = 16;
+const INPUT_SWEEP_SAMPLE_MASKS: &[(&str, u8, u8)] = &[
+    ("pass", 0x28, 0x28),
+    ("input_mask_matrix_pass", 0xAA, 0x55),
+    ("input_mask_all_released_pass", 0x00, 0x00),
+    ("input_mask_all_pressed_pass", 0xFF, 0xFF),
+    ("input_mask_joypad1_pressed_pass", 0xFF, 0x00),
+    ("input_mask_joypad2_pressed_pass", 0x00, 0xFF),
+    ("input_mask_sparse_bits_pass", 0x81, 0x18),
+    ("input_mask_nibble_split_pass", 0x0F, 0xF0),
+];
+const JOYPAD_BUTTONS: [JoypadButton; 8] = [
+    JoypadButton::A,
+    JoypadButton::B,
+    JoypadButton::Select,
+    JoypadButton::Start,
+    JoypadButton::Up,
+    JoypadButton::Down,
+    JoypadButton::Left,
+    JoypadButton::Right,
+];
 
 #[derive(Debug, Serialize)]
 struct DiagnosticBundleManifest {
@@ -239,6 +267,75 @@ struct DiagnosticInputMaskScenario {
     purpose: &'static str,
     joypad1_mask: u8,
     joypad2_mask: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticInputSweep {
+    input_sweep_schema_version: u16,
+    telemetry_schema_version: u16,
+    suite_name: &'static str,
+    suite_version: &'static str,
+    status: &'static str,
+    passed: bool,
+    recommended_exit_code: u8,
+    coverage_gap_id: &'static str,
+    summary: DiagnosticInputSweepSummary,
+    probes: Vec<DiagnosticInputSweepProbe>,
+    sample_cases: Vec<DiagnosticInputSweepSampleCase>,
+    failures: Vec<DiagnosticInputSweepFailure>,
+    ai_handoff: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticInputSweepSummary {
+    port_mask_count: usize,
+    pair_count: usize,
+    passed_pair_count: usize,
+    failed_pair_count: usize,
+    checked_port_count: usize,
+    checked_read_count: usize,
+    strobe_high_reads_per_port: usize,
+    serial_reads_per_port: usize,
+    failure_count: usize,
+    failure_sample_limit: usize,
+    exhaustive_two_port_matrix: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticInputSweepProbe {
+    id: &'static str,
+    status: &'static str,
+    expected: String,
+    observed: String,
+    likely_domain: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticInputSweepSampleCase {
+    scenario_id: &'static str,
+    joypad1_mask_hex: String,
+    joypad2_mask_hex: String,
+    joypad1_serial_bits: String,
+    joypad2_serial_bits: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticInputSweepFailure {
+    pair_index: usize,
+    joypad1_mask_hex: String,
+    joypad2_mask_hex: String,
+    port: &'static str,
+    check: &'static str,
+    read_index: usize,
+    expected: u8,
+    observed: u8,
+}
+
+struct DiagnosticInputSweepPortContext {
+    pair_index: usize,
+    joypad1_mask: u8,
+    joypad2_mask: u8,
+    port: &'static str,
 }
 
 struct DiagnosticScenarioSuiteWriteResult {
@@ -588,6 +685,8 @@ fn run() -> Result<bool, String> {
     let mut dump_rom_path: Option<PathBuf> = None;
     let mut bundle_dir: Option<PathBuf> = None;
     let mut scenario_suite_dir: Option<PathBuf> = None;
+    let mut input_sweep_json_path: Option<PathBuf> = None;
+    let mut input_sweep_report_path: Option<PathBuf> = None;
     let mut config_overridden = false;
     let mut print_stdout = true;
 
@@ -652,6 +751,18 @@ fn run() -> Result<bool, String> {
                     .ok_or_else(|| "--scenario-suite-dir requires a directory path".to_string())?;
                 scenario_suite_dir = Some(PathBuf::from(path));
             }
+            "--input-sweep-json" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--input-sweep-json requires a file path".to_string())?;
+                input_sweep_json_path = Some(PathBuf::from(path));
+            }
+            "--input-sweep-report" => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| "--input-sweep-report requires a file path".to_string())?;
+                input_sweep_report_path = Some(PathBuf::from(path));
+            }
             "--max-cycles" => {
                 let value = args
                     .next()
@@ -701,6 +812,42 @@ fn run() -> Result<bool, String> {
             }
             _ => return Err(format!("unknown argument: {arg}")),
         }
+    }
+
+    let input_sweep_requested =
+        input_sweep_json_path.is_some() || input_sweep_report_path.is_some();
+    if input_sweep_requested {
+        let incompatible = scenario_suite_dir.is_some()
+            || json_path.is_some()
+            || report_path.is_some()
+            || baseline_json_path.is_some()
+            || comparison_json_path.is_some()
+            || comparison_report_path.is_some()
+            || triage_json_path.is_some()
+            || dump_rom_path.is_some()
+            || bundle_dir.is_some()
+            || config_overridden;
+        if incompatible {
+            return Err(
+                "--input-sweep-json and --input-sweep-report run a standalone exhaustive input sweep and cannot be combined with diagnostic run outputs, scenario-suite output, or config override options"
+                    .to_string(),
+            );
+        }
+
+        let sweep = diagnostic_input_sweep();
+        let json = serde_json::to_string_pretty(&sweep)
+            .map_err(|err| format!("failed to serialize input sweep JSON: {err}"))?;
+        if let Some(path) = input_sweep_json_path {
+            write_file(&path, json.as_bytes())?;
+        }
+        if let Some(path) = input_sweep_report_path {
+            let report = format_diagnostic_input_sweep_report(&sweep);
+            write_file(&path, report.as_bytes())?;
+        }
+        if print_stdout {
+            println!("{json}");
+        }
+        return Ok(sweep.passed);
     }
 
     if let Some(path) = scenario_suite_dir {
@@ -837,6 +984,10 @@ fn print_help() {
     println!("    --bundle-dir <DIR>   Write an AI-ready diagnostic artifact bundle");
     println!(
         "    --scenario-suite-dir <DIR>   Write an AI-ready pass/fail corpus with observer reports"
+    );
+    println!("    --input-sweep-json <FILE>    Write exhaustive two-port input-mask sweep JSON");
+    println!(
+        "    --input-sweep-report <FILE>  Write exhaustive two-port input-mask sweep Markdown"
     );
     println!("    --max-cycles <N>     Override the CPU-cycle timeout");
     println!("    --joypad1 <BYTE>     Override joypad-1 mask, decimal or 0x-prefixed hex");
@@ -2361,6 +2512,361 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             expected_focus_domain: None,
         })
         .collect()
+}
+
+fn diagnostic_input_sweep() -> DiagnosticInputSweep {
+    let mut passed_pair_count = 0usize;
+    let mut failure_count = 0usize;
+    let mut failures = Vec::new();
+    let mut checked_read_count = 0usize;
+    let mut pair_index = 0usize;
+
+    for joypad1_mask in 0u16..=u8::MAX as u16 {
+        for joypad2_mask in 0u16..=u8::MAX as u16 {
+            let joypad1_mask = joypad1_mask as u8;
+            let joypad2_mask = joypad2_mask as u8;
+            let before = failure_count;
+            checked_read_count += check_input_sweep_port(
+                pair_index,
+                joypad1_mask,
+                joypad2_mask,
+                "joypad1",
+                joypad1_mask,
+                &mut failure_count,
+                &mut failures,
+            );
+            checked_read_count += check_input_sweep_port(
+                pair_index,
+                joypad1_mask,
+                joypad2_mask,
+                "joypad2",
+                joypad2_mask,
+                &mut failure_count,
+                &mut failures,
+            );
+            if failure_count == before {
+                passed_pair_count += 1;
+            }
+            pair_index += 1;
+        }
+    }
+
+    let failed_pair_count = INPUT_SWEEP_PAIR_COUNT.saturating_sub(passed_pair_count);
+    let passed = failure_count == 0 && passed_pair_count == INPUT_SWEEP_PAIR_COUNT;
+    let status = if passed { "passed" } else { "failed" };
+    DiagnosticInputSweep {
+        input_sweep_schema_version: DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION,
+        telemetry_schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
+        suite_name: DIAGNOSTIC_SUITE_NAME,
+        suite_version: DIAGNOSTIC_SUITE_VERSION,
+        status,
+        passed,
+        recommended_exit_code: if passed { 0 } else { 1 },
+        coverage_gap_id: "input_port_matrix",
+        summary: DiagnosticInputSweepSummary {
+            port_mask_count: INPUT_SWEEP_PORT_MASK_COUNT,
+            pair_count: INPUT_SWEEP_PAIR_COUNT,
+            passed_pair_count,
+            failed_pair_count,
+            checked_port_count: INPUT_SWEEP_PAIR_COUNT * 2,
+            checked_read_count,
+            strobe_high_reads_per_port: INPUT_SWEEP_STROBE_HIGH_READS_PER_PORT,
+            serial_reads_per_port: INPUT_SWEEP_SERIAL_READS_PER_PORT,
+            failure_count,
+            failure_sample_limit: INPUT_SWEEP_FAILURE_SAMPLE_LIMIT,
+            exhaustive_two_port_matrix: true,
+        },
+        probes: diagnostic_input_sweep_probes(
+            passed,
+            passed_pair_count,
+            failed_pair_count,
+            checked_read_count,
+            failure_count,
+        ),
+        sample_cases: diagnostic_input_sweep_samples(),
+        failures,
+        ai_handoff: vec![
+            "Use this artifact with diagnostic telemetry coverage_gaps[id=input_port_matrix] to distinguish sampled cartridge masks from exhaustive core input-port coverage.".to_string(),
+            "A passed sweep means all 65,536 joypad-1/joypad-2 mask pairs produced correct strobe-high hold, eight serial bits, and post-exhaustion reads through the emulator Joypad core.".to_string(),
+            "If this sweep fails, start with failures[0] and replay the closest cartridge mask using --joypad1/--expect-joypad1/--joypad2/--expect-joypad2 before editing input code.".to_string(),
+        ],
+    }
+}
+
+fn check_input_sweep_port(
+    pair_index: usize,
+    joypad1_mask: u8,
+    joypad2_mask: u8,
+    port: &'static str,
+    mask: u8,
+    failure_count: &mut usize,
+    failures: &mut Vec<DiagnosticInputSweepFailure>,
+) -> usize {
+    let context = DiagnosticInputSweepPortContext {
+        pair_index,
+        joypad1_mask,
+        joypad2_mask,
+        port,
+    };
+    let mut checked_reads = 0usize;
+    let expected_a = mask & 1;
+    let mut strobe_high = joypad_from_mask(mask);
+    strobe_high.write(1);
+    for read_index in 0..INPUT_SWEEP_STROBE_HIGH_READS_PER_PORT {
+        let observed = strobe_high.read();
+        checked_reads += 1;
+        record_input_sweep_mismatch(
+            &context,
+            "strobe_high_hold",
+            read_index,
+            expected_a,
+            observed,
+            failure_count,
+            failures,
+        );
+    }
+
+    let mut serial = joypad_from_mask(mask);
+    serial.write(1);
+    serial.write(0);
+    for read_index in 0..INPUT_SWEEP_SERIAL_READS_PER_PORT {
+        let expected = if read_index < 8 {
+            (mask >> read_index) & 1
+        } else {
+            1
+        };
+        let observed = serial.read();
+        checked_reads += 1;
+        record_input_sweep_mismatch(
+            &context,
+            if read_index < 8 {
+                "serial_bit"
+            } else {
+                "post_exhaustion"
+            },
+            read_index,
+            expected,
+            observed,
+            failure_count,
+            failures,
+        );
+    }
+
+    checked_reads
+}
+
+fn record_input_sweep_mismatch(
+    context: &DiagnosticInputSweepPortContext,
+    check: &'static str,
+    read_index: usize,
+    expected: u8,
+    observed: u8,
+    failure_count: &mut usize,
+    failures: &mut Vec<DiagnosticInputSweepFailure>,
+) {
+    if observed == expected {
+        return;
+    }
+
+    *failure_count += 1;
+    if failures.len() < INPUT_SWEEP_FAILURE_SAMPLE_LIMIT {
+        failures.push(DiagnosticInputSweepFailure {
+            pair_index: context.pair_index,
+            joypad1_mask_hex: hex_byte(context.joypad1_mask),
+            joypad2_mask_hex: hex_byte(context.joypad2_mask),
+            port: context.port,
+            check,
+            read_index,
+            expected,
+            observed,
+        });
+    }
+}
+
+fn diagnostic_input_sweep_probes(
+    passed: bool,
+    passed_pair_count: usize,
+    failed_pair_count: usize,
+    checked_read_count: usize,
+    failure_count: usize,
+) -> Vec<DiagnosticInputSweepProbe> {
+    let status = if passed { "passed" } else { "failed" };
+    vec![
+        DiagnosticInputSweepProbe {
+            id: "input.exhaustive_two_port_mask_pairs",
+            status,
+            expected: format!("{INPUT_SWEEP_PAIR_COUNT} joypad-1/joypad-2 mask pairs pass"),
+            observed: format!("{passed_pair_count} passed, {failed_pair_count} failed"),
+            likely_domain: "joypad.input_port_matrix",
+        },
+        DiagnosticInputSweepProbe {
+            id: "input.serial_shift_bits",
+            status,
+            expected: "Every low-strobe read returns mask bits A,B,Select,Start,Up,Down,Left,Right"
+                .to_string(),
+            observed: format!("{checked_read_count} total input reads checked"),
+            likely_domain: "joypad.strobe_shift",
+        },
+        DiagnosticInputSweepProbe {
+            id: "input.post_exhaustion_reads",
+            status,
+            expected: "Reads after the eighth serial bit return 1".to_string(),
+            observed: format!("{failure_count} mismatched reads across the sweep"),
+            likely_domain: "joypad.strobe_shift",
+        },
+        DiagnosticInputSweepProbe {
+            id: "input.strobe_high_hold",
+            status,
+            expected: "Repeated high-strobe reads keep returning the A button bit".to_string(),
+            observed: format!("{failure_count} mismatched reads across the sweep"),
+            likely_domain: "joypad.strobe_high_hold",
+        },
+    ]
+}
+
+fn diagnostic_input_sweep_samples() -> Vec<DiagnosticInputSweepSampleCase> {
+    INPUT_SWEEP_SAMPLE_MASKS
+        .iter()
+        .map(
+            |(scenario_id, joypad1_mask, joypad2_mask)| DiagnosticInputSweepSampleCase {
+                scenario_id,
+                joypad1_mask_hex: hex_byte(*joypad1_mask),
+                joypad2_mask_hex: hex_byte(*joypad2_mask),
+                joypad1_serial_bits: mask_serial_bits(*joypad1_mask),
+                joypad2_serial_bits: mask_serial_bits(*joypad2_mask),
+            },
+        )
+        .collect()
+}
+
+fn joypad_from_mask(mask: u8) -> Joypad {
+    let mut joypad = Joypad::new();
+    for (bit, button) in JOYPAD_BUTTONS.iter().copied().enumerate() {
+        joypad.set_button_pressed(button, mask & (1 << bit) != 0);
+    }
+    joypad
+}
+
+fn mask_serial_bits(mask: u8) -> String {
+    (0..8)
+        .map(|bit| if mask & (1 << bit) != 0 { '1' } else { '0' })
+        .collect()
+}
+
+fn format_diagnostic_input_sweep_report(sweep: &DiagnosticInputSweep) -> String {
+    let mut report = String::new();
+    writeln!(report, "# Diagnostic Input Sweep").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(report, "| Status | {} |", sweep.status).expect("write report");
+    writeln!(report, "| Passed | {} |", sweep.passed).expect("write report");
+    writeln!(
+        report,
+        "| Input sweep schema | {} |",
+        sweep.input_sweep_schema_version
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Telemetry schema | {} |",
+        sweep.telemetry_schema_version
+    )
+    .expect("write report");
+    writeln!(report, "| Suite | {} |", sweep.suite_name).expect("write report");
+    writeln!(report, "| Version | {} |", sweep.suite_version).expect("write report");
+    writeln!(report, "| Coverage gap | {} |", sweep.coverage_gap_id).expect("write report");
+    writeln!(report, "| Pair count | {} |", sweep.summary.pair_count).expect("write report");
+    writeln!(
+        report,
+        "| Passed pairs | {} |",
+        sweep.summary.passed_pair_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Failed pairs | {} |",
+        sweep.summary.failed_pair_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Checked reads | {} |",
+        sweep.summary.checked_read_count
+    )
+    .expect("write report");
+    writeln!(report, "| Failures | {} |", sweep.summary.failure_count).expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "## Probes").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Probe | Status | Expected | Observed |").expect("write report");
+    writeln!(report, "| --- | --- | --- | --- |").expect("write report");
+    for probe in &sweep.probes {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} |",
+            probe.id, probe.status, probe.expected, probe.observed
+        )
+        .expect("write report");
+    }
+    writeln!(report).expect("write report");
+    writeln!(report, "## Scenario Mask Samples").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(
+        report,
+        "| Scenario | Joypad 1 | Joypad 1 serial bits | Joypad 2 | Joypad 2 serial bits |"
+    )
+    .expect("write report");
+    writeln!(report, "| --- | --- | --- | --- | --- |").expect("write report");
+    for sample in &sweep.sample_cases {
+        writeln!(
+            report,
+            "| {} | {} | {} | {} | {} |",
+            sample.scenario_id,
+            sample.joypad1_mask_hex,
+            sample.joypad1_serial_bits,
+            sample.joypad2_mask_hex,
+            sample.joypad2_serial_bits
+        )
+        .expect("write report");
+    }
+    if !sweep.failures.is_empty() {
+        writeln!(report).expect("write report");
+        writeln!(report, "## Failure Samples").expect("write report");
+        writeln!(report).expect("write report");
+        writeln!(
+            report,
+            "| Pair | Joypad 1 | Joypad 2 | Port | Check | Read | Expected | Observed |"
+        )
+        .expect("write report");
+        writeln!(
+            report,
+            "| ---: | --- | --- | --- | --- | ---: | ---: | ---: |"
+        )
+        .expect("write report");
+        for failure in &sweep.failures {
+            writeln!(
+                report,
+                "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                failure.pair_index,
+                failure.joypad1_mask_hex,
+                failure.joypad2_mask_hex,
+                failure.port,
+                failure.check,
+                failure.read_index,
+                failure.expected,
+                failure.observed
+            )
+            .expect("write report");
+        }
+    }
+    writeln!(report).expect("write report");
+    writeln!(report, "## AI Handoff").expect("write report");
+    writeln!(report).expect("write report");
+    for instruction in &sweep.ai_handoff {
+        writeln!(report, "- {instruction}").expect("write report");
+    }
+    report
 }
 
 fn scenario_suite_ai_handoff() -> Vec<String> {
