@@ -62,11 +62,11 @@ body:
           required: true
         - label: Diagnostic observability verifier passes and contract-checks the AI-facing wrapper artifacts, including coverage-ledger counts/gaps, telemetry-catalog signal/probe/event/trace mappings, code-map source/test paths, investigation-plan routes, scenario-dossier joins, and `python scripts/verify_diagnostic_observability.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI coverage gap plan, AI query smoke, AI diagnosis smoke, AI fix-handoff smoke, AI route matrix, AI debug packet, AI debug packet verification, AI debug packet matrix, AI localization evaluation, AI session plan, AI session smoke, AI session smoke matrix, and AI artifact verification, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
+        - label: Diagnostic e2e runner passes and writes the root acceptance report, AI observability index, AI coverage gap plan, diagnostic input sweep, AI query smoke, AI diagnosis smoke, AI fix-handoff smoke, AI route matrix, AI debug packet, AI debug packet verification, AI debug packet matrix, AI localization evaluation, AI session plan, AI session smoke, AI session smoke matrix, and AI artifact verification, including `python scripts/run_diagnostic_e2e.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
         - label: Diagnostic AI coverage gap plan builder passes and maps the six known gaps to source/test anchors, telemetry signals, and validation commands, including `python scripts/build_diagnostic_ai_coverage_gap_plan.py --suite-dir target/diagnostics/scenario-suite`.
           required: true
-        - label: Diagnostic AI artifact verifier passes against the completed e2e suite and coverage gap plan, including `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report --require-ai-route-matrix --require-ai-debug-packet --require-ai-debug-packet-matrix`.
+        - label: Diagnostic AI artifact verifier passes against the completed e2e suite, coverage gap plan, and diagnostic input sweep, including `python scripts/verify_diagnostic_ai_artifacts.py --suite-dir target/diagnostics/scenario-suite --require-e2e-report --require-ai-route-matrix --require-ai-debug-packet --require-ai-debug-packet-matrix`.
           required: true
         - label: Diagnostic AI index query smoke passes, including `python scripts/query_diagnostic_ai_index.py --suite-dir target/diagnostics/scenario-suite smoke`.
           required: true

@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any
 
 
-E2E_REPORT_SCHEMA_VERSION = 1
+E2E_REPORT_SCHEMA_VERSION = 2
 OUTPUT_TAIL_LINES = 80
+INPUT_SWEEP_EXPECTED_PAIR_COUNT = 65_536
+INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT = 1_572_864
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -125,6 +127,8 @@ def artifact_paths(
         "diagnostic_ai_coverage_gap_plan_report": str(
             suite_dir / "diagnostic-ai-coverage-gap-plan.md"
         ),
+        "diagnostic_input_sweep_json": str(suite_dir / "diagnostic-input-sweep.json"),
+        "diagnostic_input_sweep_report": str(suite_dir / "diagnostic-input-sweep.md"),
         "diagnostic_ai_query_smoke_json": str(suite_dir / "diagnostic-ai-query-smoke.json"),
         "diagnostic_ai_query_smoke_report": str(suite_dir / "diagnostic-ai-query-smoke.md"),
         "diagnostic_ai_diagnosis_smoke_json": str(
@@ -238,6 +242,7 @@ def build_summary(
     scenario_dossiers = load_json(suite_dir / "diagnostic-scenario-dossiers.json")
     ai_index = load_json(suite_dir / "diagnostic-ai-observability-index.json")
     ai_coverage_gap_plan = load_json(suite_dir / "diagnostic-ai-coverage-gap-plan.json")
+    input_sweep = load_json(suite_dir / "diagnostic-input-sweep.json")
     ai_query_smoke = load_json(suite_dir / "diagnostic-ai-query-smoke.json")
     ai_diagnosis_smoke = load_json(suite_dir / "diagnostic-ai-diagnosis-smoke.json")
     ai_fix_handoff_smoke = load_json(suite_dir / "diagnostic-ai-fix-handoff-smoke.json")
@@ -275,6 +280,20 @@ def build_summary(
         errors.append("diagnostic AI index status is not passed")
     if ai_coverage_gap_plan.get("status") != "passed":
         errors.append("diagnostic AI coverage gap plan status is not passed")
+    input_sweep_summary = as_dict(input_sweep.get("summary"))
+    if input_sweep.get("status") != "passed":
+        errors.append("diagnostic input sweep status is not passed")
+    if input_sweep.get("coverage_gap_id") != "input_port_matrix":
+        errors.append("diagnostic input sweep coverage gap id is not input_port_matrix")
+    if (
+        input_sweep_summary.get("pair_count") != INPUT_SWEEP_EXPECTED_PAIR_COUNT
+        or input_sweep_summary.get("passed_pair_count") != INPUT_SWEEP_EXPECTED_PAIR_COUNT
+        or input_sweep_summary.get("failure_count") != 0
+        or input_sweep_summary.get("checked_read_count")
+        != INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT
+        or input_sweep_summary.get("exhaustive_two_port_matrix") is not True
+    ):
+        errors.append("diagnostic input sweep summary does not match exhaustive pass criteria")
     if ai_query_smoke.get("status") != "passed":
         errors.append("diagnostic AI query smoke status is not passed")
     if ai_diagnosis_smoke.get("status") != "passed":
@@ -371,6 +390,21 @@ def build_summary(
             "only_happy_paths": as_dict(ai_coverage_gap_plan.get("summary")).get(
                 "only_happy_paths"
             ),
+        },
+        "input_sweep": {
+            "status": input_sweep.get("status"),
+            "coverage_gap_id": input_sweep.get("coverage_gap_id"),
+            "pair_count": input_sweep_summary.get("pair_count"),
+            "passed_pair_count": input_sweep_summary.get("passed_pair_count"),
+            "failed_pair_count": input_sweep_summary.get("failed_pair_count"),
+            "checked_port_count": input_sweep_summary.get("checked_port_count"),
+            "checked_read_count": input_sweep_summary.get("checked_read_count"),
+            "failure_count": input_sweep_summary.get("failure_count"),
+            "exhaustive_two_port_matrix": input_sweep_summary.get(
+                "exhaustive_two_port_matrix"
+            ),
+            "probe_count": len(as_list(input_sweep.get("probes"))),
+            "sample_case_count": len(as_list(input_sweep.get("sample_cases"))),
         },
         "ai_query": {
             "status": ai_query_smoke.get("status"),
@@ -750,6 +784,7 @@ def build_summary(
             "If status is failed, inspect errors and the failed command tails before opening telemetry.",
             "If status is passed, use diagnostic_ai_index_json as the compact joined index before opening larger artifacts.",
             "Use diagnostic_ai_coverage_gap_plan_json when expanding the diagnostic cartridge with the next missing coverage fixture.",
+            "Use diagnostic_input_sweep_json as the exhaustive input_port_matrix companion artifact before changing joypad or input-port behavior.",
             "Use diagnostic_ai_query_smoke_json to prove the AI index supports deterministic route, scenario, probe, and coverage queries.",
             "Use diagnostic_ai_diagnosis_smoke_json to prove an AI-selected route can regenerate replay evidence and mapped narrow-test results.",
             "Use diagnostic_ai_fix_handoff_smoke_json to resolve the selected route into source/test line anchors and fix-loop commands.",
@@ -774,6 +809,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
     routes = as_dict(summary.get("routes"))
     ai_index = as_dict(summary.get("ai_index"))
     ai_coverage_gap_plan = as_dict(summary.get("ai_coverage_gap_plan"))
+    input_sweep = as_dict(summary.get("input_sweep"))
     ai_query = as_dict(summary.get("ai_query"))
     ai_diagnosis = as_dict(summary.get("ai_diagnosis"))
     ai_fix_handoff = as_dict(summary.get("ai_fix_handoff"))
@@ -853,6 +889,22 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Telemetry signal mappings | {ai_coverage_gap_plan.get('telemetry_signal_gap_count')} |",
         f"| Validation commands | {ai_coverage_gap_plan.get('validation_command_count')} |",
         f"| Only happy paths | {ai_coverage_gap_plan.get('only_happy_paths')} |",
+        "",
+        "## Diagnostic Input Sweep",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        f"| Status | {input_sweep.get('status')} |",
+        f"| Coverage gap | {input_sweep.get('coverage_gap_id')} |",
+        f"| Exhaustive two-port matrix | {input_sweep.get('exhaustive_two_port_matrix')} |",
+        f"| Pair count | {input_sweep.get('pair_count')} |",
+        f"| Passed pairs | {input_sweep.get('passed_pair_count')} |",
+        f"| Failed pairs | {input_sweep.get('failed_pair_count')} |",
+        f"| Checked ports | {input_sweep.get('checked_port_count')} |",
+        f"| Checked reads | {input_sweep.get('checked_read_count')} |",
+        f"| Failures | {input_sweep.get('failure_count')} |",
+        f"| Probes | {input_sweep.get('probe_count')} |",
+        f"| Sample cases | {input_sweep.get('sample_case_count')} |",
         "",
         "## AI Query",
         "",
@@ -1107,6 +1159,8 @@ def main() -> int:
     stale_outputs = (
         summary_json,
         summary_report,
+        suite_dir / "diagnostic-input-sweep.json",
+        suite_dir / "diagnostic-input-sweep.md",
         suite_dir / "diagnostic-ai-artifact-verification.json",
         suite_dir / "diagnostic-ai-artifact-verification.md",
     )
@@ -1265,6 +1319,30 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
+                "run_diagnostic_input_sweep",
+                [
+                    args.cargo,
+                    "run",
+                    "--bin",
+                    "oxidenes-diagnostic",
+                    "--",
+                    "--input-sweep-json",
+                    str(suite_dir / "diagnostic-input-sweep.json"),
+                    "--input-sweep-report",
+                    str(suite_dir / "diagnostic-input-sweep.md"),
+                    "--no-stdout",
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(
+            skipped_command("run_diagnostic_input_sweep", "AI query smoke failed")
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
                 "run_diagnostic_ai_diagnosis_smoke",
                 [
                     sys.executable,
@@ -1285,7 +1363,10 @@ def main() -> int:
         )
     else:
         commands.append(
-            skipped_command("run_diagnostic_ai_diagnosis_smoke", "AI query smoke failed")
+            skipped_command(
+                "run_diagnostic_ai_diagnosis_smoke",
+                "diagnostic input sweep failed",
+            )
         )
 
     if command_passed(commands[-1]):
@@ -1563,6 +1644,7 @@ def main() -> int:
         ai_debug_packet_matrix = as_dict(summary.get("ai_debug_packet_matrix"))
         ai_localization_eval = as_dict(summary.get("ai_localization_eval"))
         ai_coverage_gap_plan = as_dict(summary.get("ai_coverage_gap_plan"))
+        input_sweep = as_dict(summary.get("input_sweep"))
         ai_session_plan = as_dict(summary.get("ai_session_plan"))
         ai_session_smoke = as_dict(summary.get("ai_session_smoke"))
         ai_session_smoke_matrix = as_dict(summary.get("ai_session_smoke_matrix"))
@@ -1575,6 +1657,7 @@ def main() -> int:
             f"dossiers={observability.get('scenario_dossiers')}:{observability.get('actionable_dossiers')} "
             f"routes={routes.get('matrix_passed_route_count')}:{routes.get('top_route_verified')} "
             f"ai_gap_plan={ai_coverage_gap_plan.get('status')}:{ai_coverage_gap_plan.get('ready_gap_count')}/{ai_coverage_gap_plan.get('gap_count')} "
+            f"input_sweep={input_sweep.get('status')}:{input_sweep.get('pair_count')}:{input_sweep.get('failure_count')} "
             f"diagnosis={ai_diagnosis.get('status')}:{ai_diagnosis.get('route_id')} "
             f"fix_handoff={ai_fix_handoff.get('status')}:{ai_fix_handoff.get('source_match_count')} "
             f"ai_route_matrix={ai_route_matrix.get('status')}:{ai_route_matrix.get('passed_route_count')}/{ai_route_matrix.get('route_count')} "

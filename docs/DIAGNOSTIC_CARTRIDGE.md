@@ -138,7 +138,10 @@ evidence verifier. It also writes `diagnostic-ai-coverage-gap-plan.json` and
 `diagnostic-ai-coverage-gap-plan.md`, turning the six known coverage gaps into
 ranked test-design handoffs with current source/test anchors, telemetry
 signals, and validation commands. This keeps the gaps explicit and does not
-claim they are fixed. It also writes `diagnostic-ai-query-smoke.json` and
+claim they are fixed. It also writes `diagnostic-input-sweep.json` and
+`diagnostic-input-sweep.md`, proving the `input_port_matrix` companion sweep
+exhaustively covered all 65,536 two-port joypad mask pairs before the AI
+debugging graph is accepted. It also writes `diagnostic-ai-query-smoke.json` and
 `diagnostic-ai-query-smoke.md`, proving that the index can answer deterministic
 summary, top-route, scenario, focus-domain, probe, and coverage queries. It then
 writes `diagnostic-ai-diagnosis-smoke.json` and
@@ -185,7 +188,7 @@ agree on route identities, artifact paths, and stop
 conditions. Start with the e2e report to decide whether the diagnostic corpus
 is trusted, then use the AI artifact verification, AI coverage gap plan, AI
 session smoke matrix, AI session smoke, AI session plan, AI debug packet
-matrix, AI debug packet, AI route matrix, AI index, query CLI, diagnosis
+matrix, AI debug packet, AI route matrix, input sweep, AI index, query CLI, diagnosis
 runner, or fix handoff before opening full telemetry.
 
 To build only the AI coverage-gap plan from an accepted observability suite,
@@ -201,8 +204,8 @@ focus domains, source files, tests, diagnostic files, telemetry signals, and
 acceptance commands so the next cartridge fixture can be designed from one
 artifact without overstating current coverage.
 
-To add exhaustive host-side evidence for the current `input_port_matrix`
-coverage gap without slowing every cartridge run, write an input sweep artifact:
+To run only the exhaustive host-side evidence for the current
+`input_port_matrix` coverage gap, write an input sweep artifact:
 
 ```powershell
 cargo run --bin oxidenes-diagnostic -- --input-sweep-json target/diagnostics/input-sweep.json --input-sweep-report target/diagnostics/input-sweep.md --no-stdout
@@ -210,9 +213,12 @@ cargo run --bin oxidenes-diagnostic -- --input-sweep-json target/diagnostics/inp
 
 The sweep validates all 65,536 joypad-1/joypad-2 mask pairs through the emulator
 `Joypad` core, including strobe-high hold, eight serial low-strobe reads, and
-post-exhaustion reads. It is an optional companion artifact for coverage-gap
-work; the generated cartridge still provides the sampled healthy-mask fixtures
-and fault-localization scenarios used by the default AI diagnostic suite.
+post-exhaustion reads. The full e2e runner writes the same artifact as
+`diagnostic-input-sweep.json` and `diagnostic-input-sweep.md`; the standalone
+command is useful when iterating on input behavior without rerunning the full AI
+diagnostic graph. The generated cartridge still provides the sampled
+healthy-mask fixtures and fault-localization scenarios used by the default AI
+diagnostic suite.
 
 To query an accepted suite without hand-joining JSON files, run:
 
