@@ -359,12 +359,13 @@ def build_summary(
     replay_command_rows = replay_commands(evidence)
     route_check = as_dict(diagnosis.get("route_check"))
     errors: list[str] = []
+    warnings: list[str] = []
     if not diagnosis:
         errors.append(f"missing or invalid diagnosis JSON: {diagnosis_json}")
     elif diagnosis.get("status") != "passed":
         errors.append(f"diagnosis status is {diagnosis.get('status')!r}, expected 'passed'")
     if e2e_report and e2e_report.get("status") != "passed":
-        errors.append("diagnostic e2e report status is not passed")
+        warnings.append("diagnostic e2e report status is not passed")
     if not source_files:
         errors.append("diagnosis evidence is missing source_files")
     if not test_files:
@@ -472,6 +473,7 @@ def build_summary(
             },
         ],
         "errors": errors,
+        "warnings": warnings,
         "ai_handoff": [
             "Use this fix handoff after diagnostic-ai-diagnosis.json has passed.",
             "Open source_scan.files[].matches first; they are bounded line anchors for the selected focus domain.",
@@ -570,6 +572,10 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         lines.extend(["", "## Errors", ""])
         for error in as_list(summary.get("errors")):
             lines.append(f"- {error}")
+    if summary.get("warnings"):
+        lines.extend(["", "## Warnings", ""])
+        for warning in as_list(summary.get("warnings")):
+            lines.append(f"- {warning}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

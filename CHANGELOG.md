@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.3.43] - 2026-06-20
+
+### Added
+- Added the `ppu_attribute_quadrant_signature` diagnostic cartridge fixture with host-sampled attribute-table quadrant palette telemetry.
+- Added the `ppu_attribute_quadrant_fault` scenario-suite fixture and AI route so automated debugging can localize attribute quadrant palette regressions to `ppu.attribute_quadrant`.
+
+### Changed
+- Bumped diagnostic telemetry to schema 72 and scenario-suite artifacts to schema 23 for the new 45-scenario, 37-route AI corpus.
+- Hardened diagnostic AI fix-handoff generation so stale aggregate e2e reports are warnings instead of blocking per-route handoff creation.
+- Updated the PPU pixel-pipeline coverage gap to account for deterministic attribute-quadrant coverage while keeping broader tile-fetch and sprite-mux risks explicit.
+
+### Tests
+- Added cartridge, CLI, verifier, e2e, and AI route-matrix coverage for the PPU attribute-quadrant fixture and route counts.
+
 ## [0.3.42] - 2026-06-20
 
 ### Added

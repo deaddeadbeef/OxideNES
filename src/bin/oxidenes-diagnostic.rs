@@ -17,7 +17,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 4;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 7;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 22;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 23;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 2;
 const INPUT_SWEEP_PORT_MASK_COUNT: usize = 256;
@@ -2404,6 +2404,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::HostValidationFailed,
             expected_focus_test_id: Some(48),
             expected_focus_domain: Some("ppu.pixel_phase"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_attribute_quadrant_fault",
+            title: "Intentional PPU attribute-quadrant host-observation failure",
+            purpose: "Failure-localization fixture for background attribute-table quadrant palette regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuAttributeQuadrant),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::HostValidationFailed,
+            expected_focus_test_id: Some(49),
+            expected_focus_domain: Some("ppu.attribute_quadrant"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",

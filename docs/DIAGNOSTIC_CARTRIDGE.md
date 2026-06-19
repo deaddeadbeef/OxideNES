@@ -339,8 +339,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 44
-scenarios match their expected health and focus-domain contracts, the 36
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 45
+scenarios match their expected health and focus-domain contracts, the 37
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -352,7 +352,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 36 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 37 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -544,6 +544,10 @@ regressions localize to `ppu.scroll_seam` through host-sampled frame colors.
 cartridge enables rendering, proving alternating, low-plane, and high-plane
 background pixel phase regressions localize to `ppu.pixel_phase` through
 host-sampled frame colors.
+`ppu_attribute_quadrant_fault` overwrites the deterministic `$23C0` attribute
+byte before rendering is enabled, proving top-left, top-right, bottom-left,
+and bottom-right background palette quadrant regressions localize to
+`ppu.attribute_quadrant` through host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -767,7 +771,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 36 accepted AI routes into deterministic debugger startup plans
+turning all 37 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -1402,6 +1406,14 @@ alternating, low-plane, and high-plane tile samples, captures expected-vs-observ
 frame colors, and narrows the remaining PPU pixel-pipeline coverage gap to
 broader tile-fetch, attribute, and sprite-mux interactions.
 
+Schema version `72` adds the `ppu_attribute_quadrant_signature` cartridge test,
+top-level `ppu_attribute_quadrant` telemetry, and the
+`ppu.attribute_quadrant.signature` probe. The generated cartridge writes a
+single deterministic attribute byte, renders a four-quadrant background palette
+fixture, captures expected-vs-observed quadrant frame colors, and narrows the
+remaining PPU pixel-pipeline coverage gap to broader tile-fetch and sprite-mux
+interactions.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1485,3 +1497,9 @@ fixture. The fault corrupts the deterministic background tile before rendering
 is enabled for test 48, so the suite can localize scanline-local background
 pixel phase regressions to `ppu.pixel_phase` with a paired AI route and replay
 command.
+
+Scenario suite schema version `23` adds the `ppu_attribute_quadrant_fault`
+negative fixture. The fault corrupts the deterministic `$23C0` attribute byte
+before rendering is enabled for test 49, so the suite can localize background
+attribute quadrant palette regressions to `ppu.attribute_quadrant` with a
+paired AI route and replay command.

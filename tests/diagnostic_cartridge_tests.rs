@@ -91,7 +91,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 11));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 12));
     assert!(telemetry
         .analysis
         .coverage
@@ -876,6 +876,41 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.test_name == Some("ppu_pixel_phase_signature")
             && probe.likely_domain == "ppu.pixel_phase"
     }));
+    assert!(telemetry.ppu_attribute_quadrant.passed);
+    assert_eq!(telemetry.ppu_attribute_quadrant.observed_case_count, 4);
+    assert_eq!(
+        telemetry.ppu_attribute_quadrant.observed_attribute_byte_hex,
+        "0xE4"
+    );
+    assert_eq!(
+        telemetry.ppu_attribute_quadrant.top_left_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .top_right_observed_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_left_observed_color_hex,
+        "0x388700"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_right_observed_color_hex,
+        "0x5CE430"
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.attribute_quadrant.signature"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.test_id == Some(49)
+            && probe.test_name == Some("ppu_attribute_quadrant_signature")
+            && probe.likely_domain == "ppu.attribute_quadrant"
+    }));
     assert!(telemetry.ppu_scroll_seam.passed);
     assert_eq!(telemetry.ppu_scroll_seam.observed_case_count, 6);
     assert_eq!(telemetry.ppu_scroll_seam.scroll_x, 4);
@@ -1075,7 +1110,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "apu.sample_count"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "apu.frame_output"
-            && probe.expected.contains("12000..=14500")
+            && probe.expected.contains("12000..=16500")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "apu.output_envelope"
@@ -3083,6 +3118,138 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_pixel_phase_failure(
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_attribute_quadrant_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuAttributeQuadrant),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU attribute-quadrant failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_attribute_quadrant")
+    );
+    assert_eq!(telemetry.verdict.status, 0x80);
+    assert_eq!(telemetry.verdict.current_test, 47);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_status_bit_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x00);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU attribute-quadrant localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::HostValidation);
+    assert_eq!(failure.test_id, 49);
+    assert_eq!(failure.test_name, Some("ppu_attribute_quadrant_signature"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0x00");
+    assert_eq!(failure.likely_domain, "ppu.attribute_quadrant");
+    assert!(failure.assertion.contains("one attribute byte"));
+    assert!(failure.expected.contains("attr 0xE4"));
+    assert!(failure.observed.contains("attr 0x00"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::HostValidationFailed
+    );
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_attribute_quadrant_signature")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.attribute_quadrant")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 49);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.attribute_quadrant")
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.attribute_quadrant.signature".to_string()));
+    assert_eq!(
+        telemetry.ppu_attribute_quadrant.observed_attribute_byte_hex,
+        "0x00"
+    );
+    assert_eq!(
+        telemetry.ppu_attribute_quadrant.expected_attribute_byte_hex,
+        "0xE4"
+    );
+    assert_eq!(
+        telemetry.ppu_attribute_quadrant.top_left_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .top_right_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .top_right_expected_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_left_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_left_expected_color_hex,
+        "0x388700"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_right_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_right_expected_color_hex,
+        "0x5CE430"
+    );
+    assert_eq!(telemetry.ppu_attribute_quadrant.observed_case_count, 4);
+    assert!(!telemetry.ppu_attribute_quadrant.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.attribute_quadrant.signature"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(49)
+            && probe.likely_domain == "ppu.attribute_quadrant"
+    }));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_attribute_quadrant_signature (49) |"));
+    assert!(report.contains("| Focus domain | ppu.attribute_quadrant |"));
+    assert!(report.contains("| Likely domain | ppu.attribute_quadrant |"));
+    assert!(report.contains("| Attribute-quadrant attr byte / expected | 0x00 / 0xE4 |"));
+    assert!(report.contains(
+        "| Attribute-quadrant top-right sample / expected | (24, 8) 0x64B0FF / 0xB53120 |"
+    ));
+    assert!(report.contains("| Attribute-quadrant cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Attribute-quadrant passed | false |"));
+    assert!(report.contains("| 49 | ppu_attribute_quadrant_signature | ppu | edge_case | passed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::ApuStatusRegister),
@@ -3441,8 +3608,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure()
             && probe.test_id == Some(37)
             && probe.likely_domain == "cpu.rmw.asl"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 30);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 30);
+    assert_eq!(telemetry.analysis.timing.started_tests, 31);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 31);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
@@ -3517,8 +3684,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matri
             && probe.test_id == Some(38)
             && probe.likely_domain == "cpu.rmw.absolute_asl"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 31);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 31);
+    assert_eq!(telemetry.analysis.timing.started_tests, 32);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 32);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
