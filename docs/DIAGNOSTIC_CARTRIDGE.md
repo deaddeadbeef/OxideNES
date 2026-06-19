@@ -96,6 +96,12 @@ tests. Use `--samples`, `--warmups`, `--profile debug`, `--binary`, or
 `--baseline-json <FILE> --fail-on-regression`; by default the comparison allows
 up to a 20% wall-time or throughput regression before failing.
 
+Profile schema `2` records `config.target_dir`, resolves the default diagnostic
+binary from `CARGO_TARGET_DIR` when that environment variable is set, and fails
+the profile if sampled telemetry is missing build `version`, `build_type`, or
+`package_version`. This prevents containerized or alternate-target-dir runs from
+silently profiling a stale diagnostic binary.
+
 GitHub Actions CI and release diagnostic jobs also run a short debug-profile
 gate after the diagnostic e2e suite. When a prior checkout with the profiler is
 available, the job writes a prior profile, compares the current run against it,
