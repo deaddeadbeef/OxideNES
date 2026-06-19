@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ REQUIRED_REPLAY_BUNDLE_FILES = {
     "report": "report.md",
     "rom": "diagnostic.nes",
 }
+MAX_ROUTE_DIR_NAME_LENGTH = 20
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -36,7 +38,13 @@ def as_list(value: Any) -> list[Any]:
 
 def sanitize_path_component(value: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in "_.-" else "-" for char in value.strip())
-    return cleaned.strip(".-") or "route"
+    cleaned = cleaned.strip(".-") or "route"
+    if len(cleaned) <= MAX_ROUTE_DIR_NAME_LENGTH:
+        return cleaned
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    prefix_length = MAX_ROUTE_DIR_NAME_LENGTH - len(digest) - 1
+    prefix = cleaned[:prefix_length].strip(".-") or "route"
+    return f"{prefix}-{digest}"
 
 
 def path_text(value: Any) -> str:

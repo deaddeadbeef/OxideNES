@@ -1360,6 +1360,27 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.mapper3_chr_bank.observed_case_count, 4);
     assert!(telemetry.mapper3_chr_bank.cycles > 0);
     assert_eq!(telemetry.mapper3_chr_bank.error, None);
+    assert!(telemetry.mapper3_rendered_chr_bank.passed);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.mapper, 3);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.prg_banks, 2);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.chr_banks, 4);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.sample_x, 8);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.sample_y, 8);
+    assert_eq!(
+        telemetry.mapper3_rendered_chr_bank.expected_banks,
+        vec![0, 1]
+    );
+    assert_eq!(
+        telemetry.mapper3_rendered_chr_bank.bank0_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.mapper3_rendered_chr_bank.bank1_observed_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.observed_case_count, 2);
+    assert!(telemetry.mapper3_rendered_chr_bank.cycles > 0);
+    assert_eq!(telemetry.mapper3_rendered_chr_bank.error, None);
     assert!(telemetry.mapper4_mmc3.passed);
     assert_eq!(telemetry.mapper4_mmc3.mapper, 4);
     assert_eq!(telemetry.mapper4_mmc3.prg_16k_banks, 4);
@@ -1656,6 +1677,17 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.observed.contains("0x44")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper3.rendered_chr_bank_switch"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(29)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("0x64B0FF")
+            && probe.expected.contains("0xB53120")
+            && probe.observed.contains("bank0 0x64B0FF")
+            && probe.observed.contains("bank1 0xB53120")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "mapper4.mmc3_banks_irq"
             && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
             && probe.test_id == Some(33)
@@ -1793,6 +1825,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     ));
     assert!(report.contains("| Mapper 3 CHR cases / expected | 4 / 4 |"));
     assert!(report.contains("| Mapper 3 CHR error | none |"));
+    assert!(report.contains("| Mapper 3 rendered CHR-bank sample | (8, 8) |"));
+    assert!(report
+        .contains("| Mapper 3 rendered CHR-bank bank0 sample / expected | 0x64B0FF / 0x64B0FF |"));
+    assert!(report
+        .contains("| Mapper 3 rendered CHR-bank bank1 sample / expected | 0xB53120 / 0xB53120 |"));
+    assert!(report.contains("| Mapper 3 rendered CHR-bank cases / expected | 2 / 2 |"));
+    assert!(report.contains("| Mapper 3 rendered CHR-bank error | none |"));
     assert!(
         report.contains("| Mapper 4 variant mapper / PRG 16K banks / CHR 8K banks | 4 / 4 / 1 |")
     );
