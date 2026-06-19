@@ -20,14 +20,27 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 70
-EXPECTED_SCENARIO_COUNT = 43
-EXPECTED_ACTIONABLE_SCENARIO_COUNT = 35
+EXPECTED_TELEMETRY_SCHEMA = 71
+EXPECTED_SCENARIO_COUNT = 44
+EXPECTED_ACTIONABLE_SCENARIO_COUNT = 36
 EXPECTED_PASS_SCENARIO_COUNT = 8
-EXPECTED_CARTRIDGE_TEST_COUNT = 39
-EXPECTED_CARTRIDGE_TEST_IDS = set(range(1, 29)) | {37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47}
+EXPECTED_CARTRIDGE_TEST_COUNT = 40
+EXPECTED_CARTRIDGE_TEST_IDS = set(range(1, 29)) | {
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+}
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 85
+EXPECTED_PROBE_COUNT = 87
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -86,6 +99,7 @@ EXPECTED_SCENARIOS = {
     "ppu_read_buffer_fault",
     "ppu_nametable_mirroring_fault",
     "ppu_scroll_seam_fault",
+    "ppu_pixel_phase_fault",
     "ppu_sprite_overflow_fault",
     "ppu_sprite_priority_fault",
     "ppu_sprite_zero_hit_fault",
@@ -651,6 +665,8 @@ class ObservabilityVerifier:
             "cartridge.test.26.result",
             "cartridge.test.27.result",
             "cartridge.test.28.result",
+            "cartridge.test.48.result",
+            "ppu.pixel_phase.signature",
             "ppu.scroll_seam.samples",
             "ppu.sprite_priority.samples",
             "ppu.sprite_overflow.status",

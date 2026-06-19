@@ -339,8 +339,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 43
-scenarios match their expected health and focus-domain contracts, the 35
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 44
+scenarios match their expected health and focus-domain contracts, the 36
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -352,7 +352,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 35 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 36 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -455,6 +455,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
 `ppu_nametable_mirroring_fault`, `ppu_sprite_zero_hit_fault`,
 `ppu_sprite_overflow_fault`, `ppu_sprite_priority_fault`, `ppu_scroll_seam_fault`,
+`ppu_pixel_phase_fault`,
 `joypad_strobe_reset_fault`,
 `joypad_strobe_high_hold_fault`, `ppu_vram_increment_32_fault`,
 `ppu_status_latch_reset_fault`,
@@ -539,6 +540,10 @@ localize to `ppu.sprite_priority` through host-sampled frame colors.
 `ppu_scroll_seam_fault` corrupts one side of a deterministic scroll-seam scene,
 proving fine-X, coarse-X, coarse-X nametable-wrap, and vertical scroll
 regressions localize to `ppu.scroll_seam` through host-sampled frame colors.
+`ppu_pixel_phase_fault` corrupts one scanline-local background tile before the
+cartridge enables rendering, proving alternating, low-plane, and high-plane
+background pixel phase regressions localize to `ppu.pixel_phase` through
+host-sampled frame colors.
 `joypad_strobe_reset_fault` consumes the reset A-button bit after a second
 `$4016` strobe sequence, proving mid-stream joypad strobe reset regressions
 localize to `joypad.strobe_reset`.
@@ -621,8 +626,9 @@ joypad mask-table fixtures, joypad strobe-reset behavior, joypad strobe-high hol
 PPUDATA register increment behavior, PPUSTATUS write-latch reset behavior, DMA
 host-observation, OAM DMA phase-matrix behavior, APU status, PPU assertion,
 PPU sprite-zero-hit signaling, PPU sprite-overflow signaling, PPU
-sprite-priority muxing, PPU scroll seams, and PPU progress-timeout failure
-localization without requiring a broken emulator build. The Markdown reports add
+sprite-priority muxing, PPU scroll seams, PPU background pixel-phase sampling,
+and PPU progress-timeout failure localization without requiring a broken
+emulator build. The Markdown reports add
 suite analysis, observer next actions, an
 attention queue, compact scenario matrices, contract matrix, baseline comparison
 matrix, AI drilldown order, and bundle artifact maps for humans or agents
@@ -761,7 +767,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 35 accepted AI routes into deterministic debugger startup plans
+turning all 36 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -845,6 +851,8 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   overlap scene
 - PPU sprite-overflow signaling through nine in-range sprites on one scanline
   plus hardware-bug false-positive and false-negative subcases
+- PPU background pixel-phase sampling through alternating, low-plane, and
+  high-plane tile samples captured from the rendered frame
 - OAM DMA from CPU page `$0300`, including host-observed CPU stall cycle bucket
   plus DMC sample-DMA overlap timing, stall-phase, and placement telemetry
 - APU pulse-channel status register plus host-observed sample-count, peak,
@@ -1387,6 +1395,13 @@ Schema version `70` adds the `cpu_status_bit_matrix` cartridge test, top-level
 cartridge records BIT zero-page/absolute status snapshots, SEC/CLC, SEI/CLI,
 SED/CLD, and CLV status behavior through compact masks and a case counter.
 
+Schema version `71` adds the `ppu_pixel_phase_signature` cartridge test,
+top-level `ppu_pixel_phase` telemetry, and the `ppu.pixel_phase.signature`
+probe. The generated cartridge builds a deterministic background scanline with
+alternating, low-plane, and high-plane tile samples, captures expected-vs-observed
+frame colors, and narrows the remaining PPU pixel-pipeline coverage gap to
+broader tile-fetch, attribute, and sprite-mux interactions.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1464,3 +1479,9 @@ fixture. The fault corrupts the CPU status/BIT matrix bit mask immediately
 before test 47 summarizes, so the suite can localize BIT zero/negative/overflow
 flag regressions and explicit status set/clear opcode regressions to
 `cpu.status.bit_flags` with a paired AI route and replay command.
+
+Scenario suite schema version `22` adds the `ppu_pixel_phase_fault` negative
+fixture. The fault corrupts the deterministic background tile before rendering
+is enabled for test 48, so the suite can localize scanline-local background
+pixel phase regressions to `ppu.pixel_phase` with a paired AI route and replay
+command.

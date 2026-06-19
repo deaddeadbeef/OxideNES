@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.3.42] - 2026-06-20
+
+### Added
+- Added the `ppu_pixel_phase_signature` diagnostic cartridge fixture with host-sampled scanline-local background pixel phase telemetry.
+- Added the `ppu_pixel_phase_fault` scenario-suite fixture and AI route so automated debugging can localize background pixel phase regressions to `ppu.pixel_phase`.
+
+### Changed
+- Bumped diagnostic telemetry to schema 71 and scenario-suite artifacts to schema 22 for the new 44-scenario, 36-route AI corpus.
+- Updated the PPU pixel-pipeline coverage gap to account for deterministic pixel-phase coverage while keeping broader tile-fetch, attribute, and sprite-mux risks explicit.
+
+### Tests
+- Added cartridge, CLI, verifier, e2e, and AI artifact coverage for the PPU pixel-phase fixture and route counts.
+
 ## [0.3.41] - 2026-06-19
 
 ### Added

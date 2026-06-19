@@ -91,7 +91,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         .coverage
         .subsystem_summary
         .iter()
-        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 10));
+        .any(|entry| entry.subsystem == DiagnosticSubsystem::Ppu && entry.total == 11));
     assert!(telemetry
         .analysis
         .coverage
@@ -854,6 +854,28 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "ppu.sprite_priority"
     }));
+    assert!(telemetry.ppu_pixel_phase.passed);
+    assert_eq!(telemetry.ppu_pixel_phase.observed_case_count, 4);
+    assert_eq!(
+        telemetry.ppu_pixel_phase.even_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(telemetry.ppu_pixel_phase.odd_observed_color_hex, "0x000000");
+    assert_eq!(
+        telemetry.ppu_pixel_phase.low_plane_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.ppu_pixel_phase.high_plane_observed_color_hex,
+        "0xB53120"
+    );
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.pixel_phase.signature"
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.test_id == Some(48)
+            && probe.test_name == Some("ppu_pixel_phase_signature")
+            && probe.likely_domain == "ppu.pixel_phase"
+    }));
     assert!(telemetry.ppu_scroll_seam.passed);
     assert_eq!(telemetry.ppu_scroll_seam.observed_case_count, 6);
     assert_eq!(telemetry.ppu_scroll_seam.scroll_x, 4);
@@ -1053,7 +1075,7 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
         probe.id == "apu.sample_count"
             && probe.status == DiagnosticProbeStatus::Passed
             && probe.likely_domain == "apu.frame_output"
-            && probe.expected.contains("12000..=13000")
+            && probe.expected.contains("12000..=14500")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "apu.output_envelope"
@@ -2964,6 +2986,103 @@ fn generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure(
 }
 
 #[test]
+fn generated_diagnostic_cartridge_localizes_intentional_ppu_pixel_phase_failure() {
+    let telemetry = run_diagnostic(DiagnosticConfig {
+        fault_injection: Some(DiagnosticFaultInjection::PpuPixelPhase),
+        ..DiagnosticConfig::default()
+    })
+    .expect("diagnostic should run to a reported PPU pixel-phase failure");
+
+    assert!(!telemetry.verdict.passed);
+    assert_eq!(
+        telemetry.input.fault_injection_label,
+        Some("ppu_pixel_phase")
+    );
+    assert_eq!(telemetry.verdict.status, 0x80);
+    assert_eq!(telemetry.verdict.current_test, 47);
+    assert_eq!(
+        telemetry.verdict.current_test_name,
+        Some("cpu_status_bit_matrix")
+    );
+    assert_eq!(telemetry.verdict.failure_code, 0x00);
+
+    let failure = telemetry
+        .verdict
+        .failure
+        .as_ref()
+        .expect("failed run should include PPU pixel-phase localization");
+    assert_eq!(failure.kind, DiagnosticFailureKind::HostValidation);
+    assert_eq!(failure.test_id, 48);
+    assert_eq!(failure.test_name, Some("ppu_pixel_phase_signature"));
+    assert_eq!(failure.subsystem, Some(DiagnosticSubsystem::Ppu));
+    assert_eq!(failure.failure_code_hex, "0x00");
+    assert_eq!(failure.likely_domain, "ppu.pixel_phase");
+    assert!(failure
+        .assertion
+        .contains("scanline-local background pixel phases"));
+    assert!(failure.expected.contains("odd sample"));
+    assert!(failure.observed.contains("odd sample 0x64B0FF"));
+
+    assert_eq!(
+        telemetry.analysis.health,
+        DiagnosticHealth::HostValidationFailed
+    );
+    assert_eq!(
+        telemetry.analysis.failing_subsystem,
+        Some(DiagnosticSubsystem::Ppu)
+    );
+    assert_eq!(
+        telemetry.analysis.failing_test,
+        Some("ppu_pixel_phase_signature")
+    );
+    assert_eq!(
+        telemetry.analysis.first_failure_domain.as_deref(),
+        Some("ppu.pixel_phase")
+    );
+    assert_eq!(telemetry.analysis.debug_focus.focus_test_id, 48);
+    assert_eq!(
+        telemetry.analysis.debug_focus.focus_domain.as_deref(),
+        Some("ppu.pixel_phase")
+    );
+    assert!(telemetry
+        .analysis
+        .debug_focus
+        .failed_probe_ids
+        .contains(&"ppu.pixel_phase.signature".to_string()));
+    assert_eq!(
+        telemetry.ppu_pixel_phase.even_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(telemetry.ppu_pixel_phase.odd_observed_color_hex, "0x64B0FF");
+    assert_eq!(telemetry.ppu_pixel_phase.odd_expected_color_hex, "0x000000");
+    assert_eq!(
+        telemetry.ppu_pixel_phase.low_plane_observed_color_hex,
+        "0x64B0FF"
+    );
+    assert_eq!(
+        telemetry.ppu_pixel_phase.high_plane_observed_color_hex,
+        "0xB53120"
+    );
+    assert_eq!(telemetry.ppu_pixel_phase.observed_case_count, 4);
+    assert!(!telemetry.ppu_pixel_phase.passed);
+    assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "ppu.pixel_phase.signature"
+            && probe.status == DiagnosticProbeStatus::Failed
+            && probe.test_id == Some(48)
+            && probe.likely_domain == "ppu.pixel_phase"
+    }));
+
+    let report = format_diagnostic_report(&telemetry);
+    assert!(report.contains("| Focus test | ppu_pixel_phase_signature (48) |"));
+    assert!(report.contains("| Focus domain | ppu.pixel_phase |"));
+    assert!(report.contains("| Likely domain | ppu.pixel_phase |"));
+    assert!(report.contains("| Pixel-phase odd sample / expected | (17, 18) 0x64B0FF / 0x000000 |"));
+    assert!(report.contains("| Pixel-phase cases / expected | 4 / 4 |"));
+    assert!(report.contains("| Pixel-phase passed | false |"));
+    assert!(report.contains("| 48 | ppu_pixel_phase_signature | ppu | edge_case | passed |"));
+}
+
+#[test]
 fn generated_diagnostic_cartridge_localizes_intentional_apu_status_failure() {
     let telemetry = run_diagnostic(DiagnosticConfig {
         fault_injection: Some(DiagnosticFaultInjection::ApuStatusRegister),
@@ -3322,8 +3441,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure()
             && probe.test_id == Some(37)
             && probe.likely_domain == "cpu.rmw.asl"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 29);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 29);
+    assert_eq!(telemetry.analysis.timing.started_tests, 30);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 30);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
@@ -3398,8 +3517,8 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matri
             && probe.test_id == Some(38)
             && probe.likely_domain == "cpu.rmw.absolute_asl"
     }));
-    assert_eq!(telemetry.analysis.timing.started_tests, 30);
-    assert_eq!(telemetry.analysis.timing.ended_tests, 30);
+    assert_eq!(telemetry.analysis.timing.started_tests, 31);
+    assert_eq!(telemetry.analysis.timing.ended_tests, 31);
     assert_eq!(
         telemetry.analysis.timing.not_started_tests,
         DIAGNOSTIC_TESTS.len() - telemetry.analysis.timing.started_tests
