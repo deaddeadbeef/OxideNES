@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 70;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 71;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v70";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v71";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -58,6 +58,7 @@ const CPU_LOAD_STORE_MATRIX_TEST_ID: u8 = 44;
 const CPU_ALU_INDEX_MATRIX_TEST_ID: u8 = 45;
 const CPU_ARITHMETIC_MATRIX_TEST_ID: u8 = 46;
 const CPU_STATUS_MATRIX_TEST_ID: u8 = 47;
+const PPU_PIXEL_PHASE_TEST_ID: u8 = 48;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -234,7 +235,7 @@ const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_INPUT_REASON: &str =
 const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_FAULT_REASON: &str =
     "disabled: intentional fault-injection fixture";
 const APU_AUDIO_EXPECTED_MIN_SAMPLE_COUNT: usize = 12_000;
-const APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT: usize = 13_000;
+const APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT: usize = 14_500;
 const APU_AUDIO_EXPECTED_MIN_PEAK_ABS: f32 = 0.05;
 const APU_AUDIO_EXPECTED_MAX_PEAK_ABS: f32 = 0.20;
 const APU_AUDIO_EXPECTED_MIN_RMS_ABS: f32 = 0.005;
@@ -294,6 +295,7 @@ const PPU_READ_BUFFER_FAULT_LABEL: &str = "ppu_vram_read_buffer_before_first_rea
 const PPU_SCROLL_SEAM_FAULT_LABEL: &str = "ppu_scroll_seam_before_render_enable";
 const PPU_SPRITE_OVERFLOW_FAULT_LABEL: &str = "ppu_sprite_overflow_before_render_enable";
 const PPU_SPRITE_PRIORITY_FAULT_LABEL: &str = "ppu_sprite_priority_before_render_enable";
+const PPU_PIXEL_PHASE_FAULT_LABEL: &str = "ppu_pixel_phase_before_render_enable";
 const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
@@ -390,6 +392,20 @@ const PPU_SCROLL_SEAM_BOTTOM_SAMPLE_X: usize = 2;
 const PPU_SCROLL_SEAM_BOTTOM_SAMPLE_Y: usize = 20;
 const PPU_SCROLL_SEAM_EXPECTED_TOP_COLOR: u32 = 0x64B0FF;
 const PPU_SCROLL_SEAM_EXPECTED_BOTTOM_COLOR: u32 = 0xB53120;
+const PPU_PIXEL_PHASE_CASE_COUNT_ADDR: u16 = 0x0307;
+const PPU_PIXEL_PHASE_EXPECTED_CASE_COUNT: u8 = 4;
+const PPU_PIXEL_PHASE_EVEN_SAMPLE_X: usize = 16;
+const PPU_PIXEL_PHASE_EVEN_SAMPLE_Y: usize = 18;
+const PPU_PIXEL_PHASE_ODD_SAMPLE_X: usize = 17;
+const PPU_PIXEL_PHASE_ODD_SAMPLE_Y: usize = 18;
+const PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_X: usize = 24;
+const PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_Y: usize = 18;
+const PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_X: usize = 32;
+const PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_Y: usize = 18;
+const PPU_PIXEL_PHASE_EXPECTED_EVEN_COLOR: u32 = 0x64B0FF;
+const PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR: u32 = 0x000000;
+const PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR: u32 = 0x64B0FF;
+const PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR: u32 = 0xB53120;
 const CPU_RMW_MATRIX_ASL_RESULT_ADDR: u16 = 0x02B5;
 const CPU_RMW_MATRIX_ROL_RESULT_ADDR: u16 = 0x02B6;
 const CPU_RMW_MATRIX_LSR_RESULT_ADDR: u16 = 0x02B7;
@@ -858,6 +874,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "coarse-X samples prove an 8-pixel scroll shifts the viewport into the next background tile",
             "nametable-wrap samples prove a 248-pixel scroll crosses from nametable $2000 into vertical-mirrored nametable $2400",
             "top and bottom samples straddle a vertical scroll tile seam",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: PPU_PIXEL_PHASE_TEST_ID,
+        name: "ppu_pixel_phase_signature",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify scanline-local background pixel phases produce expected colors across alternating, low-plane, and high-plane tile fetches.",
+        expected_observations: &[
+            "adjacent pixels inside an alternating background tile expose even/odd pattern-bit phases",
+            "neighboring solid low-plane and high-plane tiles select distinct palette entries on the same scanline",
+            "host-observed frame samples record the compact pixel-phase signature after rendering is enabled",
         ],
     },
     DiagnosticTestSpec {
@@ -2195,9 +2223,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, host-visible multi-color background output, and an expected full-frame render checksum for the deterministic background frame.",
-        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, sprite-overflow, and deterministic full-frame signature samples.",
-        suggested_next_test: "Add broader per-dot renderer checks with scanline/window-local expected signatures and tile fetch phase assertions.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, scanline-local background pixel-phase sampling across alternating, low-plane, and high-plane tile pixels, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, host-visible multi-color background output, and an expected full-frame render checksum for the deterministic background frame.",
+        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, sprite-overflow, pixel-phase window, and deterministic full-frame signature samples.",
+        suggested_next_test: "Add broader per-dot renderer checks with tile fetch pipeline state assertions, attribute quadrant transitions, and sprite/background mux interactions across more scanline windows.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -2246,7 +2274,7 @@ pub struct DiagnosticConfig {
 impl Default for DiagnosticConfig {
     fn default() -> Self {
         Self {
-            max_cpu_cycles: 500_000,
+            max_cpu_cycles: 560_000,
             joypad1_mask: EXPECTED_JOYPAD1_MASK,
             expected_joypad1_mask: EXPECTED_JOYPAD1_MASK,
             joypad2_mask: EXPECTED_JOYPAD2_MASK,
@@ -2298,6 +2326,7 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuPixelPhase,
     PpuScrollSeam,
     PpuSpriteOverflow,
     PpuSpritePriority,
@@ -2308,7 +2337,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 32] = [
+    pub const ALL: [DiagnosticFaultInjection; 33] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAluIndexMatrix,
         DiagnosticFaultInjection::CpuArithmeticFlagMatrix,
@@ -2334,6 +2363,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::Mapper2PrgRam,
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuPixelPhase,
         DiagnosticFaultInjection::PpuScrollSeam,
         DiagnosticFaultInjection::PpuSpriteOverflow,
         DiagnosticFaultInjection::PpuSpritePriority,
@@ -2372,6 +2402,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuPixelPhase => "ppu_pixel_phase",
             DiagnosticFaultInjection::PpuScrollSeam => "ppu_scroll_seam",
             DiagnosticFaultInjection::PpuSpriteOverflow => "ppu_sprite_overflow",
             DiagnosticFaultInjection::PpuSpritePriority => "ppu_sprite_priority",
@@ -2419,6 +2450,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuPixelPhase => PPU_PIXEL_PHASE_FAULT_LABEL,
             DiagnosticFaultInjection::PpuScrollSeam => PPU_SCROLL_SEAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteOverflow => PPU_SPRITE_OVERFLOW_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpritePriority => PPU_SPRITE_PRIORITY_FAULT_LABEL,
@@ -2466,6 +2498,7 @@ pub struct DiagnosticTelemetry {
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub apu_dmc_status: ApuDmcStatusTelemetry,
     pub ppu_vblank_timing: PpuVblankTimingTelemetry,
+    pub ppu_pixel_phase: PpuPixelPhaseTelemetry,
     pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
     pub ppu_sprite_priority: PpuSpritePriorityTelemetry,
@@ -3354,6 +3387,37 @@ pub struct PpuSpritePriorityTelemetry {
     pub behind_expected_color_hex: String,
     pub behind_observed_color: u32,
     pub behind_observed_color_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PpuPixelPhaseTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub even_sample_x: usize,
+    pub even_sample_y: usize,
+    pub even_expected_color: u32,
+    pub even_expected_color_hex: String,
+    pub even_observed_color: u32,
+    pub even_observed_color_hex: String,
+    pub odd_sample_x: usize,
+    pub odd_sample_y: usize,
+    pub odd_expected_color: u32,
+    pub odd_expected_color_hex: String,
+    pub odd_observed_color: u32,
+    pub odd_observed_color_hex: String,
+    pub low_plane_sample_x: usize,
+    pub low_plane_sample_y: usize,
+    pub low_plane_expected_color: u32,
+    pub low_plane_expected_color_hex: String,
+    pub low_plane_observed_color: u32,
+    pub low_plane_observed_color_hex: String,
+    pub high_plane_sample_x: usize,
+    pub high_plane_sample_y: usize,
+    pub high_plane_expected_color: u32,
+    pub high_plane_expected_color_hex: String,
+    pub high_plane_observed_color: u32,
+    pub high_plane_observed_color_hex: String,
     pub passed: bool,
 }
 
@@ -5089,6 +5153,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut audio_sum_abs = 0.0f64;
     let mut audio_sum_squares = 0.0f64;
     let mut diagnostic_render_frame = None;
+    let mut ppu_pixel_phase_frame = None;
     let mut ppu_scroll_seam_frame = None;
     let mut ppu_sprite_priority_frame = None;
     let mut events = Vec::new();
@@ -5186,6 +5251,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             );
             maybe_capture_ppu_sprite_priority_frame(
                 &mut ppu_sprite_priority_frame,
+                current_test,
+                &bus.ppu.frame_data,
+            );
+            maybe_capture_ppu_pixel_phase_frame(
+                &mut ppu_pixel_phase_frame,
                 current_test,
                 &bus.ppu.frame_data,
             );
@@ -5335,6 +5405,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     current_test,
                     &bus.ppu.frame_data,
                 );
+                maybe_capture_ppu_pixel_phase_frame(
+                    &mut ppu_pixel_phase_frame,
+                    current_test,
+                    &bus.ppu.frame_data,
+                );
                 let ppu_scroll_seam_case_count = bus.cpu_read(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
                 maybe_capture_ppu_scroll_seam_frame(
                     &mut ppu_scroll_seam_frame,
@@ -5401,6 +5476,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         &bus.ppu.frame_data,
         &ppu_scroll_wrap,
     );
+    let ppu_pixel_phase =
+        ppu_pixel_phase_telemetry(&ram, ppu_pixel_phase_frame.as_ref(), &bus.ppu.frame_data);
     let mapper1_mmc1 = mapper1_mmc1_telemetry(&run_mapper1_mmc1_variant());
     let mapper1_mmc1_32k_prg = mapper1_mmc1_32k_prg_telemetry(&run_mapper1_mmc1_32k_prg_variant());
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
@@ -5446,6 +5523,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
+        ppu_pixel_phase: &ppu_pixel_phase,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
@@ -5495,6 +5573,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
+        ppu_pixel_phase: &ppu_pixel_phase,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
         ppu_sprite_priority: &ppu_sprite_priority,
@@ -5580,6 +5659,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix,
         apu_dmc_status,
         ppu_vblank_timing,
+        ppu_pixel_phase,
         ppu_scroll_seam,
         ppu_sprite_overflow,
         ppu_sprite_priority,
@@ -6750,6 +6830,55 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Sprite-priority passed | {} |",
         telemetry.ppu_sprite_priority.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase even sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_pixel_phase.even_sample_x,
+        telemetry.ppu_pixel_phase.even_sample_y,
+        telemetry.ppu_pixel_phase.even_observed_color_hex,
+        telemetry.ppu_pixel_phase.even_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase odd sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_pixel_phase.odd_sample_x,
+        telemetry.ppu_pixel_phase.odd_sample_y,
+        telemetry.ppu_pixel_phase.odd_observed_color_hex,
+        telemetry.ppu_pixel_phase.odd_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase low-plane sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_pixel_phase.low_plane_sample_x,
+        telemetry.ppu_pixel_phase.low_plane_sample_y,
+        telemetry.ppu_pixel_phase.low_plane_observed_color_hex,
+        telemetry.ppu_pixel_phase.low_plane_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase high-plane sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_pixel_phase.high_plane_sample_x,
+        telemetry.ppu_pixel_phase.high_plane_sample_y,
+        telemetry.ppu_pixel_phase.high_plane_observed_color_hex,
+        telemetry.ppu_pixel_phase.high_plane_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase cases / expected | {} / {} |",
+        telemetry.ppu_pixel_phase.observed_case_count,
+        telemetry.ppu_pixel_phase.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Pixel-phase passed | {} |",
+        telemetry.ppu_pixel_phase.passed
     )
     .expect("write report");
     writeln!(
@@ -8938,6 +9067,7 @@ struct HostValidationInput<'a> {
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
+    ppu_pixel_phase: &'a PpuPixelPhaseTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
@@ -8980,6 +9110,7 @@ struct ProbeTelemetryInput<'a> {
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
+    ppu_pixel_phase: &'a PpuPixelPhaseTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
     ppu_sprite_priority: &'a PpuSpritePriorityTelemetry,
@@ -9302,6 +9433,29 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_sprite_priority.behind_expected_color_hex,
             input.ppu_sprite_priority.observed_case_count,
             input.ppu_sprite_priority.expected_case_count
+        ));
+    }
+    if !input.ppu_pixel_phase.passed {
+        failures.push(format!(
+            "PPU pixel-phase mismatch: even sample ({}, {}) {} expected {}, odd sample ({}, {}) {} expected {}, low-plane sample ({}, {}) {} expected {}, high-plane sample ({}, {}) {} expected {}, cases {}/{}",
+            input.ppu_pixel_phase.even_sample_x,
+            input.ppu_pixel_phase.even_sample_y,
+            input.ppu_pixel_phase.even_observed_color_hex,
+            input.ppu_pixel_phase.even_expected_color_hex,
+            input.ppu_pixel_phase.odd_sample_x,
+            input.ppu_pixel_phase.odd_sample_y,
+            input.ppu_pixel_phase.odd_observed_color_hex,
+            input.ppu_pixel_phase.odd_expected_color_hex,
+            input.ppu_pixel_phase.low_plane_sample_x,
+            input.ppu_pixel_phase.low_plane_sample_y,
+            input.ppu_pixel_phase.low_plane_observed_color_hex,
+            input.ppu_pixel_phase.low_plane_expected_color_hex,
+            input.ppu_pixel_phase.high_plane_sample_x,
+            input.ppu_pixel_phase.high_plane_sample_y,
+            input.ppu_pixel_phase.high_plane_observed_color_hex,
+            input.ppu_pixel_phase.high_plane_expected_color_hex,
+            input.ppu_pixel_phase.observed_case_count,
+            input.ppu_pixel_phase.expected_case_count
         ));
     }
     if !input.ppu_scroll_seam.passed {
@@ -10313,6 +10467,46 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     push_probe(
         &mut probes,
         ProbeTelemetryRecord {
+            id: "ppu.pixel_phase.signature".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_PIXEL_PHASE_TEST_ID),
+            test_name: test_name(PPU_PIXEL_PHASE_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_pixel_phase.passed),
+            description:
+                "Host-sampled frame pixels prove scanline-local background pixel phases across alternating, low-plane, and high-plane tiles"
+                    .to_string(),
+            expected: format!(
+                "even sample ({}, {}) {}, odd sample ({}, {}) {}, low-plane sample ({}, {}) {}, high-plane sample ({}, {}) {}, cases {}",
+                input.ppu_pixel_phase.even_sample_x,
+                input.ppu_pixel_phase.even_sample_y,
+                input.ppu_pixel_phase.even_expected_color_hex,
+                input.ppu_pixel_phase.odd_sample_x,
+                input.ppu_pixel_phase.odd_sample_y,
+                input.ppu_pixel_phase.odd_expected_color_hex,
+                input.ppu_pixel_phase.low_plane_sample_x,
+                input.ppu_pixel_phase.low_plane_sample_y,
+                input.ppu_pixel_phase.low_plane_expected_color_hex,
+                input.ppu_pixel_phase.high_plane_sample_x,
+                input.ppu_pixel_phase.high_plane_sample_y,
+                input.ppu_pixel_phase.high_plane_expected_color_hex,
+                input.ppu_pixel_phase.expected_case_count
+            ),
+            observed: format!(
+                "even sample {}, odd sample {}, low-plane sample {}, high-plane sample {}, cases {}/{}",
+                input.ppu_pixel_phase.even_observed_color_hex,
+                input.ppu_pixel_phase.odd_observed_color_hex,
+                input.ppu_pixel_phase.low_plane_observed_color_hex,
+                input.ppu_pixel_phase.high_plane_observed_color_hex,
+                input.ppu_pixel_phase.observed_case_count,
+                input.ppu_pixel_phase.expected_case_count
+            ),
+            likely_domain: "ppu.pixel_phase".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
             id: "mapper1.mmc1_shift_register".to_string(),
             source: DiagnosticProbeSource::HostObservation,
             subsystem: Some(DiagnosticSubsystem::Cartridge),
@@ -11162,6 +11356,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_sprite_overflow();
     program.ppu_sprite_priority();
     program.ppu_scroll_seam();
+    program.ppu_pixel_phase_signature();
     program.cpu_read_modify_write_matrix();
     program.cpu_rmw_addressing_matrix();
     program.cpu_branch_condition_matrix();
@@ -13655,6 +13850,83 @@ impl DiagnosticProgram {
         self.pass_test(PPU_SCROLL_SEAM_TEST_ID);
     }
 
+    fn ppu_pixel_phase_signature(&mut self) {
+        self.begin_test(PPU_PIXEL_PHASE_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_PIXEL_PHASE_CASE_COUNT_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x20);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x42);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x01);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x02);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x03);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x23);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0xC0);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2007);
+
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x3F);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2006);
+        self.asm.lda_imm(0x0F);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x21);
+        self.asm.sta_abs(0x2007);
+        self.asm.lda_imm(0x16);
+        self.asm.sta_abs(0x2007);
+
+        self.asm
+            .label(PPU_PIXEL_PHASE_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(PPU_PIXEL_PHASE_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_PIXEL_PHASE_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x0A);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("pixel_phase_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("pixel_phase_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        self.delay_host_frame_capture();
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2001);
+        self.pass_test(PPU_PIXEL_PHASE_TEST_ID);
+    }
+
     fn delay_host_frame_capture(&mut self) {
         for _ in 0..3 {
             let delay = self.unique_label("host_frame_capture_delay");
@@ -14458,6 +14730,12 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
+        }
+        DiagnosticFaultInjection::PpuPixelPhase => {
+            bus.cpu_write(0x2006, 0x20);
+            bus.cpu_write(0x2006, 0x42);
+            bus.cpu_write(0x2007, 0x02);
+            let _ = bus.cpu_read(0x2002);
         }
         DiagnosticFaultInjection::PpuScrollSeam => {
             bus.cpu_write(0x2006, 0x20);
@@ -15602,6 +15880,70 @@ fn ppu_sprite_priority_telemetry(
         passed: observed_case_count == PPU_SPRITE_PRIORITY_EXPECTED_CASE_COUNT
             && sample.front_color == PPU_SPRITE_PRIORITY_EXPECTED_FRONT_COLOR
             && sample.behind_color == PPU_SPRITE_PRIORITY_EXPECTED_BEHIND_COLOR,
+    }
+}
+
+fn ppu_pixel_phase_telemetry(
+    ram: &[u8],
+    captured_sample: Option<&PpuPixelPhaseFrameSample>,
+    final_frame: &[u32],
+) -> PpuPixelPhaseTelemetry {
+    let observed_case_count = ram[(PPU_PIXEL_PHASE_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let fallback_sample = PpuPixelPhaseFrameSample {
+        even_color: sample_frame_color(
+            final_frame,
+            PPU_PIXEL_PHASE_EVEN_SAMPLE_X,
+            PPU_PIXEL_PHASE_EVEN_SAMPLE_Y,
+        ),
+        odd_color: sample_frame_color(
+            final_frame,
+            PPU_PIXEL_PHASE_ODD_SAMPLE_X,
+            PPU_PIXEL_PHASE_ODD_SAMPLE_Y,
+        ),
+        low_plane_color: sample_frame_color(
+            final_frame,
+            PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_X,
+            PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_Y,
+        ),
+        high_plane_color: sample_frame_color(
+            final_frame,
+            PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_X,
+            PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_Y,
+        ),
+    };
+    let sample = captured_sample.copied().unwrap_or(fallback_sample);
+    PpuPixelPhaseTelemetry {
+        expected_case_count: PPU_PIXEL_PHASE_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        even_sample_x: PPU_PIXEL_PHASE_EVEN_SAMPLE_X,
+        even_sample_y: PPU_PIXEL_PHASE_EVEN_SAMPLE_Y,
+        even_expected_color: PPU_PIXEL_PHASE_EXPECTED_EVEN_COLOR,
+        even_expected_color_hex: hex_color(PPU_PIXEL_PHASE_EXPECTED_EVEN_COLOR),
+        even_observed_color: sample.even_color,
+        even_observed_color_hex: hex_color(sample.even_color),
+        odd_sample_x: PPU_PIXEL_PHASE_ODD_SAMPLE_X,
+        odd_sample_y: PPU_PIXEL_PHASE_ODD_SAMPLE_Y,
+        odd_expected_color: PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR,
+        odd_expected_color_hex: hex_color(PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR),
+        odd_observed_color: sample.odd_color,
+        odd_observed_color_hex: hex_color(sample.odd_color),
+        low_plane_sample_x: PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_X,
+        low_plane_sample_y: PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_Y,
+        low_plane_expected_color: PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR,
+        low_plane_expected_color_hex: hex_color(PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR),
+        low_plane_observed_color: sample.low_plane_color,
+        low_plane_observed_color_hex: hex_color(sample.low_plane_color),
+        high_plane_sample_x: PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_X,
+        high_plane_sample_y: PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_Y,
+        high_plane_expected_color: PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR,
+        high_plane_expected_color_hex: hex_color(PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR),
+        high_plane_observed_color: sample.high_plane_color,
+        high_plane_observed_color_hex: hex_color(sample.high_plane_color),
+        passed: observed_case_count == PPU_PIXEL_PHASE_EXPECTED_CASE_COUNT
+            && sample.even_color == PPU_PIXEL_PHASE_EXPECTED_EVEN_COLOR
+            && sample.odd_color == PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR
+            && sample.low_plane_color == PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR
+            && sample.high_plane_color == PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR,
     }
 }
 
@@ -17766,6 +18108,14 @@ struct PpuSpritePriorityFrameSample {
     behind_color: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PpuPixelPhaseFrameSample {
+    even_color: u32,
+    odd_color: u32,
+    low_plane_color: u32,
+    high_plane_color: u32,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct PpuScrollSeamFrameSample {
     left_color: Option<u32>,
@@ -17810,6 +18160,38 @@ fn maybe_capture_ppu_sprite_priority_frame(
             frame,
             PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_X,
             PPU_SPRITE_PRIORITY_BEHIND_SAMPLE_Y,
+        ),
+    });
+}
+
+fn maybe_capture_ppu_pixel_phase_frame(
+    retained_sample: &mut Option<PpuPixelPhaseFrameSample>,
+    current_test: u8,
+    frame: &[u32],
+) {
+    if current_test != PPU_PIXEL_PHASE_TEST_ID {
+        return;
+    }
+    *retained_sample = Some(PpuPixelPhaseFrameSample {
+        even_color: sample_frame_color(
+            frame,
+            PPU_PIXEL_PHASE_EVEN_SAMPLE_X,
+            PPU_PIXEL_PHASE_EVEN_SAMPLE_Y,
+        ),
+        odd_color: sample_frame_color(
+            frame,
+            PPU_PIXEL_PHASE_ODD_SAMPLE_X,
+            PPU_PIXEL_PHASE_ODD_SAMPLE_Y,
+        ),
+        low_plane_color: sample_frame_color(
+            frame,
+            PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_X,
+            PPU_PIXEL_PHASE_LOW_PLANE_SAMPLE_Y,
+        ),
+        high_plane_color: sample_frame_color(
+            frame,
+            PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_X,
+            PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_Y,
         ),
     });
 }
@@ -18443,6 +18825,12 @@ fn compare_observation_checksums(
         &["ppu_sprite_priority", "behind_observed_color"][..],
         &["ppu_sprite_priority", "observed_case_count"][..],
         &["ppu_sprite_priority", "passed"][..],
+        &["ppu_pixel_phase", "even_observed_color"][..],
+        &["ppu_pixel_phase", "odd_observed_color"][..],
+        &["ppu_pixel_phase", "low_plane_observed_color"][..],
+        &["ppu_pixel_phase", "high_plane_observed_color"][..],
+        &["ppu_pixel_phase", "observed_case_count"][..],
+        &["ppu_pixel_phase", "passed"][..],
         &["ppu_vblank_timing", "first_nmi_latency_cycles"][..],
         &["ppu_vblank_timing", "inter_nmi_cycles"][..],
         &["ppu_vblank_timing", "edge_set_count"][..],

@@ -17,7 +17,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 4;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 7;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 21;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 22;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 2;
 const INPUT_SWEEP_PORT_MASK_COUNT: usize = 256;
@@ -2391,6 +2391,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::HostValidationFailed,
             expected_focus_test_id: Some(28),
             expected_focus_domain: Some("ppu.scroll_seam"),
+        },
+        DiagnosticScenarioSpec {
+            id: "ppu_pixel_phase_fault",
+            title: "Intentional PPU pixel-phase host-observation failure",
+            purpose: "Failure-localization fixture for scanline-local background pixel-phase regressions.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::PpuPixelPhase),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::HostValidationFailed,
+            expected_focus_test_id: Some(48),
+            expected_focus_domain: Some("ppu.pixel_phase"),
         },
         DiagnosticScenarioSpec {
             id: "joypad_strobe_reset_fault",

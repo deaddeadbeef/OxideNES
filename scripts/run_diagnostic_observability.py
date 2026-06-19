@@ -433,6 +433,19 @@ FOCUS_DOMAIN_CODE_MAP = {
             "frame_data",
         ],
     },
+    "ppu.pixel_phase": {
+        "subsystem": "ppu",
+        "description": "Scanline-local background pixel phase sampling across alternating, low-plane, and high-plane tile pixels.",
+        "source_files": ["src/ppu.rs", "src/bus.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/ppu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": [
+            "ppu_pixel_phase",
+            "pixel_phase",
+            "background_shift",
+            "tile",
+            "frame_data",
+        ],
+    },
     "ppu.scroll_seam": {
         "subsystem": "ppu",
         "description": "Fine-X scrolling across horizontal background tile seams.",
@@ -506,6 +519,7 @@ SCENARIO_TEST_FILTERS = {
     "ppu_nmi_timeout_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_nmi_timeout",
     "ppu_read_buffer_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_read_buffer_failure",
     "ppu_scroll_seam_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_scroll_seam_failure",
+    "ppu_pixel_phase_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_pixel_phase_failure",
     "ppu_sprite_overflow_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_overflow_failure",
     "ppu_sprite_priority_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_priority_failure",
     "ppu_sprite_zero_hit_fault": "generated_diagnostic_cartridge_localizes_intentional_ppu_sprite_zero_hit_failure",
