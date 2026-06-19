@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 22
+EXPECTED_SCENARIO_SUITE_SCHEMA = 23
 EXPECTED_OBSERVER_SCHEMA = 3
-EXPECTED_TELEMETRY_SCHEMA = 71
+EXPECTED_TELEMETRY_SCHEMA = 72
 EXPECTED_TRIAGE_SCHEMA = 7
 EXPECTED_BUNDLE_SCHEMA = 4
 EXPECTED_BUILD_FIELDS = ("version", "build_type", "package_version")
@@ -51,6 +51,7 @@ EXPECTED_SCENARIOS = {
     "ppu_nametable_mirroring_fault",
     "ppu_scroll_seam_fault",
     "ppu_pixel_phase_fault",
+    "ppu_attribute_quadrant_fault",
     "ppu_sprite_overflow_fault",
     "ppu_sprite_priority_fault",
     "ppu_sprite_zero_hit_fault",
@@ -238,6 +239,7 @@ class SuiteVerifier:
             "ppu_nametable_mirroring_fault",
             "ppu_scroll_seam_fault",
             "ppu_pixel_phase_fault",
+            "ppu_attribute_quadrant_fault",
             "ppu_sprite_overflow_fault",
             "ppu_sprite_priority_fault",
             "ppu_sprite_zero_hit_fault",
@@ -500,6 +502,40 @@ class SuiteVerifier:
             "failed_probe_ids=ppu.pixel_phase.signature",
             ppu_pixel_evidence,
             "PPU pixel-phase observer evidence",
+        )
+
+        ppu_attribute = by_scenario.get("ppu_attribute_quadrant_fault")
+        if not isinstance(ppu_attribute, dict):
+            self.errors.append("missing observer action for ppu_attribute_quadrant_fault")
+            return
+
+        self.expect_equal(
+            ppu_attribute.get("priority"),
+            "known_divergence",
+            "PPU attribute-quadrant observer action priority",
+        )
+        self.expect_equal(
+            ppu_attribute.get("action_type"),
+            "inspect_known_divergence",
+            "PPU attribute-quadrant observer action type",
+        )
+        self.expect_equal(
+            ppu_attribute.get("primary_artifact"),
+            "ppu_attribute_quadrant_fault/comparison.json",
+            "PPU attribute-quadrant observer primary_artifact",
+        )
+        ppu_attribute_evidence = self.expect_list(
+            ppu_attribute.get("evidence"), "PPU attribute-quadrant observer evidence"
+        )
+        self.expect_in(
+            "focus_domain=ppu.attribute_quadrant",
+            ppu_attribute_evidence,
+            "PPU attribute-quadrant observer evidence",
+        )
+        self.expect_in(
+            "failed_probe_ids=ppu.attribute_quadrant.signature",
+            ppu_attribute_evidence,
+            "PPU attribute-quadrant observer evidence",
         )
 
         joypad_reset = by_scenario.get("joypad_strobe_reset_fault")

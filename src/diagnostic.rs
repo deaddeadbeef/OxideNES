@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 71;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 72;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v71";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v72";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -59,6 +59,7 @@ const CPU_ALU_INDEX_MATRIX_TEST_ID: u8 = 45;
 const CPU_ARITHMETIC_MATRIX_TEST_ID: u8 = 46;
 const CPU_STATUS_MATRIX_TEST_ID: u8 = 47;
 const PPU_PIXEL_PHASE_TEST_ID: u8 = 48;
+const PPU_ATTRIBUTE_QUADRANT_TEST_ID: u8 = 49;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -235,7 +236,7 @@ const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_INPUT_REASON: &str =
 const DIAGNOSTIC_RENDER_FRAME_SIGNATURE_FAULT_REASON: &str =
     "disabled: intentional fault-injection fixture";
 const APU_AUDIO_EXPECTED_MIN_SAMPLE_COUNT: usize = 12_000;
-const APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT: usize = 14_500;
+const APU_AUDIO_EXPECTED_MAX_SAMPLE_COUNT: usize = 16_500;
 const APU_AUDIO_EXPECTED_MIN_PEAK_ABS: f32 = 0.05;
 const APU_AUDIO_EXPECTED_MAX_PEAK_ABS: f32 = 0.20;
 const APU_AUDIO_EXPECTED_MIN_RMS_ABS: f32 = 0.005;
@@ -296,6 +297,7 @@ const PPU_SCROLL_SEAM_FAULT_LABEL: &str = "ppu_scroll_seam_before_render_enable"
 const PPU_SPRITE_OVERFLOW_FAULT_LABEL: &str = "ppu_sprite_overflow_before_render_enable";
 const PPU_SPRITE_PRIORITY_FAULT_LABEL: &str = "ppu_sprite_priority_before_render_enable";
 const PPU_PIXEL_PHASE_FAULT_LABEL: &str = "ppu_pixel_phase_before_render_enable";
+const PPU_ATTRIBUTE_QUADRANT_FAULT_LABEL: &str = "ppu_attribute_quadrant_before_render_enable";
 const PPU_SPRITE_ZERO_HIT_FAULT_LABEL: &str = "ppu_sprite_zero_hit_before_render_enable";
 const PPU_STATUS_LATCH_RESET_FAULT_LABEL: &str = "ppu_status_latch_reset_before_address_write";
 const PPU_VRAM_INCREMENT_32_FAULT_LABEL: &str = "ppu_vram_increment_32_before_stride_read";
@@ -406,6 +408,22 @@ const PPU_PIXEL_PHASE_EXPECTED_EVEN_COLOR: u32 = 0x64B0FF;
 const PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR: u32 = 0x000000;
 const PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR: u32 = 0x64B0FF;
 const PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR: u32 = 0xB53120;
+const PPU_ATTRIBUTE_QUADRANT_CASE_COUNT_ADDR: u16 = 0x0308;
+const PPU_ATTRIBUTE_QUADRANT_ATTR_BYTE_ADDR: u16 = 0x0309;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_CASE_COUNT: u8 = 4;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_ATTR_BYTE: u8 = 0xE4;
+const PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_X: usize = 8;
+const PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_Y: usize = 8;
+const PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_X: usize = 24;
+const PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_Y: usize = 8;
+const PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_X: usize = 8;
+const PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_Y: usize = 24;
+const PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_X: usize = 24;
+const PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_Y: usize = 24;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_LEFT_COLOR: u32 = 0x64B0FF;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_RIGHT_COLOR: u32 = 0xB53120;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_LEFT_COLOR: u32 = 0x388700;
+const PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_RIGHT_COLOR: u32 = 0x5CE430;
 const CPU_RMW_MATRIX_ASL_RESULT_ADDR: u16 = 0x02B5;
 const CPU_RMW_MATRIX_ROL_RESULT_ADDR: u16 = 0x02B6;
 const CPU_RMW_MATRIX_LSR_RESULT_ADDR: u16 = 0x02B7;
@@ -886,6 +904,18 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "adjacent pixels inside an alternating background tile expose even/odd pattern-bit phases",
             "neighboring solid low-plane and high-plane tiles select distinct palette entries on the same scanline",
             "host-observed frame samples record the compact pixel-phase signature after rendering is enabled",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: PPU_ATTRIBUTE_QUADRANT_TEST_ID,
+        name: "ppu_attribute_quadrant_signature",
+        subsystem: DiagnosticSubsystem::Ppu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify one attribute-table byte selects the expected background palette for all four 2x2-tile quadrants.",
+        expected_observations: &[
+            "attribute byte $E4 assigns palettes 0, 1, 2, and 3 to top-left, top-right, bottom-left, and bottom-right quadrants",
+            "one solid background tile pattern produces four distinct host-observed colors through attribute quadrant palette selection",
+            "host-observed frame samples record the compact attribute-quadrant signature after rendering is enabled",
         ],
     },
     DiagnosticTestSpec {
@@ -2223,9 +2253,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "ppu_pixel_pipeline",
         subsystem: "ppu",
         risk: "The cartridge catches gross PPU progress and selected pixel behavior but does not prove detailed scanline/dot correctness.",
-        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, scanline-local background pixel-phase sampling across alternating, low-plane, and high-plane tile pixels, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, host-visible multi-color background output, and an expected full-frame render checksum for the deterministic background frame.",
-        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, sprite-overflow, pixel-phase window, and deterministic full-frame signature samples.",
-        suggested_next_test: "Add broader per-dot renderer checks with tile fetch pipeline state assertions, attribute quadrant transitions, and sprite/background mux interactions across more scanline windows.",
+        current_coverage: "Palette register round-trip, non-palette PPUDATA read buffering, PPUDATA increment-by-32 register behavior, PPUSTATUS write-latch reset behavior, horizontal nametable mirroring, sprite-zero-hit collision signaling, sprite-overflow evaluation including hardware-bug false-positive and false-negative subcases, sprite/background priority pixel sampling, fine-X horizontal scroll seam sampling, coarse-X tile-shift sampling, coarse-X nametable-wrap sampling through a vertical-mirroring variant cartridge, vertical scroll seam sampling, scanline-local background pixel-phase sampling across alternating, low-plane, and high-plane tile pixels, attribute-byte quadrant palette selection across all four 2x2-tile quadrants, NMI delivery, host-observed first/inter-NMI vblank timing windows, PPUSTATUS vblank set/clear dot-edge timing, completed frames, host-visible multi-color background output, and an expected full-frame render checksum for the deterministic background frame.",
+        missing_coverage: "Per-dot rendering behavior beyond targeted sprite-priority, scroll-seam, sprite-overflow, pixel-phase, attribute-quadrant, and deterministic full-frame signature samples.",
+        suggested_next_test: "Add broader per-dot renderer checks with tile fetch pipeline state assertions and sprite/background mux interactions across more scanline windows.",
     },
     DiagnosticCoverageGapSpec {
         id: "mapper_banking_runtime",
@@ -2274,7 +2304,7 @@ pub struct DiagnosticConfig {
 impl Default for DiagnosticConfig {
     fn default() -> Self {
         Self {
-            max_cpu_cycles: 560_000,
+            max_cpu_cycles: 660_000,
             joypad1_mask: EXPECTED_JOYPAD1_MASK,
             expected_joypad1_mask: EXPECTED_JOYPAD1_MASK,
             joypad2_mask: EXPECTED_JOYPAD2_MASK,
@@ -2326,6 +2356,7 @@ pub enum DiagnosticFaultInjection {
     Mapper2PrgRam,
     PpuNametableMirroring,
     PpuNmiTimeout,
+    PpuAttributeQuadrant,
     PpuPixelPhase,
     PpuScrollSeam,
     PpuSpriteOverflow,
@@ -2337,7 +2368,7 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 33] = [
+    pub const ALL: [DiagnosticFaultInjection; 34] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAluIndexMatrix,
         DiagnosticFaultInjection::CpuArithmeticFlagMatrix,
@@ -2363,6 +2394,7 @@ impl DiagnosticFaultInjection {
         DiagnosticFaultInjection::Mapper2PrgRam,
         DiagnosticFaultInjection::PpuNametableMirroring,
         DiagnosticFaultInjection::PpuNmiTimeout,
+        DiagnosticFaultInjection::PpuAttributeQuadrant,
         DiagnosticFaultInjection::PpuPixelPhase,
         DiagnosticFaultInjection::PpuScrollSeam,
         DiagnosticFaultInjection::PpuSpriteOverflow,
@@ -2402,6 +2434,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => "mapper2_prg_ram",
             DiagnosticFaultInjection::PpuNametableMirroring => "ppu_nametable_mirroring",
             DiagnosticFaultInjection::PpuNmiTimeout => "ppu_nmi_timeout",
+            DiagnosticFaultInjection::PpuAttributeQuadrant => "ppu_attribute_quadrant",
             DiagnosticFaultInjection::PpuPixelPhase => "ppu_pixel_phase",
             DiagnosticFaultInjection::PpuScrollSeam => "ppu_scroll_seam",
             DiagnosticFaultInjection::PpuSpriteOverflow => "ppu_sprite_overflow",
@@ -2450,6 +2483,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::Mapper2PrgRam => MAPPER2_PRG_RAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNametableMirroring => PPU_NAMETABLE_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::PpuNmiTimeout => PPU_NMI_TIMEOUT_FAULT_LABEL,
+            DiagnosticFaultInjection::PpuAttributeQuadrant => PPU_ATTRIBUTE_QUADRANT_FAULT_LABEL,
             DiagnosticFaultInjection::PpuPixelPhase => PPU_PIXEL_PHASE_FAULT_LABEL,
             DiagnosticFaultInjection::PpuScrollSeam => PPU_SCROLL_SEAM_FAULT_LABEL,
             DiagnosticFaultInjection::PpuSpriteOverflow => PPU_SPRITE_OVERFLOW_FAULT_LABEL,
@@ -2498,6 +2532,7 @@ pub struct DiagnosticTelemetry {
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub apu_dmc_status: ApuDmcStatusTelemetry,
     pub ppu_vblank_timing: PpuVblankTimingTelemetry,
+    pub ppu_attribute_quadrant: PpuAttributeQuadrantTelemetry,
     pub ppu_pixel_phase: PpuPixelPhaseTelemetry,
     pub ppu_scroll_seam: PpuScrollSeamTelemetry,
     pub ppu_sprite_overflow: PpuSpriteOverflowTelemetry,
@@ -3418,6 +3453,41 @@ pub struct PpuPixelPhaseTelemetry {
     pub high_plane_expected_color_hex: String,
     pub high_plane_observed_color: u32,
     pub high_plane_observed_color_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PpuAttributeQuadrantTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_attribute_byte: u8,
+    pub expected_attribute_byte_hex: String,
+    pub observed_attribute_byte: u8,
+    pub observed_attribute_byte_hex: String,
+    pub top_left_sample_x: usize,
+    pub top_left_sample_y: usize,
+    pub top_left_expected_color: u32,
+    pub top_left_expected_color_hex: String,
+    pub top_left_observed_color: u32,
+    pub top_left_observed_color_hex: String,
+    pub top_right_sample_x: usize,
+    pub top_right_sample_y: usize,
+    pub top_right_expected_color: u32,
+    pub top_right_expected_color_hex: String,
+    pub top_right_observed_color: u32,
+    pub top_right_observed_color_hex: String,
+    pub bottom_left_sample_x: usize,
+    pub bottom_left_sample_y: usize,
+    pub bottom_left_expected_color: u32,
+    pub bottom_left_expected_color_hex: String,
+    pub bottom_left_observed_color: u32,
+    pub bottom_left_observed_color_hex: String,
+    pub bottom_right_sample_x: usize,
+    pub bottom_right_sample_y: usize,
+    pub bottom_right_expected_color: u32,
+    pub bottom_right_expected_color_hex: String,
+    pub bottom_right_observed_color: u32,
+    pub bottom_right_observed_color_hex: String,
     pub passed: bool,
 }
 
@@ -5153,6 +5223,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let mut audio_sum_abs = 0.0f64;
     let mut audio_sum_squares = 0.0f64;
     let mut diagnostic_render_frame = None;
+    let mut ppu_attribute_quadrant_frame = None;
     let mut ppu_pixel_phase_frame = None;
     let mut ppu_scroll_seam_frame = None;
     let mut ppu_sprite_priority_frame = None;
@@ -5256,6 +5327,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
             );
             maybe_capture_ppu_pixel_phase_frame(
                 &mut ppu_pixel_phase_frame,
+                current_test,
+                &bus.ppu.frame_data,
+            );
+            maybe_capture_ppu_attribute_quadrant_frame(
+                &mut ppu_attribute_quadrant_frame,
                 current_test,
                 &bus.ppu.frame_data,
             );
@@ -5410,6 +5486,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
                     current_test,
                     &bus.ppu.frame_data,
                 );
+                maybe_capture_ppu_attribute_quadrant_frame(
+                    &mut ppu_attribute_quadrant_frame,
+                    current_test,
+                    &bus.ppu.frame_data,
+                );
                 let ppu_scroll_seam_case_count = bus.cpu_read(PPU_SCROLL_SEAM_CASE_COUNT_ADDR);
                 maybe_capture_ppu_scroll_seam_frame(
                     &mut ppu_scroll_seam_frame,
@@ -5478,6 +5559,11 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     );
     let ppu_pixel_phase =
         ppu_pixel_phase_telemetry(&ram, ppu_pixel_phase_frame.as_ref(), &bus.ppu.frame_data);
+    let ppu_attribute_quadrant = ppu_attribute_quadrant_telemetry(
+        &ram,
+        ppu_attribute_quadrant_frame.as_ref(),
+        &bus.ppu.frame_data,
+    );
     let mapper1_mmc1 = mapper1_mmc1_telemetry(&run_mapper1_mmc1_variant());
     let mapper1_mmc1_32k_prg = mapper1_mmc1_32k_prg_telemetry(&run_mapper1_mmc1_32k_prg_variant());
     let mapper3_chr_bank = mapper3_chr_bank_telemetry(&run_mapper3_chr_bank_variant());
@@ -5523,6 +5609,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
+        ppu_attribute_quadrant: &ppu_attribute_quadrant,
         ppu_pixel_phase: &ppu_pixel_phase,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -5573,6 +5660,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix: &apu_status_matrix,
         apu_dmc_status: &apu_dmc_status,
         ppu_vblank_timing: &ppu_vblank_timing,
+        ppu_attribute_quadrant: &ppu_attribute_quadrant,
         ppu_pixel_phase: &ppu_pixel_phase,
         ppu_scroll_seam: &ppu_scroll_seam,
         ppu_sprite_overflow: &ppu_sprite_overflow,
@@ -5659,6 +5747,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         apu_status_matrix,
         apu_dmc_status,
         ppu_vblank_timing,
+        ppu_attribute_quadrant,
         ppu_pixel_phase,
         ppu_scroll_seam,
         ppu_sprite_overflow,
@@ -6879,6 +6968,74 @@ fn write_ppu_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Pixel-phase passed | {} |",
         telemetry.ppu_pixel_phase.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant attr byte / expected | {} / {} |",
+        telemetry.ppu_attribute_quadrant.observed_attribute_byte_hex,
+        telemetry.ppu_attribute_quadrant.expected_attribute_byte_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant top-left sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_attribute_quadrant.top_left_sample_x,
+        telemetry.ppu_attribute_quadrant.top_left_sample_y,
+        telemetry.ppu_attribute_quadrant.top_left_observed_color_hex,
+        telemetry.ppu_attribute_quadrant.top_left_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant top-right sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_attribute_quadrant.top_right_sample_x,
+        telemetry.ppu_attribute_quadrant.top_right_sample_y,
+        telemetry
+            .ppu_attribute_quadrant
+            .top_right_observed_color_hex,
+        telemetry
+            .ppu_attribute_quadrant
+            .top_right_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant bottom-left sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_attribute_quadrant.bottom_left_sample_x,
+        telemetry.ppu_attribute_quadrant.bottom_left_sample_y,
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_left_observed_color_hex,
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_left_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant bottom-right sample / expected | ({}, {}) {} / {} |",
+        telemetry.ppu_attribute_quadrant.bottom_right_sample_x,
+        telemetry.ppu_attribute_quadrant.bottom_right_sample_y,
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_right_observed_color_hex,
+        telemetry
+            .ppu_attribute_quadrant
+            .bottom_right_expected_color_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant cases / expected | {} / {} |",
+        telemetry.ppu_attribute_quadrant.observed_case_count,
+        telemetry.ppu_attribute_quadrant.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Attribute-quadrant passed | {} |",
+        telemetry.ppu_attribute_quadrant.passed
     )
     .expect("write report");
     writeln!(
@@ -9067,6 +9224,7 @@ struct HostValidationInput<'a> {
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
+    ppu_attribute_quadrant: &'a PpuAttributeQuadrantTelemetry,
     ppu_pixel_phase: &'a PpuPixelPhaseTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -9110,6 +9268,7 @@ struct ProbeTelemetryInput<'a> {
     apu_status_matrix: &'a ApuStatusMatrixTelemetry,
     apu_dmc_status: &'a ApuDmcStatusTelemetry,
     ppu_vblank_timing: &'a PpuVblankTimingTelemetry,
+    ppu_attribute_quadrant: &'a PpuAttributeQuadrantTelemetry,
     ppu_pixel_phase: &'a PpuPixelPhaseTelemetry,
     ppu_scroll_seam: &'a PpuScrollSeamTelemetry,
     ppu_sprite_overflow: &'a PpuSpriteOverflowTelemetry,
@@ -9433,6 +9592,31 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.ppu_sprite_priority.behind_expected_color_hex,
             input.ppu_sprite_priority.observed_case_count,
             input.ppu_sprite_priority.expected_case_count
+        ));
+    }
+    if !input.ppu_attribute_quadrant.passed {
+        failures.push(format!(
+            "PPU attribute-quadrant mismatch: attr {} expected {}, top-left sample ({}, {}) {} expected {}, top-right sample ({}, {}) {} expected {}, bottom-left sample ({}, {}) {} expected {}, bottom-right sample ({}, {}) {} expected {}, cases {}/{}",
+            input.ppu_attribute_quadrant.observed_attribute_byte_hex,
+            input.ppu_attribute_quadrant.expected_attribute_byte_hex,
+            input.ppu_attribute_quadrant.top_left_sample_x,
+            input.ppu_attribute_quadrant.top_left_sample_y,
+            input.ppu_attribute_quadrant.top_left_observed_color_hex,
+            input.ppu_attribute_quadrant.top_left_expected_color_hex,
+            input.ppu_attribute_quadrant.top_right_sample_x,
+            input.ppu_attribute_quadrant.top_right_sample_y,
+            input.ppu_attribute_quadrant.top_right_observed_color_hex,
+            input.ppu_attribute_quadrant.top_right_expected_color_hex,
+            input.ppu_attribute_quadrant.bottom_left_sample_x,
+            input.ppu_attribute_quadrant.bottom_left_sample_y,
+            input.ppu_attribute_quadrant.bottom_left_observed_color_hex,
+            input.ppu_attribute_quadrant.bottom_left_expected_color_hex,
+            input.ppu_attribute_quadrant.bottom_right_sample_x,
+            input.ppu_attribute_quadrant.bottom_right_sample_y,
+            input.ppu_attribute_quadrant.bottom_right_observed_color_hex,
+            input.ppu_attribute_quadrant.bottom_right_expected_color_hex,
+            input.ppu_attribute_quadrant.observed_case_count,
+            input.ppu_attribute_quadrant.expected_case_count
         ));
     }
     if !input.ppu_pixel_phase.passed {
@@ -10467,6 +10651,48 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
     push_probe(
         &mut probes,
         ProbeTelemetryRecord {
+            id: "ppu.attribute_quadrant.signature".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Ppu),
+            test_id: Some(PPU_ATTRIBUTE_QUADRANT_TEST_ID),
+            test_name: test_name(PPU_ATTRIBUTE_QUADRANT_TEST_ID),
+            status: gated_probe_status(passed_suite, input.ppu_attribute_quadrant.passed),
+            description:
+                "Host-sampled frame pixels prove one attribute byte selects four background palettes across all quadrants"
+                    .to_string(),
+            expected: format!(
+                "attr {}, top-left sample ({}, {}) {}, top-right sample ({}, {}) {}, bottom-left sample ({}, {}) {}, bottom-right sample ({}, {}) {}, cases {}",
+                input.ppu_attribute_quadrant.expected_attribute_byte_hex,
+                input.ppu_attribute_quadrant.top_left_sample_x,
+                input.ppu_attribute_quadrant.top_left_sample_y,
+                input.ppu_attribute_quadrant.top_left_expected_color_hex,
+                input.ppu_attribute_quadrant.top_right_sample_x,
+                input.ppu_attribute_quadrant.top_right_sample_y,
+                input.ppu_attribute_quadrant.top_right_expected_color_hex,
+                input.ppu_attribute_quadrant.bottom_left_sample_x,
+                input.ppu_attribute_quadrant.bottom_left_sample_y,
+                input.ppu_attribute_quadrant.bottom_left_expected_color_hex,
+                input.ppu_attribute_quadrant.bottom_right_sample_x,
+                input.ppu_attribute_quadrant.bottom_right_sample_y,
+                input.ppu_attribute_quadrant.bottom_right_expected_color_hex,
+                input.ppu_attribute_quadrant.expected_case_count
+            ),
+            observed: format!(
+                "attr {}, top-left sample {}, top-right sample {}, bottom-left sample {}, bottom-right sample {}, cases {}/{}",
+                input.ppu_attribute_quadrant.observed_attribute_byte_hex,
+                input.ppu_attribute_quadrant.top_left_observed_color_hex,
+                input.ppu_attribute_quadrant.top_right_observed_color_hex,
+                input.ppu_attribute_quadrant.bottom_left_observed_color_hex,
+                input.ppu_attribute_quadrant.bottom_right_observed_color_hex,
+                input.ppu_attribute_quadrant.observed_case_count,
+                input.ppu_attribute_quadrant.expected_case_count
+            ),
+            likely_domain: "ppu.attribute_quadrant".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
             id: "ppu.pixel_phase.signature".to_string(),
             source: DiagnosticProbeSource::HostObservation,
             subsystem: Some(DiagnosticSubsystem::Ppu),
@@ -11357,6 +11583,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.ppu_sprite_priority();
     program.ppu_scroll_seam();
     program.ppu_pixel_phase_signature();
+    program.ppu_attribute_quadrant_signature();
     program.cpu_read_modify_write_matrix();
     program.cpu_rmw_addressing_matrix();
     program.cpu_branch_condition_matrix();
@@ -13927,6 +14154,67 @@ impl DiagnosticProgram {
         self.pass_test(PPU_PIXEL_PHASE_TEST_ID);
     }
 
+    fn ppu_attribute_quadrant_signature(&mut self) {
+        self.begin_test(PPU_ATTRIBUTE_QUADRANT_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(PPU_ATTRIBUTE_QUADRANT_CASE_COUNT_ADDR);
+        self.asm.sta_abs(PPU_ATTRIBUTE_QUADRANT_ATTR_BYTE_ADDR);
+        self.asm.sta_abs(0x2000);
+        self.asm.sta_abs(0x2001);
+
+        self.write_ppu_data(0x3F00, 0x0F);
+        self.write_ppu_data(0x3F01, 0x21);
+        self.write_ppu_data(0x3F05, 0x16);
+        self.write_ppu_data(0x3F09, 0x19);
+        self.write_ppu_data(0x3F0D, 0x2A);
+
+        for row in 0..4u16 {
+            for col in 0..4u16 {
+                self.write_ppu_data(0x2000 + row * 0x20 + col, 0x02);
+            }
+        }
+        self.write_ppu_data(0x23C0, PPU_ATTRIBUTE_QUADRANT_EXPECTED_ATTR_BYTE);
+
+        self.asm
+            .label(PPU_ATTRIBUTE_QUADRANT_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+        self.asm.lda_imm(PPU_ATTRIBUTE_QUADRANT_EXPECTED_CASE_COUNT);
+        self.asm.sta_abs(PPU_ATTRIBUTE_QUADRANT_CASE_COUNT_ADDR);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2000);
+        self.asm.lda_abs(0x2002);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2005);
+        self.asm.sta_abs(0x2005);
+        self.asm.lda_imm(0x0A);
+        self.asm.sta_abs(0x2001);
+
+        let first_vblank = self.unique_label("attribute_quadrant_first_vblank");
+        self.asm
+            .label(&first_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&first_vblank);
+
+        let second_vblank = self.unique_label("attribute_quadrant_second_vblank");
+        self.asm
+            .label(&second_vblank)
+            .expect("unique label should not collide");
+        self.asm.lda_abs(0x2002);
+        self.asm.and_imm(0x80);
+        self.asm.cmp_imm(0x80);
+        self.asm.bne(&second_vblank);
+
+        self.delay_host_frame_capture();
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x2001);
+        self.read_ppu_data_into_a(0x23C0);
+        self.asm.sta_abs(PPU_ATTRIBUTE_QUADRANT_ATTR_BYTE_ADDR);
+        self.pass_test(PPU_ATTRIBUTE_QUADRANT_TEST_ID);
+    }
+
     fn delay_host_frame_capture(&mut self) {
         for _ in 0..3 {
             let delay = self.unique_label("host_frame_capture_delay");
@@ -14730,6 +15018,12 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::PpuNmiTimeout => {
             bus.cpu_write(0x2000, 0x00);
+        }
+        DiagnosticFaultInjection::PpuAttributeQuadrant => {
+            bus.cpu_write(0x2006, 0x23);
+            bus.cpu_write(0x2006, 0xC0);
+            bus.cpu_write(0x2007, 0x00);
+            let _ = bus.cpu_read(0x2002);
         }
         DiagnosticFaultInjection::PpuPixelPhase => {
             bus.cpu_write(0x2006, 0x20);
@@ -15944,6 +16238,80 @@ fn ppu_pixel_phase_telemetry(
             && sample.odd_color == PPU_PIXEL_PHASE_EXPECTED_ODD_COLOR
             && sample.low_plane_color == PPU_PIXEL_PHASE_EXPECTED_LOW_PLANE_COLOR
             && sample.high_plane_color == PPU_PIXEL_PHASE_EXPECTED_HIGH_PLANE_COLOR,
+    }
+}
+
+fn ppu_attribute_quadrant_telemetry(
+    ram: &[u8],
+    captured_sample: Option<&PpuAttributeQuadrantFrameSample>,
+    final_frame: &[u32],
+) -> PpuAttributeQuadrantTelemetry {
+    let observed_case_count = ram[(PPU_ATTRIBUTE_QUADRANT_CASE_COUNT_ADDR & 0x07FF) as usize];
+    let observed_attribute_byte = ram[(PPU_ATTRIBUTE_QUADRANT_ATTR_BYTE_ADDR & 0x07FF) as usize];
+    let fallback_sample = PpuAttributeQuadrantFrameSample {
+        top_left_color: sample_frame_color(
+            final_frame,
+            PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_Y,
+        ),
+        top_right_color: sample_frame_color(
+            final_frame,
+            PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_Y,
+        ),
+        bottom_left_color: sample_frame_color(
+            final_frame,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_Y,
+        ),
+        bottom_right_color: sample_frame_color(
+            final_frame,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_Y,
+        ),
+    };
+    let sample = captured_sample.copied().unwrap_or(fallback_sample);
+    PpuAttributeQuadrantTelemetry {
+        expected_case_count: PPU_ATTRIBUTE_QUADRANT_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_attribute_byte: PPU_ATTRIBUTE_QUADRANT_EXPECTED_ATTR_BYTE,
+        expected_attribute_byte_hex: hex_byte(PPU_ATTRIBUTE_QUADRANT_EXPECTED_ATTR_BYTE),
+        observed_attribute_byte,
+        observed_attribute_byte_hex: hex_byte(observed_attribute_byte),
+        top_left_sample_x: PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_X,
+        top_left_sample_y: PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_Y,
+        top_left_expected_color: PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_LEFT_COLOR,
+        top_left_expected_color_hex: hex_color(PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_LEFT_COLOR),
+        top_left_observed_color: sample.top_left_color,
+        top_left_observed_color_hex: hex_color(sample.top_left_color),
+        top_right_sample_x: PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_X,
+        top_right_sample_y: PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_Y,
+        top_right_expected_color: PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_RIGHT_COLOR,
+        top_right_expected_color_hex: hex_color(PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_RIGHT_COLOR),
+        top_right_observed_color: sample.top_right_color,
+        top_right_observed_color_hex: hex_color(sample.top_right_color),
+        bottom_left_sample_x: PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_X,
+        bottom_left_sample_y: PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_Y,
+        bottom_left_expected_color: PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_LEFT_COLOR,
+        bottom_left_expected_color_hex: hex_color(
+            PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_LEFT_COLOR,
+        ),
+        bottom_left_observed_color: sample.bottom_left_color,
+        bottom_left_observed_color_hex: hex_color(sample.bottom_left_color),
+        bottom_right_sample_x: PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_X,
+        bottom_right_sample_y: PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_Y,
+        bottom_right_expected_color: PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_RIGHT_COLOR,
+        bottom_right_expected_color_hex: hex_color(
+            PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_RIGHT_COLOR,
+        ),
+        bottom_right_observed_color: sample.bottom_right_color,
+        bottom_right_observed_color_hex: hex_color(sample.bottom_right_color),
+        passed: observed_case_count == PPU_ATTRIBUTE_QUADRANT_EXPECTED_CASE_COUNT
+            && observed_attribute_byte == PPU_ATTRIBUTE_QUADRANT_EXPECTED_ATTR_BYTE
+            && sample.top_left_color == PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_LEFT_COLOR
+            && sample.top_right_color == PPU_ATTRIBUTE_QUADRANT_EXPECTED_TOP_RIGHT_COLOR
+            && sample.bottom_left_color == PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_LEFT_COLOR
+            && sample.bottom_right_color == PPU_ATTRIBUTE_QUADRANT_EXPECTED_BOTTOM_RIGHT_COLOR,
     }
 }
 
@@ -18116,6 +18484,14 @@ struct PpuPixelPhaseFrameSample {
     high_plane_color: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PpuAttributeQuadrantFrameSample {
+    top_left_color: u32,
+    top_right_color: u32,
+    bottom_left_color: u32,
+    bottom_right_color: u32,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct PpuScrollSeamFrameSample {
     left_color: Option<u32>,
@@ -18192,6 +18568,38 @@ fn maybe_capture_ppu_pixel_phase_frame(
             frame,
             PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_X,
             PPU_PIXEL_PHASE_HIGH_PLANE_SAMPLE_Y,
+        ),
+    });
+}
+
+fn maybe_capture_ppu_attribute_quadrant_frame(
+    retained_sample: &mut Option<PpuAttributeQuadrantFrameSample>,
+    current_test: u8,
+    frame: &[u32],
+) {
+    if current_test != PPU_ATTRIBUTE_QUADRANT_TEST_ID {
+        return;
+    }
+    *retained_sample = Some(PpuAttributeQuadrantFrameSample {
+        top_left_color: sample_frame_color(
+            frame,
+            PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_TOP_LEFT_SAMPLE_Y,
+        ),
+        top_right_color: sample_frame_color(
+            frame,
+            PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_TOP_RIGHT_SAMPLE_Y,
+        ),
+        bottom_left_color: sample_frame_color(
+            frame,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_LEFT_SAMPLE_Y,
+        ),
+        bottom_right_color: sample_frame_color(
+            frame,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_X,
+            PPU_ATTRIBUTE_QUADRANT_BOTTOM_RIGHT_SAMPLE_Y,
         ),
     });
 }
@@ -18825,6 +19233,13 @@ fn compare_observation_checksums(
         &["ppu_sprite_priority", "behind_observed_color"][..],
         &["ppu_sprite_priority", "observed_case_count"][..],
         &["ppu_sprite_priority", "passed"][..],
+        &["ppu_attribute_quadrant", "observed_attribute_byte"][..],
+        &["ppu_attribute_quadrant", "top_left_observed_color"][..],
+        &["ppu_attribute_quadrant", "top_right_observed_color"][..],
+        &["ppu_attribute_quadrant", "bottom_left_observed_color"][..],
+        &["ppu_attribute_quadrant", "bottom_right_observed_color"][..],
+        &["ppu_attribute_quadrant", "observed_case_count"][..],
+        &["ppu_attribute_quadrant", "passed"][..],
         &["ppu_pixel_phase", "even_observed_color"][..],
         &["ppu_pixel_phase", "odd_observed_color"][..],
         &["ppu_pixel_phase", "low_plane_observed_color"][..],
