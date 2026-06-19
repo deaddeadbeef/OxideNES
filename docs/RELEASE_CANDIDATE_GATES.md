@@ -140,6 +140,8 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 
 - Rendering and CRT regression tests pass.
 - `python scripts/profile_diagnostic_cartridge.py --output-dir target/diagnostics/diagnostic-profile` passes and records the diagnostic cartridge's wall-clock throughput, cycles per second, frames per second, and slowest cartridge tests for performance review.
+- `cargo test --test version_cli_tests` passes in the default dev build and proves `--help`/`--version` expose the `-dev` build metadata.
+- `OXIDENES_RELEASE=1 cargo test --test version_cli_tests` passes and proves release-mode `--help`/`--version` expose the clean package version.
 - Run at least one local release build and version smoke check before an RC tag.
 - Run Criterion rendering benchmarks before a user-facing 1.0 RC release and record the local host and date. Benchmarks are informational unless a clear regression is observed.
 
