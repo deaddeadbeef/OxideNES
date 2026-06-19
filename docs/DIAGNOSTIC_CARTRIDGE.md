@@ -866,8 +866,9 @@ The cartridge exercises the emulator through the normal CPU, bus, cartridge, PPU
   0/1 with ignored low PRG bank bit, and single-screen lower/upper nametable
   mirroring
 - Mapper 2/UXROM PRG bank switching, fixed final-bank reads, and PRG RAM round-trips
-- Mapper 3/CNROM CHR bank switching through CPU bank-select writes and
-  PPU-visible pattern-table reads
+- Mapper 3/CNROM CHR bank switching through CPU bank-select writes,
+  PPU-visible pattern-table reads, and host-sampled rendered pixels while
+  background rendering remains enabled
 - Mapper 4/MMC3 PRG R6/R7 bank switching, fixed-last PRG reads, 2 KiB and
   1 KiB CHR bank switching, horizontal/vertical mirroring control, and
   scanline IRQ delivery, plus a fixed-`$E000` edge variant for PRG-mode
@@ -1413,6 +1414,15 @@ single deterministic attribute byte, renders a four-quadrant background palette
 fixture, captures expected-vs-observed quadrant frame colors, and narrows the
 remaining PPU pixel-pipeline coverage gap to broader tile-fetch and sprite-mux
 interactions.
+
+Schema version `73` adds a generated Mapper 3/CNROM rendered CHR-bank variant
+to the host diagnostic run. The variant renders the same background tile from
+CHR bank 0, keeps background rendering enabled, switches to CHR bank 1, samples
+the rendered pixel color for both banks, and exposes top-level
+`mapper3_rendered_chr_bank` telemetry plus the
+`mapper3.rendered_chr_bank_switch` probe. This narrows the mapper runtime
+coverage gap from active-render CHR/PRG switches to active-render PRG switches
+and deeper mapper-family edge cases.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These

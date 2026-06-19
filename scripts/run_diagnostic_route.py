@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -18,6 +19,7 @@ ROUTE_CHECK_SCHEMA_VERSION = 1
 ROUTE_MATRIX_SCHEMA_VERSION = 1
 INVESTIGATION_PLAN_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
+MAX_ROUTE_DIR_NAME_LENGTH = 20
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -103,7 +105,13 @@ def route_matrix_paths(output_dir: Path) -> dict[str, str]:
 
 def sanitize_path_component(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
-    return cleaned.strip(".-") or "route"
+    cleaned = cleaned.strip(".-") or "route"
+    if len(cleaned) <= MAX_ROUTE_DIR_NAME_LENGTH:
+        return cleaned
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    prefix_length = MAX_ROUTE_DIR_NAME_LENGTH - len(digest) - 1
+    prefix = cleaned[:prefix_length].strip(".-") or "route"
+    return f"{prefix}-{digest}"
 
 
 def command_argv(command: dict[str, Any]) -> list[str]:

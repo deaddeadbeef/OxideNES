@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Added a generated Mapper 3/CNROM rendered CHR-bank diagnostic variant with host-sampled pixel telemetry for CHR bank writes while background rendering remains enabled.
+
+### Changed
+- Bumped diagnostic telemetry to schema 73 and added the `mapper3.rendered_chr_bank_switch` probe to the AI observability catalog.
+
 ## [0.3.43] - 2026-06-20
 
 ### Added

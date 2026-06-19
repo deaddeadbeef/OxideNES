@@ -17,7 +17,7 @@ from typing import Any
 
 AI_DEBUG_PACKET_MATRIX_SCHEMA_VERSION = 1
 OUTPUT_TAIL_LINES = 80
-MAX_ROUTE_DIR_NAME_LENGTH = 20
+MAX_ROUTE_DIR_NAME_LENGTH = 12
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -167,7 +167,7 @@ def identities_match(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def route_output_artifacts(route_dir: Path) -> dict[str, str]:
-    packet_dir = route_dir / "ai-debug-packet"
+    packet_dir = route_dir / "pkt"
     return {
         "diagnostic_ai_debug_packet_json": str(route_dir / "diagnostic-ai-debug-packet.json"),
         "diagnostic_ai_debug_packet_report": str(route_dir / "diagnostic-ai-debug-packet.md"),
