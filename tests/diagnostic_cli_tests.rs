@@ -137,6 +137,118 @@ fn diagnostic_cli_rejects_unknown_fault_fixture() {
 }
 
 #[test]
+fn diagnostic_cli_writes_exhaustive_input_sweep_artifacts() {
+    let root = temp_dir("input-sweep");
+    let sweep_json = root.join("input-sweep.json");
+    let sweep_report = root.join("input-sweep.md");
+    fs::create_dir_all(&root).expect("temp dir should be created");
+
+    let output = Command::new(diagnostic_bin())
+        .arg("--input-sweep-json")
+        .arg(&sweep_json)
+        .arg("--input-sweep-report")
+        .arg(&sweep_report)
+        .arg("--no-stdout")
+        .output()
+        .expect("input sweep diagnostic command should run");
+
+    assert!(output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "--no-stdout should suppress input sweep JSON stdout"
+    );
+    let sweep = read_json(&sweep_json);
+    assert_eq!(sweep["input_sweep_schema_version"], Value::from(1));
+    assert_eq!(sweep["telemetry_schema_version"], Value::from(68));
+    assert_eq!(sweep["status"], Value::String("passed".to_string()));
+    assert_eq!(sweep["passed"], Value::Bool(true));
+    assert_eq!(sweep["recommended_exit_code"], Value::from(0));
+    assert_eq!(
+        sweep["coverage_gap_id"],
+        Value::String("input_port_matrix".to_string())
+    );
+    assert_eq!(sweep["summary"]["port_mask_count"], Value::from(256));
+    assert_eq!(sweep["summary"]["pair_count"], Value::from(65_536));
+    assert_eq!(sweep["summary"]["passed_pair_count"], Value::from(65_536));
+    assert_eq!(sweep["summary"]["failed_pair_count"], Value::from(0));
+    assert_eq!(sweep["summary"]["checked_port_count"], Value::from(131_072));
+    assert_eq!(
+        sweep["summary"]["checked_read_count"],
+        Value::from(1_572_864)
+    );
+    assert_eq!(sweep["summary"]["failure_count"], Value::from(0));
+    assert_eq!(
+        sweep["summary"]["exhaustive_two_port_matrix"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        sweep["probes"]
+            .as_array()
+            .expect("input sweep probes should be an array")
+            .len(),
+        4
+    );
+    assert!(sweep["probes"]
+        .as_array()
+        .expect("input sweep probes should be an array")
+        .iter()
+        .all(|probe| probe["status"] == Value::String("passed".to_string())));
+    assert!(sweep["sample_cases"]
+        .as_array()
+        .expect("input sweep samples should be an array")
+        .iter()
+        .any(|sample| sample["scenario_id"]
+            == Value::String("input_mask_nibble_split_pass".to_string())
+            && sample["joypad1_mask_hex"] == Value::String("0x0F".to_string())
+            && sample["joypad2_mask_hex"] == Value::String("0xF0".to_string())));
+    assert_eq!(
+        sweep["failures"]
+            .as_array()
+            .expect("input sweep failures should be an array")
+            .len(),
+        0
+    );
+    assert!(sweep["ai_handoff"]
+        .as_array()
+        .expect("input sweep ai_handoff should be an array")
+        .iter()
+        .any(|entry| entry.as_str().is_some_and(|text| text.contains("65,536"))));
+
+    let report = fs::read_to_string(&sweep_report).expect("input sweep report should be readable");
+    assert!(report.contains("# Diagnostic Input Sweep"));
+    assert!(report.contains("| Pair count | 65536 |"));
+    assert!(report.contains("| input.exhaustive_two_port_mask_pairs | passed |"));
+    assert!(report.contains("| input_mask_nibble_split_pass | 0x0F | 11110000 | 0xF0 | 00001111 |"));
+
+    fs::remove_dir_all(&root).expect("input sweep temp dir should be removable");
+}
+
+#[test]
+fn diagnostic_cli_rejects_input_sweep_with_normal_outputs() {
+    let root = temp_dir("input-sweep-conflict");
+    let sweep_json = root.join("input-sweep.json");
+    let telemetry_json = root.join("telemetry.json");
+    fs::create_dir_all(&root).expect("temp dir should be created");
+
+    let output = Command::new(diagnostic_bin())
+        .arg("--input-sweep-json")
+        .arg(&sweep_json)
+        .arg("--json")
+        .arg(&telemetry_json)
+        .arg("--no-stdout")
+        .output()
+        .expect("conflicting input sweep diagnostic command should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("standalone exhaustive input sweep"));
+    assert!(!sweep_json.exists());
+    assert!(!telemetry_json.exists());
+
+    fs::remove_dir_all(&root).expect("input sweep temp dir should be removable");
+}
+
+#[test]
 fn diagnostic_cli_writes_ai_ready_scenario_suite() {
     let suite_dir = temp_dir("scenario-suite");
 
