@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 19
-EXPECTED_OBSERVER_SCHEMA = 2
-EXPECTED_TELEMETRY_SCHEMA = 68
-EXPECTED_TRIAGE_SCHEMA = 6
-EXPECTED_BUNDLE_SCHEMA = 3
+EXPECTED_SCENARIO_SUITE_SCHEMA = 20
+EXPECTED_OBSERVER_SCHEMA = 3
+EXPECTED_TELEMETRY_SCHEMA = 69
+EXPECTED_TRIAGE_SCHEMA = 7
+EXPECTED_BUNDLE_SCHEMA = 4
+EXPECTED_BUILD_FIELDS = ("version", "build_type", "package_version")
 EXPECTED_SCENARIOS = {
     "pass",
     "input_mask_matrix_pass",
@@ -100,6 +101,9 @@ class SuiteVerifier:
             0,
             "scenario-suite.json recommended_exit_code",
         )
+        manifest_build = self.verify_build_metadata(
+            manifest.get("build"), "scenario-suite.json build"
+        )
 
         analysis = self.expect_dict(manifest.get("analysis"), "scenario-suite.json analysis")
         self.expect_equal(analysis.get("status"), "passed", "analysis status")
@@ -163,6 +167,10 @@ class SuiteVerifier:
             EXPECTED_ACTIONABLE_SCENARIO_COUNT,
             "observer baseline_divergence_count",
         )
+        observer_build = self.verify_build_metadata(
+            observer.get("build"), "observer build"
+        )
+        self.expect_equal(observer_build, manifest_build, "observer build metadata")
 
         actions = self.expect_list(observer.get("next_actions"), "observer next_actions")
         observations = self.expect_list(observer.get("observations"), "observer observations")
@@ -188,6 +196,8 @@ class SuiteVerifier:
             "suite_dir": str(self.suite_dir),
             "scenario_suite_schema_version": manifest.get("scenario_suite_schema_version"),
             "observer_schema_version": observer.get("observer_schema_version"),
+            "build_version": manifest_build.get("version"),
+            "build_type": manifest_build.get("build_type"),
             "scenario_count": len(scenarios),
             "next_actions": len(actions),
             "observations": len(observations),
@@ -2197,6 +2207,19 @@ class SuiteVerifier:
         if needle not in haystack:
             self.errors.append(f"{label}: missing {needle!r}")
 
+    def verify_build_metadata(self, value: Any, label: str) -> dict[str, Any]:
+        build = self.expect_dict(value, label)
+        for field in EXPECTED_BUILD_FIELDS:
+            field_value = build.get(field)
+            if not isinstance(field_value, str) or not field_value:
+                self.errors.append(f"{label}.{field} must be a non-empty string")
+        build_type = build.get("build_type")
+        if build_type not in {"dev", "release"}:
+            self.errors.append(
+                f"{label}.build_type: expected 'dev' or 'release', got {build_type!r}"
+            )
+        return build
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -2232,6 +2255,7 @@ def main() -> int:
             "Diagnostic scenario suite verification passed: "
             f"schema={summary['scenario_suite_schema_version']} "
             f"observer_schema={summary['observer_schema_version']} "
+            f"build={summary['build_version']}:{summary['build_type']} "
             f"scenarios={summary['scenario_count']} "
             f"next_actions={summary['next_actions']}"
         )

@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 68;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 69;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v68";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v69";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -2422,9 +2422,17 @@ pub struct DiagnosticTelemetry {
 pub struct DiagnosticSuiteTelemetry {
     pub name: &'static str,
     pub version: &'static str,
+    pub build: DiagnosticBuildTelemetry,
     pub test_count: usize,
     pub goals: &'static [&'static str],
     pub failure_catalog: Vec<FailureCatalogTelemetry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticBuildTelemetry {
+    pub version: &'static str,
+    pub build_type: &'static str,
+    pub package_version: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -5641,6 +5649,24 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     .expect("write report");
     writeln!(report, "| Schema version | {} |", telemetry.schema_version).expect("write report");
     writeln!(report, "| Suite | {} |", telemetry.suite.version).expect("write report");
+    writeln!(
+        report,
+        "| Build version | {} |",
+        telemetry.suite.build.version
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Build type | {} |",
+        telemetry.suite.build.build_type
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Package version | {} |",
+        telemetry.suite.build.package_version
+    )
+    .expect("write report");
     writeln!(
         report,
         "| Cycles / frames | {} / {} |",
@@ -16517,9 +16543,18 @@ fn suite_telemetry() -> DiagnosticSuiteTelemetry {
     DiagnosticSuiteTelemetry {
         name: DIAGNOSTIC_SUITE_NAME,
         version: DIAGNOSTIC_SUITE_VERSION,
+        build: diagnostic_build_telemetry(),
         test_count: DIAGNOSTIC_TESTS.len(),
         goals: DIAGNOSTIC_AI_GOALS,
         failure_catalog: failure_catalog_telemetry(),
+    }
+}
+
+pub fn diagnostic_build_telemetry() -> DiagnosticBuildTelemetry {
+    DiagnosticBuildTelemetry {
+        version: env!("OXIDENES_VERSION"),
+        build_type: env!("OXIDENES_BUILD_TYPE"),
+        package_version: env!("CARGO_PKG_VERSION"),
     }
 }
 
@@ -18690,6 +18725,15 @@ mod tests {
         assert_eq!(
             telemetry.schema_version,
             DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION
+        );
+        assert_eq!(telemetry.suite.build.version, env!("OXIDENES_VERSION"));
+        assert_eq!(
+            telemetry.suite.build.build_type,
+            env!("OXIDENES_BUILD_TYPE")
+        );
+        assert_eq!(
+            telemetry.suite.build.package_version,
+            env!("CARGO_PKG_VERSION")
         );
         assert_eq!(telemetry.suite.test_count, DIAGNOSTIC_TESTS.len());
         assert!(!telemetry.suite.failure_catalog.is_empty());

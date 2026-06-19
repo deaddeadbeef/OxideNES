@@ -1359,6 +1359,17 @@ top-level `cpu_arithmetic_matrix` telemetry, and the
 carry-out, borrow, overflow, zero, and negative flag outcomes through compact
 ADC/SBC masks, result sentinels, and a case counter.
 
+Schema version `69` adds suite-level `build` metadata with `version`,
+`build_type`, and `package_version` to raw telemetry, bundle manifests,
+triage JSON, scenario-suite manifests, scenario-suite observers, input-sweep
+artifacts, and diagnostic profile samples. This lets automated debuggers and
+release evidence prove whether a diagnostic run came from a dev build such as
+`0.3.39-dev` or an `OXIDENES_RELEASE=1` release binary without relying on the
+terminal that launched it.
+The root wrapper schemas are bumped with the same contract: bundle schema `4`,
+triage schema `7`, scenario-suite schema `20`, observer schema `3`, and
+input-sweep schema `2`.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`

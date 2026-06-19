@@ -3,22 +3,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use oxidenes::diagnostic::{
-    build_diagnostic_cartridge, compare_diagnostic_to_baseline,
+    build_diagnostic_cartridge, compare_diagnostic_to_baseline, diagnostic_build_telemetry,
     format_diagnostic_comparison_report, format_diagnostic_report, run_diagnostic,
-    DiagnosticComparisonTelemetry, DiagnosticConfig, DiagnosticDebugEventFocusTelemetry,
-    DiagnosticDebugInstructionFocusTelemetry, DiagnosticFaultInjection, DiagnosticHealth,
-    DiagnosticProbeStatus, DiagnosticTelemetry, DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_SUITE_NAME,
-    DIAGNOSTIC_SUITE_VERSION, DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
+    DiagnosticBuildTelemetry, DiagnosticComparisonTelemetry, DiagnosticConfig,
+    DiagnosticDebugEventFocusTelemetry, DiagnosticDebugInstructionFocusTelemetry,
+    DiagnosticFaultInjection, DiagnosticHealth, DiagnosticProbeStatus, DiagnosticTelemetry,
+    DIAGNOSTIC_PROVENANCE, DIAGNOSTIC_SUITE_NAME, DIAGNOSTIC_SUITE_VERSION,
+    DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
 };
 use oxidenes::joypad::{Joypad, JoypadButton};
 use oxidenes::recording::sha256;
 use serde::Serialize;
 
-const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 3;
-const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 6;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 19;
-const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 2;
-const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 1;
+const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 4;
+const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 7;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 20;
+const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 3;
+const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 2;
 const INPUT_SWEEP_PORT_MASK_COUNT: usize = 256;
 const INPUT_SWEEP_PAIR_COUNT: usize = INPUT_SWEEP_PORT_MASK_COUNT * INPUT_SWEEP_PORT_MASK_COUNT;
 const INPUT_SWEEP_STROBE_HIGH_READS_PER_PORT: usize = 2;
@@ -51,6 +52,7 @@ struct DiagnosticBundleManifest {
     telemetry_schema_version: u16,
     suite_name: String,
     suite_version: String,
+    build: DiagnosticBuildTelemetry,
     passed: bool,
     recommended_exit_code: u8,
     config: DiagnosticBundleConfig,
@@ -81,6 +83,7 @@ struct DiagnosticScenarioSuiteManifest {
     bundle_schema_version: u16,
     suite_name: String,
     suite_version: String,
+    build: DiagnosticBuildTelemetry,
     baseline_scenario_id: &'static str,
     scenario_count: usize,
     passed: bool,
@@ -138,6 +141,7 @@ struct DiagnosticScenarioSuiteObserverReport {
     bundle_schema_version: u16,
     suite_name: String,
     suite_version: String,
+    build: DiagnosticBuildTelemetry,
     status: &'static str,
     summary: String,
     recommended_exit_code: u8,
@@ -275,6 +279,7 @@ struct DiagnosticInputSweep {
     telemetry_schema_version: u16,
     suite_name: &'static str,
     suite_version: &'static str,
+    build: DiagnosticBuildTelemetry,
     status: &'static str,
     passed: bool,
     recommended_exit_code: u8,
@@ -357,6 +362,7 @@ struct DiagnosticTriageReport {
     telemetry_schema_version: u16,
     suite_name: String,
     suite_version: String,
+    build: DiagnosticBuildTelemetry,
     passed: bool,
     recommended_exit_code: u8,
     health: String,
@@ -1046,6 +1052,7 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
     let telemetry_schema_version = baseline_telemetry.schema_version;
     let suite_name = baseline_telemetry.suite.name.to_string();
     let suite_version = baseline_telemetry.suite.version.to_string();
+    let build = baseline_telemetry.suite.build.clone();
     let baseline_json = serde_json::to_string_pretty(&baseline_telemetry)
         .map_err(|err| format!("failed to serialize baseline scenario telemetry: {err}"))?;
 
@@ -1078,6 +1085,7 @@ fn write_scenario_suite(path: &Path) -> Result<DiagnosticScenarioSuiteWriteResul
         bundle_schema_version: DIAGNOSTIC_BUNDLE_SCHEMA_VERSION,
         suite_name,
         suite_version,
+        build,
         baseline_scenario_id: baseline_spec.id,
         scenario_count: scenarios.len(),
         passed,
@@ -1124,6 +1132,7 @@ fn scenario_suite_observer(
         bundle_schema_version: manifest.bundle_schema_version,
         suite_name: manifest.suite_name.clone(),
         suite_version: manifest.suite_version.clone(),
+        build: manifest.build.clone(),
         status: manifest.analysis.status,
         summary: manifest.analysis.summary.clone(),
         recommended_exit_code: manifest.recommended_exit_code,
@@ -1475,6 +1484,14 @@ fn format_scenario_suite_report(manifest: &DiagnosticScenarioSuiteManifest) -> S
     writeln!(report, "| --- | --- |").expect("write report");
     writeln!(report, "| Suite | {} |", manifest.suite_name).expect("write report");
     writeln!(report, "| Version | {} |", manifest.suite_version).expect("write report");
+    writeln!(report, "| Build version | {} |", manifest.build.version).expect("write report");
+    writeln!(report, "| Build type | {} |", manifest.build.build_type).expect("write report");
+    writeln!(
+        report,
+        "| Package version | {} |",
+        manifest.build.package_version
+    )
+    .expect("write report");
     writeln!(
         report,
         "| Scenario suite schema | {} |",
@@ -1706,6 +1723,14 @@ fn format_scenario_suite_observer_report(
     writeln!(report, "| --- | --- |").expect("write report");
     writeln!(report, "| Suite | {} |", observer.suite_name).expect("write report");
     writeln!(report, "| Version | {} |", observer.suite_version).expect("write report");
+    writeln!(report, "| Build version | {} |", observer.build.version).expect("write report");
+    writeln!(report, "| Build type | {} |", observer.build.build_type).expect("write report");
+    writeln!(
+        report,
+        "| Package version | {} |",
+        observer.build.package_version
+    )
+    .expect("write report");
     writeln!(
         report,
         "| Observer schema | {} |",
@@ -2559,6 +2584,7 @@ fn diagnostic_input_sweep() -> DiagnosticInputSweep {
         telemetry_schema_version: DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION,
         suite_name: DIAGNOSTIC_SUITE_NAME,
         suite_version: DIAGNOSTIC_SUITE_VERSION,
+        build: diagnostic_build_telemetry(),
         status,
         passed,
         recommended_exit_code: if passed { 0 } else { 1 },
@@ -2775,6 +2801,14 @@ fn format_diagnostic_input_sweep_report(sweep: &DiagnosticInputSweep) -> String 
     .expect("write report");
     writeln!(report, "| Suite | {} |", sweep.suite_name).expect("write report");
     writeln!(report, "| Version | {} |", sweep.suite_version).expect("write report");
+    writeln!(report, "| Build version | {} |", sweep.build.version).expect("write report");
+    writeln!(report, "| Build type | {} |", sweep.build.build_type).expect("write report");
+    writeln!(
+        report,
+        "| Package version | {} |",
+        sweep.build.package_version
+    )
+    .expect("write report");
     writeln!(report, "| Coverage gap | {} |", sweep.coverage_gap_id).expect("write report");
     writeln!(report, "| Pair count | {} |", sweep.summary.pair_count).expect("write report");
     writeln!(
@@ -2956,6 +2990,7 @@ fn write_bundle(path: &Path, input: DiagnosticBundleInput<'_>) -> Result<(), Str
         telemetry_schema_version: input.telemetry.schema_version,
         suite_name: input.telemetry.suite.name.to_string(),
         suite_version: input.telemetry.suite.version.to_string(),
+        build: input.telemetry.suite.build.clone(),
         passed: input.passed,
         recommended_exit_code: if input.passed { 0 } else { 1 },
         config: input.config,
@@ -3014,6 +3049,7 @@ fn diagnostic_triage_report(
         telemetry_schema_version: telemetry.schema_version,
         suite_name: telemetry.suite.name.to_string(),
         suite_version: telemetry.suite.version.to_string(),
+        build: telemetry.suite.build.clone(),
         passed,
         recommended_exit_code: if passed { 0 } else { 1 },
         health: json_label(&telemetry.analysis.health)?,

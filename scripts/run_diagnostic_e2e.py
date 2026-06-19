@@ -324,6 +324,7 @@ def build_summary(
 
     status = "passed" if not errors else "failed"
     top_route = as_dict(as_dict(observability.get("investigation_plan")).get("top_route"))
+    build = as_dict(as_dict(observability.get("suite")).get("build"))
     return {
         "diagnostic_e2e_report_schema_version": E2E_REPORT_SCHEMA_VERSION,
         "generated_at_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -331,6 +332,9 @@ def build_summary(
         "recommended_exit_code": 0 if status == "passed" else 1,
         "git": git_metadata(repo_root),
         "suite_dir": str(suite_dir),
+        "build": build,
+        "build_version": build.get("version"),
+        "build_type": build.get("build_type"),
         "commands": commands,
         "observability": {
             "status": observability.get("status"),
@@ -838,6 +842,8 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Generated at UTC | {summary.get('generated_at_utc')} |",
         f"| Git commit | {as_dict(summary.get('git')).get('short_commit', '')} |",
         f"| Suite dir | {summary.get('suite_dir')} |",
+        f"| Build version | {summary.get('build_version')} |",
+        f"| Build type | {summary.get('build_type')} |",
         "",
         "## Observability",
         "",

@@ -205,6 +205,8 @@ def extract_sample(
     telemetry = load_json(telemetry_path)
     verdict = as_dict(telemetry.get("verdict"))
     analysis = as_dict(telemetry.get("analysis"))
+    suite = as_dict(telemetry.get("suite"))
+    build_metadata = as_dict(suite.get("build"))
     timing = as_dict(analysis.get("timing"))
     slowest = as_dict(timing.get("slowest_test"))
     duration_seconds = float(command.get("duration_seconds") or 0)
@@ -222,7 +224,10 @@ def extract_sample(
         "cycles_per_second": safe_rate(cycles, duration_seconds),
         "frames_per_second": safe_rate(frames, duration_seconds),
         "telemetry_schema_version": telemetry.get("schema_version"),
-        "suite_version": as_dict(telemetry.get("suite")).get("version"),
+        "suite_version": suite.get("version"),
+        "build_metadata": build_metadata,
+        "build_version": build_metadata.get("version"),
+        "build_type": build_metadata.get("build_type"),
         "health": analysis.get("health"),
         "passed": verdict.get("passed"),
         "test_count": len(as_list(telemetry.get("tests"))),
@@ -333,6 +338,14 @@ def build_profile(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
         for sample in samples
         if as_dict(sample.get("slowest_test")).get("test_name")
     )
+    build_metadata = next(
+        (
+            as_dict(sample.get("build_metadata"))
+            for sample in samples + warmups
+            if as_dict(sample.get("build_metadata"))
+        ),
+        {},
+    )
 
     profile: dict[str, Any] = {
         "diagnostic_cartridge_profile_schema_version": PROFILE_SCHEMA_VERSION,
@@ -347,6 +360,7 @@ def build_profile(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
             "binary": str(binary),
             "skip_build": args.skip_build,
         },
+        "build_metadata": build_metadata,
         "build": build,
         "aggregates": {
             "wall_seconds": metric_stats(wall_values),
@@ -404,6 +418,9 @@ def format_report(profile: dict[str, Any]) -> str:
         f"| Commit | {markdown_cell(as_dict(profile.get('repo')).get('commit'))} |",
         f"| Dirty worktree | {markdown_cell(as_dict(profile.get('repo')).get('dirty'))} |",
         f"| Binary | {markdown_cell(as_dict(profile.get('config')).get('binary'))} |",
+        f"| Build version | {markdown_cell(as_dict(profile.get('build_metadata')).get('version'))} |",
+        f"| Build type | {markdown_cell(as_dict(profile.get('build_metadata')).get('build_type'))} |",
+        f"| Package version | {markdown_cell(as_dict(profile.get('build_metadata')).get('package_version'))} |",
         f"| Samples / warmups | {markdown_cell(as_dict(profile.get('config')).get('samples'))} / {markdown_cell(as_dict(profile.get('config')).get('warmups'))} |",
         "",
         "## Aggregates",
