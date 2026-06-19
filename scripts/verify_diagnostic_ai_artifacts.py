@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any
 
 
-AI_ARTIFACT_VERIFICATION_SCHEMA_VERSION = 1
+AI_ARTIFACT_VERIFICATION_SCHEMA_VERSION = 2
 EXPECTED_SCENARIO_COUNT = 42
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 34
 EXPECTED_FOCUS_DOMAIN_COUNT = 34
 EXPECTED_COVERAGE_GAP_COUNT = 6
+INPUT_SWEEP_EXPECTED_PAIR_COUNT = 65_536
+INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT = 1_572_864
 
 
 def as_dict(value: Any) -> dict[str, Any]:
@@ -175,6 +177,7 @@ def input_artifacts(
     suite_dir: Path,
     ai_index: dict[str, Any],
     ai_coverage_gap_plan: dict[str, Any],
+    input_sweep: dict[str, Any],
     ai_query: dict[str, Any],
     ai_diagnosis: dict[str, Any],
     ai_fix_handoff: dict[str, Any],
@@ -188,12 +191,14 @@ def input_artifacts(
     ai_session_smoke_matrix: dict[str, Any],
     e2e_report: dict[str, Any],
     check_e2e_report: bool,
+    check_input_sweep: bool,
     check_ai_route_matrix: bool,
     check_ai_debug_packet: bool,
     check_ai_debug_packet_matrix: bool,
 ) -> dict[str, str]:
     index_artifacts = as_dict(ai_index.get("artifacts"))
     coverage_gap_plan_artifacts = as_dict(ai_coverage_gap_plan.get("artifacts"))
+    input_sweep_artifacts = as_dict(input_sweep.get("artifacts"))
     query_artifacts = as_dict(ai_query.get("artifacts"))
     diagnosis_artifacts = as_dict(ai_diagnosis.get("artifacts"))
     fix_artifacts = as_dict(ai_fix_handoff.get("artifacts"))
@@ -281,6 +286,21 @@ def input_artifacts(
             fix_artifacts.get("replay_bundle_telemetry_json")
         ),
     }
+    if check_input_sweep:
+        artifacts.update(
+            {
+                "diagnostic_input_sweep_json": artifact_value(
+                    input_sweep_artifacts.get("diagnostic_input_sweep_json"),
+                    e2e_artifacts.get("diagnostic_input_sweep_json"),
+                    str(suite_dir / "diagnostic-input-sweep.json"),
+                ),
+                "diagnostic_input_sweep_report": artifact_value(
+                    input_sweep_artifacts.get("diagnostic_input_sweep_report"),
+                    e2e_artifacts.get("diagnostic_input_sweep_report"),
+                    str(suite_dir / "diagnostic-input-sweep.md"),
+                ),
+            }
+        )
     if check_ai_route_matrix:
         artifacts.update(
             {
@@ -736,6 +756,7 @@ def build_summary(
     suite_dir = args.suite_dir
     ai_index_path = suite_dir / "diagnostic-ai-observability-index.json"
     ai_coverage_gap_plan_path = suite_dir / "diagnostic-ai-coverage-gap-plan.json"
+    input_sweep_path = suite_dir / "diagnostic-input-sweep.json"
     ai_query_path = suite_dir / "diagnostic-ai-query-smoke.json"
     ai_diagnosis_path = suite_dir / "diagnostic-ai-diagnosis-smoke.json"
     ai_fix_handoff_path = suite_dir / "diagnostic-ai-fix-handoff-smoke.json"
@@ -753,6 +774,7 @@ def build_summary(
 
     ai_index = load_json(ai_index_path)
     ai_coverage_gap_plan = load_json(ai_coverage_gap_plan_path)
+    input_sweep = load_json(input_sweep_path)
     ai_query = load_json(ai_query_path)
     ai_diagnosis = load_json(ai_diagnosis_path)
     ai_fix_handoff = load_json(ai_fix_handoff_path)
@@ -766,6 +788,7 @@ def build_summary(
     ai_session_smoke_matrix = load_json(ai_session_smoke_matrix_path)
     e2e_report = load_json(e2e_report_path)
     check_e2e_report = args.require_e2e_report or bool(e2e_report)
+    check_input_sweep = check_e2e_report or bool(input_sweep)
     check_ai_route_matrix = args.require_ai_route_matrix or bool(ai_route_matrix)
     check_ai_debug_packet = args.require_ai_debug_packet or bool(ai_debug_packet)
     check_ai_debug_packet_matrix = args.require_ai_debug_packet_matrix or bool(
@@ -774,6 +797,7 @@ def build_summary(
     source_artifacts = [
         ai_index,
         ai_coverage_gap_plan,
+        input_sweep,
         ai_query,
         ai_diagnosis,
         ai_fix_handoff,
@@ -792,6 +816,7 @@ def build_summary(
         suite_dir,
         ai_index,
         ai_coverage_gap_plan,
+        input_sweep,
         ai_query,
         ai_diagnosis,
         ai_fix_handoff,
@@ -805,6 +830,7 @@ def build_summary(
         ai_session_smoke_matrix,
         e2e_report,
         check_e2e_report,
+        check_input_sweep,
         check_ai_route_matrix,
         check_ai_debug_packet,
         check_ai_debug_packet_matrix,
@@ -1039,6 +1065,55 @@ def build_summary(
             == EXPECTED_COVERAGE_GAP_COUNT
             and not weak_gap_rows,
             {"summary": coverage_gap_plan_summary, "weak_gap_rows": weak_gap_rows},
+        )
+    input_sweep_summary = as_dict(input_sweep.get("summary"))
+    if check_input_sweep:
+        add_check(
+            checks,
+            errors,
+            "diagnostic_input_sweep_loaded",
+            bool(input_sweep),
+            str(input_sweep_path),
+        )
+        add_check(
+            checks,
+            errors,
+            "diagnostic_input_sweep_passed",
+            input_sweep.get("status") == "passed"
+            and input_sweep.get("passed") is True
+            and input_sweep.get("recommended_exit_code") == 0,
+            {
+                "status": input_sweep.get("status"),
+                "passed": input_sweep.get("passed"),
+                "recommended_exit_code": input_sweep.get("recommended_exit_code"),
+            },
+        )
+        add_check(
+            checks,
+            errors,
+            "diagnostic_input_sweep_identity",
+            input_sweep.get("input_sweep_schema_version") == 1
+            and input_sweep.get("coverage_gap_id") == "input_port_matrix",
+            {
+                "input_sweep_schema_version": input_sweep.get(
+                    "input_sweep_schema_version"
+                ),
+                "coverage_gap_id": input_sweep.get("coverage_gap_id"),
+            },
+        )
+        add_check(
+            checks,
+            errors,
+            "diagnostic_input_sweep_exhaustive_counts",
+            input_sweep_summary.get("pair_count") == INPUT_SWEEP_EXPECTED_PAIR_COUNT
+            and input_sweep_summary.get("passed_pair_count")
+            == INPUT_SWEEP_EXPECTED_PAIR_COUNT
+            and input_sweep_summary.get("failed_pair_count") == 0
+            and input_sweep_summary.get("failure_count") == 0
+            and input_sweep_summary.get("checked_read_count")
+            == INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT
+            and input_sweep_summary.get("exhaustive_two_port_matrix") is True,
+            input_sweep_summary,
         )
     localization_summary = as_dict(ai_localization_eval.get("summary"))
     if ai_localization_eval or check_e2e_report:
@@ -1852,6 +1927,25 @@ def build_summary(
                 == coverage_gap_plan_summary.get("telemetry_signal_gap_count"),
                 e2e_coverage_gap_plan,
             )
+        e2e_input_sweep = as_dict(e2e_report.get("input_sweep"))
+        if input_sweep:
+            add_check(
+                checks,
+                errors,
+                "e2e_diagnostic_input_sweep_matches",
+                e2e_input_sweep.get("status") == input_sweep.get("status")
+                and e2e_input_sweep.get("coverage_gap_id")
+                == input_sweep.get("coverage_gap_id")
+                and e2e_input_sweep.get("pair_count")
+                == input_sweep_summary.get("pair_count")
+                and e2e_input_sweep.get("checked_read_count")
+                == input_sweep_summary.get("checked_read_count")
+                and e2e_input_sweep.get("failure_count")
+                == input_sweep_summary.get("failure_count")
+                and e2e_input_sweep.get("exhaustive_two_port_matrix")
+                == input_sweep_summary.get("exhaustive_two_port_matrix"),
+                e2e_input_sweep,
+            )
         add_check(
             checks,
             errors,
@@ -2080,6 +2174,23 @@ def build_summary(
             "ai_coverage_gap_plan_validation_command_count": coverage_gap_plan_summary.get(
                 "validation_command_count"
             ),
+            "diagnostic_input_sweep_checked": check_input_sweep,
+            "diagnostic_input_sweep_status": input_sweep.get("status"),
+            "diagnostic_input_sweep_coverage_gap_id": input_sweep.get(
+                "coverage_gap_id"
+            ),
+            "diagnostic_input_sweep_pair_count": input_sweep_summary.get(
+                "pair_count"
+            ),
+            "diagnostic_input_sweep_checked_read_count": input_sweep_summary.get(
+                "checked_read_count"
+            ),
+            "diagnostic_input_sweep_failure_count": input_sweep_summary.get(
+                "failure_count"
+            ),
+            "diagnostic_input_sweep_exhaustive_two_port_matrix": input_sweep_summary.get(
+                "exhaustive_two_port_matrix"
+            ),
             "source_match_count": as_dict(ai_fix_handoff.get("source_scan")).get(
                 "source_match_count"
             ),
@@ -2259,6 +2370,7 @@ def build_summary(
             "Use this verifier before trusting a downloaded diagnostic scenario-suite artifact for automated debugging.",
             "A passed verifier proves the AI index, query smoke, diagnosis smoke, and fix handoff agree on route, scenario, focus domain, and probe.",
             "When diagnostic-ai-coverage-gap-plan.json is present, this verifier also proves known coverage gaps are mapped to current source/test anchors, telemetry signals, and validation commands.",
+            "When diagnostic-input-sweep.json is present, this verifier also proves the input_port_matrix companion artifact exhaustively covered both controller ports.",
             "When diagnostic-ai-route-matrix.json is present, this verifier also proves every AI route can regenerate diagnosis and fix-handoff artifacts.",
             "When diagnostic-ai-debug-packet.json is present, this verifier also proves the selected route has a relocatable packet with digest-checked evidence and source/test context.",
             "When diagnostic-ai-debug-packet-matrix.json is present, this verifier also proves every AI route has a relocatable packet with source/test context.",
@@ -2347,6 +2459,13 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| AI coverage test anchors | {totals.get('ai_coverage_gap_plan_test_anchor_gap_count')} |",
         f"| AI coverage telemetry mappings | {totals.get('ai_coverage_gap_plan_telemetry_signal_gap_count')} |",
         f"| AI coverage validation commands | {totals.get('ai_coverage_gap_plan_validation_command_count')} |",
+        f"| Diagnostic input sweep checked | {totals.get('diagnostic_input_sweep_checked')} |",
+        f"| Diagnostic input sweep | {totals.get('diagnostic_input_sweep_status')} |",
+        f"| Diagnostic input sweep gap | {totals.get('diagnostic_input_sweep_coverage_gap_id')} |",
+        f"| Diagnostic input sweep pairs | {totals.get('diagnostic_input_sweep_pair_count')} |",
+        f"| Diagnostic input sweep checked reads | {totals.get('diagnostic_input_sweep_checked_read_count')} |",
+        f"| Diagnostic input sweep failures | {totals.get('diagnostic_input_sweep_failure_count')} |",
+        f"| Diagnostic input sweep exhaustive matrix | {totals.get('diagnostic_input_sweep_exhaustive_two_port_matrix')} |",
         f"| Fix handoff test matches | {totals.get('test_match_count')} |",
         "",
         "## Automation Readiness",
@@ -2470,6 +2589,7 @@ def main() -> int:
             f"{summary['status']}: suite={args.suite_dir} "
             f"checks={totals.get('passed_check_count')}/{totals.get('check_count')} "
             f"missing_artifacts={totals.get('missing_artifact_count')} "
+            f"input_sweep={totals.get('diagnostic_input_sweep_status')}:{totals.get('diagnostic_input_sweep_pair_count')}:{totals.get('diagnostic_input_sweep_failure_count')} "
             f"route={totals.get('top_route_id')} "
             f"scenario={totals.get('top_route_scenario')} "
             f"summary_json={summary_json} summary_report={summary_report}"
