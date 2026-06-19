@@ -2315,6 +2315,18 @@ fn get_screen_resolution() -> (usize, usize) {
     (1920, 1080)
 }
 
+fn oxidenes_version() -> &'static str {
+    env!("OXIDENES_VERSION")
+}
+
+fn version_banner() -> String {
+    format!("OxideNES v{}", oxidenes_version())
+}
+
+fn cli_version_line() -> String {
+    format!("oxidenes {}", oxidenes_version())
+}
+
 fn main() {
     // Boost Windows timer resolution for smooth frame pacing
     #[cfg(target_os = "windows")]
@@ -2330,7 +2342,7 @@ fn main() {
     // CLI flags (handle before any initialization)
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
-        println!("OxideNES v{}", env!("CARGO_PKG_VERSION"));
+        println!("{}", version_banner());
         println!();
         println!("USAGE:");
         println!("    oxidenes [OPTIONS] [ROM_FILE]");
@@ -2357,7 +2369,7 @@ fn main() {
         std::process::exit(0);
     }
     if args.contains(&"--version".to_string()) {
-        println!("oxidenes {}", env!("CARGO_PKG_VERSION"));
+        println!("{}", cli_version_line());
         std::process::exit(0);
     }
     if args.iter().any(|arg| arg == "--import-roms") {
@@ -2376,7 +2388,7 @@ fn main() {
     let mut update_dismissed = false;
 
     let mut window = Window::new(
-        &format!("OxideNES v{}", env!("OXIDENES_VERSION")),
+        &version_banner(),
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         WindowOptions {
