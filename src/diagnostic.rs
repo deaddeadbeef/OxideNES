@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 69;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 70;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v69";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v70";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -57,6 +57,7 @@ const CPU_COMPARE_MATRIX_TEST_ID: u8 = 43;
 const CPU_LOAD_STORE_MATRIX_TEST_ID: u8 = 44;
 const CPU_ALU_INDEX_MATRIX_TEST_ID: u8 = 45;
 const CPU_ARITHMETIC_MATRIX_TEST_ID: u8 = 46;
+const CPU_STATUS_MATRIX_TEST_ID: u8 = 47;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -311,6 +312,8 @@ const CPU_ALU_INDEX_MATRIX_FAULT_LABEL: &str = "cpu_alu_index_matrix_before_case
 const CPU_ALU_INDEX_MATRIX_SUMMARY_LABEL: &str = "cpu_alu_index_matrix_before_summary";
 const CPU_ARITHMETIC_MATRIX_FAULT_LABEL: &str = "cpu_arithmetic_matrix_before_cases";
 const CPU_ARITHMETIC_MATRIX_SUMMARY_LABEL: &str = "cpu_arithmetic_matrix_before_summary";
+const CPU_STATUS_MATRIX_FAULT_LABEL: &str = "cpu_status_matrix_before_cases";
+const CPU_STATUS_MATRIX_SUMMARY_LABEL: &str = "cpu_status_matrix_before_summary";
 const INPUT_PORT_MATRIX_FAULT_LABEL: &str = "input_port_matrix_before_serial_reads";
 const DMA_PHASE_MATRIX_FAULT_LABEL: &str = "oam_dma_phase_matrix_before_second_dma";
 
@@ -497,6 +500,22 @@ const CPU_ARITHMETIC_MATRIX_CASE_COUNT_ADDR: u16 = 0x0300;
 const CPU_ARITHMETIC_MATRIX_EXPECTED_ADC_MASK: u8 = 0x0F;
 const CPU_ARITHMETIC_MATRIX_EXPECTED_SBC_MASK: u8 = 0x0F;
 const CPU_ARITHMETIC_MATRIX_EXPECTED_CASE_COUNT: u8 = 8;
+const CPU_STATUS_MATRIX_BIT_MASK_ADDR: u16 = 0x0301;
+const CPU_STATUS_MATRIX_FLAG_MASK_ADDR: u16 = 0x0302;
+const CPU_STATUS_MATRIX_BIT_ZP_STATUS_ADDR: u16 = 0x0303;
+const CPU_STATUS_MATRIX_BIT_ABS_STATUS_ADDR: u16 = 0x0304;
+const CPU_STATUS_MATRIX_FLAG_CLEAR_STATUS_ADDR: u16 = 0x0305;
+const CPU_STATUS_MATRIX_CASE_COUNT_ADDR: u16 = 0x0306;
+const CPU_STATUS_MATRIX_ZP_OPERAND_ADDR: u8 = 0xE0;
+const CPU_STATUS_MATRIX_ABS_OPERAND_ADDR: u16 = 0x0310;
+const CPU_STATUS_MATRIX_BIT_STATUS_MASK: u8 = 0xC2;
+const CPU_STATUS_MATRIX_FLAG_STATUS_MASK: u8 = 0x4D;
+const CPU_STATUS_MATRIX_EXPECTED_BIT_MASK: u8 = 0x03;
+const CPU_STATUS_MATRIX_EXPECTED_FLAG_MASK: u8 = 0x0F;
+const CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS: u8 = 0xC2;
+const CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS: u8 = 0x40;
+const CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS: u8 = 0x00;
+const CPU_STATUS_MATRIX_EXPECTED_CASE_COUNT: u8 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -964,6 +983,19 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
             "ADC covers positive overflow, carry-to-zero, carry-in, and negative-overflow cases",
             "SBC covers no-borrow, borrow, signed-overflow, and borrow-in cases",
             "the matrix records every ADC/SBC arithmetic flag subcase in masks, result bytes, and case count",
+        ],
+    },
+    DiagnosticTestSpec {
+        id: CPU_STATUS_MATRIX_TEST_ID,
+        name: "cpu_status_bit_matrix",
+        subsystem: DiagnosticSubsystem::Cpu,
+        tier: DiagnosticTestTier::EdgeCase,
+        intent: "Verify BIT and explicit status set/clear opcodes preserve zero, negative, overflow, carry, interrupt-disable, and decimal flag behavior.",
+        expected_observations: &[
+            "BIT zero-page copies operand bits 7 and 6 into N/V while setting zero from A&M",
+            "BIT absolute preserves a non-zero A&M result while copying operand bit 6 into overflow",
+            "SEC/CLC, SEI/CLI, SED/CLD, and CLV set then clear their status bits through observable status snapshots",
+            "the matrix records every BIT and status set/clear subcase in masks and case count",
         ],
     },
 ];
@@ -1663,6 +1695,33 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         remediation_hint: "Inspect arithmetic matrix execution flow and the ADC/SBC opcode paths before broadening arithmetic coverage further.",
     },
     DiagnosticFailureSpec {
+        code: 0xE6,
+        test_id: CPU_STATUS_MATRIX_TEST_ID,
+        assertion: "BIT matrix copies operand status bits and zero result state",
+        expected: "BIT zero-page records N/V/Z as 0xC2 and BIT absolute records V-only status as 0x40",
+        observed: "one or more BIT opcode cases did not preserve the expected status bits",
+        likely_domain: "cpu.status.bit_flags",
+        remediation_hint: "Inspect BIT zero-page/absolute dispatch, zero flag calculation from A&M, and N/V copies from operand bits 7 and 6.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xE7,
+        test_id: CPU_STATUS_MATRIX_TEST_ID,
+        assertion: "Explicit status set/clear opcodes update their target flags",
+        expected: "SEC/CLC, SEI/CLI, SED/CLD, and CLV set then clear carry, interrupt-disable, decimal, and overflow bits",
+        observed: "one or more explicit status flag transitions did not match the expected set/clear behavior",
+        likely_domain: "cpu.status.set_clear_flags",
+        remediation_hint: "Inspect SEC, CLC, SEI, CLI, SED, CLD, and CLV opcode handlers plus PHP/PLA status serialization for observability.",
+    },
+    DiagnosticFailureSpec {
+        code: 0xEB,
+        test_id: CPU_STATUS_MATRIX_TEST_ID,
+        assertion: "CPU status/BIT matrix records every subcase",
+        expected: "BIT mask == 0x03, flag mask == 0x0F, clear-status snapshot == 0x00, and case count == 6",
+        observed: "the CPU status/BIT matrix did not record every expected subcase",
+        likely_domain: "cpu.status.bit_flags",
+        remediation_hint: "Inspect status matrix execution flow and the BIT/status opcode paths before broadening CPU flag coverage further.",
+    },
+    DiagnosticFailureSpec {
         code: 0xB0,
         test_id: 12,
         assertion: "Zero-page indexed LDA wraps from $FF + X to $80",
@@ -2128,7 +2187,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, a load/store/transfer matrix covering LDA/LDX/LDY indexed loads, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes, a logical/index matrix covering AND/ORA/EOR immediate results plus INX/INY/DEX/DEY wraparound and flag outcomes, and an arithmetic flag matrix covering ADC/SBC carry-in, carry-out, borrow, overflow, zero, and negative outcomes.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, a load/store/transfer matrix covering LDA/LDX/LDY indexed loads, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes, a logical/index matrix covering AND/ORA/EOR immediate results plus INX/INY/DEX/DEY wraparound and flag outcomes, an arithmetic flag matrix covering ADC/SBC carry-in, carry-out, borrow, overflow, zero, and negative outcomes, and a status/BIT matrix covering BIT zero-page/absolute plus SEC/CLC, SEI/CLI, SED/CLD, and CLV flag transitions.",
         missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
@@ -2224,6 +2283,7 @@ pub enum DiagnosticFaultInjection {
     CpuLoadStoreTransferMatrix,
     CpuAluIndexMatrix,
     CpuArithmeticFlagMatrix,
+    CpuStatusBitMatrix,
     CpuRamMirroring,
     CpuReadModifyWriteAddressingMatrix,
     CpuReadModifyWriteMatrix,
@@ -2248,10 +2308,11 @@ pub enum DiagnosticFaultInjection {
 }
 
 impl DiagnosticFaultInjection {
-    pub const ALL: [DiagnosticFaultInjection; 31] = [
+    pub const ALL: [DiagnosticFaultInjection; 32] = [
         DiagnosticFaultInjection::ApuStatusRegister,
         DiagnosticFaultInjection::CpuAluIndexMatrix,
         DiagnosticFaultInjection::CpuArithmeticFlagMatrix,
+        DiagnosticFaultInjection::CpuStatusBitMatrix,
         DiagnosticFaultInjection::CpuAccumulatorShiftRotateMatrix,
         DiagnosticFaultInjection::CpuAddressingModeMatrix,
         DiagnosticFaultInjection::CpuBranchConditionMatrix,
@@ -2294,6 +2355,7 @@ impl DiagnosticFaultInjection {
             DiagnosticFaultInjection::CpuLoadStoreTransferMatrix => "cpu_load_store_matrix",
             DiagnosticFaultInjection::CpuAluIndexMatrix => "cpu_alu_index_matrix",
             DiagnosticFaultInjection::CpuArithmeticFlagMatrix => "cpu_arithmetic_flag_matrix",
+            DiagnosticFaultInjection::CpuStatusBitMatrix => "cpu_status_bit_matrix",
             DiagnosticFaultInjection::CpuRamMirroring => "cpu_ram_mirroring",
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 "cpu_rmw_addressing_matrix"
@@ -2340,6 +2402,7 @@ impl DiagnosticFaultInjection {
             }
             DiagnosticFaultInjection::CpuAluIndexMatrix => CPU_ALU_INDEX_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuArithmeticFlagMatrix => CPU_ARITHMETIC_MATRIX_FAULT_LABEL,
+            DiagnosticFaultInjection::CpuStatusBitMatrix => CPU_STATUS_MATRIX_FAULT_LABEL,
             DiagnosticFaultInjection::CpuRamMirroring => CPU_RAM_MIRRORING_FAULT_LABEL,
             DiagnosticFaultInjection::CpuReadModifyWriteAddressingMatrix => {
                 CPU_RMW_ADDRESSING_MATRIX_FAULT_LABEL
@@ -2398,6 +2461,7 @@ pub struct DiagnosticTelemetry {
     pub cpu_rmw_addressing_matrix: CpuRmwAddressingMatrixTelemetry,
     pub cpu_rmw_matrix: CpuRmwMatrixTelemetry,
     pub cpu_stack_matrix: CpuStackMatrixTelemetry,
+    pub cpu_status_matrix: CpuStatusMatrixTelemetry,
     pub input_port_matrix: InputPortMatrixTelemetry,
     pub apu_status_matrix: ApuStatusMatrixTelemetry,
     pub apu_dmc_status: ApuDmcStatusTelemetry,
@@ -3124,6 +3188,33 @@ pub struct CpuArithmeticMatrixTelemetry {
     pub sbc_overflow_result_hex: String,
     pub sbc_borrow_in_result: u8,
     pub sbc_borrow_in_result_hex: String,
+    pub passed: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CpuStatusMatrixTelemetry {
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
+    pub expected_bit_mask: u8,
+    pub expected_bit_mask_hex: String,
+    pub bit_mask: u8,
+    pub bit_mask_hex: String,
+    pub expected_flag_mask: u8,
+    pub expected_flag_mask_hex: String,
+    pub flag_mask: u8,
+    pub flag_mask_hex: String,
+    pub bit_zp_status: u8,
+    pub bit_zp_status_hex: String,
+    pub expected_bit_zp_status: u8,
+    pub expected_bit_zp_status_hex: String,
+    pub bit_abs_status: u8,
+    pub bit_abs_status_hex: String,
+    pub expected_bit_abs_status: u8,
+    pub expected_bit_abs_status_hex: String,
+    pub flag_clear_status: u8,
+    pub flag_clear_status_hex: String,
+    pub expected_flag_clear_status: u8,
+    pub expected_flag_clear_status_hex: String,
     pub passed: bool,
 }
 
@@ -5297,6 +5388,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
     let cpu_load_store_matrix = cpu_load_store_matrix_telemetry(&ram);
     let cpu_alu_index_matrix = cpu_alu_index_matrix_telemetry(&ram);
     let cpu_arithmetic_matrix = cpu_arithmetic_matrix_telemetry(&ram);
+    let cpu_status_matrix = cpu_status_matrix_telemetry(&ram);
     let cpu_stack_matrix = cpu_stack_matrix_telemetry(&ram);
     let input_port_matrix = input_port_matrix_telemetry(&ram, &config);
     let apu_status_matrix = apu_status_matrix_telemetry(&ram);
@@ -5341,6 +5433,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_alu_index_matrix: &cpu_alu_index_matrix,
         cpu_arithmetic_matrix: &cpu_arithmetic_matrix,
+        cpu_status_matrix: &cpu_status_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -5389,6 +5482,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_addressing_matrix: &cpu_addressing_matrix,
         cpu_alu_index_matrix: &cpu_alu_index_matrix,
         cpu_arithmetic_matrix: &cpu_arithmetic_matrix,
+        cpu_status_matrix: &cpu_status_matrix,
         cpu_branch_matrix: &cpu_branch_matrix,
         cpu_compare_matrix: &cpu_compare_matrix,
         cpu_interrupt_matrix: &cpu_interrupt_matrix,
@@ -5479,6 +5573,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         cpu_interrupt_matrix,
         cpu_load_store_matrix,
         cpu_stack_matrix,
+        cpu_status_matrix,
         cpu_rmw_addressing_matrix,
         cpu_rmw_matrix,
         input_port_matrix,
@@ -5745,6 +5840,7 @@ pub fn format_diagnostic_report(telemetry: &DiagnosticTelemetry) -> String {
     write_cpu_load_store_section(&mut report, telemetry);
     write_cpu_alu_index_section(&mut report, telemetry);
     write_cpu_arithmetic_section(&mut report, telemetry);
+    write_cpu_status_section(&mut report, telemetry);
     write_cpu_stack_section(&mut report, telemetry);
     write_cpu_interrupt_section(&mut report, telemetry);
     write_timing_section(&mut report, telemetry);
@@ -7338,6 +7434,61 @@ fn write_cpu_arithmetic_section(report: &mut String, telemetry: &DiagnosticTelem
     writeln!(report).expect("write report");
 }
 
+fn write_cpu_status_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
+    writeln!(report, "## CPU Status/BIT Matrix").expect("write report");
+    writeln!(report).expect("write report");
+    writeln!(report, "| Field | Value |").expect("write report");
+    writeln!(report, "| --- | --- |").expect("write report");
+    writeln!(
+        report,
+        "| BIT/flag masks | {} / {} |",
+        telemetry.cpu_status_matrix.bit_mask_hex, telemetry.cpu_status_matrix.flag_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Expected masks | {} / {} |",
+        telemetry.cpu_status_matrix.expected_bit_mask_hex,
+        telemetry.cpu_status_matrix.expected_flag_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| BIT zero-page/absolute status | {} / {} |",
+        telemetry.cpu_status_matrix.bit_zp_status_hex,
+        telemetry.cpu_status_matrix.bit_abs_status_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Expected BIT status | {} / {} |",
+        telemetry.cpu_status_matrix.expected_bit_zp_status_hex,
+        telemetry.cpu_status_matrix.expected_bit_abs_status_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Cleared flag status / expected | {} / {} |",
+        telemetry.cpu_status_matrix.flag_clear_status_hex,
+        telemetry.cpu_status_matrix.expected_flag_clear_status_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status/BIT cases / expected | {} / {} |",
+        telemetry.cpu_status_matrix.observed_case_count,
+        telemetry.cpu_status_matrix.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Status/BIT matrix passed | {} |",
+        telemetry.cpu_status_matrix.passed
+    )
+    .expect("write report");
+    writeln!(report).expect("write report");
+}
+
 fn write_cpu_stack_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
     writeln!(report, "## CPU Stack Matrix").expect("write report");
     writeln!(report).expect("write report");
@@ -7901,6 +8052,8 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0x08 => OpcodeDecode::implied("PHP"),
         0x18 => OpcodeDecode::implied("CLC"),
         0x20 => OpcodeDecode::absolute("JSR"),
+        0x24 => OpcodeDecode::zero_page("BIT"),
+        0x2C => OpcodeDecode::absolute("BIT"),
         0x28 => OpcodeDecode::implied("PLP"),
         0x29 => OpcodeDecode::immediate("AND"),
         0x38 => OpcodeDecode::implied("SEC"),
@@ -7964,6 +8117,7 @@ fn decode_opcode(opcode: u8) -> Option<OpcodeDecode> {
         0xEA => OpcodeDecode::implied("NOP"),
         0x88 => OpcodeDecode::implied("DEY"),
         0xF0 => OpcodeDecode::relative("BEQ"),
+        0xF8 => OpcodeDecode::implied("SED"),
         _ => return None,
     };
     Some(decode)
@@ -8771,6 +8925,7 @@ struct HostValidationInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_alu_index_matrix: &'a CpuAluIndexMatrixTelemetry,
     cpu_arithmetic_matrix: &'a CpuArithmeticMatrixTelemetry,
+    cpu_status_matrix: &'a CpuStatusMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -8812,6 +8967,7 @@ struct ProbeTelemetryInput<'a> {
     cpu_addressing_matrix: &'a CpuAddressingMatrixTelemetry,
     cpu_alu_index_matrix: &'a CpuAluIndexMatrixTelemetry,
     cpu_arithmetic_matrix: &'a CpuArithmeticMatrixTelemetry,
+    cpu_status_matrix: &'a CpuStatusMatrixTelemetry,
     cpu_branch_matrix: &'a CpuBranchMatrixTelemetry,
     cpu_compare_matrix: &'a CpuCompareMatrixTelemetry,
     cpu_interrupt_matrix: &'a CpuInterruptMatrixTelemetry,
@@ -8971,6 +9127,18 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.cpu_arithmetic_matrix.sbc_borrow_in_result_hex,
             input.cpu_arithmetic_matrix.observed_case_count,
             input.cpu_arithmetic_matrix.expected_case_count
+        ));
+    }
+    if !input.cpu_status_matrix.passed {
+        failures.push(format!(
+            "CPU status/BIT matrix mismatch: bit_mask={}, flag_mask={}, BIT zp/abs status={}/{}, clear_status={}, cases {}/{}",
+            input.cpu_status_matrix.bit_mask_hex,
+            input.cpu_status_matrix.flag_mask_hex,
+            input.cpu_status_matrix.bit_zp_status_hex,
+            input.cpu_status_matrix.bit_abs_status_hex,
+            input.cpu_status_matrix.flag_clear_status_hex,
+            input.cpu_status_matrix.observed_case_count,
+            input.cpu_status_matrix.expected_case_count
         ));
     }
     if !input.cpu_stack_matrix.passed {
@@ -9695,6 +9863,34 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 input.cpu_arithmetic_matrix.expected_case_count
             ),
             likely_domain: "cpu.arithmetic.adc_sbc_flags".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "cpu.status_matrix.results".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cpu),
+            test_id: Some(CPU_STATUS_MATRIX_TEST_ID),
+            test_name: test_name(CPU_STATUS_MATRIX_TEST_ID),
+            status: gated_probe_status(passed_suite, input.cpu_status_matrix.passed),
+            description:
+                "CPU status/BIT matrix retained expected BIT and explicit status flag set/clear observations"
+                    .to_string(),
+            expected:
+                "bit=0x03, flags=0x0F, BIT zp/abs status=0xC2/0x40, clear_status=0x00, cases=6"
+                    .to_string(),
+            observed: format!(
+                "bit {}, flags {}, BIT zp/abs status {}/{}, clear_status {}, cases {}/{}",
+                input.cpu_status_matrix.bit_mask_hex,
+                input.cpu_status_matrix.flag_mask_hex,
+                input.cpu_status_matrix.bit_zp_status_hex,
+                input.cpu_status_matrix.bit_abs_status_hex,
+                input.cpu_status_matrix.flag_clear_status_hex,
+                input.cpu_status_matrix.observed_case_count,
+                input.cpu_status_matrix.expected_case_count
+            ),
+            likely_domain: "cpu.status.bit_flags".to_string(),
         },
     );
     push_probe(
@@ -10976,6 +11172,7 @@ fn build_program_with_labels() -> Result<(Vec<u8>, HashMap<String, u16>), String
     program.cpu_load_store_transfer_matrix();
     program.cpu_alu_index_matrix();
     program.cpu_arithmetic_flag_matrix();
+    program.cpu_status_bit_matrix();
 
     program.asm.lda_imm(STATUS_PASS);
     program.asm.sta_zp(STATUS_ADDR);
@@ -11219,6 +11416,27 @@ impl DiagnosticProgram {
         self.asm.ora_imm(mask_bit);
         self.asm.sta_abs(mask_addr);
         self.asm.inc_abs(CPU_ARITHMETIC_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn mark_status_matrix_case(&mut self, mask_addr: u16, mask_bit: u8) {
+        self.asm.lda_abs(mask_addr);
+        self.asm.ora_imm(mask_bit);
+        self.asm.sta_abs(mask_addr);
+        self.asm.inc_abs(CPU_STATUS_MATRIX_CASE_COUNT_ADDR);
+    }
+
+    fn record_status_mask(&mut self, addr: u16, mask: u8) {
+        self.asm.php();
+        self.asm.pla();
+        self.asm.and_imm(mask);
+        self.asm.sta_abs(addr);
+    }
+
+    fn expect_status_mask_eq(&mut self, mask: u8, expected: u8, fail_code: u8) {
+        self.asm.php();
+        self.asm.pla();
+        self.asm.and_imm(mask);
+        self.expect_a_eq(expected, fail_code);
     }
 
     fn set_overflow_flag(&mut self) {
@@ -12232,6 +12450,102 @@ impl DiagnosticProgram {
         self.asm.lda_abs(CPU_ARITHMETIC_MATRIX_CASE_COUNT_ADDR);
         self.expect_a_eq(CPU_ARITHMETIC_MATRIX_EXPECTED_CASE_COUNT, 0xE5);
         self.pass_test(CPU_ARITHMETIC_MATRIX_TEST_ID);
+    }
+
+    fn cpu_status_bit_matrix(&mut self) {
+        self.begin_test(CPU_STATUS_MATRIX_TEST_ID);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_BIT_MASK_ADDR);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_FLAG_MASK_ADDR);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_BIT_ZP_STATUS_ADDR);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_BIT_ABS_STATUS_ADDR);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_FLAG_CLEAR_STATUS_ADDR);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_CASE_COUNT_ADDR);
+
+        self.asm
+            .label(CPU_STATUS_MATRIX_FAULT_LABEL)
+            .expect("diagnostic fault-injection label should not collide");
+
+        self.asm.clc();
+        self.asm.clv();
+        self.asm.cld();
+        self.asm.lda_imm(0xC0);
+        self.asm.sta_zp(CPU_STATUS_MATRIX_ZP_OPERAND_ADDR);
+        self.asm.lda_imm(0x0F);
+        self.asm.bit_zp(CPU_STATUS_MATRIX_ZP_OPERAND_ADDR);
+        self.record_status_mask(
+            CPU_STATUS_MATRIX_BIT_ZP_STATUS_ADDR,
+            CPU_STATUS_MATRIX_BIT_STATUS_MASK,
+        );
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS, 0xE6);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_BIT_MASK_ADDR, 0x01);
+
+        self.asm.clc();
+        self.asm.clv();
+        self.asm.lda_imm(0x40);
+        self.asm.sta_abs(CPU_STATUS_MATRIX_ABS_OPERAND_ADDR);
+        self.asm.lda_imm(0xF0);
+        self.asm.bit_abs(CPU_STATUS_MATRIX_ABS_OPERAND_ADDR);
+        self.record_status_mask(
+            CPU_STATUS_MATRIX_BIT_ABS_STATUS_ADDR,
+            CPU_STATUS_MATRIX_BIT_STATUS_MASK,
+        );
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS, 0xE6);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_BIT_MASK_ADDR, 0x02);
+
+        self.asm.clc();
+        self.expect_c_clear(0xE7);
+        self.asm.sec();
+        self.expect_c_set(0xE7);
+        self.asm.clc();
+        self.expect_c_clear(0xE7);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_FLAG_MASK_ADDR, 0x01);
+
+        self.asm.cli();
+        self.expect_status_mask_eq(0x04, 0x00, 0xE7);
+        self.asm.sei();
+        self.expect_status_mask_eq(0x04, 0x04, 0xE7);
+        self.asm.cli();
+        self.expect_status_mask_eq(0x04, 0x00, 0xE7);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_FLAG_MASK_ADDR, 0x02);
+
+        self.asm.cld();
+        self.expect_status_mask_eq(0x08, 0x00, 0xE7);
+        self.asm.sed();
+        self.expect_status_mask_eq(0x08, 0x08, 0xE7);
+        self.asm.cld();
+        self.expect_status_mask_eq(0x08, 0x00, 0xE7);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_FLAG_MASK_ADDR, 0x04);
+
+        self.set_overflow_flag();
+        self.expect_v_set(0xE7);
+        self.asm.clv();
+        self.expect_v_clear(0xE7);
+        self.record_status_mask(
+            CPU_STATUS_MATRIX_FLAG_CLEAR_STATUS_ADDR,
+            CPU_STATUS_MATRIX_FLAG_STATUS_MASK,
+        );
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS, 0xE7);
+        self.mark_status_matrix_case(CPU_STATUS_MATRIX_FLAG_MASK_ADDR, 0x08);
+
+        self.asm
+            .label(CPU_STATUS_MATRIX_SUMMARY_LABEL)
+            .expect("diagnostic status summary label should not collide");
+        self.asm.lda_abs(CPU_STATUS_MATRIX_BIT_MASK_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_BIT_MASK, 0xEB);
+        self.asm.lda_abs(CPU_STATUS_MATRIX_FLAG_MASK_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_FLAG_MASK, 0xEB);
+        self.asm.lda_abs(CPU_STATUS_MATRIX_BIT_ZP_STATUS_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS, 0xEB);
+        self.asm.lda_abs(CPU_STATUS_MATRIX_BIT_ABS_STATUS_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS, 0xEB);
+        self.asm.lda_abs(CPU_STATUS_MATRIX_FLAG_CLEAR_STATUS_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS, 0xEB);
+        self.asm.lda_abs(CPU_STATUS_MATRIX_CASE_COUNT_ADDR);
+        self.expect_a_eq(CPU_STATUS_MATRIX_EXPECTED_CASE_COUNT, 0xEB);
+        self.asm.sei();
+        self.asm.cld();
+        self.pass_test(CPU_STATUS_MATRIX_TEST_ID);
     }
 
     fn joypad_overread_returns_one(&mut self) {
@@ -13674,6 +13988,14 @@ impl Assembler {
         self.op_imm(0xC0, value);
     }
 
+    fn bit_zp(&mut self, addr: u8) {
+        self.op_zp(0x24, addr);
+    }
+
+    fn bit_abs(&mut self, addr: u16) {
+        self.op_abs(0x2C, addr);
+    }
+
     fn beq(&mut self, label: &str) {
         self.op_rel(0xF0, label);
     }
@@ -13861,6 +14183,10 @@ impl Assembler {
 
     fn cld(&mut self) {
         self.emit(0xD8);
+    }
+
+    fn sed(&mut self) {
+        self.emit(0xF8);
     }
 
     fn clc(&mut self) {
@@ -14080,6 +14406,9 @@ fn apply_diagnostic_fault_injection(bus: &mut Bus, fault: DiagnosticFaultInjecti
         }
         DiagnosticFaultInjection::CpuArithmeticFlagMatrix => {
             bus.cpu_write(CPU_ARITHMETIC_MATRIX_ADC_MASK_ADDR, 0x80);
+        }
+        DiagnosticFaultInjection::CpuStatusBitMatrix => {
+            bus.cpu_write(CPU_STATUS_MATRIX_BIT_MASK_ADDR, 0x80);
         }
         DiagnosticFaultInjection::CpuStackStatusMatrix => {
             bus.cpu_write(CPU_STACK_MATRIX_CASE_COUNT_ADDR, 0x80);
@@ -14534,6 +14863,46 @@ fn cpu_arithmetic_matrix_telemetry(ram: &[u8]) -> CpuArithmeticMatrixTelemetry {
             && sbc_borrow_result == 0xFF
             && sbc_overflow_result == 0x7F
             && sbc_borrow_in_result == 0x00,
+    }
+}
+
+fn cpu_status_matrix_telemetry(ram: &[u8]) -> CpuStatusMatrixTelemetry {
+    let bit_mask = ram[(CPU_STATUS_MATRIX_BIT_MASK_ADDR & 0x07FF) as usize];
+    let flag_mask = ram[(CPU_STATUS_MATRIX_FLAG_MASK_ADDR & 0x07FF) as usize];
+    let bit_zp_status = ram[(CPU_STATUS_MATRIX_BIT_ZP_STATUS_ADDR & 0x07FF) as usize];
+    let bit_abs_status = ram[(CPU_STATUS_MATRIX_BIT_ABS_STATUS_ADDR & 0x07FF) as usize];
+    let flag_clear_status = ram[(CPU_STATUS_MATRIX_FLAG_CLEAR_STATUS_ADDR & 0x07FF) as usize];
+    let observed_case_count = ram[(CPU_STATUS_MATRIX_CASE_COUNT_ADDR & 0x07FF) as usize];
+
+    CpuStatusMatrixTelemetry {
+        expected_case_count: CPU_STATUS_MATRIX_EXPECTED_CASE_COUNT,
+        observed_case_count,
+        expected_bit_mask: CPU_STATUS_MATRIX_EXPECTED_BIT_MASK,
+        expected_bit_mask_hex: hex_byte(CPU_STATUS_MATRIX_EXPECTED_BIT_MASK),
+        bit_mask,
+        bit_mask_hex: hex_byte(bit_mask),
+        expected_flag_mask: CPU_STATUS_MATRIX_EXPECTED_FLAG_MASK,
+        expected_flag_mask_hex: hex_byte(CPU_STATUS_MATRIX_EXPECTED_FLAG_MASK),
+        flag_mask,
+        flag_mask_hex: hex_byte(flag_mask),
+        bit_zp_status,
+        bit_zp_status_hex: hex_byte(bit_zp_status),
+        expected_bit_zp_status: CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS,
+        expected_bit_zp_status_hex: hex_byte(CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS),
+        bit_abs_status,
+        bit_abs_status_hex: hex_byte(bit_abs_status),
+        expected_bit_abs_status: CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS,
+        expected_bit_abs_status_hex: hex_byte(CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS),
+        flag_clear_status,
+        flag_clear_status_hex: hex_byte(flag_clear_status),
+        expected_flag_clear_status: CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS,
+        expected_flag_clear_status_hex: hex_byte(CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS),
+        passed: observed_case_count == CPU_STATUS_MATRIX_EXPECTED_CASE_COUNT
+            && bit_mask == CPU_STATUS_MATRIX_EXPECTED_BIT_MASK
+            && flag_mask == CPU_STATUS_MATRIX_EXPECTED_FLAG_MASK
+            && bit_zp_status == CPU_STATUS_MATRIX_EXPECTED_BIT_ZP_STATUS
+            && bit_abs_status == CPU_STATUS_MATRIX_EXPECTED_BIT_ABS_STATUS
+            && flag_clear_status == CPU_STATUS_MATRIX_EXPECTED_FLAG_CLEAR_STATUS,
     }
 }
 
@@ -18020,6 +18389,13 @@ fn compare_observation_checksums(
         &["cpu_arithmetic_matrix", "sbc_borrow_in_result"][..],
         &["cpu_arithmetic_matrix", "observed_case_count"][..],
         &["cpu_arithmetic_matrix", "passed"][..],
+        &["cpu_status_matrix", "bit_mask"][..],
+        &["cpu_status_matrix", "flag_mask"][..],
+        &["cpu_status_matrix", "bit_zp_status"][..],
+        &["cpu_status_matrix", "bit_abs_status"][..],
+        &["cpu_status_matrix", "flag_clear_status"][..],
+        &["cpu_status_matrix", "observed_case_count"][..],
+        &["cpu_status_matrix", "passed"][..],
         &["cpu_branch_matrix", "taken_mask"][..],
         &["cpu_branch_matrix", "not_taken_mask"][..],
         &["cpu_branch_matrix", "page_cross_result"][..],

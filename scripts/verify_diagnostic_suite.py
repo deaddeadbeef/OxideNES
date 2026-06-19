@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-EXPECTED_SCENARIO_SUITE_SCHEMA = 20
+EXPECTED_SCENARIO_SUITE_SCHEMA = 21
 EXPECTED_OBSERVER_SCHEMA = 3
-EXPECTED_TELEMETRY_SCHEMA = 69
+EXPECTED_TELEMETRY_SCHEMA = 70
 EXPECTED_TRIAGE_SCHEMA = 7
 EXPECTED_BUNDLE_SCHEMA = 4
 EXPECTED_BUILD_FIELDS = ("version", "build_type", "package_version")
@@ -42,6 +42,7 @@ EXPECTED_SCENARIOS = {
     "cpu_load_store_matrix_fault",
     "cpu_alu_index_matrix_fault",
     "cpu_arithmetic_matrix_fault",
+    "cpu_status_matrix_fault",
     "cpu_rmw_matrix_fault",
     "cpu_rmw_addressing_matrix_fault",
     "input_port_matrix_fault",
@@ -229,6 +230,7 @@ class SuiteVerifier:
             "cpu_load_store_matrix_fault",
             "cpu_alu_index_matrix_fault",
             "cpu_arithmetic_matrix_fault",
+            "cpu_status_matrix_fault",
             "input_port_matrix_fault",
             "ppu_nmi_timeout_fault",
             "ppu_read_buffer_fault",
