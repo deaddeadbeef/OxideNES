@@ -202,7 +202,11 @@ The builder writes `diagnostic-ai-coverage-gap-plan.json` and
 `diagnostic-ai-coverage-gap-plan.md`. Each known gap is mapped to the closest
 focus domains, source files, tests, diagnostic files, telemetry signals, and
 acceptance commands so the next cartridge fixture can be designed from one
-artifact without overstating current coverage.
+artifact without overstating current coverage. When
+`diagnostic-input-sweep.json` and `diagnostic-input-sweep.md` are already in the
+suite directory, the `input_port_matrix` row also records them as validated
+companion evidence so the remaining gap text stays focused on unmapped host
+input behavior rather than the exhaustive Joypad core sweep.
 
 To run only the exhaustive host-side evidence for the current
 `input_port_matrix` coverage gap, write an input sweep artifact:
@@ -214,11 +218,13 @@ cargo run --bin oxidenes-diagnostic -- --input-sweep-json target/diagnostics/inp
 The sweep validates all 65,536 joypad-1/joypad-2 mask pairs through the emulator
 `Joypad` core, including strobe-high hold, eight serial low-strobe reads, and
 post-exhaustion reads. The full e2e runner writes the same artifact as
-`diagnostic-input-sweep.json` and `diagnostic-input-sweep.md`; the standalone
+`diagnostic-input-sweep.json` and `diagnostic-input-sweep.md` before rebuilding
+the AI coverage-gap plan, then the verifier cross-checks that the plan's
+`input_port_matrix` companion artifact matches the sweep counts. The standalone
 command is useful when iterating on input behavior without rerunning the full AI
-diagnostic graph. The generated cartridge still provides the sampled
-healthy-mask fixtures and fault-localization scenarios used by the default AI
-diagnostic suite.
+diagnostic graph. The generated cartridge still provides the sampled healthy-mask
+fixtures and fault-localization scenarios used by the default AI diagnostic
+suite.
 
 To query an accepted suite without hand-joining JSON files, run:
 
@@ -702,12 +708,14 @@ evidence without replaying the cartridge again.
 `run_diagnostic_e2e.py` additionally writes `diagnostic-e2e-report.json`,
 `diagnostic-e2e-report.md`, `diagnostic-ai-observability-index.json`, and
 `diagnostic-ai-observability-index.md` after the observability and route
-evidence gates finish. It then runs
+evidence gates finish. It then runs the exhaustive input sweep and writes
+`diagnostic-input-sweep.json` plus `diagnostic-input-sweep.md`, then runs
 `build_diagnostic_ai_coverage_gap_plan.py` and writes
 `diagnostic-ai-coverage-gap-plan.json` plus
 `diagnostic-ai-coverage-gap-plan.md`, proving the known coverage gaps are
 ranked, mapped to current source/test anchors, linked to telemetry signals, and
-ready for the next cartridge test-design pass. It then runs
+ready for the next cartridge test-design pass with validated input-sweep
+companion evidence. It then runs
 `query_diagnostic_ai_index.py smoke` and
 writes `diagnostic-ai-query-smoke.json` plus `diagnostic-ai-query-smoke.md`.
 It also runs `run_diagnostic_ai_diagnosis.py` for the top route and writes

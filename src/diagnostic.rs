@@ -2168,9 +2168,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, and a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs.",
-        missing_coverage: "Exhaustive 65,536 two-port mask sweeps, disconnected-controller electrical defaults beyond all-released masks, and host input remapping.",
-        suggested_next_test: "Add an optional exhaustive input-port sweep mode and host-remapping fixtures.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs, and the e2e diagnostic runner writes diagnostic-input-sweep.json with an exhaustive 65,536-pair two-port Joypad core sweep.",
+        missing_coverage: "Host input remapping fixtures, disconnected-controller electrical defaults beyond all-released masks, and in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.",
+        suggested_next_test: "Add host input-remapping fixtures and disconnected-controller default cases that prove UI/configured controls still serialize through $4016/$4017 correctly.",
     },
 ];
 
@@ -18735,6 +18735,18 @@ mod tests {
                 && gap
                     .missing_coverage
                     .contains("Per-dot rendering behavior beyond targeted")));
+        assert!(telemetry.analysis.coverage_gaps.iter().any(|gap| {
+            gap.id == "input_port_matrix"
+                && gap.current_coverage.contains("diagnostic-input-sweep.json")
+                && gap.current_coverage.contains("65,536-pair")
+                && gap
+                    .missing_coverage
+                    .contains("Host input remapping fixtures")
+                && !gap
+                    .suggested_next_test
+                    .contains("optional exhaustive input-port sweep")
+                && gap.suggested_next_test.contains("input-remapping fixtures")
+        }));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());
         assert_eq!(

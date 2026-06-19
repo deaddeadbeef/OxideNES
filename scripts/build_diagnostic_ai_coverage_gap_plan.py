@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 
 
-AI_COVERAGE_GAP_PLAN_SCHEMA_VERSION = 1
+AI_COVERAGE_GAP_PLAN_SCHEMA_VERSION = 2
 EXPECTED_COVERAGE_GAP_COUNT = 6
+INPUT_SWEEP_EXPECTED_PAIR_COUNT = 65_536
+INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT = 1_572_864
 
 SUBSYSTEM_ALIASES = {
     "apu": ["apu"],
@@ -111,7 +113,7 @@ def test_command_for_path(path: str) -> dict[str, Any]:
     }
 
 
-def validation_commands(test_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validation_commands(gap_id: str, test_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     commands = [
         {
             "purpose": "Run the diagnostic cartridge regression suite after adding the new gap fixture.",
@@ -143,6 +145,25 @@ def validation_commands(test_files: list[dict[str, Any]]) -> list[dict[str, Any]
             ],
         },
     ]
+    if gap_id == "input_port_matrix":
+        commands.append(
+            {
+                "purpose": "Refresh the exhaustive input-port companion evidence for this gap.",
+                "text": "cargo run --bin oxidenes-diagnostic -- --input-sweep-json target/diagnostics/scenario-suite/diagnostic-input-sweep.json --input-sweep-report target/diagnostics/scenario-suite/diagnostic-input-sweep.md --no-stdout",
+                "argv": [
+                    "cargo",
+                    "run",
+                    "--bin",
+                    "oxidenes-diagnostic",
+                    "--",
+                    "--input-sweep-json",
+                    "target/diagnostics/scenario-suite/diagnostic-input-sweep.json",
+                    "--input-sweep-report",
+                    "target/diagnostics/scenario-suite/diagnostic-input-sweep.md",
+                    "--no-stdout",
+                ],
+            }
+        )
     commands.extend(
         test_command_for_path(str(record.get("path")))
         for record in test_files
@@ -190,9 +211,53 @@ def telemetry_signals(gap: dict[str, Any], telemetry_catalog: dict[str, Any]) ->
     ]
 
 
+def input_sweep_companion(suite_dir: Path, gap: dict[str, Any]) -> list[dict[str, Any]]:
+    if gap.get("id") != "input_port_matrix":
+        return []
+
+    sweep_json = suite_dir / "diagnostic-input-sweep.json"
+    sweep_report = suite_dir / "diagnostic-input-sweep.md"
+    sweep = load_json(sweep_json)
+    sweep_summary = as_dict(sweep.get("summary"))
+    validated = (
+        sweep_json.is_file()
+        and sweep_report.is_file()
+        and sweep.get("status") == "passed"
+        and sweep.get("coverage_gap_id") == "input_port_matrix"
+        and sweep_summary.get("pair_count") == INPUT_SWEEP_EXPECTED_PAIR_COUNT
+        and sweep_summary.get("passed_pair_count") == INPUT_SWEEP_EXPECTED_PAIR_COUNT
+        and sweep_summary.get("failed_pair_count") == 0
+        and sweep_summary.get("failure_count") == 0
+        and sweep_summary.get("checked_read_count")
+        == INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT
+        and sweep_summary.get("exhaustive_two_port_matrix") is True
+    )
+    return [
+        {
+            "id": "diagnostic_input_sweep",
+            "purpose": "Exhaustive host-side Joypad core evidence for the input_port_matrix coverage gap.",
+            "artifact_json": str(sweep_json),
+            "artifact_report": str(sweep_report),
+            "present": sweep_json.is_file() and sweep_report.is_file(),
+            "validated": validated,
+            "status": sweep.get("status"),
+            "coverage_gap_id": sweep.get("coverage_gap_id"),
+            "pair_count": sweep_summary.get("pair_count"),
+            "passed_pair_count": sweep_summary.get("passed_pair_count"),
+            "failed_pair_count": sweep_summary.get("failed_pair_count"),
+            "checked_read_count": sweep_summary.get("checked_read_count"),
+            "failure_count": sweep_summary.get("failure_count"),
+            "exhaustive_two_port_matrix": sweep_summary.get(
+                "exhaustive_two_port_matrix"
+            ),
+        }
+    ]
+
+
 def build_gap_entry(
     rank: int,
     gap: dict[str, Any],
+    suite_dir: Path,
     code_map: dict[str, Any],
     telemetry_catalog: dict[str, Any],
 ) -> dict[str, Any]:
@@ -210,6 +275,7 @@ def build_gap_entry(
         [record for entry in code_entries for record in as_list(entry.get("suggested_commands"))]
     )
     signals = telemetry_signals(gap, telemetry_catalog)
+    companion_artifacts = input_sweep_companion(suite_dir, gap)
     return {
         "rank": rank,
         "gap_id": gap.get("id"),
@@ -229,9 +295,10 @@ def build_gap_entry(
         "source_files": source_files,
         "test_files": test_files,
         "diagnostic_files": diagnostic_files,
+        "companion_artifacts": companion_artifacts,
         "telemetry_signals": signals,
         "current_regression_commands": commands[:8],
-        "acceptance_commands": validation_commands(test_files),
+        "acceptance_commands": validation_commands(str(gap.get("id") or ""), test_files),
         "next_test_acceptance": [
             "Add or extend an IP-safe generated diagnostic fixture for this gap.",
             "Expose new observations through triage.json and telemetry.json, not only report text.",
@@ -253,7 +320,7 @@ def build_summary(args: argparse.Namespace, summary_json: Path, summary_report: 
         if isinstance(gap, dict)
     ]
     gap_entries = [
-        build_gap_entry(rank, gap, code_map, telemetry_catalog)
+        build_gap_entry(rank, gap, suite_dir, code_map, telemetry_catalog)
         for rank, gap in enumerate(gaps, start=1)
     ]
     errors: list[str] = []
@@ -299,6 +366,15 @@ def build_summary(args: argparse.Namespace, summary_json: Path, summary_report: 
             "source_anchor_gap_count": sum(1 for entry in gap_entries if entry.get("source_files")),
             "test_anchor_gap_count": sum(1 for entry in gap_entries if entry.get("test_files")),
             "telemetry_signal_gap_count": sum(1 for entry in gap_entries if entry.get("telemetry_signals")),
+            "companion_artifact_gap_count": sum(1 for entry in gap_entries if entry.get("companion_artifacts")),
+            "validated_companion_artifact_gap_count": sum(
+                1
+                for entry in gap_entries
+                if any(
+                    as_dict(artifact).get("validated") is True
+                    for artifact in as_list(entry.get("companion_artifacts"))
+                )
+            ),
             "validation_command_count": sum(len(as_list(entry.get("acceptance_commands"))) for entry in gap_entries),
             "known_gap_count": coverage_ledger.get("known_gap_count"),
             "only_happy_paths": as_dict(coverage_ledger.get("coverage_posture")).get("only_happy_paths"),
@@ -316,6 +392,7 @@ def build_summary(args: argparse.Namespace, summary_json: Path, summary_report: 
         "ai_handoff": [
             "Use this plan when expanding the diagnostic cartridge rather than guessing the next fixture.",
             "Each gap joins known missing coverage to current source/test anchors, telemetry signals, and validation commands.",
+            "When companion artifacts exist, use them to separate remaining gaps from evidence already collected outside the cartridge.",
             "A passed plan does not claim the gaps are fixed; it proves they are explicit, ranked, and ready for test design.",
         ],
     }
@@ -336,13 +413,14 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Source anchors | {totals.get('source_anchor_gap_count')}/{totals.get('gap_count')} |",
         f"| Test anchors | {totals.get('test_anchor_gap_count')}/{totals.get('gap_count')} |",
         f"| Telemetry signal mappings | {totals.get('telemetry_signal_gap_count')}/{totals.get('gap_count')} |",
+        f"| Companion artifact gaps | {totals.get('validated_companion_artifact_gap_count')}/{totals.get('companion_artifact_gap_count')} |",
         f"| Validation commands | {totals.get('validation_command_count')} |",
         f"| Only happy paths | {totals.get('only_happy_paths')} |",
         "",
         "## Gaps",
         "",
-        "| Rank | Gap | Subsystem | Ready | Focus domains | Source files | Test files | Next test |",
-        "| ---: | --- | --- | --- | ---: | ---: | ---: | --- |",
+        "| Rank | Gap | Subsystem | Ready | Focus domains | Source files | Test files | Companion evidence | Next test |",
+        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for gap in as_list(summary.get("gaps")):
         if not isinstance(gap, dict):
@@ -353,6 +431,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
             f"{len(as_list(gap.get('mapped_focus_domains')))} | "
             f"{len(as_list(gap.get('source_files')))} | "
             f"{len(as_list(gap.get('test_files')))} | "
+            f"{sum(1 for artifact in as_list(gap.get('companion_artifacts')) if as_dict(artifact).get('validated') is True)}/{len(as_list(gap.get('companion_artifacts')))} | "
             f"{markdown_cell(gap.get('suggested_next_test'))} |"
         )
     lines.extend(["", "## AI Handoff", ""])
