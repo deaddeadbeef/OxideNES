@@ -28,6 +28,9 @@ use oxidenes::netplay::{NetplaySession, NetplayState};
 use oxidenes::ppu::Region;
 use oxidenes::recording::{sha256, InputRecording};
 use oxidenes::rendering::*;
+use oxidenes::rom_library::{
+    default_rom_library_dir, import_rom_folder, point_config_at_default_library, RomImportMode,
+};
 use oxidenes::romdb::RomDatabase;
 use oxidenes::scripting::ScriptEngine;
 use oxidenes::state_io::StateReader;
@@ -1037,6 +1040,24 @@ mod menu_text_tests {
     fn truncation_is_char_count_based() {
         assert_eq!(truncate_with_ellipsis_chars("ABCDEFGHIJ", 7), "ABCD...");
         assert_eq!(truncate_with_ellipsis_chars("ABCDE", 7), "ABCDE");
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn option_value_rejects_missing_or_option_like_values() {
+        let args = vec![
+            "oxidenes".to_string(),
+            "--import-roms".to_string(),
+            "--import-mode".to_string(),
+            "copy".to_string(),
+        ];
+
+        assert_eq!(option_value(&args, "--import-roms"), None);
+        assert_eq!(option_value(&args, "--import-mode"), Some("copy"));
     }
 }
 
@@ -2323,6 +2344,8 @@ fn main() {
         println!("    -h, --help       Show this help message");
         println!("    --version        Show version");
         println!("    --script <FILE>  Load a Lua script on startup");
+        println!("    --import-roms <DIR>          Import .nes files into the default ROM library");
+        println!("    --import-mode <copy|symlink> Import mode for --import-roms (default: copy)");
         println!();
         println!("CONTROLS:");
         println!("    Escape       Pause / Menu");
@@ -2336,6 +2359,12 @@ fn main() {
     if args.contains(&"--version".to_string()) {
         println!("oxidenes {}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
+    }
+    if args.iter().any(|arg| arg == "--import-roms") {
+        run_rom_import_command(&args);
+    } else if args.iter().any(|arg| arg == "--import-mode") {
+        eprintln!("--import-mode requires --import-roms <DIR>");
+        std::process::exit(2);
     }
 
     let mut config = load_config();
@@ -8391,6 +8420,68 @@ fn main() {
             };
         }
     }
+}
+
+fn run_rom_import_command(args: &[String]) -> ! {
+    let Some(source_dir) = option_value(args, "--import-roms") else {
+        eprintln!("--import-roms requires a source directory");
+        std::process::exit(2);
+    };
+    let mode = if args.iter().any(|arg| arg == "--import-mode") {
+        let Some(value) = option_value(args, "--import-mode") else {
+            eprintln!("--import-mode requires copy or symlink");
+            std::process::exit(2);
+        };
+        match RomImportMode::parse(value) {
+            Some(mode) => mode,
+            None => {
+                eprintln!("unsupported --import-mode: {value} (expected copy or symlink)");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        RomImportMode::Copy
+    };
+
+    match import_rom_folder(source_dir, mode) {
+        Ok(summary) => {
+            let mut config = load_config();
+            let default_dir = point_config_at_default_library(&mut config);
+            save_config(&config);
+            println!(
+                "Imported {} NES ROM(s) with {} mode into {}",
+                summary.imported,
+                summary.mode.as_str(),
+                default_dir.display()
+            );
+            if summary.skipped_existing > 0 {
+                println!(
+                    "Skipped {} existing target file(s)",
+                    summary.skipped_existing
+                );
+            }
+            if summary.skipped_entries > 0 {
+                println!("Skipped {} non-NES entry(s)", summary.skipped_entries);
+            }
+            std::process::exit(0);
+        }
+        Err(error) => {
+            eprintln!(
+                "ROM import failed for target {}: {}",
+                default_rom_library_dir().display(),
+                error
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn option_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|arg| arg == name)
+        .and_then(|index| args.get(index + 1))
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
 }
 
 /// Convert analog stick to NES D-pad with circular deadzone, cardinal snapping, and hysteresis.
