@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.44] - 2026-06-20
+
 ### Added
 - Added a generated Mapper 3/CNROM rendered CHR-bank diagnostic variant with host-sampled pixel telemetry for CHR bank writes while background rendering remains enabled.
 
