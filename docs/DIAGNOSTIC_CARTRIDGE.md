@@ -1364,7 +1364,7 @@ Schema version `69` adds suite-level `build` metadata with `version`,
 triage JSON, scenario-suite manifests, scenario-suite observers, input-sweep
 artifacts, and diagnostic profile samples. This lets automated debuggers and
 release evidence prove whether a diagnostic run came from a dev build such as
-`0.3.39-dev` or an `OXIDENES_RELEASE=1` release binary without relying on the
+`<package-version>-dev` or an `OXIDENES_RELEASE=1` release binary without relying on the
 terminal that launched it.
 The root wrapper schemas are bumped with the same contract: bundle schema `4`,
 triage schema `7`, scenario-suite schema `20`, observer schema `3`, and
