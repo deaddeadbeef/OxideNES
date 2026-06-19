@@ -46,6 +46,12 @@ cargo build --release
 
 # Or use the built-in file browser
 ./target/release/oxidenes
+
+# Import a folder of .nes files into the default library
+./target/release/oxidenes --import-roms path/to/rom-folder --import-mode copy
+
+# Or leave ROMs in place and symlink them into the default library
+./target/release/oxidenes --import-roms path/to/rom-folder --import-mode symlink
 ```
 
 On first launch without a configured ROM directory, OxideNES opens a folder setup screen. Select the folder that contains your legally obtained `.nes` files; files are not bundled with the emulator.

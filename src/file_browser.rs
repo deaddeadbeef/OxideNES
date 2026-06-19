@@ -1,3 +1,4 @@
+use crate::rom_library::default_rom_library_dir;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,9 +43,11 @@ impl FileBrowser {
     }
 
     pub fn default_dir() -> PathBuf {
-        let home = env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
-        let roms_dir = PathBuf::from(&home).join(".nes-emulator").join("roms");
-        let downloads = PathBuf::from(&home).join("Downloads");
+        let roms_dir = default_rom_library_dir();
+        let home = env::var("USERPROFILE")
+            .or_else(|_| env::var("HOME"))
+            .unwrap_or_else(|_| ".".to_string());
+        let downloads = PathBuf::from(home).join("Downloads");
         if roms_dir.is_dir() {
             roms_dir
         } else if downloads.is_dir() {
