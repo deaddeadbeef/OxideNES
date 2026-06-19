@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.40] - 2026-06-19
+
+### Added
+- Added release-vs-dev build metadata to diagnostic telemetry, triage JSON, bundle manifests, scenario-suite root artifacts, input-sweep artifacts, observability/e2e summaries, and diagnostic profiles.
+- Added verifier coverage so AI-facing diagnostic suites must expose consistent `version`, `build_type`, and `package_version` fields.
+
+### Changed
+- Bumped diagnostic telemetry to schema 69 and the affected wrapper artifact schemas for bundle, triage, scenario-suite, observer, and input-sweep outputs.
+- Included post-`v0.3.39` diagnostic observability work: input-sweep coverage-gap evidence, dev-build CLI version metadata, and build-identifiable diagnostic evidence.
+
 ## [0.3.4] - 2026-06-02
 
 ### Added
