@@ -384,6 +384,12 @@ def build_summary(
             "telemetry_signal_gap_count": as_dict(
                 ai_coverage_gap_plan.get("summary")
             ).get("telemetry_signal_gap_count"),
+            "companion_artifact_gap_count": as_dict(
+                ai_coverage_gap_plan.get("summary")
+            ).get("companion_artifact_gap_count"),
+            "validated_companion_artifact_gap_count": as_dict(
+                ai_coverage_gap_plan.get("summary")
+            ).get("validated_companion_artifact_gap_count"),
             "validation_command_count": as_dict(
                 ai_coverage_gap_plan.get("summary")
             ).get("validation_command_count"),
@@ -887,6 +893,7 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Source anchors | {ai_coverage_gap_plan.get('source_anchor_gap_count')} |",
         f"| Test anchors | {ai_coverage_gap_plan.get('test_anchor_gap_count')} |",
         f"| Telemetry signal mappings | {ai_coverage_gap_plan.get('telemetry_signal_gap_count')} |",
+        f"| Companion evidence | {ai_coverage_gap_plan.get('validated_companion_artifact_gap_count')}/{ai_coverage_gap_plan.get('companion_artifact_gap_count')} |",
         f"| Validation commands | {ai_coverage_gap_plan.get('validation_command_count')} |",
         f"| Only happy paths | {ai_coverage_gap_plan.get('only_happy_paths')} |",
         "",
@@ -1282,43 +1289,6 @@ def main() -> int:
     if command_passed(commands[-1]):
         commands.append(
             run_command(
-                "build_diagnostic_ai_coverage_gap_plan",
-                [
-                    sys.executable,
-                    script_path("build_diagnostic_ai_coverage_gap_plan.py"),
-                    "--suite-dir",
-                    str(suite_dir),
-                    "--summary-json",
-                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.json"),
-                    "--summary-report",
-                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.md"),
-                ],
-                repo_root,
-            )
-        )
-    else:
-        commands.append(skipped_command("build_diagnostic_ai_coverage_gap_plan", "AI index failed"))
-
-    if command_passed(commands[-1]):
-        commands.append(
-            run_command(
-                "query_diagnostic_ai_index_smoke",
-                [
-                    sys.executable,
-                    script_path("query_diagnostic_ai_index.py"),
-                    "--suite-dir",
-                    str(suite_dir),
-                    "smoke",
-                ],
-                repo_root,
-            )
-        )
-    else:
-        commands.append(skipped_command("query_diagnostic_ai_index_smoke", "AI coverage gap plan failed"))
-
-    if command_passed(commands[-1]):
-        commands.append(
-            run_command(
                 "run_diagnostic_input_sweep",
                 [
                     args.cargo,
@@ -1336,9 +1306,49 @@ def main() -> int:
             )
         )
     else:
+        commands.append(skipped_command("run_diagnostic_input_sweep", "AI index failed"))
+
+    if command_passed(commands[-1]):
         commands.append(
-            skipped_command("run_diagnostic_input_sweep", "AI query smoke failed")
+            run_command(
+                "build_diagnostic_ai_coverage_gap_plan",
+                [
+                    sys.executable,
+                    script_path("build_diagnostic_ai_coverage_gap_plan.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "--summary-json",
+                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.json"),
+                    "--summary-report",
+                    str(suite_dir / "diagnostic-ai-coverage-gap-plan.md"),
+                ],
+                repo_root,
+            )
         )
+    else:
+        commands.append(
+            skipped_command(
+                "build_diagnostic_ai_coverage_gap_plan",
+                "diagnostic input sweep failed",
+            )
+        )
+
+    if command_passed(commands[-1]):
+        commands.append(
+            run_command(
+                "query_diagnostic_ai_index_smoke",
+                [
+                    sys.executable,
+                    script_path("query_diagnostic_ai_index.py"),
+                    "--suite-dir",
+                    str(suite_dir),
+                    "smoke",
+                ],
+                repo_root,
+            )
+        )
+    else:
+        commands.append(skipped_command("query_diagnostic_ai_index_smoke", "AI coverage gap plan failed"))
 
     if command_passed(commands[-1]):
         commands.append(
@@ -1365,7 +1375,7 @@ def main() -> int:
         commands.append(
             skipped_command(
                 "run_diagnostic_ai_diagnosis_smoke",
-                "diagnostic input sweep failed",
+                "AI query smoke failed",
             )
         )
 

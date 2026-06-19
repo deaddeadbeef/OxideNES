@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-AI_ARTIFACT_VERIFICATION_SCHEMA_VERSION = 2
+AI_ARTIFACT_VERIFICATION_SCHEMA_VERSION = 3
 EXPECTED_SCENARIO_COUNT = 42
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 34
 EXPECTED_FOCUS_DOMAIN_COUNT = 34
@@ -981,6 +981,37 @@ def build_summary(
     coverage_gap_plan_gaps = [
         row for row in as_list(ai_coverage_gap_plan.get("gaps")) if isinstance(row, dict)
     ]
+    input_sweep_summary = as_dict(input_sweep.get("summary"))
+    input_gap_entries = [
+        row for row in coverage_gap_plan_gaps if row.get("gap_id") == "input_port_matrix"
+    ]
+    input_gap_entry = input_gap_entries[0] if input_gap_entries else {}
+    input_sweep_companions = [
+        artifact
+        for artifact in as_list(input_gap_entry.get("companion_artifacts"))
+        if isinstance(artifact, dict) and artifact.get("id") == "diagnostic_input_sweep"
+    ]
+    input_sweep_companion = (
+        input_sweep_companions[0] if input_sweep_companions else {}
+    )
+    input_sweep_companion_matches = (
+        input_sweep_companion.get("validated") is True
+        and input_sweep_companion.get("status") == input_sweep.get("status")
+        and input_sweep_companion.get("coverage_gap_id")
+        == input_sweep.get("coverage_gap_id")
+        and input_sweep_companion.get("pair_count")
+        == input_sweep_summary.get("pair_count")
+        and input_sweep_companion.get("passed_pair_count")
+        == input_sweep_summary.get("passed_pair_count")
+        and input_sweep_companion.get("failed_pair_count")
+        == input_sweep_summary.get("failed_pair_count")
+        and input_sweep_companion.get("checked_read_count")
+        == input_sweep_summary.get("checked_read_count")
+        and input_sweep_companion.get("failure_count")
+        == input_sweep_summary.get("failure_count")
+        and input_sweep_companion.get("exhaustive_two_port_matrix")
+        == input_sweep_summary.get("exhaustive_two_port_matrix")
+    )
     query_summary = as_dict(ai_query.get("summary"))
     coverage = as_dict(ai_index.get("coverage_limits"))
     add_check(
@@ -1066,7 +1097,21 @@ def build_summary(
             and not weak_gap_rows,
             {"summary": coverage_gap_plan_summary, "weak_gap_rows": weak_gap_rows},
         )
-    input_sweep_summary = as_dict(input_sweep.get("summary"))
+        add_check(
+            checks,
+            errors,
+            "coverage_gap_plan_companion_artifact_counts",
+            coverage_gap_plan_summary.get("companion_artifact_gap_count") == 1
+            and coverage_gap_plan_summary.get(
+                "validated_companion_artifact_gap_count"
+            )
+            == 1
+            and len(input_sweep_companions) == 1,
+            {
+                "summary": coverage_gap_plan_summary,
+                "input_port_matrix_companion_count": len(input_sweep_companions),
+            },
+        )
     if check_input_sweep:
         add_check(
             checks,
@@ -1114,6 +1159,16 @@ def build_summary(
             == INPUT_SWEEP_EXPECTED_CHECKED_READ_COUNT
             and input_sweep_summary.get("exhaustive_two_port_matrix") is True,
             input_sweep_summary,
+        )
+        add_check(
+            checks,
+            errors,
+            "diagnostic_input_sweep_coverage_gap_plan_companion_matches",
+            bool(ai_coverage_gap_plan) and input_sweep_companion_matches,
+            {
+                "companion": input_sweep_companion,
+                "input_sweep_summary": input_sweep_summary,
+            },
         )
     localization_summary = as_dict(ai_localization_eval.get("summary"))
     if ai_localization_eval or check_e2e_report:
@@ -1924,7 +1979,15 @@ def build_summary(
                 and e2e_coverage_gap_plan.get("ready_gap_count")
                 == coverage_gap_plan_summary.get("ready_gap_count")
                 and e2e_coverage_gap_plan.get("telemetry_signal_gap_count")
-                == coverage_gap_plan_summary.get("telemetry_signal_gap_count"),
+                == coverage_gap_plan_summary.get("telemetry_signal_gap_count")
+                and e2e_coverage_gap_plan.get("companion_artifact_gap_count")
+                == coverage_gap_plan_summary.get("companion_artifact_gap_count")
+                and e2e_coverage_gap_plan.get(
+                    "validated_companion_artifact_gap_count"
+                )
+                == coverage_gap_plan_summary.get(
+                    "validated_companion_artifact_gap_count"
+                ),
                 e2e_coverage_gap_plan,
             )
         e2e_input_sweep = as_dict(e2e_report.get("input_sweep"))
@@ -2171,10 +2234,24 @@ def build_summary(
             "ai_coverage_gap_plan_telemetry_signal_gap_count": coverage_gap_plan_summary.get(
                 "telemetry_signal_gap_count"
             ),
+            "ai_coverage_gap_plan_companion_artifact_gap_count": coverage_gap_plan_summary.get(
+                "companion_artifact_gap_count"
+            ),
+            "ai_coverage_gap_plan_validated_companion_artifact_gap_count": coverage_gap_plan_summary.get(
+                "validated_companion_artifact_gap_count"
+            ),
             "ai_coverage_gap_plan_validation_command_count": coverage_gap_plan_summary.get(
                 "validation_command_count"
             ),
             "diagnostic_input_sweep_checked": check_input_sweep,
+            "diagnostic_input_sweep_gap_plan_companion_count": len(
+                input_sweep_companions
+            ),
+            "diagnostic_input_sweep_gap_plan_companion_validated": input_sweep_companion.get(
+                "validated"
+            )
+            is True,
+            "diagnostic_input_sweep_gap_plan_companion_matches": input_sweep_companion_matches,
             "diagnostic_input_sweep_status": input_sweep.get("status"),
             "diagnostic_input_sweep_coverage_gap_id": input_sweep.get(
                 "coverage_gap_id"
@@ -2458,8 +2535,12 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| AI coverage source anchors | {totals.get('ai_coverage_gap_plan_source_anchor_gap_count')} |",
         f"| AI coverage test anchors | {totals.get('ai_coverage_gap_plan_test_anchor_gap_count')} |",
         f"| AI coverage telemetry mappings | {totals.get('ai_coverage_gap_plan_telemetry_signal_gap_count')} |",
+        f"| AI coverage companion evidence | {totals.get('ai_coverage_gap_plan_validated_companion_artifact_gap_count')}/{totals.get('ai_coverage_gap_plan_companion_artifact_gap_count')} |",
         f"| AI coverage validation commands | {totals.get('ai_coverage_gap_plan_validation_command_count')} |",
         f"| Diagnostic input sweep checked | {totals.get('diagnostic_input_sweep_checked')} |",
+        f"| Diagnostic input sweep gap-plan companions | {totals.get('diagnostic_input_sweep_gap_plan_companion_count')} |",
+        f"| Diagnostic input sweep gap-plan companion validated | {totals.get('diagnostic_input_sweep_gap_plan_companion_validated')} |",
+        f"| Diagnostic input sweep gap-plan companion matches | {totals.get('diagnostic_input_sweep_gap_plan_companion_matches')} |",
         f"| Diagnostic input sweep | {totals.get('diagnostic_input_sweep_status')} |",
         f"| Diagnostic input sweep gap | {totals.get('diagnostic_input_sweep_coverage_gap_id')} |",
         f"| Diagnostic input sweep pairs | {totals.get('diagnostic_input_sweep_pair_count')} |",

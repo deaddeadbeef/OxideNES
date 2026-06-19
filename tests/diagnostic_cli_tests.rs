@@ -4703,6 +4703,23 @@ fn diagnostic_cli_writes_standalone_triage_json() {
         .expect("coverage gaps should be an array")
         .iter()
         .any(|gap| gap["id"] == Value::String("ppu_pixel_pipeline".to_string())));
+    assert!(triage["coverage_gaps"]
+        .as_array()
+        .expect("coverage gaps should be an array")
+        .iter()
+        .any(
+            |gap| gap["id"] == Value::String("input_port_matrix".to_string())
+                && gap["current_coverage"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("diagnostic-input-sweep.json"))
+                && gap["missing_coverage"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Host input remapping fixtures"))
+                && gap["suggested_next_test"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("input-remapping fixtures")
+                        && !text.contains("optional exhaustive input-port sweep"))
+        ));
     assert_eq!(triage["probes"]["failed_probes"], Value::from(0));
     assert!(triage["artifact_hints"]
         .as_array()
