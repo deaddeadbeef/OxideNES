@@ -652,12 +652,16 @@ def suite_summary(suite_dir: Path) -> dict[str, Any]:
     actions = observer.get("next_actions")
     observations = observer.get("observations")
     first_action = actions[0] if isinstance(actions, list) and actions else None
+    build = as_dict(manifest.get("build"))
     return {
         "suite_dir": str(suite_dir),
         "scenario_suite_schema_version": manifest.get("scenario_suite_schema_version"),
         "observer_schema_version": observer.get("observer_schema_version"),
         "suite_name": manifest.get("suite_name"),
         "suite_version": manifest.get("suite_version"),
+        "build": build,
+        "build_version": build.get("version"),
+        "build_type": build.get("build_type"),
         "passed": manifest.get("passed"),
         "observer_status": observer.get("status"),
         "summary": observer.get("summary") or manifest.get("analysis", {}).get("summary"),
@@ -3891,6 +3895,8 @@ def write_markdown(path: Path, summary: dict[str, Any]) -> None:
         f"| Git dirty | {summary.get('git', {}).get('dirty', '')} |",
         f"| Suite schema | {suite.get('scenario_suite_schema_version')} |",
         f"| Observer schema | {suite.get('observer_schema_version')} |",
+        f"| Build version | {suite.get('build_version')} |",
+        f"| Build type | {suite.get('build_type')} |",
         f"| Scenario count | {suite.get('scenario_count')} |",
         f"| Next actions | {suite.get('next_action_count')} |",
         f"| Observations | {suite.get('observation_count')} |",

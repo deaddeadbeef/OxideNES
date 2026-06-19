@@ -66,6 +66,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 
 - CPU fetch/decode execution is covered by generated in-memory test ROM content.
 - The generated diagnostic cartridge bundle contains `manifest.json`, `triage.json`, `telemetry.json`, `report.md`, and `diagnostic.nes`; when a baseline is supplied it also contains `comparison.json` and `comparison.md`.
+- Diagnostic `manifest.json`, `triage.json`, `telemetry.json`, scenario-suite root artifacts, input-sweep artifacts, and diagnostic profiles include build metadata with `version`, `build_type`, and `package_version` so RC evidence proves whether it came from a dev or release binary.
 - `triage.json` and `telemetry.json` include explicit known coverage gaps so release evidence does not overstate cartridge coverage.
 - `triage.json` and `telemetry.json` include a derived debug focus with the focus test/subsystem/domain, failed probe ids, final event, terminal instruction, and last focus-test instruction for AI-first triage.
 - Diagnostic event tails include CPU register snapshots and diagnostic RAM watchpoints so failed headless runs preserve immediate execution-state context for automated triage.

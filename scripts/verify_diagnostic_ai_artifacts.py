@@ -1137,7 +1137,7 @@ def build_summary(
             checks,
             errors,
             "diagnostic_input_sweep_identity",
-            input_sweep.get("input_sweep_schema_version") == 1
+            input_sweep.get("input_sweep_schema_version") == 2
             and input_sweep.get("coverage_gap_id") == "input_port_matrix",
             {
                 "input_sweep_schema_version": input_sweep.get(

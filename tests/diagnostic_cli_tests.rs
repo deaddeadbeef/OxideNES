@@ -25,6 +25,21 @@ fn read_json(path: &Path) -> Value {
         .expect("json file should parse")
 }
 
+fn assert_build_metadata(value: &Value) {
+    assert_eq!(
+        value["version"],
+        Value::String(env!("OXIDENES_VERSION").to_string())
+    );
+    assert_eq!(
+        value["build_type"],
+        Value::String(env!("OXIDENES_BUILD_TYPE").to_string())
+    );
+    assert_eq!(
+        value["package_version"],
+        Value::String(env!("CARGO_PKG_VERSION").to_string())
+    );
+}
+
 #[test]
 fn diagnostic_cli_writes_ai_ready_bundle() {
     let bundle_dir = temp_dir("bundle-pass");
@@ -158,8 +173,9 @@ fn diagnostic_cli_writes_exhaustive_input_sweep_artifacts() {
         "--no-stdout should suppress input sweep JSON stdout"
     );
     let sweep = read_json(&sweep_json);
-    assert_eq!(sweep["input_sweep_schema_version"], Value::from(1));
-    assert_eq!(sweep["telemetry_schema_version"], Value::from(68));
+    assert_eq!(sweep["input_sweep_schema_version"], Value::from(2));
+    assert_eq!(sweep["telemetry_schema_version"], Value::from(69));
+    assert_build_metadata(&sweep["build"]);
     assert_eq!(sweep["status"], Value::String("passed".to_string()));
     assert_eq!(sweep["passed"], Value::Bool(true));
     assert_eq!(sweep["recommended_exit_code"], Value::from(0));
@@ -261,10 +277,11 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
 
     assert!(status.success());
     let manifest = read_json(&suite_dir.join("scenario-suite.json"));
-    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(19));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(68));
-    assert_eq!(manifest["triage_schema_version"], Value::from(6));
-    assert_eq!(manifest["bundle_schema_version"], Value::from(3));
+    assert_eq!(manifest["scenario_suite_schema_version"], Value::from(20));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(69));
+    assert_build_metadata(&manifest["build"]);
+    assert_eq!(manifest["triage_schema_version"], Value::from(7));
+    assert_eq!(manifest["bundle_schema_version"], Value::from(4));
     assert_eq!(manifest["passed"], Value::Bool(true));
     assert_eq!(manifest["recommended_exit_code"], Value::from(0));
     assert_eq!(
@@ -862,11 +879,12 @@ fn diagnostic_cli_writes_ai_ready_scenario_suite() {
             .is_some_and(|text| text.contains("scenario-suite-observer.json"))));
 
     let observer = read_json(&suite_dir.join("scenario-suite-observer.json"));
-    assert_eq!(observer["observer_schema_version"], Value::from(2));
-    assert_eq!(observer["scenario_suite_schema_version"], Value::from(19));
-    assert_eq!(observer["telemetry_schema_version"], Value::from(68));
-    assert_eq!(observer["triage_schema_version"], Value::from(6));
-    assert_eq!(observer["bundle_schema_version"], Value::from(3));
+    assert_eq!(observer["observer_schema_version"], Value::from(3));
+    assert_eq!(observer["scenario_suite_schema_version"], Value::from(20));
+    assert_eq!(observer["telemetry_schema_version"], Value::from(69));
+    assert_build_metadata(&observer["build"]);
+    assert_eq!(observer["triage_schema_version"], Value::from(7));
+    assert_eq!(observer["bundle_schema_version"], Value::from(4));
     assert_eq!(observer["status"], Value::String("passed".to_string()));
     assert_eq!(observer["recommended_exit_code"], Value::from(0));
     assert_eq!(observer["scenario_count"], Value::from(42));
@@ -4604,8 +4622,9 @@ fn diagnostic_cli_writes_standalone_triage_json() {
 
     assert!(status.success());
     let triage = read_json(&triage_path);
-    assert_eq!(triage["triage_schema_version"], Value::from(6));
-    assert_eq!(triage["telemetry_schema_version"], Value::from(68));
+    assert_eq!(triage["triage_schema_version"], Value::from(7));
+    assert_eq!(triage["telemetry_schema_version"], Value::from(69));
+    assert_build_metadata(&triage["build"]);
     assert_eq!(triage["passed"], Value::Bool(true));
     assert_eq!(
         triage["debug_focus"]["health"],
@@ -4763,8 +4782,9 @@ fn assert_bundle_artifacts_with_config(
     expected_fault_injection: Option<&str>,
 ) {
     let manifest = read_json(&bundle_dir.join("manifest.json"));
-    assert_eq!(manifest["bundle_schema_version"], Value::from(3));
-    assert_eq!(manifest["telemetry_schema_version"], Value::from(68));
+    assert_eq!(manifest["bundle_schema_version"], Value::from(4));
+    assert_eq!(manifest["telemetry_schema_version"], Value::from(69));
+    assert_build_metadata(&manifest["build"]);
     assert_eq!(manifest["passed"], Value::Bool(passed));
     assert_eq!(
         manifest["config"]["joypad2_mask_hex"],
