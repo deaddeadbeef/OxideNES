@@ -38,6 +38,8 @@ perf_output.txt
 *.log
 core
 core.*
+__pycache__/
+*.pyc
 
 # Cargo
 # Keep Cargo.lock for binary crate (recommended)

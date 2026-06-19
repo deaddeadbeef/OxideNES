@@ -339,8 +339,8 @@ python scripts/evaluate_diagnostic_ai_localization.py --suite-dir target/diagnos
 ```
 
 This writes `diagnostic-ai-localization-eval.json` plus
-`diagnostic-ai-localization-eval.md`. A passed evaluation means all 42
-scenarios match their expected health and focus-domain contracts, the 34
+`diagnostic-ai-localization-eval.md`. A passed evaluation means all 43
+scenarios match their expected health and focus-domain contracts, the 35
 intentional negative fixtures are not being reduced to happy-path evidence, and
 each negative fixture has route evidence, source/test anchors, packet
 self-verification, and a perfect localization score.
@@ -352,7 +352,7 @@ python scripts/build_diagnostic_ai_session_plan.py --suite-dir target/diagnostic
 ```
 
 This writes `diagnostic-ai-session-plan.json` plus
-`diagnostic-ai-session-plan.md`. A passed plan means all 34 accepted AI routes
+`diagnostic-ai-session-plan.md`. A passed plan means all 35 accepted AI routes
 have ordered read artifacts, replay commands, narrow-test commands,
 verification commands, and stop conditions before an automated debugger starts
 editing emulator code.
@@ -449,6 +449,7 @@ scenario: `pass`, `input_mask_matrix_pass`,
 `cpu_load_store_matrix_fault`,
 `cpu_alu_index_matrix_fault`,
 `cpu_arithmetic_matrix_fault`,
+`cpu_status_matrix_fault`,
 `input_port_matrix_fault`,
 `ppu_read_buffer_fault`,
 `mapper2_bank_switch_fault`, `mapper2_prg_ram_fault`,
@@ -506,6 +507,7 @@ with `--compare-suite-dir` when the comparison should be a CI gate. The
 `cpu_load_store_matrix_fault`,
 `cpu_alu_index_matrix_fault`,
 `cpu_arithmetic_matrix_fault`,
+`cpu_status_matrix_fault`,
 `input_port_matrix_fault`, and
 `ppu_read_buffer_fault` scenarios use telemetry-visible fault injection to
 corrupt deterministic CPU RAM and VRAM sentinels just before the cartridge
@@ -597,6 +599,10 @@ register regressions localize to `cpu.alu_index.logic_flags`.
 before the generated cartridge summarizes arithmetic carry, borrow, overflow,
 zero, and negative flag cases, proving arithmetic regressions localize to
 `cpu.arithmetic.adc_sbc_flags`.
+`cpu_status_matrix_fault` corrupts the CPU status/BIT matrix bit mask before
+the generated cartridge summarizes BIT zero/negative/overflow flags and
+explicit status set/clear opcodes, proving status flag regressions localize to
+`cpu.status.bit_flags`.
 `input_port_matrix_fault` clears joypad 2's Start button before the combined
 input-port serial matrix, proving `$4016`/`$4017` strobe-high, serial-shift,
 and overread regressions localize to `joypad.input_port_matrix`.
@@ -755,7 +761,7 @@ its expected health/focus-domain contract and whether every negative fixture
 has route evidence, source/test anchors, and packet self-verification.
 It then runs `build_diagnostic_ai_session_plan.py` and writes
 `diagnostic-ai-session-plan.json` plus `diagnostic-ai-session-plan.md`,
-turning all 34 accepted AI routes into deterministic debugger startup plans
+turning all 35 accepted AI routes into deterministic debugger startup plans
 with ordered artifacts, replay commands, narrow tests, verification commands,
 and stop conditions.
 It then runs `run_diagnostic_ai_session_smoke.py` and writes
@@ -1376,6 +1382,11 @@ The root wrapper schemas are bumped with the same contract: bundle schema `4`,
 triage schema `7`, scenario-suite schema `20`, observer schema `3`, and
 input-sweep schema `2`.
 
+Schema version `70` adds the `cpu_status_bit_matrix` cartridge test, top-level
+`cpu_status_matrix` telemetry, and the `cpu.status_matrix.results` probe. The
+cartridge records BIT zero-page/absolute status snapshots, SEC/CLC, SEI/CLI,
+SED/CLD, and CLV status behavior through compact masks and a case counter.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1447,3 +1458,9 @@ negative fixture. The fault corrupts the ADC/SBC arithmetic matrix ADC mask
 immediately before test 46 summarizes, so the suite can localize carry, borrow,
 overflow, zero, and negative arithmetic flag regressions to
 `cpu.arithmetic.adc_sbc_flags` with a paired AI route and replay command.
+
+Scenario suite schema version `21` adds the `cpu_status_matrix_fault` negative
+fixture. The fault corrupts the CPU status/BIT matrix bit mask immediately
+before test 47 summarizes, so the suite can localize BIT zero/negative/overflow
+flag regressions and explicit status set/clear opcode regressions to
+`cpu.status.bit_flags` with a paired AI route and replay command.

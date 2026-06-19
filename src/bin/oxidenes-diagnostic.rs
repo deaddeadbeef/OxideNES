@@ -17,7 +17,7 @@ use serde::Serialize;
 
 const DIAGNOSTIC_BUNDLE_SCHEMA_VERSION: u16 = 4;
 const DIAGNOSTIC_TRIAGE_SCHEMA_VERSION: u16 = 7;
-const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 20;
+const DIAGNOSTIC_SCENARIO_SUITE_SCHEMA_VERSION: u16 = 21;
 const DIAGNOSTIC_SCENARIO_OBSERVER_SCHEMA_VERSION: u16 = 3;
 const DIAGNOSTIC_INPUT_SWEEP_SCHEMA_VERSION: u16 = 2;
 const INPUT_SWEEP_PORT_MASK_COUNT: usize = 256;
@@ -2005,7 +2005,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
         config: default.clone(),
         expected_passed: true,
         expected_health: DiagnosticHealth::Healthy,
-        expected_focus_test_id: Some(46),
+        expected_focus_test_id: Some(47),
         expected_focus_domain: None,
     }];
     specs.extend(input_mask_scenario_specs(&default));
@@ -2257,6 +2257,19 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
             expected_health: DiagnosticHealth::CartridgeAssertionFailed,
             expected_focus_test_id: Some(46),
             expected_focus_domain: Some("cpu.arithmetic.adc_sbc_flags"),
+        },
+        DiagnosticScenarioSpec {
+            id: "cpu_status_matrix_fault",
+            title: "Intentional CPU status/BIT matrix assertion failure",
+            purpose: "Failure-localization fixture for BIT zero/negative/overflow flags and explicit CPU status set/clear opcodes.",
+            config: DiagnosticConfig {
+                fault_injection: Some(DiagnosticFaultInjection::CpuStatusBitMatrix),
+                ..default.clone()
+            },
+            expected_passed: false,
+            expected_health: DiagnosticHealth::CartridgeAssertionFailed,
+            expected_focus_test_id: Some(47),
+            expected_focus_domain: Some("cpu.status.bit_flags"),
         },
         DiagnosticScenarioSpec {
             id: "input_port_matrix_fault",
@@ -2533,7 +2546,7 @@ fn input_mask_scenario_specs(default: &DiagnosticConfig) -> Vec<DiagnosticScenar
             },
             expected_passed: true,
             expected_health: DiagnosticHealth::Healthy,
-            expected_focus_test_id: Some(46),
+            expected_focus_test_id: Some(47),
             expected_focus_domain: None,
         })
         .collect()

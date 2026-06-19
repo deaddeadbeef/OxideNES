@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
+## [0.3.41] - 2026-06-19
+
+### Added
+- Added a CPU status/BIT diagnostic cartridge matrix covering BIT zero-page/absolute status behavior plus SEC/CLC, SEI/CLI, SED/CLD, and CLV flag transitions.
+- Added the `cpu_status_matrix_fault` scenario-suite fixture and AI route so automated debugging can localize status flag regressions to `cpu.status.bit_flags`.
+
 ### Changed
+- Bumped diagnostic telemetry to schema 70 and scenario-suite artifacts to schema 21 for the new status/BIT telemetry and 43-scenario, 35-route AI corpus.
 - Hardened the diagnostic cartridge profiler so default binary resolution honors `CARGO_TARGET_DIR`, records `config.target_dir`, and fails when sampled telemetry is missing build `version`, `build_type`, or `package_version`.
 
 ### Tests
+- Added cartridge, CLI, verifier, e2e, and AI artifact coverage for the status/BIT fixture and route counts.
 - Added profiler-script integration coverage for `CARGO_TARGET_DIR` plus missing-build-metadata validation.
 
 ## [0.3.40] - 2026-06-19

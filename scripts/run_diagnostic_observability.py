@@ -467,6 +467,13 @@ FOCUS_DOMAIN_CODE_MAP = {
         "test_files": ["tests/ppu_tests.rs"],
         "search_terms": ["addr_latch", "self.w = false", "0x2002", "0x2006"],
     },
+    "cpu.status.bit_flags": {
+        "subsystem": "cpu",
+        "description": "BIT zero/negative/overflow flag behavior and explicit CPU status set/clear opcodes.",
+        "source_files": ["src/cpu.rs", "src/diagnostic.rs"],
+        "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
+        "search_terms": ["BIT", "SED", "CLV", "set_flag", "cpu_status_bit_matrix"],
+    },
 }
 
 SCENARIO_TEST_FILTERS = {
@@ -482,6 +489,7 @@ SCENARIO_TEST_FILTERS = {
     "cpu_load_store_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_failure",
     "cpu_alu_index_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_alu_index_matrix_failure",
     "cpu_arithmetic_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_arithmetic_matrix_failure",
+    "cpu_status_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_status_matrix_failure",
     "cpu_rmw_addressing_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_addressing_matrix_failure",
     "cpu_rmw_matrix_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_rmw_matrix_failure",
     "cpu_zero_page_wrap_fault": "generated_diagnostic_cartridge_localizes_intentional_cpu_zero_page_wrap_failure",
