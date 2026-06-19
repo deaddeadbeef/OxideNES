@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-PROFILE_SCHEMA_VERSION = 1
+PROFILE_SCHEMA_VERSION = 2
 OUTPUT_TAIL_LINES = 80
 
 
@@ -116,12 +116,30 @@ def binary_suffix() -> str:
     return ".exe" if os.name == "nt" else ""
 
 
+def cargo_target_dir(repo_root: Path) -> Path:
+    configured = os.environ.get("CARGO_TARGET_DIR")
+    if configured:
+        target_dir = Path(configured)
+        if target_dir.is_absolute():
+            return target_dir
+        return repo_root / target_dir
+    return repo_root / "target"
+
+
 def default_binary_path(repo_root: Path, profile: str, target: str | None) -> Path:
     profile_dir = "release" if profile == "release" else "debug"
-    target_root = repo_root / "target"
+    target_root = cargo_target_dir(repo_root)
     if target:
         target_root = target_root / target
     return target_root / profile_dir / f"oxidenes-diagnostic{binary_suffix()}"
+
+
+def missing_build_metadata_fields(build_metadata: dict[str, Any]) -> list[str]:
+    return [
+        field
+        for field in ["version", "build_type", "package_version"]
+        if not build_metadata.get(field)
+    ]
 
 
 def build_binary(args: argparse.Namespace, repo_root: Path) -> dict[str, Any] | None:
@@ -357,6 +375,7 @@ def build_profile(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
             "warmups": args.warmups,
             "profile": args.profile,
             "target": args.target,
+            "target_dir": str(cargo_target_dir(repo_root)),
             "binary": str(binary),
             "skip_build": args.skip_build,
         },
@@ -389,6 +408,12 @@ def build_profile(args: argparse.Namespace, repo_root: Path) -> dict[str, Any]:
         profile["errors"].append("diagnostic binary build failed")
     if not binary.is_file():
         profile["errors"].append(f"diagnostic binary was not found: {binary}")
+    missing_build_fields = missing_build_metadata_fields(build_metadata)
+    if missing_build_fields:
+        profile["errors"].append(
+            "diagnostic build metadata missing fields: "
+            + ", ".join(missing_build_fields)
+        )
     failed_samples = [
         sample["sample_index"] for sample in samples if sample.get("status") != "passed"
     ]

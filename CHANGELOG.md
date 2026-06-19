@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Hardened the diagnostic cartridge profiler so default binary resolution honors `CARGO_TARGET_DIR`, records `config.target_dir`, and fails when sampled telemetry is missing build `version`, `build_type`, or `package_version`.
+
+### Tests
+- Added profiler-script integration coverage for `CARGO_TARGET_DIR` plus missing-build-metadata validation.
+
 ## [0.3.40] - 2026-06-19
 
 ### Added
