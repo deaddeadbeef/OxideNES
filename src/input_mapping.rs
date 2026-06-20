@@ -1,4 +1,4 @@
-use crate::config::{ControllerBindings, KeyboardBindings};
+use crate::config::{ControllerBindings, InputBindings, KeyboardBindings};
 use crate::joypad::{Joypad, JoypadButton};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,33 @@ impl JoypadInputState {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct JoypadInputPair {
+    pub p1: JoypadInputState,
+    pub p2: JoypadInputState,
+}
+
+impl JoypadInputPair {
+    pub fn apply_to_joypads(self, joypad1: &mut Joypad, joypad2: &mut Joypad) {
+        self.p1.apply_to_joypad(joypad1);
+        self.p2.apply_to_joypad(joypad2);
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ControllerInputSnapshot<'a> {
+    pub pressed_buttons: &'a [&'a str],
+    pub dpad: DirectionalInput,
+    pub left_stick: DirectionalInput,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HostInputSnapshot<'a> {
+    pub pressed_keys: &'a [&'a str],
+    pub controller_p1: Option<ControllerInputSnapshot<'a>>,
+    pub controller_p2: Option<ControllerInputSnapshot<'a>>,
+}
+
 pub fn keyboard_state_from_bindings<F>(
     bindings: &KeyboardBindings,
     mut pressed_key: F,
@@ -96,6 +123,28 @@ where
     }
 
     state
+}
+
+pub fn keyboard_pair_from_bindings<F>(
+    bindings: &InputBindings,
+    mut pressed_key: F,
+    turbo_active: bool,
+) -> JoypadInputPair
+where
+    F: FnMut(&str) -> bool,
+{
+    JoypadInputPair {
+        p1: keyboard_state_from_bindings(
+            &bindings.keyboard_p1,
+            |name| pressed_key(name),
+            turbo_active,
+        ),
+        p2: keyboard_state_from_bindings(
+            &bindings.keyboard_p2,
+            |name| pressed_key(name),
+            turbo_active,
+        ),
+    }
 }
 
 pub fn controller_state_from_bindings<F>(
@@ -127,4 +176,38 @@ where
     }
 
     state
+}
+
+pub fn host_input_pair_from_snapshot(
+    bindings: &InputBindings,
+    snapshot: HostInputSnapshot<'_>,
+    turbo_active: bool,
+) -> JoypadInputPair {
+    let mut pair = keyboard_pair_from_bindings(
+        bindings,
+        |key| snapshot.pressed_keys.contains(&key),
+        turbo_active,
+    );
+
+    if let Some(controller) = snapshot.controller_p1 {
+        pair.p1.merge(controller_state_from_bindings(
+            &bindings.controller_p1,
+            |button| controller.pressed_buttons.contains(&button),
+            controller.dpad,
+            controller.left_stick,
+            turbo_active,
+        ));
+    }
+
+    if let Some(controller) = snapshot.controller_p2 {
+        pair.p2.merge(controller_state_from_bindings(
+            &bindings.controller_p2,
+            |button| controller.pressed_buttons.contains(&button),
+            controller.dpad,
+            controller.left_stick,
+            turbo_active,
+        ));
+    }
+
+    pair
 }
