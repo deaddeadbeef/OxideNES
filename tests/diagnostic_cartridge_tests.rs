@@ -1576,6 +1576,57 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(telemetry.mapper4_mmc3_a12_gate.expected_case_count, 2);
     assert!(telemetry.mapper4_mmc3_a12_gate.cycles > 0);
     assert_eq!(telemetry.mapper4_mmc3_a12_gate.error, None);
+    assert!(telemetry.mapper4_mmc3_sprite_a12_gate.passed);
+    assert_eq!(telemetry.mapper4_mmc3_sprite_a12_gate.mapper, 4);
+    assert_eq!(telemetry.mapper4_mmc3_sprite_a12_gate.prg_16k_banks, 4);
+    assert_eq!(telemetry.mapper4_mmc3_sprite_a12_gate.chr_8k_banks, 1);
+    assert_eq!(telemetry.mapper4_mmc3_sprite_a12_gate.irq_latch_hex, "0x01");
+    assert_eq!(
+        telemetry.mapper4_mmc3_sprite_a12_gate.low_sprite_ctrl_hex,
+        "0x00"
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_sprite_a12_gate.high_sprite_ctrl_hex,
+        "0x08"
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_sprite_a12_gate.sprite_mask_hex,
+        "0x10"
+    );
+    assert_eq!(
+        telemetry
+            .mapper4_mmc3_sprite_a12_gate
+            .observed_low_sprite_irq_count,
+        0
+    );
+    assert_eq!(
+        telemetry
+            .mapper4_mmc3_sprite_a12_gate
+            .expected_low_sprite_irq_count,
+        0
+    );
+    assert_eq!(
+        telemetry
+            .mapper4_mmc3_sprite_a12_gate
+            .observed_high_sprite_irq_count,
+        1
+    );
+    assert_eq!(
+        telemetry
+            .mapper4_mmc3_sprite_a12_gate
+            .expected_high_sprite_irq_count,
+        1
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_sprite_a12_gate.observed_case_count,
+        2
+    );
+    assert_eq!(
+        telemetry.mapper4_mmc3_sprite_a12_gate.expected_case_count,
+        2
+    );
+    assert!(telemetry.mapper4_mmc3_sprite_a12_gate.cycles > 0);
+    assert_eq!(telemetry.mapper4_mmc3_sprite_a12_gate.error, None);
     assert!(telemetry.mapper4_mmc3_prg_ram.passed);
     assert_eq!(telemetry.mapper4_mmc3_prg_ram.mapper, 4);
     assert_eq!(telemetry.mapper4_mmc3_prg_ram.prg_16k_banks, 4);
@@ -1759,6 +1810,17 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.observed.contains("high IRQ 1")
     }));
     assert!(telemetry.probes.iter().any(|probe| {
+        probe.id == "mapper4.mmc3_sprite_a12_irq_gate"
+            && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
+            && probe.test_id == Some(51)
+            && probe.test_name.is_none()
+            && probe.status == DiagnosticProbeStatus::Passed
+            && probe.expected.contains("PPUCTRL low 0x00 high 0x08")
+            && probe.expected.contains("PPUMASK 0x10")
+            && probe.observed.contains("low IRQ 0")
+            && probe.observed.contains("high IRQ 1")
+    }));
+    assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "mapper4.mmc3_prg_ram_persistence"
             && probe.subsystem == Some(DiagnosticSubsystem::Cartridge)
             && probe.test_id == Some(36)
@@ -1937,6 +1999,17 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Mapper 4 A12 gate high-pattern IRQ observed / expected | 1 / 1 |"));
     assert!(report.contains("| Mapper 4 A12 gate cases / expected | 2 / 2 |"));
     assert!(report.contains("| Mapper 4 A12 gate error | none |"));
+    assert!(report.contains(
+        "| Mapper 4 sprite A12 gate PPUCTRL low / high / PPUMASK | 0x00 / 0x08 / 0x10 |"
+    ));
+    assert!(
+        report.contains("| Mapper 4 sprite A12 gate low-sprite IRQ observed / expected | 0 / 0 |")
+    );
+    assert!(
+        report.contains("| Mapper 4 sprite A12 gate high-sprite IRQ observed / expected | 1 / 1 |")
+    );
+    assert!(report.contains("| Mapper 4 sprite A12 gate cases / expected | 2 / 2 |"));
+    assert!(report.contains("| Mapper 4 sprite A12 gate error | none |"));
     assert!(report.contains("| Mapper 4 PRG RAM mapper / PRG 16K banks / battery | 4 / 4 / true |"));
     assert!(report.contains(
         "| Mapper 4 PRG RAM read addresses | [\"0x6000\", \"0x67FF\", \"0x7FFF\", \"0x6000\"] |"
