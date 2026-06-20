@@ -2317,9 +2317,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs, the e2e diagnostic runner writes diagnostic-input-sweep.json with an exhaustive 65,536-pair two-port Joypad core sweep, host input-remapping regression fixtures prove custom keyboard/controller bindings, turbo gates, merged sources, and joypad mask serialization through the same library path used by the game loop, and a bus-level disconnected/default controller fixture proves both $4016 and $4017 serialize eight released bits before post-exhaustion reads go high.",
-        missing_coverage: "Live window/controller event injection and in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.",
-        suggested_next_test: "Add live host-event fixtures that prove UI/controller events still serialize through $4016/$4017 correctly.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs, the e2e diagnostic runner writes diagnostic-input-sweep.json with an exhaustive 65,536-pair two-port Joypad core sweep, host input-remapping regression fixtures prove custom keyboard/controller bindings, turbo gates, merged sources, and joypad mask serialization through the same library path used by the game loop, a bus-level disconnected/default controller fixture proves both $4016 and $4017 serialize eight released bits before post-exhaustion reads go high, and a headless host-event snapshot fixture injects keyboard, controller button, D-pad, and stick-derived events before proving the resulting masks through real bus serial reads.",
+        missing_coverage: "OS-backed minifb/gilrs event injection beyond synthetic host snapshots and in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.",
+        suggested_next_test: "Add an OS-backed minifb/gilrs event-injection harness that proves real window/controller events still serialize through $4016/$4017 correctly.",
     },
 ];
 
@@ -21312,15 +21312,18 @@ mod tests {
                     .current_coverage
                     .contains("disconnected/default controller fixture")
                 && gap
+                    .current_coverage
+                    .contains("headless host-event snapshot fixture")
+                && gap
                     .missing_coverage
-                    .contains("Live window/controller event injection")
+                    .contains("OS-backed minifb/gilrs event injection")
                 && !gap.missing_coverage.contains("Disconnected-controller")
                 && !gap
                     .suggested_next_test
                     .contains("optional exhaustive input-port sweep")
                 && !gap.suggested_next_test.contains("input-remapping fixtures")
                 && !gap.suggested_next_test.contains("disconnected-controller")
-                && gap.suggested_next_test.contains("live host-event fixtures")
+                && gap.suggested_next_test.contains("event-injection harness")
         }));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());

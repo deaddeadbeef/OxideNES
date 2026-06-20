@@ -17,15 +17,20 @@ game loop on the same code path.
   order.
 - [x] Add bus-level default/disconnected controller coverage for both joypad
   ports, including released serial bits and post-exhaustion high reads.
+- [x] Add a headless host-event snapshot fixture that injects keyboard,
+  controller button, D-pad, and stick-derived events, applies them to a real
+  `Bus`, and validates `$4016`/`$4017` serial masks.
 - [x] Update the diagnostic coverage gap text so host input-remapping fixtures
-  and disconnected/default port behavior are covered and the remaining gap is
-  live event injection and broader in-cartridge iteration.
+  disconnected/default port behavior, and headless host-event snapshots are
+  covered and the remaining gap is OS-backed event injection and broader
+  in-cartridge iteration.
 - [x] Document the release-candidate evidence requirement.
 
 ## Verification
 
 - [x] `cargo fmt -- --check`
 - [x] `cargo test --test input_mapping_tests --target x86_64-pc-windows-msvc`
+- [x] `cargo test --test input_mapping_tests host_input_snapshot_serializes_injected_events_through_bus_ports --target x86_64-pc-windows-msvc`
 - [x] `cargo test --test bus_tests bus_default_joypads_read_released_then_overread_high --target x86_64-pc-windows-msvc`
 - [x] `cargo test --lib diagnostic::tests::headless_diagnostic_passes_and_collects_telemetry --target x86_64-pc-windows-msvc`
 - [x] `cargo test --test diagnostic_cli_tests diagnostic_cli_writes_standalone_triage_json --target x86_64-pc-windows-msvc`

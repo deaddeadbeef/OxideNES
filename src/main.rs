@@ -24,7 +24,7 @@ use oxidenes::config::{
 use oxidenes::cpu::Cpu;
 use oxidenes::file_browser::FileBrowser;
 use oxidenes::input_mapping::{
-    controller_state_from_bindings, keyboard_state_from_bindings, DirectionalInput,
+    controller_state_from_bindings, keyboard_pair_from_bindings, DirectionalInput,
 };
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
@@ -8628,21 +8628,13 @@ fn handle_input(
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
 
-    let kb1 = &input_bindings.keyboard_p1;
-    let mut p1 = keyboard_state_from_bindings(
-        kb1,
+    let mut input_pair = keyboard_pair_from_bindings(
+        input_bindings,
         |name| string_to_key(name).is_some_and(|key| keys.contains(&key)),
         turbo_active,
     );
     let mut l_trigger = false;
     let mut r_trigger = false;
-
-    let kb2 = &input_bindings.keyboard_p2;
-    let mut p2 = keyboard_state_from_bindings(
-        kb2,
-        |name| string_to_key(name).is_some_and(|key| keys.contains(&key)),
-        turbo_active,
-    );
 
     // Controllers - Poll gamepad events and read state
     if let Some(ref mut g) = gilrs {
@@ -8661,7 +8653,7 @@ fn handle_input(
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl1.deadzone, stick_state_p1);
-            p1.merge(controller_state_from_bindings(
+            input_pair.p1.merge(controller_state_from_bindings(
                 ctrl1,
                 |name| {
                     string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
@@ -8695,7 +8687,7 @@ fn handle_input(
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl2.deadzone, stick_state_p2);
-            p2.merge(controller_state_from_bindings(
+            input_pair.p2.merge(controller_state_from_bindings(
                 ctrl2,
                 |name| {
                     string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
@@ -8718,10 +8710,14 @@ fn handle_input(
     }
 
     // Apply all input to joypads
-    p1.apply_to_joypad(&mut bus.joypad1);
-    p2.apply_to_joypad(&mut bus.joypad2);
+    input_pair.apply_to_joypads(&mut bus.joypad1, &mut bus.joypad2);
 
-    (p1.start, p1.select, l_trigger, r_trigger)
+    (
+        input_pair.p1.start,
+        input_pair.p1.select,
+        l_trigger,
+        r_trigger,
+    )
 }
 
 #[derive(Clone, Copy)]

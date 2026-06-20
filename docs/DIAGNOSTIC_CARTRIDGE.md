@@ -244,9 +244,13 @@ tests rather than in the generated cartridge. The game loop calls the same
 validated before they serialize through `$4016` and `$4017`. Bus-level
 disconnected/default controller coverage lives in `tests/bus_tests.rs`; it
 proves both `$4016` and `$4017` serialize eight released bits before
-post-exhaustion reads go high. The remaining `input_port_matrix` gap is now
-live window/controller event injection and in-cartridge exhaustive mask
-iteration beyond the sampled generated fixtures.
+post-exhaustion reads go high. Headless host-event injection coverage also
+lives in `tests/input_mapping_tests.rs`; it builds a `HostInputSnapshot` with
+keyboard, controller button, D-pad, and stick-derived events, applies the
+resulting pair to a real `Bus`, and reads `$4016`/`$4017` serially. The
+remaining `input_port_matrix` gap is now OS-backed minifb/gilrs event injection
+outside synthetic snapshots and in-cartridge exhaustive mask iteration beyond
+the sampled generated fixtures.
 
 To query an accepted suite without hand-joining JSON files, run:
 
