@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.3.46] - 2026-06-20
+
+### Added
+- Added a generated Mapper 4/MMC3 sprite A12-source gate diagnostic variant that proves low-pattern sprite rendering suppresses MMC3 scanline IRQ clocks while high sprite pattern-table rendering still triggers the configured IRQ.
+
+### Changed
+- Bumped diagnostic telemetry to schema 75 and added the `mapper4.mmc3_sprite_a12_irq_gate` probe to the AI observability catalog.
+
 ## [0.3.45] - 2026-06-20
 
 ### Added

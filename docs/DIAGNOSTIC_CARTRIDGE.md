@@ -1433,6 +1433,15 @@ telemetry plus the `mapper4.mmc3_a12_irq_gate` probe. This proves A12-source
 gating at the current scanline-level approximation; fine MMC3 A12 edge-filter
 timing remains outside the diagnostic cartridge contract.
 
+Schema version `75` adds a generated Mapper 4/MMC3 sprite A12-source gate
+variant to the host diagnostic run. The variant first enables sprite rendering
+with the sprite pattern table at `$0000` and expects zero MMC3 IRQs, then
+switches the sprite pattern table to `$1000` and expects one IRQ from the same
+latch/reload setup. It exposes top-level `mapper4_mmc3_sprite_a12_gate`
+telemetry plus the `mapper4.mmc3_sprite_a12_irq_gate` probe. This proves the
+sprite-source half of the current scanline-level A12 gate while keeping fine
+MMC3 A12 edge-filter timing outside the diagnostic cartridge contract.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
