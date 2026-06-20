@@ -813,6 +813,11 @@ It then runs `verify_diagnostic_ai_artifacts.py` and writes
 `diagnostic-ai-artifact-verification.json` plus
 `diagnostic-ai-artifact-verification.md`, proving the AI-facing artifact graph
 is internally consistent before automated debugger or fix loops consume it.
+For a local dev-build CI run that records these gates without relying on
+GitHub Actions, run `python scripts/run_local_ci.py --output-dir target/local-ci/dev --build-profile debug`.
+The runner writes `local-ci-report.json`, `local-ci-report.md`, per-command
+logs, diagnostic bundle output, the scenario-suite directory, profile output,
+build/test/clippy status, cargo-audit status, and binary smoke evidence.
 The AI index is the smallest single artifact for automated debuggers that need
 to join scenario health, failed probes, start-artifact pointers, replay
 arguments, mapped source files, narrow tests, and known coverage limits. The AI
