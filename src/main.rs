@@ -24,7 +24,7 @@ use oxidenes::config::{
 use oxidenes::cpu::Cpu;
 use oxidenes::file_browser::FileBrowser;
 use oxidenes::input_mapping::{
-    controller_state_from_bindings, keyboard_pair_from_bindings, DirectionalInput,
+    controller_state_from_gilrs_buttons, keyboard_pair_from_minifb_keys, DirectionalInput,
 };
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
@@ -75,141 +75,6 @@ impl StickState {
         self.down = false;
         self.left = false;
         self.right = false;
-    }
-}
-
-fn string_to_key(s: &str) -> Option<Key> {
-    match s {
-        "A" => Some(Key::A),
-        "B" => Some(Key::B),
-        "C" => Some(Key::C),
-        "D" => Some(Key::D),
-        "E" => Some(Key::E),
-        "F" => Some(Key::F),
-        "G" => Some(Key::G),
-        "H" => Some(Key::H),
-        "I" => Some(Key::I),
-        "J" => Some(Key::J),
-        "K" => Some(Key::K),
-        "L" => Some(Key::L),
-        "M" => Some(Key::M),
-        "N" => Some(Key::N),
-        "O" => Some(Key::O),
-        "P" => Some(Key::P),
-        "Q" => Some(Key::Q),
-        "R" => Some(Key::R),
-        "S" => Some(Key::S),
-        "T" => Some(Key::T),
-        "U" => Some(Key::U),
-        "V" => Some(Key::V),
-        "W" => Some(Key::W),
-        "X" => Some(Key::X),
-        "Y" => Some(Key::Y),
-        "Z" => Some(Key::Z),
-        "Up" => Some(Key::Up),
-        "Down" => Some(Key::Down),
-        "Left" => Some(Key::Left),
-        "Right" => Some(Key::Right),
-        "Enter" => Some(Key::Enter),
-        "Space" => Some(Key::Space),
-        "LeftShift" => Some(Key::LeftShift),
-        "RightShift" => Some(Key::RightShift),
-        "LeftCtrl" => Some(Key::LeftCtrl),
-        "RightCtrl" => Some(Key::RightCtrl),
-        "Comma" => Some(Key::Comma),
-        "Period" => Some(Key::Period),
-        "Slash" => Some(Key::Slash),
-        "Semicolon" => Some(Key::Semicolon),
-        "Apostrophe" => Some(Key::Apostrophe),
-        "1" => Some(Key::Key1),
-        "2" => Some(Key::Key2),
-        "3" => Some(Key::Key3),
-        "4" => Some(Key::Key4),
-        "5" => Some(Key::Key5),
-        "6" => Some(Key::Key6),
-        "7" => Some(Key::Key7),
-        "8" => Some(Key::Key8),
-        "9" => Some(Key::Key9),
-        "0" => Some(Key::Key0),
-        "Escape" => Some(Key::Escape),
-        "Tab" => Some(Key::Tab),
-        "Backspace" => Some(Key::Backspace),
-        "Delete" => Some(Key::Delete),
-        "Insert" => Some(Key::Insert),
-        "Home" => Some(Key::Home),
-        "End" => Some(Key::End),
-        "PageUp" => Some(Key::PageUp),
-        "PageDown" => Some(Key::PageDown),
-        "Pause" => Some(Key::Pause),
-        "Menu" => Some(Key::Menu),
-        "F1" => Some(Key::F1),
-        "F2" => Some(Key::F2),
-        "F3" => Some(Key::F3),
-        "F4" => Some(Key::F4),
-        "F5" => Some(Key::F5),
-        "F6" => Some(Key::F6),
-        "F7" => Some(Key::F7),
-        "F8" => Some(Key::F8),
-        "F9" => Some(Key::F9),
-        "F10" => Some(Key::F10),
-        "F11" => Some(Key::F11),
-        "F12" => Some(Key::F12),
-        "F13" => Some(Key::F13),
-        "F14" => Some(Key::F14),
-        "F15" => Some(Key::F15),
-        "CapsLock" => Some(Key::CapsLock),
-        "NumLock" => Some(Key::NumLock),
-        "ScrollLock" => Some(Key::ScrollLock),
-        "NumPad0" => Some(Key::NumPad0),
-        "NumPad1" => Some(Key::NumPad1),
-        "NumPad2" => Some(Key::NumPad2),
-        "NumPad3" => Some(Key::NumPad3),
-        "NumPad4" => Some(Key::NumPad4),
-        "NumPad5" => Some(Key::NumPad5),
-        "NumPad6" => Some(Key::NumPad6),
-        "NumPad7" => Some(Key::NumPad7),
-        "NumPad8" => Some(Key::NumPad8),
-        "NumPad9" => Some(Key::NumPad9),
-        "NumPadDot" => Some(Key::NumPadDot),
-        "NumPadSlash" => Some(Key::NumPadSlash),
-        "NumPadAsterisk" => Some(Key::NumPadAsterisk),
-        "NumPadMinus" => Some(Key::NumPadMinus),
-        "NumPadPlus" => Some(Key::NumPadPlus),
-        "NumPadEnter" => Some(Key::NumPadEnter),
-        "LeftAlt" => Some(Key::LeftAlt),
-        "RightAlt" => Some(Key::RightAlt),
-        "LeftSuper" => Some(Key::LeftSuper),
-        "RightSuper" => Some(Key::RightSuper),
-        "Backquote" => Some(Key::Backquote),
-        "Backslash" => Some(Key::Backslash),
-        "Equal" => Some(Key::Equal),
-        "Minus" => Some(Key::Minus),
-        "LeftBracket" => Some(Key::LeftBracket),
-        "RightBracket" => Some(Key::RightBracket),
-        _ => None,
-    }
-}
-
-fn string_to_gilrs_button(name: &str) -> Option<gilrs::Button> {
-    match name {
-        "South" => Some(gilrs::Button::South),
-        "East" => Some(gilrs::Button::East),
-        "North" => Some(gilrs::Button::North),
-        "West" => Some(gilrs::Button::West),
-        "Start" => Some(gilrs::Button::Start),
-        "Select" => Some(gilrs::Button::Select),
-        "Mode" => Some(gilrs::Button::Mode),
-        "LeftTrigger" => Some(gilrs::Button::LeftTrigger),
-        "RightTrigger" => Some(gilrs::Button::RightTrigger),
-        "LeftTrigger2" => Some(gilrs::Button::LeftTrigger2),
-        "RightTrigger2" => Some(gilrs::Button::RightTrigger2),
-        "LeftThumb" => Some(gilrs::Button::LeftThumb),
-        "RightThumb" => Some(gilrs::Button::RightThumb),
-        "DPadUp" => Some(gilrs::Button::DPadUp),
-        "DPadDown" => Some(gilrs::Button::DPadDown),
-        "DPadLeft" => Some(gilrs::Button::DPadLeft),
-        "DPadRight" => Some(gilrs::Button::DPadRight),
-        _ => None,
     }
 }
 
@@ -8628,11 +8493,8 @@ fn handle_input(
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
 
-    let mut input_pair = keyboard_pair_from_bindings(
-        input_bindings,
-        |name| string_to_key(name).is_some_and(|key| keys.contains(&key)),
-        turbo_active,
-    );
+    let mut input_pair =
+        keyboard_pair_from_minifb_keys(input_bindings, |key| keys.contains(&key), turbo_active);
     let mut l_trigger = false;
     let mut r_trigger = false;
 
@@ -8653,11 +8515,9 @@ fn handle_input(
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl1.deadzone, stick_state_p1);
-            input_pair.p1.merge(controller_state_from_bindings(
+            input_pair.p1.merge(controller_state_from_gilrs_buttons(
                 ctrl1,
-                |name| {
-                    string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
-                },
+                |button| gamepad.is_pressed(button),
                 DirectionalInput {
                     up: gamepad.is_pressed(Button::DPadUp),
                     down: gamepad.is_pressed(Button::DPadDown),
@@ -8687,11 +8547,9 @@ fn handle_input(
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl2.deadzone, stick_state_p2);
-            input_pair.p2.merge(controller_state_from_bindings(
+            input_pair.p2.merge(controller_state_from_gilrs_buttons(
                 ctrl2,
-                |name| {
-                    string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
-                },
+                |button| gamepad.is_pressed(button),
                 DirectionalInput {
                     up: gamepad.is_pressed(Button::DPadUp),
                     down: gamepad.is_pressed(Button::DPadDown),

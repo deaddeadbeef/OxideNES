@@ -247,10 +247,13 @@ proves both `$4016` and `$4017` serialize eight released bits before
 post-exhaustion reads go high. Headless host-event injection coverage also
 lives in `tests/input_mapping_tests.rs`; it builds a `HostInputSnapshot` with
 keyboard, controller button, D-pad, and stick-derived events, applies the
-resulting pair to a real `Bus`, and reads `$4016`/`$4017` serially. The
-remaining `input_port_matrix` gap is now OS-backed minifb/gilrs event injection
-outside synthetic snapshots and in-cartridge exhaustive mask iteration beyond
-the sampled generated fixtures.
+resulting pair to a real `Bus`, and reads `$4016`/`$4017` serially. The same
+test module also builds an `OsHostInputSnapshot` with real `minifb::Key` and
+`gilrs::Button` values, proving the OS-typed adapter path used by the game loop
+still serializes through the bus. The remaining `input_port_matrix` gap is live
+minifb window polling and gilrs device polling injection beyond typed adapter
+fixtures, plus in-cartridge exhaustive mask iteration beyond the sampled
+generated fixtures.
 
 To query an accepted suite without hand-joining JSON files, run:
 
