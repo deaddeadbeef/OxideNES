@@ -1,9 +1,13 @@
+use gilrs::Button;
+use minifb::Key;
 use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
 use oxidenes::config::{ControllerBindings, InputBindings, KeyboardBindings};
 use oxidenes::input_mapping::{
-    controller_state_from_bindings, host_input_pair_from_snapshot, keyboard_state_from_bindings,
-    ControllerInputSnapshot, DirectionalInput, HostInputSnapshot, JoypadInputState,
+    controller_state_from_bindings, host_input_pair_from_os_snapshot,
+    host_input_pair_from_snapshot, keyboard_state_from_bindings, ControllerInputSnapshot,
+    DirectionalInput, GilrsControllerInputSnapshot, HostInputSnapshot, JoypadInputState,
+    OsHostInputSnapshot,
 };
 use oxidenes::joypad::{Joypad, JoypadButton};
 use std::collections::BTreeSet;
@@ -177,6 +181,42 @@ fn host_input_snapshot_serializes_injected_events_through_bus_ports() {
     };
 
     let pair = host_input_pair_from_snapshot(&bindings, snapshot, false);
+
+    assert_eq!(pair.p1.to_mask(), 0x9B);
+    assert_eq!(pair.p2.to_mask(), 0x2D);
+
+    let mut bus = make_test_bus();
+    pair.apply_to_joypads(&mut bus.joypad1, &mut bus.joypad2);
+    assert_eq!(serial_masks_from_bus(&mut bus), (0x9B, 0x2D));
+}
+
+#[test]
+fn os_host_input_snapshot_uses_minifb_and_gilrs_events_for_bus_serialization() {
+    let bindings = InputBindings::default();
+    let snapshot = OsHostInputSnapshot {
+        pressed_keys: &[Key::K, Key::Enter, Key::Period, Key::RightCtrl],
+        controller_p1: Some(GilrsControllerInputSnapshot {
+            pressed_buttons: &[Button::West],
+            dpad: DirectionalInput {
+                right: true,
+                ..DirectionalInput::default()
+            },
+            left_stick: DirectionalInput {
+                up: true,
+                ..DirectionalInput::default()
+            },
+        }),
+        controller_p2: Some(GilrsControllerInputSnapshot {
+            pressed_buttons: &[Button::Start],
+            dpad: DirectionalInput {
+                down: true,
+                ..DirectionalInput::default()
+            },
+            left_stick: DirectionalInput::default(),
+        }),
+    };
+
+    let pair = host_input_pair_from_os_snapshot(&bindings, snapshot, false);
 
     assert_eq!(pair.p1.to_mask(), 0x9B);
     assert_eq!(pair.p2.to_mask(), 0x2D);

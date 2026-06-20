@@ -2317,9 +2317,9 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "input_port_matrix",
         subsystem: "joypad",
         risk: "The cartridge proves fixed serial-read masks for both controller ports but not the full input state matrix.",
-        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs, the e2e diagnostic runner writes diagnostic-input-sweep.json with an exhaustive 65,536-pair two-port Joypad core sweep, host input-remapping regression fixtures prove custom keyboard/controller bindings, turbo gates, merged sources, and joypad mask serialization through the same library path used by the game loop, a bus-level disconnected/default controller fixture proves both $4016 and $4017 serialize eight released bits before post-exhaustion reads go high, and a headless host-event snapshot fixture injects keyboard, controller button, D-pad, and stick-derived events before proving the resulting masks through real bus serial reads.",
-        missing_coverage: "OS-backed minifb/gilrs event injection beyond synthetic host snapshots and in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.",
-        suggested_next_test: "Add an OS-backed minifb/gilrs event-injection harness that proves real window/controller events still serialize through $4016/$4017 correctly.",
+        current_coverage: "Joypad 1 and joypad 2 strobe/shift sequences use explicit expected masks, the scenario suite includes generated default, alternating, all-released, all-pressed, joypad-1-only pressed, joypad-2-only pressed, sparse-bits, and nibble-split input-mask pass fixtures, joypad 1 verifies mid-stream strobe reset behavior, a combined input-port matrix verifies both $4016 and $4017 strobe-high reads, full eight-bit serial masks, and overreads, a generated input-mask sweep variant reconstructs both serial bytes across 16 host-applied mask pairs, the e2e diagnostic runner writes diagnostic-input-sweep.json with an exhaustive 65,536-pair two-port Joypad core sweep, host input-remapping regression fixtures prove custom keyboard/controller bindings, turbo gates, merged sources, and joypad mask serialization through the same library path used by the game loop, a bus-level disconnected/default controller fixture proves both $4016 and $4017 serialize eight released bits before post-exhaustion reads go high, a headless host-event snapshot fixture injects keyboard, controller button, D-pad, and stick-derived events before proving the resulting masks through real bus serial reads, and an OS-typed minifb/gilrs adapter fixture proves real minifb::Key and gilrs::Button values flow through host input mapping before bus serial reads.",
+        missing_coverage: "Live minifb window polling and gilrs device polling injection beyond typed adapter fixtures, plus in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.",
+        suggested_next_test: "Add a live minifb window/gilrs device polling harness that proves real polled window/controller events still serialize through $4016/$4017 correctly.",
     },
 ];
 
@@ -21315,15 +21315,19 @@ mod tests {
                     .current_coverage
                     .contains("headless host-event snapshot fixture")
                 && gap
+                    .current_coverage
+                    .contains("OS-typed minifb/gilrs adapter fixture")
+                && gap
                     .missing_coverage
-                    .contains("OS-backed minifb/gilrs event injection")
+                    .contains("Live minifb window polling and gilrs device polling")
                 && !gap.missing_coverage.contains("Disconnected-controller")
+                && !gap.missing_coverage.contains("synthetic host snapshots")
                 && !gap
                     .suggested_next_test
                     .contains("optional exhaustive input-port sweep")
                 && !gap.suggested_next_test.contains("input-remapping fixtures")
                 && !gap.suggested_next_test.contains("disconnected-controller")
-                && gap.suggested_next_test.contains("event-injection harness")
+                && gap.suggested_next_test.contains("device polling harness")
         }));
         assert!(telemetry.analysis.summary.contains("diagnostic passed"));
         assert!(!telemetry.analysis.next_actions.is_empty());

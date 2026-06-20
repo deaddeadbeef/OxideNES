@@ -5108,13 +5108,15 @@ fn diagnostic_cli_writes_standalone_triage_json() {
                     && text.contains("host input-remapping")
                     && text.contains("same library path used by the game loop")
                     && text.contains("disconnected/default controller fixture")
-                    && text.contains("headless host-event snapshot fixture"))
+                    && text.contains("headless host-event snapshot fixture")
+                    && text.contains("OS-typed minifb/gilrs adapter fixture"))
                 && gap["missing_coverage"].as_str().is_some_and(|text| text
-                    .contains("OS-backed minifb/gilrs event injection")
+                    .contains("Live minifb window polling and gilrs device polling")
+                    && !text.contains("synthetic host snapshots")
                     && !text.contains("Disconnected-controller")
                     && !text.contains("Host input remapping fixtures"))
                 && gap["suggested_next_test"].as_str().is_some_and(|text| text
-                    .contains("event-injection harness")
+                    .contains("device polling harness")
                     && !text.contains("disconnected-controller")
                     && !text.contains("input-remapping fixtures")
                     && !text.contains("optional exhaustive input-port sweep"))
