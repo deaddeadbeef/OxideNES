@@ -100,6 +100,17 @@ fn local_ci_script_dry_run_writes_ai_ready_report() {
         );
     }
 
+    let security_audit = report["commands"]
+        .as_array()
+        .expect("commands should be an array")
+        .iter()
+        .find(|command| command["name"] == Value::String("security-audit".to_string()))
+        .expect("security-audit step should be present");
+    assert_eq!(
+        security_audit["argv"],
+        serde_json::json!(["cargo", "audit", "--no-fetch", "--stale"])
+    );
+
     assert!(report["commands"]
         .as_array()
         .expect("commands should be an array")

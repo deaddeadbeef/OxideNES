@@ -212,7 +212,7 @@ def make_steps(args: argparse.Namespace, repo_root: Path) -> tuple[list[StepSpec
         StepSpec("ip-compliance", [python, script_path("ip_compliance_audit.py")]),
         StepSpec(
             "security-audit",
-            ["cargo", "audit"],
+            ["cargo", "audit", "--no-fetch", "--stale"],
             skip_reason="--skip-security-audit" if args.skip_security_audit else None,
         ),
         StepSpec(

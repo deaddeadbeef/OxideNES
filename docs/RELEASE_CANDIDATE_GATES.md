@@ -11,10 +11,12 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - `cargo test`
 - `cargo clippy -- -D warnings`
 - `git diff --check`
-- `cargo audit`
+- `cargo audit --no-fetch --stale`
 - Local dev-build CI evidence can be generated without relying on GitHub Actions:
   `python scripts/run_local_ci.py --output-dir target/local-ci/dev --build-profile debug`
   writes `local-ci-report.json`, `local-ci-report.md`, command logs, diagnostic bundle artifacts, the diagnostic e2e scenario suite, diagnostic profile output, dev binary smoke evidence, and build/test/clippy/audit status.
+  The local audit gate uses the cached RustSec advisory database with
+  `cargo audit --no-fetch --stale`, so it does not depend on GitHub during the run.
 - The diagnostic cartridge bundle commands pass and write an AI-ready bundle:
   `cargo run --bin oxidenes-diagnostic -- --json target/diagnostics/release-baseline.json --no-stdout`
   then
