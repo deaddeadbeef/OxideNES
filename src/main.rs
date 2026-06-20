@@ -24,7 +24,8 @@ use oxidenes::config::{
 use oxidenes::cpu::Cpu;
 use oxidenes::file_browser::FileBrowser;
 use oxidenes::input_mapping::{
-    controller_state_from_gilrs_buttons, keyboard_pair_from_minifb_keys, DirectionalInput,
+    analog_stick_to_dpad, controller_state_from_gilrs_poll, keyboard_pair_from_minifb_keys,
+    AnalogStickState,
 };
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
@@ -56,27 +57,6 @@ const MENU_GOLD: u32 = 0xF8D878;
 const MENU_GRAY: u32 = 0x9C9C9C;
 const MENU_DARK_GRAY: u32 = 0x585858;
 const MENU_LIGHT_BLUE: u32 = 0x6888FC;
-
-#[derive(Default, Clone)]
-struct StickState {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-}
-
-impl StickState {
-    #[inline]
-    fn any_active(&self) -> bool {
-        self.up || self.down || self.left || self.right
-    }
-    fn clear(&mut self) {
-        self.up = false;
-        self.down = false;
-        self.left = false;
-        self.right = false;
-    }
-}
 
 fn key_to_string(key: Key) -> String {
     match key {
@@ -2042,7 +2022,7 @@ fn poll_menu_input(
     gilrs: &mut Option<Gilrs>,
     repeat: &mut RepeatTracker,
     menu_deadzone: f32,
-    stick_state: &mut StickState,
+    stick_state: &mut AnalogStickState,
 ) -> MenuInput {
     let confirm = window.is_key_pressed(Key::Enter, KeyRepeat::No);
     let back = window.is_key_pressed(Key::Escape, KeyRepeat::No);
@@ -2093,12 +2073,11 @@ fn poll_menu_input(
             raw_right |= gamepad.is_pressed(Button::DPadRight);
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) =
-                stick_to_dpad(stick_x, stick_y, menu_deadzone, stick_state);
-            raw_up |= s_up;
-            raw_down |= s_down;
-            raw_left |= s_left;
-            raw_right |= s_right;
+            let stick_dpad = analog_stick_to_dpad(stick_x, stick_y, menu_deadzone, stick_state);
+            raw_up |= stick_dpad.up;
+            raw_down |= stick_dpad.down;
+            raw_left |= stick_dpad.left;
+            raw_right |= stick_dpad.right;
         }
     }
 
@@ -2417,9 +2396,9 @@ fn main() {
     let mut window_title: String = format!("OxideNES v{}", env!("OXIDENES_VERSION"));
 
     // Analog stick state for hysteresis
-    let mut stick_state_p1 = StickState::default();
-    let mut stick_state_p2 = StickState::default();
-    let mut stick_state_menu = StickState::default();
+    let mut stick_state_p1 = AnalogStickState::default();
+    let mut stick_state_p2 = AnalogStickState::default();
+    let mut stick_state_menu = AnalogStickState::default();
 
     // Pause menu state
     let mut paused: bool = false;
@@ -8364,131 +8343,14 @@ fn option_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-/// Convert analog stick to NES D-pad with circular deadzone, cardinal snapping, and hysteresis.
-/// Returns (up, down, left, right) as booleans.
-#[inline]
-fn stick_to_dpad(
-    stick_x: f32,
-    stick_y: f32,
-    deadzone: f32,
-    prev_state: &mut StickState,
-) -> (bool, bool, bool, bool) {
-    let magnitude = (stick_x * stick_x + stick_y * stick_y).sqrt();
-
-    // Hysteresis: use lower threshold for release to prevent jitter
-    let active_deadzone = if prev_state.any_active() {
-        (deadzone * 0.75).max(0.05)
-    } else {
-        deadzone
-    };
-
-    if magnitude < active_deadzone {
-        prev_state.clear();
-        return (false, false, false, false);
-    }
-
-    // Normalize to unit circle
-    let nx = stick_x / magnitude;
-    let ny = stick_y / magnitude;
-
-    // Angle in degrees (0° = right, 90° = up, counter-clockwise)
-    let angle = ny.atan2(nx).to_degrees();
-    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
-
-    // Push strength: 0.0 at deadzone edge, 1.0 at full tilt
-    let push_strength = ((magnitude - active_deadzone) / (1.0 - active_deadzone)).min(1.0);
-
-    // Cardinal snapping: 35° half-angle gives 70° pure-cardinal zones
-    // Diagonals only allowed in the remaining 20° windows at >70% push
-    let cardinal_half_angle = 35.0_f32;
-    let diagonal_min_strength = 0.70_f32;
-
-    let mut up = false;
-    let mut down = false;
-    let mut left = false;
-    let mut right = false;
-
-    let angle_dist = |target: f32| -> f32 {
-        let d = (angle - target).abs();
-        if d > 180.0 {
-            360.0 - d
-        } else {
-            d
-        }
-    };
-
-    let dist_right = angle_dist(0.0);
-    let dist_up = angle_dist(90.0);
-    let dist_left = angle_dist(180.0);
-    let dist_down = angle_dist(270.0);
-
-    let min_dist = dist_right.min(dist_up).min(dist_left).min(dist_down);
-
-    if min_dist <= cardinal_half_angle {
-        // Pure cardinal zone
-        if min_dist == dist_right {
-            right = true;
-        } else if min_dist == dist_up {
-            up = true;
-        } else if min_dist == dist_left {
-            left = true;
-        } else {
-            down = true;
-        }
-    } else if push_strength >= diagonal_min_strength {
-        // Diagonal zone with sufficient push
-        if angle > 0.0 && angle < 90.0 {
-            right = true;
-            up = true;
-        } else if angle > 90.0 && angle < 180.0 {
-            left = true;
-            up = true;
-        } else if angle > 180.0 && angle < 270.0 {
-            left = true;
-            down = true;
-        } else {
-            right = true;
-            down = true;
-        }
-    } else {
-        // Diagonal zone but not pushed hard enough — snap to nearest cardinal
-        if min_dist == dist_right {
-            right = true;
-        } else if min_dist == dist_up {
-            up = true;
-        } else if min_dist == dist_left {
-            left = true;
-        } else {
-            down = true;
-        }
-    }
-
-    // SOCD cleaning: prevent simultaneous opposite directions
-    if up && down {
-        up = false;
-        down = false;
-    }
-    if left && right {
-        left = false;
-        right = false;
-    }
-
-    prev_state.up = up;
-    prev_state.down = down;
-    prev_state.left = left;
-    prev_state.right = right;
-
-    (up, down, left, right)
-}
-
 fn handle_input(
     window: &Window,
     bus: &mut Bus,
     gilrs: &mut Option<Gilrs>,
     frame_counter: u32,
     input_bindings: &InputBindings,
-    stick_state_p1: &mut StickState,
-    stick_state_p2: &mut StickState,
+    stick_state_p1: &mut AnalogStickState,
+    stick_state_p2: &mut AnalogStickState,
 ) -> (bool, bool, bool, bool) {
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
@@ -8510,60 +8372,32 @@ fn handle_input(
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl1 = &input_bindings.controller_p1;
 
-            // Left analog stick (circular deadzone + cardinal snapping)
-            let stick_x = gamepad.value(Axis::LeftStickX);
-            let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) =
-                stick_to_dpad(stick_x, stick_y, ctrl1.deadzone, stick_state_p1);
-            input_pair.p1.merge(controller_state_from_gilrs_buttons(
+            let polled = controller_state_from_gilrs_poll(
                 ctrl1,
                 |button| gamepad.is_pressed(button),
-                DirectionalInput {
-                    up: gamepad.is_pressed(Button::DPadUp),
-                    down: gamepad.is_pressed(Button::DPadDown),
-                    left: gamepad.is_pressed(Button::DPadLeft),
-                    right: gamepad.is_pressed(Button::DPadRight),
-                },
-                DirectionalInput {
-                    up: s_up,
-                    down: s_down,
-                    left: s_left,
-                    right: s_right,
-                },
+                gamepad.value(Axis::LeftStickX),
+                gamepad.value(Axis::LeftStickY),
+                stick_state_p1,
                 turbo_active,
-            ));
-            l_trigger |=
-                gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
-            r_trigger |= gamepad.is_pressed(Button::RightTrigger)
-                || gamepad.is_pressed(Button::RightTrigger2);
+            );
+            input_pair.p1.merge(polled.state);
+            l_trigger |= polled.left_trigger;
+            r_trigger |= polled.right_trigger;
         }
 
         // Player 2 controller
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl2 = &input_bindings.controller_p2;
 
-            // Left analog stick (circular deadzone + cardinal snapping)
-            let stick_x = gamepad.value(Axis::LeftStickX);
-            let stick_y = gamepad.value(Axis::LeftStickY);
-            let (s_up, s_down, s_left, s_right) =
-                stick_to_dpad(stick_x, stick_y, ctrl2.deadzone, stick_state_p2);
-            input_pair.p2.merge(controller_state_from_gilrs_buttons(
+            let polled = controller_state_from_gilrs_poll(
                 ctrl2,
                 |button| gamepad.is_pressed(button),
-                DirectionalInput {
-                    up: gamepad.is_pressed(Button::DPadUp),
-                    down: gamepad.is_pressed(Button::DPadDown),
-                    left: gamepad.is_pressed(Button::DPadLeft),
-                    right: gamepad.is_pressed(Button::DPadRight),
-                },
-                DirectionalInput {
-                    up: s_up,
-                    down: s_down,
-                    left: s_left,
-                    right: s_right,
-                },
+                gamepad.value(Axis::LeftStickX),
+                gamepad.value(Axis::LeftStickY),
+                stick_state_p2,
                 turbo_active,
-            ));
+            );
+            input_pair.p2.merge(polled.state);
         }
     }
 

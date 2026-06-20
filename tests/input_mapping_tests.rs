@@ -4,10 +4,10 @@ use oxidenes::bus::Bus;
 use oxidenes::cartridge::Cartridge;
 use oxidenes::config::{ControllerBindings, InputBindings, KeyboardBindings};
 use oxidenes::input_mapping::{
-    controller_state_from_bindings, host_input_pair_from_os_snapshot,
-    host_input_pair_from_snapshot, keyboard_state_from_bindings, ControllerInputSnapshot,
-    DirectionalInput, GilrsControllerInputSnapshot, HostInputSnapshot, JoypadInputState,
-    OsHostInputSnapshot,
+    analog_stick_to_dpad, controller_state_from_bindings, controller_state_from_gilrs_poll,
+    host_input_pair_from_os_snapshot, host_input_pair_from_snapshot, keyboard_state_from_bindings,
+    AnalogStickState, ControllerInputSnapshot, DirectionalInput, GilrsControllerInputSnapshot,
+    HostInputSnapshot, JoypadInputState, OsHostInputSnapshot,
 };
 use oxidenes::joypad::{Joypad, JoypadButton};
 use std::collections::BTreeSet;
@@ -224,4 +224,63 @@ fn os_host_input_snapshot_uses_minifb_and_gilrs_events_for_bus_serialization() {
     let mut bus = make_test_bus();
     pair.apply_to_joypads(&mut bus.joypad1, &mut bus.joypad2);
     assert_eq!(serial_masks_from_bus(&mut bus), (0x9B, 0x2D));
+}
+
+#[test]
+fn analog_stick_to_dpad_keeps_hysteresis_then_clears_below_release_threshold() {
+    let mut stick = AnalogStickState::default();
+
+    let initial = analog_stick_to_dpad(0.0, 0.31, 0.30, &mut stick);
+    assert_eq!(
+        initial,
+        DirectionalInput {
+            up: true,
+            ..DirectionalInput::default()
+        }
+    );
+
+    let held = analog_stick_to_dpad(0.0, 0.24, 0.30, &mut stick);
+    assert_eq!(
+        held,
+        DirectionalInput {
+            up: true,
+            ..DirectionalInput::default()
+        }
+    );
+
+    let released = analog_stick_to_dpad(0.0, 0.20, 0.30, &mut stick);
+    assert_eq!(released, DirectionalInput::default());
+    assert_eq!(stick, AnalogStickState::default());
+}
+
+#[test]
+fn gilrs_poll_helper_serializes_buttons_axes_and_triggers_through_bus_ports() {
+    let bindings = ControllerBindings::default();
+    let pressed = [
+        Button::West,
+        Button::Start,
+        Button::DPadLeft,
+        Button::East,
+        Button::RightTrigger2,
+    ];
+    let mut stick = AnalogStickState::default();
+
+    let polled = controller_state_from_gilrs_poll(
+        &bindings,
+        |button| pressed.contains(&button),
+        0.0,
+        0.95,
+        &mut stick,
+        true,
+    );
+
+    assert!(polled.dpad.left);
+    assert!(polled.left_stick.up);
+    assert!(!polled.left_trigger);
+    assert!(polled.right_trigger);
+    assert_eq!(polled.state.to_mask(), 0x5B);
+
+    let mut bus = make_test_bus();
+    polled.state.apply_to_joypad(&mut bus.joypad1);
+    assert_eq!(serial_masks_from_bus(&mut bus), (0x5B, 0x00));
 }

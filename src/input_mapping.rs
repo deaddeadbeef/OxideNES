@@ -12,6 +12,29 @@ pub struct DirectionalInput {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AnalogStickState {
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+impl AnalogStickState {
+    #[inline]
+    fn any_active(self) -> bool {
+        self.up || self.down || self.left || self.right
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.up = false;
+        self.down = false;
+        self.left = false;
+        self.right = false;
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct JoypadInputState {
     pub a: bool,
     pub b: bool,
@@ -110,6 +133,15 @@ pub struct OsHostInputSnapshot<'a> {
     pub pressed_keys: &'a [MinifbKey],
     pub controller_p1: Option<GilrsControllerInputSnapshot<'a>>,
     pub controller_p2: Option<GilrsControllerInputSnapshot<'a>>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PolledControllerInput {
+    pub state: JoypadInputState,
+    pub left_trigger: bool,
+    pub right_trigger: bool,
+    pub dpad: DirectionalInput,
+    pub left_stick: DirectionalInput,
 }
 
 pub fn minifb_key_from_binding_name(name: &str) -> Option<MinifbKey> {
@@ -361,6 +393,147 @@ where
         left_stick,
         turbo_active,
     )
+}
+
+/// Convert analog stick state to NES D-pad directions with circular deadzone,
+/// cardinal snapping, diagonal gating, and release hysteresis.
+pub fn analog_stick_to_dpad(
+    stick_x: f32,
+    stick_y: f32,
+    deadzone: f32,
+    prev_state: &mut AnalogStickState,
+) -> DirectionalInput {
+    let magnitude = (stick_x * stick_x + stick_y * stick_y).sqrt();
+
+    let active_deadzone = if prev_state.any_active() {
+        (deadzone * 0.75).max(0.05)
+    } else {
+        deadzone
+    };
+
+    if magnitude < active_deadzone {
+        prev_state.clear();
+        return DirectionalInput::default();
+    }
+
+    let nx = stick_x / magnitude;
+    let ny = stick_y / magnitude;
+
+    let angle = ny.atan2(nx).to_degrees();
+    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+    let push_strength = ((magnitude - active_deadzone) / (1.0 - active_deadzone)).min(1.0);
+
+    let cardinal_half_angle = 35.0_f32;
+    let diagonal_min_strength = 0.70_f32;
+
+    let angle_dist = |target: f32| -> f32 {
+        let d = (angle - target).abs();
+        if d > 180.0 {
+            360.0 - d
+        } else {
+            d
+        }
+    };
+
+    let dist_right = angle_dist(0.0);
+    let dist_up = angle_dist(90.0);
+    let dist_left = angle_dist(180.0);
+    let dist_down = angle_dist(270.0);
+
+    let min_dist = dist_right.min(dist_up).min(dist_left).min(dist_down);
+    let mut state = DirectionalInput::default();
+
+    if min_dist <= cardinal_half_angle {
+        if min_dist == dist_right {
+            state.right = true;
+        } else if min_dist == dist_up {
+            state.up = true;
+        } else if min_dist == dist_left {
+            state.left = true;
+        } else {
+            state.down = true;
+        }
+    } else if push_strength >= diagonal_min_strength {
+        if angle > 0.0 && angle < 90.0 {
+            state.right = true;
+            state.up = true;
+        } else if angle > 90.0 && angle < 180.0 {
+            state.left = true;
+            state.up = true;
+        } else if angle > 180.0 && angle < 270.0 {
+            state.left = true;
+            state.down = true;
+        } else {
+            state.right = true;
+            state.down = true;
+        }
+    } else if min_dist == dist_right {
+        state.right = true;
+    } else if min_dist == dist_up {
+        state.up = true;
+    } else if min_dist == dist_left {
+        state.left = true;
+    } else {
+        state.down = true;
+    }
+
+    if state.up && state.down {
+        state.up = false;
+        state.down = false;
+    }
+    if state.left && state.right {
+        state.left = false;
+        state.right = false;
+    }
+
+    prev_state.up = state.up;
+    prev_state.down = state.down;
+    prev_state.left = state.left;
+    prev_state.right = state.right;
+
+    state
+}
+
+pub fn controller_state_from_gilrs_poll<F>(
+    bindings: &ControllerBindings,
+    mut is_button_pressed: F,
+    left_stick_x: f32,
+    left_stick_y: f32,
+    prev_left_stick: &mut AnalogStickState,
+    turbo_active: bool,
+) -> PolledControllerInput
+where
+    F: FnMut(GilrsButton) -> bool,
+{
+    let dpad = DirectionalInput {
+        up: is_button_pressed(GilrsButton::DPadUp),
+        down: is_button_pressed(GilrsButton::DPadDown),
+        left: is_button_pressed(GilrsButton::DPadLeft),
+        right: is_button_pressed(GilrsButton::DPadRight),
+    };
+    let left_stick = analog_stick_to_dpad(
+        left_stick_x,
+        left_stick_y,
+        bindings.deadzone,
+        prev_left_stick,
+    );
+    let state = controller_state_from_gilrs_buttons(
+        bindings,
+        &mut is_button_pressed,
+        dpad,
+        left_stick,
+        turbo_active,
+    );
+
+    PolledControllerInput {
+        state,
+        left_trigger: is_button_pressed(GilrsButton::LeftTrigger)
+            || is_button_pressed(GilrsButton::LeftTrigger2),
+        right_trigger: is_button_pressed(GilrsButton::RightTrigger)
+            || is_button_pressed(GilrsButton::RightTrigger2),
+        dpad,
+        left_stick,
+    }
 }
 
 pub fn host_input_pair_from_snapshot(
