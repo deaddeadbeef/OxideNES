@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 78;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 79;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v78";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v79";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -536,9 +536,9 @@ const CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR: u16 = 0x02E9;
 const CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR: u16 = 0x02EA;
 const CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR: u16 = 0x02EB;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK: u8 = 0x0F;
-const CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK: u8 = 0x3F;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK: u8 = 0x7F;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK: u8 = 0x0F;
-const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 14;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 15;
 const CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR: u16 = 0x02EC;
 const CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR: u16 = 0x02ED;
 const CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR: u16 = 0x02EE;
@@ -1707,7 +1707,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xC2,
         test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
         assertion: "Store matrix covers STA, STX, and STY memory side effects",
-        expected: "STA absolute,Y, STA absolute,X, STA zero-page,X, STA (zero-page,X), STX zero-page,Y, and STY zero-page,X write the expected RAM sentinels",
+        expected: "STA absolute,Y, STA absolute,X, STA zero-page,X, STA (zero-page,X), STA (zero-page),Y, STX zero-page,Y, and STY zero-page,X write the expected RAM sentinels",
         observed: "one or more store opcodes did not write the expected effective address",
         likely_domain: "cpu.load_store.transfer_matrix",
         remediation_hint: "Inspect STA/STX/STY effective-address resolution and memory writeback for the matrix addressing modes.",
@@ -1725,7 +1725,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xC4,
         test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
         assertion: "Load/store/transfer matrix records every opcode family subcase",
-        expected: "load mask == 0x0F, store mask == 0x3F, transfer mask == 0x0F, and case count == 14",
+        expected: "load mask == 0x0F, store mask == 0x7F, transfer mask == 0x0F, and case count == 15",
         observed: "the load/store/transfer matrix did not record every expected subcase",
         likely_domain: "cpu.load_store.transfer_matrix",
         remediation_hint: "Inspect matrix execution flow and the load/store/transfer opcode paths before broadening opcode coverage further.",
@@ -10910,7 +10910,7 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             description:
                 "CPU load/store/transfer matrix retained expected register flags and memory side effects"
                     .to_string(),
-            expected: "load=0x0F, store=0x3F, transfer=0x0F, load A/X/Y=0x5A/0x80/0x7E, store A/X/Y=0xC3/0x5E/0xA7, transfer TAX/TAY/TXA/TYA=0x44/0x00/0x80/0x7F, cases=14"
+            expected: "load=0x0F, store=0x7F, transfer=0x0F, load A/X/Y=0x5A/0x80/0x7E, store A/X/Y=0xC3/0x5E/0xA7, transfer TAX/TAY/TXA/TYA=0x44/0x00/0x80/0x7F, cases=15"
                 .to_string(),
             observed: format!(
                 "load {}, store {}, transfer {}, load A/X/Y {}/{}/{}, store A/X/Y {}/{}/{}, transfer TAX/TAY/TXA/TYA {}/{}/{}/{}, cases {}/{}",
@@ -13520,6 +13520,19 @@ impl DiagnosticProgram {
         self.expect_a_eq(0xD2, 0xC2);
         self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x20);
 
+        self.asm.lda_imm(0x40);
+        self.asm.sta_zp(0x58);
+        self.asm.lda_imm(0x05);
+        self.asm.sta_zp(0x59);
+        self.asm.lda_imm(0x00);
+        self.asm.sta_abs(0x0547);
+        self.asm.lda_imm(0xE4);
+        self.asm.ldy_imm(0x07);
+        self.asm.sta_indirect_y(0x58);
+        self.asm.lda_abs(0x0547);
+        self.expect_a_eq(0xE4, 0xC2);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_STORE_MASK_ADDR, 0x40);
+
         self.asm.lda_imm(0x44);
         self.asm.tax();
         self.expect_z_clear(0xC3);
@@ -15429,6 +15442,10 @@ impl Assembler {
 
     fn sta_indexed_indirect(&mut self, addr: u8) {
         self.op_zp(0x81, addr);
+    }
+
+    fn sta_indirect_y(&mut self, addr: u8) {
+        self.op_zp(0x91, addr);
     }
 
     fn stx_abs(&mut self, addr: u16) {
