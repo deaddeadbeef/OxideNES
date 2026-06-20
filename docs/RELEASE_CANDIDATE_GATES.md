@@ -81,6 +81,7 @@ OxideNES can publish a 1.0 release candidate only when every required gate below
 - Bus-level disconnected/default controller tests prove both `$4016` and `$4017` serialize eight released bits before post-exhaustion reads go high.
 - Headless host-event injection tests build a `HostInputSnapshot` with keyboard, controller button, D-pad, and stick-derived events, apply it to a real `Bus`, and prove the resulting masks through `$4016`/`$4017` serial reads.
 - OS-typed host-event adapter tests build an `OsHostInputSnapshot` with real `minifb::Key` and `gilrs::Button` values, apply it to a real `Bus`, and prove the resulting masks through `$4016`/`$4017` serial reads.
+- Gilrs polling helper tests prove D-pad button polling, analog stick cardinal snapping with hysteresis, turbo gates, trigger flags, and bus serial reads use the same library path as the game loop.
 - Diagnostic telemetry includes APU status-matrix evidence for `$4015` bits 0-3 plus the `apu.status_matrix` probe, DMC active-bit `$4015` evidence plus the `apu.dmc_status` probe, and APU audio output envelope evidence: sample-count, peak, RMS, and mean absolute windows plus the `apu.output_envelope` probe.
 - Diagnostic observability runs add `diagnostic-debug-index.jsonl` and `diagnostic-debug-index.md` as root one-row-per-scenario indexes for AI routing before opening per-scenario telemetry.
 - Diagnostic observability runs add `diagnostic-observability-analysis.json` and `diagnostic-observability-analysis.md` as aggregate ranked subsystem/domain hypotheses for automated debuggers.

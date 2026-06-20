@@ -250,10 +250,13 @@ keyboard, controller button, D-pad, and stick-derived events, applies the
 resulting pair to a real `Bus`, and reads `$4016`/`$4017` serially. The same
 test module also builds an `OsHostInputSnapshot` with real `minifb::Key` and
 `gilrs::Button` values, proving the OS-typed adapter path used by the game loop
-still serializes through the bus. The remaining `input_port_matrix` gap is live
-minifb window polling and gilrs device polling injection beyond typed adapter
-fixtures, plus in-cartridge exhaustive mask iteration beyond the sampled
-generated fixtures.
+still serializes through the bus. Gilrs polling helper coverage proves D-pad
+button polling, analog stick cardinal snapping with hysteresis, turbo gates,
+trigger flags, and bus serial reads use the same library path as the game loop.
+The remaining `input_port_matrix` gap is live minifb `Window` key polling plus
+physical or virtual gilrs device enumeration and event pumping beyond typed
+adapter and closure-driven polling fixtures, plus in-cartridge exhaustive mask
+iteration beyond the sampled generated fixtures.
 
 To query an accepted suite without hand-joining JSON files, run:
 
