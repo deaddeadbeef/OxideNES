@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.3.45] - 2026-06-20
+
+### Added
+- Added a generated Mapper 4/MMC3 A12-source gate diagnostic variant that proves low-pattern background rendering suppresses MMC3 scanline IRQ clocks while high-pattern background rendering still triggers the configured IRQ.
+
+### Changed
+- Bumped diagnostic telemetry to schema 74 and added the `mapper4.mmc3_a12_irq_gate` probe to the AI observability catalog.
+
 ## [0.3.44] - 2026-06-20
 
 ### Added

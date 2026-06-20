@@ -1424,6 +1424,15 @@ the rendered pixel color for both banks, and exposes top-level
 coverage gap from active-render CHR/PRG switches to active-render PRG switches
 and deeper mapper-family edge cases.
 
+Schema version `74` adds a generated Mapper 4/MMC3 A12-source gate variant to
+the host diagnostic run. The variant first renders background from pattern table
+`$0000` with background rendering enabled and expects zero MMC3 IRQs, then
+switches background rendering to pattern table `$1000` and expects one IRQ from
+the same latch/reload setup. It exposes top-level `mapper4_mmc3_a12_gate`
+telemetry plus the `mapper4.mmc3_a12_irq_gate` probe. This proves A12-source
+gating at the current scanline-level approximation; fine MMC3 A12 edge-filter
+timing remains outside the diagnostic cartridge contract.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`

@@ -20,7 +20,7 @@ EXPECTED_TELEMETRY_CATALOG_SCHEMA = 1
 EXPECTED_CODE_MAP_SCHEMA = 1
 EXPECTED_INVESTIGATION_PLAN_SCHEMA = 1
 EXPECTED_SCENARIO_DOSSIERS_SCHEMA = 1
-EXPECTED_TELEMETRY_SCHEMA = 73
+EXPECTED_TELEMETRY_SCHEMA = 74
 EXPECTED_SCENARIO_COUNT = 45
 EXPECTED_ACTIONABLE_SCENARIO_COUNT = 37
 EXPECTED_PASS_SCENARIO_COUNT = 8
@@ -41,7 +41,7 @@ EXPECTED_CARTRIDGE_TEST_IDS = set(range(1, 29)) | {
     49,
 }
 EXPECTED_COVERAGE_GAP_COUNT = 6
-EXPECTED_PROBE_COUNT = 90
+EXPECTED_PROBE_COUNT = 91
 EXPECTED_EVENT_KIND_COUNT = 9
 EXPECTED_SIGNAL_FAMILY_COUNT = 8
 EXPECTED_TRACE_RETAINED_INSTRUCTION_COUNT = 64
@@ -677,6 +677,7 @@ class ObservabilityVerifier:
             "mapper3.rendered_chr_bank_switch",
             "mapper4.mmc3_banks_irq",
             "mapper4.mmc3_inversion_irq_reload",
+            "mapper4.mmc3_a12_irq_gate",
             "mapper4.mmc3_prg_ram_persistence",
             "mapper7.axrom_switching",
             "joypad.input_mask_sweep.results",
