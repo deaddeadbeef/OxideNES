@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 73;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 74;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v73";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v74";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -60,6 +60,7 @@ const CPU_ARITHMETIC_MATRIX_TEST_ID: u8 = 46;
 const CPU_STATUS_MATRIX_TEST_ID: u8 = 47;
 const PPU_PIXEL_PHASE_TEST_ID: u8 = 48;
 const PPU_ATTRIBUTE_QUADRANT_TEST_ID: u8 = 49;
+const MAPPER4_MMC3_A12_GATE_TEST_ID: u8 = 50;
 const MAPPER1_MAPPER: u8 = 1;
 const MAPPER1_PRG_BANKS: u8 = 4;
 const MAPPER1_CHR_8K_BANKS: u8 = 2;
@@ -161,6 +162,13 @@ const MAPPER4_EDGE_PRG_BANK_SENTINELS: [(usize, u16, u8); 3] = [
 const MAPPER4_EDGE_CHR_EXPECTED_VALUES: [u8; 8] = [0x76, 0x87, 0x10, 0x21, 0x32, 0x43, 0x54, 0x65];
 const MAPPER4_EDGE_IRQ_LATCHES: [u8; 2] = [0x03, 0x00];
 const MAPPER4_EDGE_EXPECTED_IRQ_COUNTS: [u8; 2] = [0x01, 0x02];
+const MAPPER4_A12_GATE_IRQ_LATCH: u8 = 0x01;
+const MAPPER4_A12_GATE_LOW_PATTERN_CTRL: u8 = 0x00;
+const MAPPER4_A12_GATE_HIGH_PATTERN_CTRL: u8 = 0x10;
+const MAPPER4_A12_GATE_BACKGROUND_MASK: u8 = 0x08;
+const MAPPER4_A12_GATE_EXPECTED_LOW_IRQ_COUNT: u8 = 0;
+const MAPPER4_A12_GATE_EXPECTED_HIGH_IRQ_COUNT: u8 = 1;
+const MAPPER4_A12_GATE_EXPECTED_CASE_COUNT: u8 = 2;
 const MAPPER4_PRG_RAM_SIZE: usize = 0x2000;
 const MAPPER4_PRG_RAM_READ_ADDRS: [u16; 4] = [0x6000, 0x67FF, 0x7FFF, 0x6000];
 const MAPPER4_PRG_RAM_EXPECTED_VALUES: [u8; 4] = [0x5A, 0xC3, 0xA7, 0x3C];
@@ -286,6 +294,10 @@ const MAPPER1_MMC1_32K_PRG_CASE_COUNT_ADDR: u16 = 0x02A0;
 const MAPPER1_MMC1_32K_PRG_OBSERVED_BASE_ADDR: u16 = 0x02A1;
 const MAPPER4_MMC3_PRG_RAM_CASE_COUNT_ADDR: u16 = 0x02B0;
 const MAPPER4_MMC3_PRG_RAM_OBSERVED_BASE_ADDR: u16 = 0x02B1;
+const MAPPER4_MMC3_A12_GATE_PHASE_ADDR: u16 = 0x030C;
+const MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR: u16 = 0x030D;
+const MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR: u16 = 0x030E;
+const MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR: u16 = 0x030F;
 // Keep the canonical render-frame signature phase stable after earlier tests grow.
 const PPU_RENDER_FRAME_PHASE_ALIGNMENT_NOPS: usize = 31;
 const APU_STATUS_FAULT_LABEL: &str = "apu_status_register_before_status_read";
@@ -2516,6 +2528,7 @@ pub struct DiagnosticTelemetry {
     pub mapper3_rendered_chr_bank: Mapper3RenderedChrBankTelemetry,
     pub mapper4_mmc3: Mapper4Mmc3Telemetry,
     pub mapper4_mmc3_edge: Mapper4Mmc3EdgeTelemetry,
+    pub mapper4_mmc3_a12_gate: Mapper4Mmc3A12GateTelemetry,
     pub mapper4_mmc3_prg_ram: Mapper4Mmc3PrgRamTelemetry,
     pub mapper7_axrom: Mapper7AxromTelemetry,
     pub input_mask_sweep: InputMaskSweepTelemetry,
@@ -2765,6 +2778,31 @@ pub struct Mapper4Mmc3EdgeTelemetry {
     pub expected_chr_values_hex: Vec<String>,
     pub observed_chr_values: Vec<u8>,
     pub observed_chr_values_hex: Vec<String>,
+    pub cycles: u64,
+    pub frames: u64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Mapper4Mmc3A12GateTelemetry {
+    pub mapper: u8,
+    pub prg_16k_banks: u8,
+    pub chr_8k_banks: u8,
+    pub irq_latch: u8,
+    pub irq_latch_hex: String,
+    pub low_pattern_ctrl: u8,
+    pub low_pattern_ctrl_hex: String,
+    pub high_pattern_ctrl: u8,
+    pub high_pattern_ctrl_hex: String,
+    pub background_mask: u8,
+    pub background_mask_hex: String,
+    pub expected_low_pattern_irq_count: u8,
+    pub observed_low_pattern_irq_count: u8,
+    pub expected_high_pattern_irq_count: u8,
+    pub observed_high_pattern_irq_count: u8,
+    pub expected_case_count: u8,
+    pub observed_case_count: u8,
     pub cycles: u64,
     pub frames: u64,
     pub passed: bool,
@@ -4262,6 +4300,47 @@ fn build_mapper4_mmc3_edge_variant_cartridge() -> Result<Vec<u8>, String> {
     Ok(rom)
 }
 
+fn build_mapper4_mmc3_a12_gate_variant_cartridge() -> Result<Vec<u8>, String> {
+    let (program, labels) = build_mapper4_mmc3_a12_gate_variant_program_with_labels()?;
+    if program.len() > 0x2000 {
+        return Err(format!(
+            "Mapper 4 A12 gate diagnostic program is too large for fixed $C000-$DFFF execution: {} bytes > {} bytes",
+            program.len(),
+            0x2000
+        ));
+    }
+
+    let prg_size = MAPPER4_PRG_16K_BANKS as usize * PRG_BANK_SIZE;
+    let mut rom = Vec::with_capacity(16 + prg_size + MAPPER4_CHR_8K_BANKS as usize * CHR_BANK_SIZE);
+    rom.extend_from_slice(b"NES\x1A");
+    rom.push(MAPPER4_PRG_16K_BANKS);
+    rom.push(MAPPER4_CHR_8K_BANKS);
+    rom.push((MAPPER4_MAPPER & 0x0F) << 4);
+    rom.push(MAPPER4_MAPPER & 0xF0);
+    rom.extend_from_slice(&[0; 8]);
+
+    let mut prg = vec![0xEA; prg_size];
+    let program_offset = (MAPPER4_PRG_16K_BANKS as usize - 1) * PRG_BANK_SIZE;
+    prg[program_offset..program_offset + program.len()].copy_from_slice(&program);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFA,
+        label_addr(&labels, "nmi")?,
+    );
+    write_vector_for_banks(&mut prg, MAPPER4_PRG_16K_BANKS, 0xFFFC, PROGRAM_BASE);
+    write_vector_for_banks(
+        &mut prg,
+        MAPPER4_PRG_16K_BANKS,
+        0xFFFE,
+        label_addr(&labels, "irq")?,
+    );
+
+    rom.extend_from_slice(&prg);
+    rom.extend_from_slice(&build_mapper4_mmc3_chr_rom());
+    Ok(rom)
+}
+
 fn build_mapper4_mmc3_prg_ram_variant_cartridge() -> Result<Vec<u8>, String> {
     let (program, labels) = build_mapper4_mmc3_prg_ram_variant_program_with_labels()?;
     if program.len() > 0x2000 {
@@ -4846,6 +4925,8 @@ fn build_mapper4_mmc3_variant_program_with_labels(
     program.asm.lda_imm(0x00);
     program.asm.sta_abs(0xC001);
     program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x10);
+    program.asm.sta_abs(0x2000);
     program.asm.lda_imm(0x08);
     program.asm.sta_abs(0x2001);
     program.asm.cli();
@@ -4968,6 +5049,8 @@ fn build_mapper4_mmc3_edge_variant_program_with_labels(
     program.asm.lda_imm(0x00);
     program.asm.sta_abs(0xC001);
     program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x10);
+    program.asm.sta_abs(0x2000);
     program.asm.lda_imm(0x08);
     program.asm.sta_abs(0x2001);
     program.asm.cli();
@@ -4990,6 +5073,8 @@ fn build_mapper4_mmc3_edge_variant_program_with_labels(
     program.asm.lda_imm(0x00);
     program.asm.sta_abs(0xC001);
     program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x10);
+    program.asm.sta_abs(0x2000);
     program.asm.lda_imm(0x08);
     program.asm.sta_abs(0x2001);
     program.asm.cli();
@@ -5027,6 +5112,133 @@ fn build_mapper4_mmc3_edge_variant_program_with_labels(
     program.asm.clc();
     program.asm.adc_imm(0x01);
     program.asm.sta_abs(MAPPER4_MMC3_EDGE_IRQ_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("hang")?;
+    program.asm.jmp_label("hang");
+
+    let labels = program.asm.labels.clone();
+    let bytes = program.asm.finalize()?;
+    Ok((bytes, labels))
+}
+
+fn build_mapper4_mmc3_a12_gate_variant_program_with_labels(
+) -> Result<(Vec<u8>, HashMap<String, u16>), String> {
+    let mut program = DiagnosticProgram::new();
+
+    program.asm.label("reset")?;
+    program.asm.sei();
+    program.asm.cld();
+    program.asm.ldx_imm(0xFF);
+    program.asm.txs();
+    program.asm.lda_imm(0x40);
+    program.asm.sta_abs(0x4017);
+    program.asm.lda_imm(STATUS_RUNNING);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.lda_imm(MAPPER4_MMC3_A12_GATE_TEST_ID);
+    program.asm.sta_zp(CURRENT_TEST_ADDR);
+    program.asm.lda_imm(0xA5);
+    program.asm.sta_zp(SIGNATURE_ADDR);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_zp(FAILURE_CODE_ADDR);
+    program.asm.sta_zp(NMI_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_A12_GATE_PHASE_ADDR);
+    program
+        .asm
+        .sta_abs(MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR);
+    program
+        .asm
+        .sta_abs(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR);
+    program.asm.sta_abs(MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR);
+    program.asm.sta_abs(0x2000);
+    program.asm.sta_abs(0x2001);
+    program.asm.sta_abs(0xE000);
+
+    program.asm.lda_imm(MAPPER4_A12_GATE_IRQ_LATCH);
+    program.asm.sta_abs(0xC000);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xC001);
+    program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x01);
+    program.asm.sta_abs(MAPPER4_MMC3_A12_GATE_PHASE_ADDR);
+    program.asm.lda_imm(MAPPER4_A12_GATE_LOW_PATTERN_CTRL);
+    program.asm.sta_abs(0x2000);
+    program.asm.lda_imm(MAPPER4_A12_GATE_BACKGROUND_MASK);
+    program.asm.sta_abs(0x2001);
+    program.asm.cli();
+    program.wait_for_vblank("mapper4_a12_low_vblank_1");
+    program.wait_for_vblank("mapper4_a12_low_vblank_2");
+    program.wait_for_vblank("mapper4_a12_low_vblank_3");
+    program.asm.sei();
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x2001);
+    program.asm.sta_abs(0xE000);
+    program
+        .asm
+        .lda_abs(MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR);
+    program.expect_a_eq(MAPPER4_A12_GATE_EXPECTED_LOW_IRQ_COUNT, 0xEA);
+    program.increment_abs(MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(MAPPER4_A12_GATE_IRQ_LATCH);
+    program.asm.sta_abs(0xC000);
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xC001);
+    program.asm.sta_abs(0xE001);
+    program.asm.lda_imm(0x02);
+    program.asm.sta_abs(MAPPER4_MMC3_A12_GATE_PHASE_ADDR);
+    program.asm.lda_imm(MAPPER4_A12_GATE_HIGH_PATTERN_CTRL);
+    program.asm.sta_abs(0x2000);
+    program.asm.lda_imm(MAPPER4_A12_GATE_BACKGROUND_MASK);
+    program.asm.sta_abs(0x2001);
+    program.asm.cli();
+    program.asm.label("wait_mapper4_a12_high_irq")?;
+    program
+        .asm
+        .lda_abs(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR);
+    program
+        .asm
+        .cmp_imm(MAPPER4_A12_GATE_EXPECTED_HIGH_IRQ_COUNT);
+    program.asm.bne("wait_mapper4_a12_high_irq");
+    program.asm.sei();
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0x2001);
+    program.asm.sta_abs(0xE000);
+    program
+        .asm
+        .lda_abs(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR);
+    program.expect_a_eq(MAPPER4_A12_GATE_EXPECTED_HIGH_IRQ_COUNT, 0xEB);
+    program.increment_abs(MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR);
+
+    program.asm.lda_imm(STATUS_PASS);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("fail")?;
+    program.asm.lda_imm(STATUS_FAIL);
+    program.asm.sta_zp(STATUS_ADDR);
+    program.asm.jmp_label("hang");
+
+    program.asm.label("nmi")?;
+    program.asm.inc_zp(NMI_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("irq")?;
+    program.asm.sei();
+    program.asm.lda_imm(0x00);
+    program.asm.sta_abs(0xE000);
+    program.asm.lda_abs(MAPPER4_MMC3_A12_GATE_PHASE_ADDR);
+    program.asm.cmp_imm(0x01);
+    program.asm.beq("mapper4_a12_low_irq");
+    program.asm.cmp_imm(0x02);
+    program.asm.beq("mapper4_a12_high_irq");
+    program.asm.rti();
+    program.asm.label("mapper4_a12_low_irq")?;
+    program
+        .asm
+        .inc_abs(MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR);
+    program.asm.rti();
+    program.asm.label("mapper4_a12_high_irq")?;
+    program
+        .asm
+        .inc_abs(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR);
     program.asm.rti();
     program.asm.label("hang")?;
     program.asm.jmp_label("hang");
@@ -5712,6 +5924,8 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_rendered_chr_bank_telemetry(&run_mapper3_rendered_chr_bank_variant());
     let mapper4_mmc3 = mapper4_mmc3_telemetry(&run_mapper4_mmc3_variant());
     let mapper4_mmc3_edge = mapper4_mmc3_edge_telemetry(&run_mapper4_mmc3_edge_variant());
+    let mapper4_mmc3_a12_gate =
+        mapper4_mmc3_a12_gate_telemetry(&run_mapper4_mmc3_a12_gate_variant());
     let mapper4_mmc3_prg_ram = mapper4_mmc3_prg_ram_telemetry(&run_mapper4_mmc3_prg_ram_variant());
     let mapper7_axrom = mapper7_axrom_telemetry(&run_mapper7_axrom_variant());
     let input_mask_sweep = input_mask_sweep_telemetry(&run_input_mask_sweep_variant());
@@ -5764,6 +5978,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_rendered_chr_bank: &mapper3_rendered_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
+        mapper4_mmc3_a12_gate: &mapper4_mmc3_a12_gate,
         mapper4_mmc3_prg_ram: &mapper4_mmc3_prg_ram,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
@@ -5816,6 +6031,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_rendered_chr_bank: &mapper3_rendered_chr_bank,
         mapper4_mmc3: &mapper4_mmc3,
         mapper4_mmc3_edge: &mapper4_mmc3_edge,
+        mapper4_mmc3_a12_gate: &mapper4_mmc3_a12_gate,
         mapper4_mmc3_prg_ram: &mapper4_mmc3_prg_ram,
         mapper7_axrom: &mapper7_axrom,
         dma: &dma,
@@ -5868,6 +6084,7 @@ pub fn run_diagnostic(config: DiagnosticConfig) -> Result<DiagnosticTelemetry, S
         mapper3_rendered_chr_bank,
         mapper4_mmc3,
         mapper4_mmc3_edge,
+        mapper4_mmc3_a12_gate,
         mapper4_mmc3_prg_ram,
         mapper7_axrom,
         input_mask_sweep,
@@ -6771,6 +6988,63 @@ fn write_mapper_section(report: &mut String, telemetry: &DiagnosticTelemetry) {
         report,
         "| Mapper 4 edge error | {} |",
         optional_string(telemetry.mapper4_mmc3_edge.error.as_deref())
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate PPUCTRL low / high / PPUMASK | {} / {} / {} |",
+        telemetry.mapper4_mmc3_a12_gate.low_pattern_ctrl_hex,
+        telemetry.mapper4_mmc3_a12_gate.high_pattern_ctrl_hex,
+        telemetry.mapper4_mmc3_a12_gate.background_mask_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate IRQ latch | {} |",
+        telemetry.mapper4_mmc3_a12_gate.irq_latch_hex
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate low-pattern IRQ observed / expected | {} / {} |",
+        telemetry
+            .mapper4_mmc3_a12_gate
+            .observed_low_pattern_irq_count,
+        telemetry
+            .mapper4_mmc3_a12_gate
+            .expected_low_pattern_irq_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate high-pattern IRQ observed / expected | {} / {} |",
+        telemetry
+            .mapper4_mmc3_a12_gate
+            .observed_high_pattern_irq_count,
+        telemetry
+            .mapper4_mmc3_a12_gate
+            .expected_high_pattern_irq_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate cases / expected | {} / {} |",
+        telemetry.mapper4_mmc3_a12_gate.observed_case_count,
+        telemetry.mapper4_mmc3_a12_gate.expected_case_count
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate cycles / frames / passed | {} / {} / {} |",
+        telemetry.mapper4_mmc3_a12_gate.cycles,
+        telemetry.mapper4_mmc3_a12_gate.frames,
+        telemetry.mapper4_mmc3_a12_gate.passed
+    )
+    .expect("write report");
+    writeln!(
+        report,
+        "| Mapper 4 A12 gate error | {} |",
+        optional_string(telemetry.mapper4_mmc3_a12_gate.error.as_deref())
     )
     .expect("write report");
     writeln!(
@@ -9423,6 +9697,7 @@ struct HostValidationInput<'a> {
     mapper3_rendered_chr_bank: &'a Mapper3RenderedChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
+    mapper4_mmc3_a12_gate: &'a Mapper4Mmc3A12GateTelemetry,
     mapper4_mmc3_prg_ram: &'a Mapper4Mmc3PrgRamTelemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
@@ -9468,6 +9743,7 @@ struct ProbeTelemetryInput<'a> {
     mapper3_rendered_chr_bank: &'a Mapper3RenderedChrBankTelemetry,
     mapper4_mmc3: &'a Mapper4Mmc3Telemetry,
     mapper4_mmc3_edge: &'a Mapper4Mmc3EdgeTelemetry,
+    mapper4_mmc3_a12_gate: &'a Mapper4Mmc3A12GateTelemetry,
     mapper4_mmc3_prg_ram: &'a Mapper4Mmc3PrgRamTelemetry,
     mapper7_axrom: &'a Mapper7AxromTelemetry,
     dma: &'a DmaTelemetry,
@@ -9962,6 +10238,22 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
             input.mapper4_mmc3_edge.expected_case_count,
             input.mapper4_mmc3_edge.cycles,
             optional_string(input.mapper4_mmc3_edge.error.as_deref())
+        ));
+    }
+    if !input.mapper4_mmc3_a12_gate.passed {
+        failures.push(format!(
+            "Mapper 4 MMC3 A12 gate variant mismatch: low-pattern IRQ {}/{}, high-pattern IRQ {}/{}, PPUCTRL low/high {}/{}, PPUMASK {}, cases {}/{}, cycles={}, error {}",
+            input.mapper4_mmc3_a12_gate.observed_low_pattern_irq_count,
+            input.mapper4_mmc3_a12_gate.expected_low_pattern_irq_count,
+            input.mapper4_mmc3_a12_gate.observed_high_pattern_irq_count,
+            input.mapper4_mmc3_a12_gate.expected_high_pattern_irq_count,
+            input.mapper4_mmc3_a12_gate.low_pattern_ctrl_hex,
+            input.mapper4_mmc3_a12_gate.high_pattern_ctrl_hex,
+            input.mapper4_mmc3_a12_gate.background_mask_hex,
+            input.mapper4_mmc3_a12_gate.observed_case_count,
+            input.mapper4_mmc3_a12_gate.expected_case_count,
+            input.mapper4_mmc3_a12_gate.cycles,
+            optional_string(input.mapper4_mmc3_a12_gate.error.as_deref())
         ));
     }
     if !input.mapper4_mmc3_prg_ram.passed {
@@ -11144,6 +11436,41 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 optional_string(input.mapper4_mmc3_edge.error.as_deref())
             ),
             likely_domain: "cartridge.mapper4_mmc3".to_string(),
+        },
+    );
+    push_probe(
+        &mut probes,
+        ProbeTelemetryRecord {
+            id: "mapper4.mmc3_a12_irq_gate".to_string(),
+            source: DiagnosticProbeSource::HostObservation,
+            subsystem: Some(DiagnosticSubsystem::Cartridge),
+            test_id: Some(MAPPER4_MMC3_A12_GATE_TEST_ID),
+            test_name: None,
+            status: gated_probe_status(passed_suite, input.mapper4_mmc3_a12_gate.passed),
+            description:
+                "Generated Mapper 4 A12 gate variant proves low-pattern background rendering does not clock MMC3 IRQs while high-pattern rendering still does"
+                    .to_string(),
+            expected: format!(
+                "PPUCTRL low {} high {}, PPUMASK {}, latch {}, low IRQ {}, high IRQ {}, cases {}",
+                input.mapper4_mmc3_a12_gate.low_pattern_ctrl_hex,
+                input.mapper4_mmc3_a12_gate.high_pattern_ctrl_hex,
+                input.mapper4_mmc3_a12_gate.background_mask_hex,
+                input.mapper4_mmc3_a12_gate.irq_latch_hex,
+                input.mapper4_mmc3_a12_gate.expected_low_pattern_irq_count,
+                input.mapper4_mmc3_a12_gate.expected_high_pattern_irq_count,
+                input.mapper4_mmc3_a12_gate.expected_case_count
+            ),
+            observed: format!(
+                "low IRQ {}, high IRQ {}, cases {}/{}, cycles={}, frames={}, error {}",
+                input.mapper4_mmc3_a12_gate.observed_low_pattern_irq_count,
+                input.mapper4_mmc3_a12_gate.observed_high_pattern_irq_count,
+                input.mapper4_mmc3_a12_gate.observed_case_count,
+                input.mapper4_mmc3_a12_gate.expected_case_count,
+                input.mapper4_mmc3_a12_gate.cycles,
+                input.mapper4_mmc3_a12_gate.frames,
+                optional_string(input.mapper4_mmc3_a12_gate.error.as_deref())
+            ),
+            likely_domain: "cartridge.mapper4_mmc3_a12_irq_gate".to_string(),
         },
     );
     push_probe(
@@ -16214,6 +16541,34 @@ fn mapper4_mmc3_edge_telemetry(
     }
 }
 
+fn mapper4_mmc3_a12_gate_telemetry(
+    observation: &Mapper4Mmc3A12GateObservation,
+) -> Mapper4Mmc3A12GateTelemetry {
+    Mapper4Mmc3A12GateTelemetry {
+        mapper: MAPPER4_MAPPER,
+        prg_16k_banks: MAPPER4_PRG_16K_BANKS,
+        chr_8k_banks: MAPPER4_CHR_8K_BANKS,
+        irq_latch: MAPPER4_A12_GATE_IRQ_LATCH,
+        irq_latch_hex: hex_byte(MAPPER4_A12_GATE_IRQ_LATCH),
+        low_pattern_ctrl: MAPPER4_A12_GATE_LOW_PATTERN_CTRL,
+        low_pattern_ctrl_hex: hex_byte(MAPPER4_A12_GATE_LOW_PATTERN_CTRL),
+        high_pattern_ctrl: MAPPER4_A12_GATE_HIGH_PATTERN_CTRL,
+        high_pattern_ctrl_hex: hex_byte(MAPPER4_A12_GATE_HIGH_PATTERN_CTRL),
+        background_mask: MAPPER4_A12_GATE_BACKGROUND_MASK,
+        background_mask_hex: hex_byte(MAPPER4_A12_GATE_BACKGROUND_MASK),
+        expected_low_pattern_irq_count: MAPPER4_A12_GATE_EXPECTED_LOW_IRQ_COUNT,
+        observed_low_pattern_irq_count: observation.low_pattern_irq_count,
+        expected_high_pattern_irq_count: MAPPER4_A12_GATE_EXPECTED_HIGH_IRQ_COUNT,
+        observed_high_pattern_irq_count: observation.high_pattern_irq_count,
+        expected_case_count: MAPPER4_A12_GATE_EXPECTED_CASE_COUNT,
+        observed_case_count: observation.observed_case_count,
+        cycles: observation.cycles,
+        frames: observation.frames,
+        passed: observation.passed,
+        error: observation.error.clone(),
+    }
+}
+
 fn mapper4_mmc3_prg_ram_telemetry(
     observation: &Mapper4Mmc3PrgRamObservation,
 ) -> Mapper4Mmc3PrgRamTelemetry {
@@ -16739,6 +17094,31 @@ impl Mapper4Mmc3EdgeObservation {
             observed_prg_values: [0; 3],
             observed_chr_values: [0; 8],
             observed_irq_counts: [0; 2],
+            observed_case_count: 0,
+            cycles: 0,
+            frames: 0,
+            passed: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Mapper4Mmc3A12GateObservation {
+    low_pattern_irq_count: u8,
+    high_pattern_irq_count: u8,
+    observed_case_count: u8,
+    cycles: u64,
+    frames: u64,
+    passed: bool,
+    error: Option<String>,
+}
+
+impl Mapper4Mmc3A12GateObservation {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            low_pattern_irq_count: 0,
+            high_pattern_irq_count: 0,
             observed_case_count: 0,
             cycles: 0,
             frames: 0,
@@ -17386,6 +17766,86 @@ fn read_mapper4_mmc3_edge_irq_observed_counts(bus: &mut Bus) -> [u8; 2] {
         *value = bus.cpu_read(MAPPER4_MMC3_EDGE_IRQ_OBSERVED_BASE_ADDR + index as u16);
     }
     values
+}
+
+fn run_mapper4_mmc3_a12_gate_variant() -> Mapper4Mmc3A12GateObservation {
+    match try_run_mapper4_mmc3_a12_gate_variant() {
+        Ok(observation) => observation,
+        Err(error) => Mapper4Mmc3A12GateObservation::failed(error),
+    }
+}
+
+fn try_run_mapper4_mmc3_a12_gate_variant() -> Result<Mapper4Mmc3A12GateObservation, String> {
+    let rom = build_mapper4_mmc3_a12_gate_variant_cartridge()?;
+    let cartridge = Cartridge::new(&rom)?;
+    let mut bus = Bus::new(cartridge);
+    let mut cpu = Cpu::new();
+    cpu.reset(&mut bus);
+
+    let mut cycles = 0u64;
+    let mut frames = 0u64;
+    let cycle_limit = 180_000u64;
+
+    while cycles < cycle_limit {
+        cpu.clock(&mut bus);
+        bus.tick(1);
+        bus.tick_apu();
+        cycles += 1;
+
+        if bus.ppu.frame_complete() {
+            frames += 1;
+            bus.apu.end_frame();
+            let _ = bus.apu.drain_samples();
+        }
+
+        let status = read_ram_byte(&mut bus, STATUS_ADDR);
+        if matches!(status, STATUS_PASS | STATUS_FAIL) {
+            let low_pattern_irq_count = bus.cpu_read(MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR);
+            let high_pattern_irq_count = bus.cpu_read(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR);
+            let observed_case_count = bus.cpu_read(MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR);
+            let failure_code = read_ram_byte(&mut bus, FAILURE_CODE_ADDR);
+            let passed = status == STATUS_PASS
+                && low_pattern_irq_count == MAPPER4_A12_GATE_EXPECTED_LOW_IRQ_COUNT
+                && high_pattern_irq_count == MAPPER4_A12_GATE_EXPECTED_HIGH_IRQ_COUNT
+                && observed_case_count == MAPPER4_A12_GATE_EXPECTED_CASE_COUNT;
+            let error = if passed {
+                None
+            } else if status == STATUS_FAIL {
+                Some(format!(
+                    "Mapper 4 MMC3 A12 gate variant reported FAIL with failure code 0x{failure_code:02X}"
+                ))
+            } else {
+                Some(format!(
+                    "Mapper 4 MMC3 A12 gate variant reached PASS with mismatched host observations: low IRQ {}, high IRQ {}, cases {}/{}",
+                    low_pattern_irq_count,
+                    high_pattern_irq_count,
+                    observed_case_count,
+                    MAPPER4_A12_GATE_EXPECTED_CASE_COUNT
+                ))
+            };
+            return Ok(Mapper4Mmc3A12GateObservation {
+                low_pattern_irq_count,
+                high_pattern_irq_count,
+                observed_case_count,
+                cycles,
+                frames,
+                passed,
+                error,
+            });
+        }
+    }
+
+    Ok(Mapper4Mmc3A12GateObservation {
+        low_pattern_irq_count: bus.cpu_read(MAPPER4_MMC3_A12_GATE_LOW_IRQ_COUNT_ADDR),
+        high_pattern_irq_count: bus.cpu_read(MAPPER4_MMC3_A12_GATE_HIGH_IRQ_COUNT_ADDR),
+        observed_case_count: bus.cpu_read(MAPPER4_MMC3_A12_GATE_CASE_COUNT_ADDR),
+        cycles,
+        frames,
+        passed: false,
+        error: Some(format!(
+            "Mapper 4 MMC3 A12 gate variant timed out after {cycle_limit} cycles"
+        )),
+    })
 }
 
 fn run_mapper4_mmc3_prg_ram_variant() -> Mapper4Mmc3PrgRamObservation {

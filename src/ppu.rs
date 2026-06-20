@@ -332,6 +332,14 @@ impl Ppu {
         self.mask & 0x18 != 0
     }
 
+    #[inline(always)]
+    fn mmc3_irq_a12_source_enabled(&self) -> bool {
+        let background_fetches_high_pattern_table = self.mask & 0x08 != 0 && self.ctrl & 0x10 != 0;
+        let sprite_fetches_high_pattern_table =
+            self.mask & 0x10 != 0 && (self.ctrl & 0x20 != 0 || self.ctrl & 0x08 != 0);
+        background_fetches_high_pattern_table || sprite_fetches_high_pattern_table
+    }
+
     #[inline]
     fn increment_scroll_x(&mut self) {
         if !self.rendering_enabled() {
@@ -495,8 +503,8 @@ impl Ppu {
                 self.transfer_address_x();
             }
 
-            // Clock MMC3 scanline counter at cycle 260 of visible scanlines
-            if self.cycle == 260 && self.rendering_enabled() {
+            // Clock the MMC3 scanline counter only when rendered fetches can drive PPU A12 high.
+            if self.cycle == 260 && self.mmc3_irq_a12_source_enabled() {
                 cart.mapper.clock_scanline();
             }
 
