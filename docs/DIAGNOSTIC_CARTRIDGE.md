@@ -1402,8 +1402,9 @@ Schema version `66` adds the `cpu_load_store_transfer_matrix` cartridge test,
 top-level `cpu_load_store_matrix` telemetry, and the
 `cpu.load_store_matrix.results` probe. The cartridge records LDA/LDX/LDY load
 results and flags, STA/STX/STY indexed memory side effects including
-absolute-X/absolute-Y and zero-page indexed forms, TAX/TAY/TXA/TYA register
-transfer results and flags, compact family masks, and a case counter.
+absolute-X/absolute-Y, zero-page-X, and zero-page indexed forms,
+TAX/TAY/TXA/TYA register transfer results and flags, compact family masks, and
+a case counter.
 
 Schema version `67` adds the `cpu_alu_index_matrix` cartridge test, top-level
 `cpu_alu_index_matrix` telemetry, and the `cpu.alu_index_matrix.results` probe.
@@ -1480,6 +1481,12 @@ cartridge test with an indexed absolute `STA abs,X` store case. The
 load/store telemetry now expects four store cases, store mask `0x0F`, and
 twelve total load/store/transfer cases, narrowing the CPU opcode matrix gap for
 official store addressing modes without changing the JSON shape.
+
+Schema version `77` extends the `cpu_load_store_transfer_matrix` generated
+cartridge test with an indexed zero-page `STA zp,X` store case. The
+load/store telemetry now expects five store cases, store mask `0x1F`, and
+thirteen total load/store/transfer cases, continuing to narrow official store
+addressing-mode coverage without changing the JSON shape.
 
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
