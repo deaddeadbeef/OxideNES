@@ -114,6 +114,25 @@ fn bus_joypad_write_read() {
 }
 
 #[test]
+fn bus_default_joypads_read_released_then_overread_high() {
+    let mut bus = make_test_bus();
+    bus.cpu_write(0x4016, 0x01);
+    bus.cpu_write(0x4016, 0x00);
+
+    let mut port1_bits = Vec::new();
+    let mut port2_bits = Vec::new();
+    for _ in 0..8 {
+        port1_bits.push(bus.cpu_read(0x4016) & 0x01);
+        port2_bits.push(bus.cpu_read(0x4017) & 0x01);
+    }
+
+    assert_eq!(port1_bits, vec![0; 8]);
+    assert_eq!(port2_bits, vec![0; 8]);
+    assert_eq!(bus.cpu_read(0x4016) & 0x01, 1);
+    assert_eq!(bus.cpu_read(0x4017) & 0x01, 1);
+}
+
+#[test]
 fn bus_ram_snapshot() {
     let mut bus = make_test_bus();
     bus.cpu_write(0x0000, 0x42);

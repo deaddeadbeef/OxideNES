@@ -15,15 +15,18 @@ game loop on the same code path.
 - [x] Add regression tests for custom keyboard bindings, custom controller face
   button bindings, turbo gates, merged input sources, and joypad serial bit
   order.
+- [x] Add bus-level default/disconnected controller coverage for both joypad
+  ports, including released serial bits and post-exhaustion high reads.
 - [x] Update the diagnostic coverage gap text so host input-remapping fixtures
-  are covered and the remaining gap is live event injection, disconnected
-  defaults, and broader in-cartridge iteration.
+  and disconnected/default port behavior are covered and the remaining gap is
+  live event injection and broader in-cartridge iteration.
 - [x] Document the release-candidate evidence requirement.
 
 ## Verification
 
 - [x] `cargo fmt -- --check`
 - [x] `cargo test --test input_mapping_tests --target x86_64-pc-windows-msvc`
+- [x] `cargo test --test bus_tests bus_default_joypads_read_released_then_overread_high --target x86_64-pc-windows-msvc`
 - [x] `cargo test --lib diagnostic::tests::headless_diagnostic_passes_and_collects_telemetry --target x86_64-pc-windows-msvc`
 - [x] `cargo test --test diagnostic_cli_tests diagnostic_cli_writes_standalone_triage_json --target x86_64-pc-windows-msvc`
 - [x] `python scripts/run_diagnostic_observability.py --suite-dir target/diagnostics/input-remap-observability --skip-replay`

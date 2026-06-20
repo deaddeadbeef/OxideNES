@@ -5103,19 +5103,20 @@ fn diagnostic_cli_writes_standalone_triage_json() {
         .iter()
         .any(
             |gap| gap["id"] == Value::String("input_port_matrix".to_string())
-                && gap["current_coverage"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("diagnostic-input-sweep.json")
-                        && text.contains("host input-remapping")
-                        && text.contains("same library path used by the game loop"))
+                && gap["current_coverage"].as_str().is_some_and(|text| text
+                    .contains("diagnostic-input-sweep.json")
+                    && text.contains("host input-remapping")
+                    && text.contains("same library path used by the game loop")
+                    && text.contains("disconnected/default controller fixture"))
                 && gap["missing_coverage"].as_str().is_some_and(|text| text
-                    .contains("Disconnected-controller electrical defaults")
+                    .contains("Live window/controller event injection")
+                    && !text.contains("Disconnected-controller")
                     && !text.contains("Host input remapping fixtures"))
-                && gap["suggested_next_test"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("live host-event fixtures")
-                        && !text.contains("input-remapping fixtures")
-                        && !text.contains("optional exhaustive input-port sweep"))
+                && gap["suggested_next_test"].as_str().is_some_and(|text| text
+                    .contains("live host-event fixtures")
+                    && !text.contains("disconnected-controller")
+                    && !text.contains("input-remapping fixtures")
+                    && !text.contains("optional exhaustive input-port sweep"))
         ));
     assert_eq!(triage["probes"]["failed_probes"], Value::from(0));
     assert!(triage["artifact_hints"]
