@@ -8,6 +8,7 @@ pub mod config;
 pub mod cpu;
 pub mod diagnostic;
 pub mod file_browser;
+pub mod input_mapping;
 pub mod joypad;
 pub mod mapper;
 pub mod netplay;

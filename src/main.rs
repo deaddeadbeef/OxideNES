@@ -23,6 +23,9 @@ use oxidenes::config::{
 };
 use oxidenes::cpu::Cpu;
 use oxidenes::file_browser::FileBrowser;
+use oxidenes::input_mapping::{
+    controller_state_from_bindings, keyboard_state_from_bindings, DirectionalInput,
+};
 use oxidenes::joypad::JoypadButton;
 use oxidenes::netplay::{NetplaySession, NetplayState};
 use oxidenes::ppu::Region;
@@ -8625,67 +8628,21 @@ fn handle_input(
     let keys = window.get_keys();
     let turbo_active = (frame_counter / 2).is_multiple_of(2); // ~15Hz: ON 2 frames, OFF 2 frames
 
-    // Player 1 - Keyboard
     let kb1 = &input_bindings.keyboard_p1;
-    let p1_key_up = string_to_key(&kb1.up);
-    let p1_key_down = string_to_key(&kb1.down);
-    let p1_key_left = string_to_key(&kb1.left);
-    let p1_key_right = string_to_key(&kb1.right);
-    let p1_key_a = string_to_key(&kb1.a);
-    let p1_key_b = string_to_key(&kb1.b);
-    let p1_key_start = string_to_key(&kb1.start);
-    let p1_key_select = string_to_key(&kb1.select);
-    let p1_key_turbo_a = string_to_key(&kb1.turbo_a);
-    let p1_key_turbo_b = string_to_key(&kb1.turbo_b);
-
-    let mut p1_up = p1_key_up.is_some_and(|k| keys.contains(&k));
-    let mut p1_down = p1_key_down.is_some_and(|k| keys.contains(&k));
-    let mut p1_left = p1_key_left.is_some_and(|k| keys.contains(&k));
-    let mut p1_right = p1_key_right.is_some_and(|k| keys.contains(&k));
-    let mut p1_a = p1_key_a.is_some_and(|k| keys.contains(&k));
-    let mut p1_b = p1_key_b.is_some_and(|k| keys.contains(&k));
-    let mut p1_start = p1_key_start.is_some_and(|k| keys.contains(&k));
-    let mut p1_select = p1_key_select.is_some_and(|k| keys.contains(&k));
+    let mut p1 = keyboard_state_from_bindings(
+        kb1,
+        |name| string_to_key(name).is_some_and(|key| keys.contains(&key)),
+        turbo_active,
+    );
     let mut l_trigger = false;
     let mut r_trigger = false;
 
-    // P1 turbo buttons
-    if p1_key_turbo_a.is_some_and(|k| keys.contains(&k)) && turbo_active {
-        p1_a = true;
-    }
-    if p1_key_turbo_b.is_some_and(|k| keys.contains(&k)) && turbo_active {
-        p1_b = true;
-    }
-
-    // Player 2 - Keyboard
     let kb2 = &input_bindings.keyboard_p2;
-    let p2_key_up = string_to_key(&kb2.up);
-    let p2_key_down = string_to_key(&kb2.down);
-    let p2_key_left = string_to_key(&kb2.left);
-    let p2_key_right = string_to_key(&kb2.right);
-    let p2_key_a = string_to_key(&kb2.a);
-    let p2_key_b = string_to_key(&kb2.b);
-    let p2_key_start = string_to_key(&kb2.start);
-    let p2_key_select = string_to_key(&kb2.select);
-    let p2_key_turbo_a = string_to_key(&kb2.turbo_a);
-    let p2_key_turbo_b = string_to_key(&kb2.turbo_b);
-
-    let mut p2_up = p2_key_up.is_some_and(|k| keys.contains(&k));
-    let mut p2_down = p2_key_down.is_some_and(|k| keys.contains(&k));
-    let mut p2_left = p2_key_left.is_some_and(|k| keys.contains(&k));
-    let mut p2_right = p2_key_right.is_some_and(|k| keys.contains(&k));
-    let mut p2_a = p2_key_a.is_some_and(|k| keys.contains(&k));
-    let mut p2_b = p2_key_b.is_some_and(|k| keys.contains(&k));
-    let mut p2_start = p2_key_start.is_some_and(|k| keys.contains(&k));
-    let mut p2_select = p2_key_select.is_some_and(|k| keys.contains(&k));
-
-    // P2 turbo buttons
-    if p2_key_turbo_a.is_some_and(|k| keys.contains(&k)) && turbo_active {
-        p2_a = true;
-    }
-    if p2_key_turbo_b.is_some_and(|k| keys.contains(&k)) && turbo_active {
-        p2_b = true;
-    }
+    let mut p2 = keyboard_state_from_bindings(
+        kb2,
+        |name| string_to_key(name).is_some_and(|key| keys.contains(&key)),
+        turbo_active,
+    );
 
     // Controllers - Poll gamepad events and read state
     if let Some(ref mut g) = gilrs {
@@ -8699,45 +8656,30 @@ fn handle_input(
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl1 = &input_bindings.controller_p1;
 
-            // D-pad buttons
-            p1_up |= gamepad.is_pressed(Button::DPadUp);
-            p1_down |= gamepad.is_pressed(Button::DPadDown);
-            p1_left |= gamepad.is_pressed(Button::DPadLeft);
-            p1_right |= gamepad.is_pressed(Button::DPadRight);
-
             // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl1.deadzone, stick_state_p1);
-            p1_up |= s_up;
-            p1_down |= s_down;
-            p1_left |= s_left;
-            p1_right |= s_right;
-
-            // Face buttons - configurable
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.a) {
-                p1_a |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.b) {
-                p1_b |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.turbo_a) {
-                if gamepad.is_pressed(btn) && turbo_active {
-                    p1_a = true;
-                }
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.turbo_b) {
-                if gamepad.is_pressed(btn) && turbo_active {
-                    p1_b = true;
-                }
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.start) {
-                p1_start |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl1.select) {
-                p1_select |= gamepad.is_pressed(btn);
-            }
+            p1.merge(controller_state_from_bindings(
+                ctrl1,
+                |name| {
+                    string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
+                },
+                DirectionalInput {
+                    up: gamepad.is_pressed(Button::DPadUp),
+                    down: gamepad.is_pressed(Button::DPadDown),
+                    left: gamepad.is_pressed(Button::DPadLeft),
+                    right: gamepad.is_pressed(Button::DPadRight),
+                },
+                DirectionalInput {
+                    up: s_up,
+                    down: s_down,
+                    left: s_left,
+                    right: s_right,
+                },
+                turbo_active,
+            ));
             l_trigger |=
                 gamepad.is_pressed(Button::LeftTrigger) || gamepad.is_pressed(Button::LeftTrigger2);
             r_trigger |= gamepad.is_pressed(Button::RightTrigger)
@@ -8748,74 +8690,38 @@ fn handle_input(
         if let Some((_, gamepad)) = gp_iter.next() {
             let ctrl2 = &input_bindings.controller_p2;
 
-            // D-pad buttons
-            p2_up |= gamepad.is_pressed(Button::DPadUp);
-            p2_down |= gamepad.is_pressed(Button::DPadDown);
-            p2_left |= gamepad.is_pressed(Button::DPadLeft);
-            p2_right |= gamepad.is_pressed(Button::DPadRight);
-
             // Left analog stick (circular deadzone + cardinal snapping)
             let stick_x = gamepad.value(Axis::LeftStickX);
             let stick_y = gamepad.value(Axis::LeftStickY);
             let (s_up, s_down, s_left, s_right) =
                 stick_to_dpad(stick_x, stick_y, ctrl2.deadzone, stick_state_p2);
-            p2_up |= s_up;
-            p2_down |= s_down;
-            p2_left |= s_left;
-            p2_right |= s_right;
-
-            // Face buttons - configurable
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.a) {
-                p2_a |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.b) {
-                p2_b |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.turbo_a) {
-                if gamepad.is_pressed(btn) && turbo_active {
-                    p2_a = true;
-                }
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.turbo_b) {
-                if gamepad.is_pressed(btn) && turbo_active {
-                    p2_b = true;
-                }
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.start) {
-                p2_start |= gamepad.is_pressed(btn);
-            }
-            if let Some(btn) = string_to_gilrs_button(&ctrl2.select) {
-                p2_select |= gamepad.is_pressed(btn);
-            }
+            p2.merge(controller_state_from_bindings(
+                ctrl2,
+                |name| {
+                    string_to_gilrs_button(name).is_some_and(|button| gamepad.is_pressed(button))
+                },
+                DirectionalInput {
+                    up: gamepad.is_pressed(Button::DPadUp),
+                    down: gamepad.is_pressed(Button::DPadDown),
+                    left: gamepad.is_pressed(Button::DPadLeft),
+                    right: gamepad.is_pressed(Button::DPadRight),
+                },
+                DirectionalInput {
+                    up: s_up,
+                    down: s_down,
+                    left: s_left,
+                    right: s_right,
+                },
+                turbo_active,
+            ));
         }
     }
 
     // Apply all input to joypads
-    bus.joypad1.set_button_pressed(JoypadButton::A, p1_a);
-    bus.joypad1.set_button_pressed(JoypadButton::B, p1_b);
-    bus.joypad1
-        .set_button_pressed(JoypadButton::Select, p1_select);
-    bus.joypad1
-        .set_button_pressed(JoypadButton::Start, p1_start);
-    bus.joypad1.set_button_pressed(JoypadButton::Up, p1_up);
-    bus.joypad1.set_button_pressed(JoypadButton::Down, p1_down);
-    bus.joypad1.set_button_pressed(JoypadButton::Left, p1_left);
-    bus.joypad1
-        .set_button_pressed(JoypadButton::Right, p1_right);
+    p1.apply_to_joypad(&mut bus.joypad1);
+    p2.apply_to_joypad(&mut bus.joypad2);
 
-    bus.joypad2.set_button_pressed(JoypadButton::A, p2_a);
-    bus.joypad2.set_button_pressed(JoypadButton::B, p2_b);
-    bus.joypad2
-        .set_button_pressed(JoypadButton::Select, p2_select);
-    bus.joypad2
-        .set_button_pressed(JoypadButton::Start, p2_start);
-    bus.joypad2.set_button_pressed(JoypadButton::Up, p2_up);
-    bus.joypad2.set_button_pressed(JoypadButton::Down, p2_down);
-    bus.joypad2.set_button_pressed(JoypadButton::Left, p2_left);
-    bus.joypad2
-        .set_button_pressed(JoypadButton::Right, p2_right);
-
-    (p1_start, p1_select, l_trigger, r_trigger)
+    (p1.start, p1.select, l_trigger, r_trigger)
 }
 
 #[derive(Clone, Copy)]

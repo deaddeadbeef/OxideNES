@@ -212,7 +212,11 @@ artifact without overstating current coverage. When
 `diagnostic-input-sweep.json` and `diagnostic-input-sweep.md` are already in the
 suite directory, the `input_port_matrix` row also records them as validated
 companion evidence so the remaining gap text stays focused on unmapped host
-input behavior rather than the exhaustive Joypad core sweep.
+input behavior rather than the exhaustive Joypad core sweep. The same row also
+tracks the host-remapping regression fixtures in `tests/input_mapping_tests.rs`,
+which exercise custom keyboard bindings, custom controller face-button bindings,
+turbo gates, merged keyboard/controller sources, and the joypad mask order used
+by the game loop.
 
 To run only the exhaustive host-side evidence for the current
 `input_port_matrix` coverage gap, write an input sweep artifact:
@@ -231,6 +235,16 @@ command is useful when iterating on input behavior without rerunning the full AI
 diagnostic graph. The generated cartridge still provides the sampled healthy-mask
 fixtures and fault-localization scenarios used by the default AI diagnostic
 suite.
+
+Host input-remapping coverage lives in the library input-mapping regression
+tests rather than in the generated cartridge. The game loop calls the same
+`keyboard_state_from_bindings`, `controller_state_from_bindings`, and
+`JoypadInputState::apply_to_joypad` helpers covered by
+`tests/input_mapping_tests.rs`, so custom keyboard/controller bindings are
+validated before they serialize through `$4016` and `$4017`. The remaining
+`input_port_matrix` gap is now live window/controller event injection,
+disconnected-controller electrical defaults beyond all-released masks, and
+in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.
 
 To query an accepted suite without hand-joining JSON files, run:
 
