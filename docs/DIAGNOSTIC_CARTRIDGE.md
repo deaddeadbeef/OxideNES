@@ -241,10 +241,12 @@ tests rather than in the generated cartridge. The game loop calls the same
 `keyboard_state_from_bindings`, `controller_state_from_bindings`, and
 `JoypadInputState::apply_to_joypad` helpers covered by
 `tests/input_mapping_tests.rs`, so custom keyboard/controller bindings are
-validated before they serialize through `$4016` and `$4017`. The remaining
-`input_port_matrix` gap is now live window/controller event injection,
-disconnected-controller electrical defaults beyond all-released masks, and
-in-cartridge exhaustive mask iteration beyond the sampled generated fixtures.
+validated before they serialize through `$4016` and `$4017`. Bus-level
+disconnected/default controller coverage lives in `tests/bus_tests.rs`; it
+proves both `$4016` and `$4017` serialize eight released bits before
+post-exhaustion reads go high. The remaining `input_port_matrix` gap is now
+live window/controller event injection and in-cartridge exhaustive mask
+iteration beyond the sampled generated fixtures.
 
 To query an accepted suite without hand-joining JSON files, run:
 
