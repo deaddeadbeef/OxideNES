@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.3.47] - 2026-06-20
+
+### Added
+- Added local dev-build CI evidence runner output for fmt, IP compliance, offline security audit, diagnostic baseline/bundle/e2e, observability verifiers, diagnostic profile, build, test, smoke-binary, and clippy gates.
+- Added host-input observability coverage for input remapping, disconnected/default controllers, injected host events, OS-typed minifb/gilrs input snapshots, and live gilrs polling paths.
+- Added CLI coverage for the ROM folder import copy/symlink workflow.
+- Expanded the CPU load/store/transfer diagnostic cartridge matrix with official `STA abs,X`, `STA zp,X`, `STA (zp,X)`, and `STA (zp),Y` store addressing-mode cases.
+
+### Changed
+- Bumped diagnostic telemetry to schema 79 and suite version to `diagnostic-cartridge-v79`.
+- Updated the CPU load/store matrix contract to seven store cases, store mask `0x7F`, and fifteen total load/store/transfer cases.
+- Made the local CI security-audit gate use cached offline advisory data so dev-build validation does not depend on GitHub during the run.
+
 ## [0.3.46] - 2026-06-20
 
 ### Added
