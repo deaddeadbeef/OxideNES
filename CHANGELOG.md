@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.50] - 2026-06-21
+
 ### Added
 - Expanded the CPU ALU/index diagnostic cartridge matrix with an explicit `AND zp` zero-page logical case and retained `and_zp_result` telemetry.
 - Expanded the CPU ALU/index diagnostic cartridge matrix with explicit `ORA zp` and `EOR zp` zero-page logical cases and retained `ora_zp_result` and `eor_zp_result` telemetry.
