@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 79;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 80;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v79";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v80";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -535,10 +535,11 @@ const CPU_LOAD_STORE_MATRIX_TRANSFER_TAY_RESULT_ADDR: u16 = 0x02E8;
 const CPU_LOAD_STORE_MATRIX_TRANSFER_TXA_RESULT_ADDR: u16 = 0x02E9;
 const CPU_LOAD_STORE_MATRIX_TRANSFER_TYA_RESULT_ADDR: u16 = 0x02EA;
 const CPU_LOAD_STORE_MATRIX_CASE_COUNT_ADDR: u16 = 0x02EB;
-const CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK: u8 = 0x0F;
+const CPU_LOAD_STORE_MATRIX_LOAD_INDIRECT_Y_RESULT_ADDR: u16 = 0x0255;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_LOAD_MASK: u8 = 0x1F;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_STORE_MASK: u8 = 0x7F;
 const CPU_LOAD_STORE_MATRIX_EXPECTED_TRANSFER_MASK: u8 = 0x0F;
-const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 15;
+const CPU_LOAD_STORE_MATRIX_EXPECTED_CASE_COUNT: u8 = 16;
 const CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR: u16 = 0x02EC;
 const CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR: u16 = 0x02ED;
 const CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR: u16 = 0x02EE;
@@ -1045,8 +1046,8 @@ pub const DIAGNOSTIC_TESTS: &[DiagnosticTestSpec] = &[
         tier: DiagnosticTestTier::EdgeCase,
         intent: "Verify representative LDA/LDX/LDY, STA/STX/STY, and TAX/TAY/TXA/TYA opcodes preserve register flags and memory side effects.",
         expected_observations: &[
-            "LDA, LDX, and LDY cover positive, zero, and negative flag outcomes across indexed addressing cases",
-            "STA, STX, and STY write expected bytes through absolute,Y, zero-page,Y, and zero-page,X stores",
+            "LDA covers indexed-indirect, absolute,Y, and indirect-indexed addressing while load results retain positive, zero, and negative flag outcomes",
+            "STA, STX, and STY write expected bytes through absolute,Y, absolute,X, zero-page,X, indexed-indirect, indirect-indexed, zero-page,Y, and zero-page-X stores",
             "TAX, TAY, TXA, and TYA transfer register values while updating zero and negative flags",
             "the matrix records every load, store, and transfer subcase in masks and case count",
         ],
@@ -1698,7 +1699,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xBF,
         test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
         assertion: "Load matrix covers LDA, LDX, and LDY result and flag outcomes",
-        expected: "LDA indexed-indirect reads 0x5A, LDA absolute,Y can set zero, LDX absolute,Y can set negative, and LDY absolute,X reads 0x7E",
+        expected: "LDA indexed-indirect reads 0x5A, LDA absolute,Y can set zero, LDA indirect-indexed reads 0x91, LDX absolute,Y can set negative, and LDY absolute,X reads 0x7E",
         observed: "one or more load opcodes did not preserve the expected result or zero/negative flag state",
         likely_domain: "cpu.load_store.transfer_matrix",
         remediation_hint: "Inspect LDA/LDX/LDY dispatch, indexed addressing, and zero/negative flag updates before broadening the CPU opcode matrix.",
@@ -1725,7 +1726,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xC4,
         test_id: CPU_LOAD_STORE_MATRIX_TEST_ID,
         assertion: "Load/store/transfer matrix records every opcode family subcase",
-        expected: "load mask == 0x0F, store mask == 0x7F, transfer mask == 0x0F, and case count == 15",
+        expected: "load mask == 0x1F, store mask == 0x7F, transfer mask == 0x0F, and case count == 16",
         observed: "the load/store/transfer matrix did not record every expected subcase",
         likely_domain: "cpu.load_store.transfer_matrix",
         remediation_hint: "Inspect matrix execution flow and the load/store/transfer opcode paths before broadening opcode coverage further.",
@@ -3291,6 +3292,8 @@ pub struct CpuLoadStoreMatrixTelemetry {
     pub load_x_result_hex: String,
     pub load_y_result: u8,
     pub load_y_result_hex: String,
+    pub load_indirect_y_result: u8,
+    pub load_indirect_y_result_hex: String,
     pub store_a_result: u8,
     pub store_a_result_hex: String,
     pub store_x_result: u8,
@@ -8309,10 +8312,11 @@ fn write_cpu_load_store_section(report: &mut String, telemetry: &DiagnosticTelem
     .expect("write report");
     writeln!(
         report,
-        "| Load A/X/Y results | {} / {} / {} |",
+        "| Load A/X/Y/(zp),Y results | {} / {} / {} / {} |",
         telemetry.cpu_load_store_matrix.load_a_result_hex,
         telemetry.cpu_load_store_matrix.load_x_result_hex,
-        telemetry.cpu_load_store_matrix.load_y_result_hex
+        telemetry.cpu_load_store_matrix.load_y_result_hex,
+        telemetry.cpu_load_store_matrix.load_indirect_y_result_hex
     )
     .expect("write report");
     writeln!(
@@ -10108,13 +10112,14 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
     if !input.cpu_load_store_matrix.passed {
         failures.push(format!(
-            "CPU load/store/transfer matrix mismatch: load_mask={}, store_mask={}, transfer_mask={}, load A/X/Y={}/{}/{}, store A/X/Y={}/{}/{}, transfer TAX/TAY/TXA/TYA={}/{}/{}/{}, cases {}/{}",
+            "CPU load/store/transfer matrix mismatch: load_mask={}, store_mask={}, transfer_mask={}, load A/X/Y/(zp),Y={}/{}/{}/{}, store A/X/Y={}/{}/{}, transfer TAX/TAY/TXA/TYA={}/{}/{}/{}, cases {}/{}",
             input.cpu_load_store_matrix.load_mask_hex,
             input.cpu_load_store_matrix.store_mask_hex,
             input.cpu_load_store_matrix.transfer_mask_hex,
             input.cpu_load_store_matrix.load_a_result_hex,
             input.cpu_load_store_matrix.load_x_result_hex,
             input.cpu_load_store_matrix.load_y_result_hex,
+            input.cpu_load_store_matrix.load_indirect_y_result_hex,
             input.cpu_load_store_matrix.store_a_result_hex,
             input.cpu_load_store_matrix.store_x_result_hex,
             input.cpu_load_store_matrix.store_y_result_hex,
@@ -10910,16 +10915,17 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
             description:
                 "CPU load/store/transfer matrix retained expected register flags and memory side effects"
                     .to_string(),
-            expected: "load=0x0F, store=0x7F, transfer=0x0F, load A/X/Y=0x5A/0x80/0x7E, store A/X/Y=0xC3/0x5E/0xA7, transfer TAX/TAY/TXA/TYA=0x44/0x00/0x80/0x7F, cases=15"
+            expected: "load=0x1F, store=0x7F, transfer=0x0F, load A/X/Y/(zp),Y=0x5A/0x80/0x7E/0x91, store A/X/Y=0xC3/0x5E/0xA7, transfer TAX/TAY/TXA/TYA=0x44/0x00/0x80/0x7F, cases=16"
                 .to_string(),
             observed: format!(
-                "load {}, store {}, transfer {}, load A/X/Y {}/{}/{}, store A/X/Y {}/{}/{}, transfer TAX/TAY/TXA/TYA {}/{}/{}/{}, cases {}/{}",
+                "load {}, store {}, transfer {}, load A/X/Y/(zp),Y {}/{}/{}/{}, store A/X/Y {}/{}/{}, transfer TAX/TAY/TXA/TYA {}/{}/{}/{}, cases {}/{}",
                 input.cpu_load_store_matrix.load_mask_hex,
                 input.cpu_load_store_matrix.store_mask_hex,
                 input.cpu_load_store_matrix.transfer_mask_hex,
                 input.cpu_load_store_matrix.load_a_result_hex,
                 input.cpu_load_store_matrix.load_x_result_hex,
                 input.cpu_load_store_matrix.load_y_result_hex,
+                input.cpu_load_store_matrix.load_indirect_y_result_hex,
                 input.cpu_load_store_matrix.store_a_result_hex,
                 input.cpu_load_store_matrix.store_x_result_hex,
                 input.cpu_load_store_matrix.store_y_result_hex,
@@ -13404,6 +13410,8 @@ impl DiagnosticProgram {
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR);
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR);
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_INDIRECT_Y_RESULT_ADDR);
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR);
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR);
         self.asm.sta_abs(CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR);
@@ -13434,6 +13442,21 @@ impl DiagnosticProgram {
         self.expect_n_clear(0xBF);
         self.expect_a_eq(0x5A, 0xBF);
         self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0x70);
+        self.asm.sta_zp(0x5A);
+        self.asm.lda_imm(0x05);
+        self.asm.sta_zp(0x5B);
+        self.asm.lda_imm(0x91);
+        self.asm.sta_abs(0x0573);
+        self.asm.ldy_imm(0x03);
+        self.asm.lda_indirect_y(0x5A);
+        self.asm
+            .sta_abs(CPU_LOAD_STORE_MATRIX_LOAD_INDIRECT_Y_RESULT_ADDR);
+        self.expect_z_clear(0xBF);
+        self.expect_n_set(0xBF);
+        self.expect_a_eq(0x91, 0xBF);
+        self.mark_load_store_matrix_case(CPU_LOAD_STORE_MATRIX_LOAD_MASK_ADDR, 0x10);
 
         self.asm.lda_imm(0x00);
         self.asm.sta_abs(0x0500);
@@ -16227,6 +16250,8 @@ fn cpu_load_store_matrix_telemetry(ram: &[u8]) -> CpuLoadStoreMatrixTelemetry {
     let load_a_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_A_RESULT_ADDR & 0x07FF) as usize];
     let load_x_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_X_RESULT_ADDR & 0x07FF) as usize];
     let load_y_result = ram[(CPU_LOAD_STORE_MATRIX_LOAD_Y_RESULT_ADDR & 0x07FF) as usize];
+    let load_indirect_y_result =
+        ram[(CPU_LOAD_STORE_MATRIX_LOAD_INDIRECT_Y_RESULT_ADDR & 0x07FF) as usize];
     let store_a_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_A_RESULT_ADDR & 0x07FF) as usize];
     let store_x_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_X_RESULT_ADDR & 0x07FF) as usize];
     let store_y_result = ram[(CPU_LOAD_STORE_MATRIX_STORE_Y_RESULT_ADDR & 0x07FF) as usize];
@@ -16261,6 +16286,8 @@ fn cpu_load_store_matrix_telemetry(ram: &[u8]) -> CpuLoadStoreMatrixTelemetry {
         load_x_result_hex: hex_byte(load_x_result),
         load_y_result,
         load_y_result_hex: hex_byte(load_y_result),
+        load_indirect_y_result,
+        load_indirect_y_result_hex: hex_byte(load_indirect_y_result),
         store_a_result,
         store_a_result_hex: hex_byte(store_a_result),
         store_x_result,
@@ -16282,6 +16309,7 @@ fn cpu_load_store_matrix_telemetry(ram: &[u8]) -> CpuLoadStoreMatrixTelemetry {
             && load_a_result == 0x5A
             && load_x_result == 0x80
             && load_y_result == 0x7E
+            && load_indirect_y_result == 0x91
             && store_a_result == 0xC3
             && store_x_result == 0x5E
             && store_y_result == 0xA7
@@ -20537,6 +20565,7 @@ fn compare_observation_checksums(
         &["cpu_load_store_matrix", "load_a_result"][..],
         &["cpu_load_store_matrix", "load_x_result"][..],
         &["cpu_load_store_matrix", "load_y_result"][..],
+        &["cpu_load_store_matrix", "load_indirect_y_result"][..],
         &["cpu_load_store_matrix", "store_a_result"][..],
         &["cpu_load_store_matrix", "store_x_result"][..],
         &["cpu_load_store_matrix", "store_y_result"][..],

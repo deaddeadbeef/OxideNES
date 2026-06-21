@@ -1500,6 +1500,13 @@ load/store telemetry now expects seven store cases, store mask `0x7F`, and
 fifteen total load/store/transfer cases, continuing to narrow official store
 addressing-mode coverage without changing the JSON shape.
 
+Schema version `80` extends the `cpu_load_store_transfer_matrix` generated
+cartridge test with an indirect-indexed `LDA (zp),Y` load case. The
+load/store telemetry now expects five load cases, load mask `0x1F`, a retained
+`load_indirect_y_result` byte, and sixteen total load/store/transfer cases,
+continuing to narrow official load addressing-mode coverage with an explicit
+expected-vs-observed value for AI triage.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
