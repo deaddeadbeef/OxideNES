@@ -627,9 +627,10 @@ before the generated cartridge summarizes LDA/LDX/LDY loads, STA/STX/STY
 stores, and TAX/TAY/TXA/TYA transfers, proving register load, memory store, and
 register-transfer regressions localize to `cpu.load_store.transfer_matrix`.
 `cpu_alu_index_matrix_fault` corrupts the logical/index matrix logic mask
-before the generated cartridge summarizes AND/ORA/EOR immediate cases and
-INX/INY/DEX/DEY wraparound cases, proving logical result flags and index
-register regressions localize to `cpu.alu_index.logic_flags`.
+before the generated cartridge summarizes AND immediate/zero-page, ORA
+immediate, EOR immediate, and INX/INY/DEX/DEY wraparound cases, proving logical
+result flags and index register regressions localize to
+`cpu.alu_index.logic_flags`.
 `cpu_arithmetic_matrix_fault` corrupts the ADC/SBC arithmetic matrix ADC mask
 before the generated cartridge summarizes arithmetic carry, borrow, overflow,
 zero, and negative flag cases, proving arithmetic regressions localize to
@@ -1528,6 +1529,12 @@ and nineteen total load/store/transfer cases, continuing to narrow official
 load addressing-mode coverage with an explicit expected-vs-observed value for
 AI triage.
 
+Schema version `84` extends the `cpu_alu_index_matrix` generated cartridge test
+with a zero-page `AND zp` logical case. The ALU/index telemetry now expects four
+logic cases, logic mask `0x0F`, a retained `and_zp_result` byte, and eight total
+ALU/index cases, continuing to narrow official logical addressing-mode coverage
+with an explicit expected-vs-observed value for AI triage.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
@@ -1589,10 +1596,10 @@ STA/STX/STY, and TAX/TAY/TXA/TYA regressions to
 
 Scenario suite schema version `18` adds the `cpu_alu_index_matrix_fault`
 negative fixture. The fault corrupts the logical/index matrix logic mask
-immediately before test 45 summarizes, so the suite can localize AND/ORA/EOR
-result/flag regressions and INX/INY/DEX/DEY index-register wraparound
-regressions to `cpu.alu_index.logic_flags` with a paired AI route and replay
-command.
+immediately before test 45 summarizes, so the suite can localize AND
+immediate/zero-page, ORA immediate, EOR immediate result/flag regressions, and
+INX/INY/DEX/DEY index-register wraparound regressions to
+`cpu.alu_index.logic_flags` with a paired AI route and replay command.
 
 Scenario suite schema version `19` adds the `cpu_arithmetic_matrix_fault`
 negative fixture. The fault corrupts the ADC/SBC arithmetic matrix ADC mask

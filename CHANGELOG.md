@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+- Expanded the CPU ALU/index diagnostic cartridge matrix with an explicit `AND zp` zero-page logical case and retained `and_zp_result` telemetry.
+
+### Changed
+- Bumped diagnostic telemetry to schema 84 and suite version to `diagnostic-cartridge-v84`.
+- Updated the CPU ALU/index matrix contract to four logic cases, logic mask `0x0F`, and eight total ALU/index cases.
+
 ## [0.3.49] - 2026-06-21
 
 ### Added

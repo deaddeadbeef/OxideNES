@@ -12,9 +12,9 @@ use crate::ppu::PpuTimingState;
 
 pub const DIAGNOSTIC_PROVENANCE: &str =
     "Generated OxideNES diagnostic iNES cartridge: synthetic 6502 program and CHR patterns only, no ROM content.";
-pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 83;
+pub const DIAGNOSTIC_TELEMETRY_SCHEMA_VERSION: u16 = 84;
 pub const DIAGNOSTIC_SUITE_NAME: &str = "oxidenes_headless_diagnostic_cartridge";
-pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v83";
+pub const DIAGNOSTIC_SUITE_VERSION: &str = "diagnostic-cartridge-v84";
 
 const DIAGNOSTIC_AI_GOALS: &[&str] = &[
     "headless end-to-end emulator validation",
@@ -553,9 +553,10 @@ const CPU_ALU_INDEX_MATRIX_INY_RESULT_ADDR: u16 = 0x02F2;
 const CPU_ALU_INDEX_MATRIX_DEX_RESULT_ADDR: u16 = 0x02F3;
 const CPU_ALU_INDEX_MATRIX_DEY_RESULT_ADDR: u16 = 0x02F4;
 const CPU_ALU_INDEX_MATRIX_CASE_COUNT_ADDR: u16 = 0x02F5;
-const CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK: u8 = 0x07;
+const CPU_ALU_INDEX_MATRIX_AND_ZP_RESULT_ADDR: u16 = 0x0259;
+const CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK: u8 = 0x0F;
 const CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK: u8 = 0x0F;
-const CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT: u8 = 7;
+const CPU_ALU_INDEX_MATRIX_EXPECTED_CASE_COUNT: u8 = 8;
 const CPU_ARITHMETIC_MATRIX_ADC_MASK_ADDR: u16 = 0x02F6;
 const CPU_ARITHMETIC_MATRIX_SBC_MASK_ADDR: u16 = 0x02F7;
 const CPU_ARITHMETIC_MATRIX_ADC_OVERFLOW_RESULT_ADDR: u16 = 0x02F8;
@@ -1738,7 +1739,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xC5,
         test_id: CPU_ALU_INDEX_MATRIX_TEST_ID,
         assertion: "ALU logical matrix covers AND, ORA, and EOR result and flag outcomes",
-        expected: "AND produces 0x00 with zero set, ORA produces 0xC0 with negative set, and EOR produces 0x80 with negative set",
+        expected: "AND immediate produces 0x00 with zero set, AND zero-page produces 0x88 with negative set, ORA produces 0xC0 with negative set, and EOR produces 0x80 with negative set",
         observed: "one or more logical accumulator opcodes did not preserve the expected result or zero/negative flag state",
         likely_domain: "cpu.alu_index.logic_flags",
         remediation_hint: "Inspect AND/ORA/EOR dispatch and zero/negative flag updates before broadening the official opcode matrix.",
@@ -1756,7 +1757,7 @@ const DIAGNOSTIC_FAILURES: &[DiagnosticFailureSpec] = &[
         code: 0xC7,
         test_id: CPU_ALU_INDEX_MATRIX_TEST_ID,
         assertion: "ALU/index matrix records every logical and index-register subcase",
-        expected: "logic mask == 0x07, index mask == 0x0F, and case count == 7",
+        expected: "logic mask == 0x0F, index mask == 0x0F, and case count == 8",
         observed: "the ALU/index matrix did not record every expected subcase",
         likely_domain: "cpu.alu_index.logic_flags",
         remediation_hint: "Inspect matrix execution flow and the logical/index opcode paths before broadening opcode coverage further.",
@@ -2281,7 +2282,7 @@ const DIAGNOSTIC_COVERAGE_GAPS: &[DiagnosticCoverageGapSpec] = &[
         id: "cpu_opcode_matrix",
         subsystem: "cpu",
         risk: "The cartridge proves selected CPU execution paths, not full 6502 opcode/addressing-mode compatibility.",
-        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, a load/store/transfer matrix covering LDA/LDX/LDY indexed loads plus LDX zero-page, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes, a logical/index matrix covering AND/ORA/EOR immediate results plus INX/INY/DEX/DEY wraparound and flag outcomes, an arithmetic flag matrix covering ADC/SBC carry-in, carry-out, borrow, overflow, zero, and negative outcomes, and a status/BIT matrix covering BIT zero-page/absolute plus SEC/CLC, SEI/CLI, SED/CLD, and CLV flag transitions.",
+        current_coverage: "ADC/SBC arithmetic, flags, stack push/pop, JSR/RTS, a taken page-crossing branch, a conditional branch matrix covering all official branch opcodes across taken and not-taken flag states plus a page-crossing branch target, zero-page indexed wraparound, indirect JMP page-wrap behavior, a telemetry-backed load-addressing matrix covering absolute,X plus indirect,Y page-crossing cases, a zero-page read-modify-write matrix covering ASL, ROL, LSR, ROR, INC, and DEC memory write-back sentinels, a non-zero-page RMW addressing matrix covering absolute plus page-crossing absolute,X write-back sentinels, accumulator-form ASL/LSR/ROL/ROR result and flag cases, CMP/CPX/CPY equal, greater-than, and less-than flag outcomes, a load/store/transfer matrix covering LDA/LDX/LDY indexed loads plus LDX zero-page, STA/STX/STY memory side effects, and TAX/TAY/TXA/TYA zero/negative flag outcomes, a logical/index matrix covering AND/ORA/EOR immediate results plus AND zero-page and INX/INY/DEX/DEY wraparound and flag outcomes, an arithmetic flag matrix covering ADC/SBC carry-in, carry-out, borrow, overflow, zero, and negative outcomes, and a status/BIT matrix covering BIT zero-page/absolute plus SEC/CLC, SEI/CLI, SED/CLD, and CLV flag transitions.",
         missing_coverage: "Complete official opcode matrix, illegal opcodes, interrupt priority edge cases, indirect read/modify/write addressing is not applicable to official 6502 opcodes but broader addressing/register/flag combinations remain incomplete, and broader cycle-accurate addressing penalties beyond targeted branch and load page-crossing cases.",
         suggested_next_test: "Generate an opcode/addressing-mode matrix cartridge that records accumulator, flags, memory side effects, and cycle buckets per case across all official opcodes.",
     },
@@ -3334,6 +3335,8 @@ pub struct CpuAluIndexMatrixTelemetry {
     pub index_mask_hex: String,
     pub and_result: u8,
     pub and_result_hex: String,
+    pub and_zp_result: u8,
+    pub and_zp_result_hex: String,
     pub ora_result: u8,
     pub ora_result_hex: String,
     pub eor_result: u8,
@@ -8385,8 +8388,9 @@ fn write_cpu_alu_index_section(report: &mut String, telemetry: &DiagnosticTeleme
     .expect("write report");
     writeln!(
         report,
-        "| AND/ORA/EOR results | {} / {} / {} |",
+        "| AND imm/AND zp/ORA/EOR results | {} / {} / {} / {} |",
         telemetry.cpu_alu_index_matrix.and_result_hex,
+        telemetry.cpu_alu_index_matrix.and_zp_result_hex,
         telemetry.cpu_alu_index_matrix.ora_result_hex,
         telemetry.cpu_alu_index_matrix.eor_result_hex
     )
@@ -10148,10 +10152,11 @@ fn host_validate(input: HostValidationInput<'_>) -> Vec<String> {
     }
     if !input.cpu_alu_index_matrix.passed {
         failures.push(format!(
-            "CPU ALU/index matrix mismatch: logic_mask={}, index_mask={}, AND/ORA/EOR={}/{}/{}, INX/INY/DEX/DEY={}/{}/{}/{}, cases {}/{}",
+            "CPU ALU/index matrix mismatch: logic_mask={}, index_mask={}, AND imm/AND zp/ORA/EOR={}/{}/{}/{}, INX/INY/DEX/DEY={}/{}/{}/{}, cases {}/{}",
             input.cpu_alu_index_matrix.logic_mask_hex,
             input.cpu_alu_index_matrix.index_mask_hex,
             input.cpu_alu_index_matrix.and_result_hex,
+            input.cpu_alu_index_matrix.and_zp_result_hex,
             input.cpu_alu_index_matrix.ora_result_hex,
             input.cpu_alu_index_matrix.eor_result_hex,
             input.cpu_alu_index_matrix.inx_result_hex,
@@ -10970,13 +10975,14 @@ fn probe_telemetry(input: ProbeTelemetryInput<'_>) -> Vec<DiagnosticProbeTelemet
                 "CPU logical ALU and index-register matrix retained expected result and status-flag observations"
                     .to_string(),
             expected:
-                "logic=0x07, index=0x0F, AND/ORA/EOR=0x00/0xC0/0x80, INX/INY/DEX/DEY=0x00/0x80/0xFF/0x00, cases=7"
+                "logic=0x0F, index=0x0F, AND imm/AND zp/ORA/EOR=0x00/0x88/0xC0/0x80, INX/INY/DEX/DEY=0x00/0x80/0xFF/0x00, cases=8"
                     .to_string(),
             observed: format!(
-                "logic {}, index {}, AND/ORA/EOR {}/{}/{}, INX/INY/DEX/DEY {}/{}/{}/{}, cases {}/{}",
+                "logic {}, index {}, AND imm/AND zp/ORA/EOR {}/{}/{}/{}, INX/INY/DEX/DEY {}/{}/{}/{}, cases {}/{}",
                 input.cpu_alu_index_matrix.logic_mask_hex,
                 input.cpu_alu_index_matrix.index_mask_hex,
                 input.cpu_alu_index_matrix.and_result_hex,
+                input.cpu_alu_index_matrix.and_zp_result_hex,
                 input.cpu_alu_index_matrix.ora_result_hex,
                 input.cpu_alu_index_matrix.eor_result_hex,
                 input.cpu_alu_index_matrix.inx_result_hex,
@@ -13673,6 +13679,7 @@ impl DiagnosticProgram {
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR);
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR);
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_AND_ZP_RESULT_ADDR);
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR);
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR);
         self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR);
@@ -13692,6 +13699,16 @@ impl DiagnosticProgram {
         self.expect_n_clear(0xC5);
         self.expect_a_eq(0x00, 0xC5);
         self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x01);
+
+        self.asm.lda_imm(0xAA);
+        self.asm.sta_zp(0x36);
+        self.asm.lda_imm(0xCC);
+        self.asm.and_zp(0x36);
+        self.asm.sta_abs(CPU_ALU_INDEX_MATRIX_AND_ZP_RESULT_ADDR);
+        self.expect_z_clear(0xC5);
+        self.expect_n_set(0xC5);
+        self.expect_a_eq(0x88, 0xC5);
+        self.mark_alu_index_matrix_case(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR, 0x08);
 
         self.asm.lda_imm(0x40);
         self.asm.ora_imm(0x80);
@@ -15570,6 +15587,10 @@ impl Assembler {
         self.op_imm(0x29, value);
     }
 
+    fn and_zp(&mut self, addr: u8) {
+        self.op_zp(0x25, addr);
+    }
+
     fn ora_imm(&mut self, value: u8) {
         self.op_imm(0x09, value);
     }
@@ -16407,6 +16428,7 @@ fn cpu_alu_index_matrix_telemetry(ram: &[u8]) -> CpuAluIndexMatrixTelemetry {
     let logic_mask = ram[(CPU_ALU_INDEX_MATRIX_LOGIC_MASK_ADDR & 0x07FF) as usize];
     let index_mask = ram[(CPU_ALU_INDEX_MATRIX_INDEX_MASK_ADDR & 0x07FF) as usize];
     let and_result = ram[(CPU_ALU_INDEX_MATRIX_AND_RESULT_ADDR & 0x07FF) as usize];
+    let and_zp_result = ram[(CPU_ALU_INDEX_MATRIX_AND_ZP_RESULT_ADDR & 0x07FF) as usize];
     let ora_result = ram[(CPU_ALU_INDEX_MATRIX_ORA_RESULT_ADDR & 0x07FF) as usize];
     let eor_result = ram[(CPU_ALU_INDEX_MATRIX_EOR_RESULT_ADDR & 0x07FF) as usize];
     let inx_result = ram[(CPU_ALU_INDEX_MATRIX_INX_RESULT_ADDR & 0x07FF) as usize];
@@ -16428,6 +16450,8 @@ fn cpu_alu_index_matrix_telemetry(ram: &[u8]) -> CpuAluIndexMatrixTelemetry {
         index_mask_hex: hex_byte(index_mask),
         and_result,
         and_result_hex: hex_byte(and_result),
+        and_zp_result,
+        and_zp_result_hex: hex_byte(and_zp_result),
         ora_result,
         ora_result_hex: hex_byte(ora_result),
         eor_result,
@@ -16444,6 +16468,7 @@ fn cpu_alu_index_matrix_telemetry(ram: &[u8]) -> CpuAluIndexMatrixTelemetry {
             && logic_mask == CPU_ALU_INDEX_MATRIX_EXPECTED_LOGIC_MASK
             && index_mask == CPU_ALU_INDEX_MATRIX_EXPECTED_INDEX_MASK
             && and_result == 0x00
+            && and_zp_result == 0x88
             && ora_result == 0xC0
             && eor_result == 0x80
             && inx_result == 0x00
@@ -20664,6 +20689,7 @@ fn compare_observation_checksums(
         &["cpu_alu_index_matrix", "logic_mask"][..],
         &["cpu_alu_index_matrix", "index_mask"][..],
         &["cpu_alu_index_matrix", "and_result"][..],
+        &["cpu_alu_index_matrix", "and_zp_result"][..],
         &["cpu_alu_index_matrix", "ora_result"][..],
         &["cpu_alu_index_matrix", "eor_result"][..],
         &["cpu_alu_index_matrix", "inx_result"][..],
