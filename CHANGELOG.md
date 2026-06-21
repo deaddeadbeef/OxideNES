@@ -3,9 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Expanded the CPU load/store/transfer diagnostic cartridge matrix with an explicit `LDX zp,Y` indexed zero-page load case and retained `load_x_zp_y_result` telemetry.
 - Expanded the CPU load/store/transfer diagnostic cartridge matrix with an explicit `LDA (zp),Y` indirect-indexed load case and retained `load_indirect_y_result` telemetry.
 
 ### Changed
+- Bumped diagnostic telemetry to schema 81 and suite version to `diagnostic-cartridge-v81`.
+- Updated the CPU load/store matrix contract to six load cases, load mask `0x3F`, and seventeen total load/store/transfer cases.
 - Bumped diagnostic telemetry to schema 80 and suite version to `diagnostic-cartridge-v80`.
 - Updated the CPU load/store matrix contract to five load cases, load mask `0x1F`, and sixteen total load/store/transfer cases.
 
