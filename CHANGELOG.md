@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.49] - 2026-06-21
+
 ### Added
 - Expanded the CPU load/store/transfer diagnostic cartridge matrix with an explicit `LDX zp` zero-page load case and retained `load_x_zp_result` telemetry.
 - Expanded the CPU load/store/transfer diagnostic cartridge matrix with an explicit `LDY zp,X` indexed zero-page load case and retained `load_y_zp_x_result` telemetry.
