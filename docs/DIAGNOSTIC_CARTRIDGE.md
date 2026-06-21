@@ -1521,6 +1521,13 @@ telemetry now expects seven load cases, load mask `0x7F`, a retained
 continuing to narrow official load addressing-mode coverage with an explicit
 expected-vs-observed value for AI triage.
 
+Schema version `83` extends the `cpu_load_store_transfer_matrix` generated
+cartridge test with a zero-page `LDX zp` load case. The load/store telemetry now
+expects eight load cases, load mask `0xFF`, a retained `load_x_zp_result` byte,
+and nineteen total load/store/transfer cases, continuing to narrow official
+load addressing-mode coverage with an explicit expected-vs-observed value for
+AI triage.
+
 Scenario suite schema version `8` and observer schema version `2` add
 `replay_args` arrays for each scenario, observer action, and observation. These
 arguments call `cargo run --bin oxidenes-diagnostic -- --bundle-dir target/diagnostics/replay/<scenario>`
