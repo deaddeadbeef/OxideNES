@@ -2235,7 +2235,7 @@ fn diagnostic_scenario_specs() -> Vec<DiagnosticScenarioSpec> {
         DiagnosticScenarioSpec {
             id: "cpu_alu_index_matrix_fault",
             title: "Intentional CPU ALU/index matrix assertion failure",
-            purpose: "Failure-localization fixture for AND/ORA/EOR logical result flags and INX/INY/DEX/DEY index-register regressions.",
+            purpose: "Failure-localization fixture for AND/ORA/EOR immediate and zero-page logical result flags and INX/INY/DEX/DEY index-register regressions.",
             config: DiagnosticConfig {
                 fault_injection: Some(DiagnosticFaultInjection::CpuAluIndexMatrix),
                 ..default.clone()

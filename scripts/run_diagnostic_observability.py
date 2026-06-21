@@ -172,7 +172,7 @@ FOCUS_DOMAIN_CODE_MAP = {
     },
     "cpu.alu_index.logic_flags": {
         "subsystem": "cpu",
-        "description": "6502 AND/ORA/EOR logical result flags plus INX/INY/DEX/DEY index-register wraparound behavior observed through diagnostic sentinels.",
+        "description": "6502 AND/ORA/EOR immediate and zero-page logical result flags plus INX/INY/DEX/DEY index-register wraparound behavior observed through diagnostic sentinels.",
         "source_files": ["src/cpu.rs", "src/diagnostic.rs"],
         "test_files": ["tests/cpu_tests.rs", "tests/diagnostic_cartridge_tests.rs"],
         "search_terms": [

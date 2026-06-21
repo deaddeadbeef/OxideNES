@@ -534,13 +534,15 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.likely_domain == "cpu.load_store.transfer_matrix"
     }));
     assert!(telemetry.cpu_alu_index_matrix.passed);
-    assert_eq!(telemetry.cpu_alu_index_matrix.observed_case_count, 8);
-    assert_eq!(telemetry.cpu_alu_index_matrix.logic_mask_hex, "0x0F");
+    assert_eq!(telemetry.cpu_alu_index_matrix.observed_case_count, 10);
+    assert_eq!(telemetry.cpu_alu_index_matrix.logic_mask_hex, "0x3F");
     assert_eq!(telemetry.cpu_alu_index_matrix.index_mask_hex, "0x0F");
     assert_eq!(telemetry.cpu_alu_index_matrix.and_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.and_zp_result_hex, "0x88");
     assert_eq!(telemetry.cpu_alu_index_matrix.ora_result_hex, "0xC0");
+    assert_eq!(telemetry.cpu_alu_index_matrix.ora_zp_result_hex, "0x18");
     assert_eq!(telemetry.cpu_alu_index_matrix.eor_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_alu_index_matrix.eor_zp_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.inx_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.iny_result_hex, "0x80");
     assert_eq!(telemetry.cpu_alu_index_matrix.dex_result_hex, "0xFF");
@@ -2173,11 +2175,11 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Load/store/transfer cases / expected | 19 / 19 |"));
     assert!(report.contains("| Load/store/transfer matrix passed | true |"));
     assert!(report.contains("## CPU ALU/Index Matrix"));
-    assert!(report.contains("| Logic/index masks | 0x0F / 0x0F |"));
-    assert!(report.contains("| Expected masks | 0x0F / 0x0F |"));
-    assert!(report.contains("| AND imm/AND zp/ORA/EOR results | 0x00 / 0x88 / 0xC0 / 0x80 |"));
+    assert!(report.contains("| Logic/index masks | 0x3F / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x3F / 0x0F |"));
+    assert!(report.contains("| AND imm/AND zp/ORA imm/ORA zp/EOR imm/EOR zp results | 0x00 / 0x88 / 0xC0 / 0x18 / 0x80 / 0x00 |"));
     assert!(report.contains("| INX/INY/DEX/DEY results | 0x00 / 0x80 / 0xFF / 0x00 |"));
-    assert!(report.contains("| ALU/index cases / expected | 8 / 8 |"));
+    assert!(report.contains("| ALU/index cases / expected | 10 / 10 |"));
     assert!(report.contains("| ALU/index matrix passed | true |"));
     assert!(report.contains("## CPU Arithmetic Flag Matrix"));
     assert!(report.contains("| ADC/SBC masks | 0x0F / 0x0F |"));
@@ -4552,17 +4554,19 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_alu_index_matrix_fai
         telemetry.analysis.debug_focus.focus_domain.as_deref(),
         Some("cpu.alu_index.logic_flags")
     );
-    assert_eq!(telemetry.cpu_alu_index_matrix.logic_mask_hex, "0x8F");
+    assert_eq!(telemetry.cpu_alu_index_matrix.logic_mask_hex, "0xBF");
     assert_eq!(telemetry.cpu_alu_index_matrix.index_mask_hex, "0x0F");
     assert_eq!(telemetry.cpu_alu_index_matrix.and_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.and_zp_result_hex, "0x88");
     assert_eq!(telemetry.cpu_alu_index_matrix.ora_result_hex, "0xC0");
+    assert_eq!(telemetry.cpu_alu_index_matrix.ora_zp_result_hex, "0x18");
     assert_eq!(telemetry.cpu_alu_index_matrix.eor_result_hex, "0x80");
+    assert_eq!(telemetry.cpu_alu_index_matrix.eor_zp_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.inx_result_hex, "0x00");
     assert_eq!(telemetry.cpu_alu_index_matrix.iny_result_hex, "0x80");
     assert_eq!(telemetry.cpu_alu_index_matrix.dex_result_hex, "0xFF");
     assert_eq!(telemetry.cpu_alu_index_matrix.dey_result_hex, "0x00");
-    assert_eq!(telemetry.cpu_alu_index_matrix.observed_case_count, 8);
+    assert_eq!(telemetry.cpu_alu_index_matrix.observed_case_count, 10);
     assert!(!telemetry.cpu_alu_index_matrix.passed);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "cartridge.test.45.result"
@@ -4594,11 +4598,11 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_alu_index_matrix_fai
     assert!(report.contains("| Focus test | cpu_alu_index_matrix (45) |"));
     assert!(report.contains("| Focus domain | cpu.alu_index.logic_flags |"));
     assert!(report.contains("| Likely domain | cpu.alu_index.logic_flags |"));
-    assert!(report.contains("| Logic/index masks | 0x8F / 0x0F |"));
-    assert!(report.contains("| Expected masks | 0x0F / 0x0F |"));
-    assert!(report.contains("| AND imm/AND zp/ORA/EOR results | 0x00 / 0x88 / 0xC0 / 0x80 |"));
+    assert!(report.contains("| Logic/index masks | 0xBF / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x3F / 0x0F |"));
+    assert!(report.contains("| AND imm/AND zp/ORA imm/ORA zp/EOR imm/EOR zp results | 0x00 / 0x88 / 0xC0 / 0x18 / 0x80 / 0x00 |"));
     assert!(report.contains("| INX/INY/DEX/DEY results | 0x00 / 0x80 / 0xFF / 0x00 |"));
-    assert!(report.contains("| ALU/index cases / expected | 8 / 8 |"));
+    assert!(report.contains("| ALU/index cases / expected | 10 / 10 |"));
     assert!(report.contains("| ALU/index matrix passed | false |"));
     assert!(report.contains("| 45 | cpu_alu_index_matrix | cpu | edge_case | failed |"));
     assert!(report.contains("| 46 | cpu_arithmetic_flag_matrix | cpu | edge_case | not_started |"));

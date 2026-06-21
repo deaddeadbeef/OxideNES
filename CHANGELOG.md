@@ -4,8 +4,11 @@
 
 ### Added
 - Expanded the CPU ALU/index diagnostic cartridge matrix with an explicit `AND zp` zero-page logical case and retained `and_zp_result` telemetry.
+- Expanded the CPU ALU/index diagnostic cartridge matrix with explicit `ORA zp` and `EOR zp` zero-page logical cases and retained `ora_zp_result` and `eor_zp_result` telemetry.
 
 ### Changed
+- Bumped diagnostic telemetry to schema 85 and suite version to `diagnostic-cartridge-v85`.
+- Updated the CPU ALU/index matrix contract to six logic cases, logic mask `0x3F`, and ten total ALU/index cases.
 - Bumped diagnostic telemetry to schema 84 and suite version to `diagnostic-cartridge-v84`.
 - Updated the CPU ALU/index matrix contract to four logic cases, logic mask `0x0F`, and eight total ALU/index cases.
 
