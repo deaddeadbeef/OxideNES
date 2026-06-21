@@ -489,8 +489,8 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
             && probe.likely_domain == "cpu.compare.flags"
     }));
     assert!(telemetry.cpu_load_store_matrix.passed);
-    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 17);
-    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x3F");
+    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 18);
+    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x7F");
     assert_eq!(telemetry.cpu_load_store_matrix.store_mask_hex, "0x7F");
     assert_eq!(telemetry.cpu_load_store_matrix.transfer_mask_hex, "0x0F");
     assert_eq!(telemetry.cpu_load_store_matrix.load_a_result_hex, "0x5A");
@@ -503,6 +503,10 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert_eq!(
         telemetry.cpu_load_store_matrix.load_x_zp_y_result_hex,
         "0x42"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.load_y_zp_x_result_hex,
+        "0x39"
     );
     assert_eq!(telemetry.cpu_load_store_matrix.store_a_result_hex, "0xC3");
     assert_eq!(telemetry.cpu_load_store_matrix.store_x_result_hex, "0x5E");
@@ -2158,13 +2162,13 @@ fn generated_diagnostic_cartridge_runs_headlessly_to_pass() {
     assert!(report.contains("| Compare matrix cases / expected | 9 / 9 |"));
     assert!(report.contains("| Compare matrix passed | true |"));
     assert!(report.contains("## CPU Load/Store/Transfer Matrix"));
-    assert!(report.contains("| Load/store/transfer masks | 0x3F / 0x7F / 0x0F |"));
-    assert!(report.contains("| Expected masks | 0x3F / 0x7F / 0x0F |"));
+    assert!(report.contains("| Load/store/transfer masks | 0x7F / 0x7F / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x7F / 0x7F / 0x0F |"));
     assert!(report
-        .contains("| Load A/X/Y/LDA (zp),Y/LDX zp,Y results | 0x5A / 0x80 / 0x7E / 0x91 / 0x42 |"));
+        .contains("| Load A/X/Y/LDA (zp),Y/LDX zp,Y/LDY zp,X results | 0x5A / 0x80 / 0x7E / 0x91 / 0x42 / 0x39 |"));
     assert!(report.contains("| Store A/X/Y results | 0xC3 / 0x5E / 0xA7 |"));
     assert!(report.contains("| Transfer TAX/TAY/TXA/TYA results | 0x44 / 0x00 / 0x80 / 0x7F |"));
-    assert!(report.contains("| Load/store/transfer cases / expected | 17 / 17 |"));
+    assert!(report.contains("| Load/store/transfer cases / expected | 18 / 18 |"));
     assert!(report.contains("| Load/store/transfer matrix passed | true |"));
     assert!(report.contains("## CPU ALU/Index Matrix"));
     assert!(report.contains("| Logic/index masks | 0x07 / 0x0F |"));
@@ -4413,7 +4417,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_fa
         telemetry.analysis.debug_focus.focus_domain.as_deref(),
         Some("cpu.load_store.transfer_matrix")
     );
-    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x3F");
+    assert_eq!(telemetry.cpu_load_store_matrix.load_mask_hex, "0x7F");
     assert_eq!(telemetry.cpu_load_store_matrix.store_mask_hex, "0xFF");
     assert_eq!(telemetry.cpu_load_store_matrix.transfer_mask_hex, "0x0F");
     assert_eq!(telemetry.cpu_load_store_matrix.load_a_result_hex, "0x5A");
@@ -4426,6 +4430,10 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_fa
     assert_eq!(
         telemetry.cpu_load_store_matrix.load_x_zp_y_result_hex,
         "0x42"
+    );
+    assert_eq!(
+        telemetry.cpu_load_store_matrix.load_y_zp_x_result_hex,
+        "0x39"
     );
     assert_eq!(telemetry.cpu_load_store_matrix.store_a_result_hex, "0xC3");
     assert_eq!(telemetry.cpu_load_store_matrix.store_x_result_hex, "0x5E");
@@ -4446,7 +4454,7 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_fa
         telemetry.cpu_load_store_matrix.transfer_tya_result_hex,
         "0x7F"
     );
-    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 17);
+    assert_eq!(telemetry.cpu_load_store_matrix.observed_case_count, 18);
     assert!(!telemetry.cpu_load_store_matrix.passed);
     assert!(telemetry.probes.iter().any(|probe| {
         probe.id == "cartridge.test.44.result"
@@ -4478,13 +4486,13 @@ fn generated_diagnostic_cartridge_localizes_intentional_cpu_load_store_matrix_fa
     assert!(report.contains("| Focus test | cpu_load_store_transfer_matrix (44) |"));
     assert!(report.contains("| Focus domain | cpu.load_store.transfer_matrix |"));
     assert!(report.contains("| Likely domain | cpu.load_store.transfer_matrix |"));
-    assert!(report.contains("| Load/store/transfer masks | 0x3F / 0xFF / 0x0F |"));
-    assert!(report.contains("| Expected masks | 0x3F / 0x7F / 0x0F |"));
+    assert!(report.contains("| Load/store/transfer masks | 0x7F / 0xFF / 0x0F |"));
+    assert!(report.contains("| Expected masks | 0x7F / 0x7F / 0x0F |"));
     assert!(report
-        .contains("| Load A/X/Y/LDA (zp),Y/LDX zp,Y results | 0x5A / 0x80 / 0x7E / 0x91 / 0x42 |"));
+        .contains("| Load A/X/Y/LDA (zp),Y/LDX zp,Y/LDY zp,X results | 0x5A / 0x80 / 0x7E / 0x91 / 0x42 / 0x39 |"));
     assert!(report.contains("| Store A/X/Y results | 0xC3 / 0x5E / 0xA7 |"));
     assert!(report.contains("| Transfer TAX/TAY/TXA/TYA results | 0x44 / 0x00 / 0x80 / 0x7F |"));
-    assert!(report.contains("| Load/store/transfer cases / expected | 17 / 17 |"));
+    assert!(report.contains("| Load/store/transfer cases / expected | 18 / 18 |"));
     assert!(report.contains("| Load/store/transfer matrix passed | false |"));
     assert!(report.contains("| 44 | cpu_load_store_transfer_matrix | cpu | edge_case | failed |"));
     assert!(report.contains("| 45 | cpu_alu_index_matrix | cpu | edge_case | not_started |"));
