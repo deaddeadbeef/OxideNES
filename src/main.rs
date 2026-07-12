@@ -50,13 +50,18 @@ const SCREEN_CURVE_SRC_BITS: u32 = 20;
 const SCREEN_CURVE_SRC_MASK: u32 = (1 << SCREEN_CURVE_SRC_BITS) - 1;
 const SCREEN_CURVE_CORNER_R: usize = 18;
 
-// NES menu colors
-const MENU_BG: u32 = 0x0C0C3C;
-const MENU_WHITE: u32 = 0xFCFCFC;
-const MENU_GOLD: u32 = 0xF8D878;
-const MENU_GRAY: u32 = 0x9C9C9C;
-const MENU_DARK_GRAY: u32 = 0x585858;
-const MENU_LIGHT_BLUE: u32 = 0x6888FC;
+// Software UI palette: restrained enough for the cabinet, clear through the CRT pass.
+const MENU_BG: u32 = 0x091017;
+const MENU_PANEL: u32 = 0x0F1A22;
+const MENU_WHITE: u32 = 0xF2F6F3;
+const MENU_GOLD: u32 = 0xF2C14E;
+const MENU_GRAY: u32 = 0xAFBBC0;
+const MENU_DARK_GRAY: u32 = 0x75868D;
+const MENU_LIGHT_BLUE: u32 = 0x52D6C5;
+const MENU_BORDER_DIM: u32 = 0x28545A;
+const MENU_SELECTION_BG: u32 = 0x17343C;
+const MENU_SELECTION_EDGE: u32 = 0xF2C14E;
+const MENU_GLASS_INTENSITY_CAP: u8 = 38;
 
 fn key_to_string(key: Key) -> String {
     match key {
@@ -965,6 +970,98 @@ mod menu_text_tests {
         assert_eq!(rom_library_action(3), Some(RomLibraryAction::Back));
         assert_eq!(rom_library_action(4), None);
     }
+
+    #[test]
+    fn menu_selection_uses_fill_edge_and_outline() {
+        let mut fb = vec![MENU_BG; 256 * 240];
+
+        draw_menu_selection(&mut fb, 10, 20, 236);
+
+        assert_eq!(fb[81 * 256 + 235], MENU_SELECTION_EDGE);
+        assert_eq!(fb[80 * 256 + 22], MENU_BORDER_DIM);
+        assert_eq!(fb[82 * 256 + 22], MENU_SELECTION_BG);
+        assert_eq!(fb[87 * 256 + 235], MENU_BORDER_DIM);
+        assert_eq!(fb[88 * 256 + 20], MENU_BG);
+    }
+
+    #[test]
+    fn menu_transition_keeps_text_legible_at_initial_fade() {
+        let mut fb = vec![MENU_WHITE];
+
+        apply_menu_fade(&mut fb, 1, 1, 6);
+
+        let red = (fb[0] >> 16) & 0xFF;
+        let green = (fb[0] >> 8) & 0xFF;
+        let blue = fb[0] & 0xFF;
+        assert!(red >= 130 && green >= 130 && blue >= 130);
+    }
+
+    #[test]
+    fn menu_background_separates_header_and_content_bands() {
+        let mut fb = vec![0; 256 * 240];
+
+        paint_menu_background(&mut fb);
+
+        assert_eq!(fb[16 * 256 + 32], MENU_PANEL);
+        assert_eq!(fb[80 * 256 + 32], MENU_BG);
+        assert_eq!(fb[200 * 256 + 32], MENU_PANEL);
+        assert_eq!(fb[200 * 256 + 8], MENU_BG);
+    }
+
+    fn write_menu_snapshot(path: &Path, fb: &[u32], width: usize, height: usize) {
+        let mut bytes = format!("P6\n{} {}\n255\n", width, height).into_bytes();
+        for pixel in fb.iter().take(width * height) {
+            bytes.push(((pixel >> 16) & 0xFF) as u8);
+            bytes.push(((pixel >> 8) & 0xFF) as u8);
+            bytes.push((pixel & 0xFF) as u8);
+        }
+        fs::write(path, bytes).expect("write menu snapshot");
+    }
+
+    #[test]
+    #[ignore = "developer visual artifact generator"]
+    fn write_menu_visual_snapshots() {
+        let output_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("visual-snapshots");
+        fs::create_dir_all(&output_dir).expect("create visual snapshot directory");
+
+        let mut cfg = EmulatorConfig::default();
+        cfg.favorite_games = vec!["C:/ROMS/MEGA MAN 2.NES".to_string()];
+        cfg.recent_games = vec![
+            "C:/ROMS/MEGA MAN 2.NES".to_string(),
+            "C:/ROMS/CASTLEVANIA III.NES".to_string(),
+            "C:/ROMS/KIRBY'S ADVENTURE.NES".to_string(),
+        ];
+        let mut fb = vec![0; 256 * 240];
+
+        render_home_screen(&mut fb, &MenuState::new(), &cfg, true, &[true], &[true; 3]);
+        write_menu_snapshot(&output_dir.join("home.ppm"), &fb, 256, 240);
+
+        let mut screen = Vec::new();
+        scale_simple(&fb, &mut screen);
+        let mut cabinet = Vec::new();
+        build_tv_frame(&mut cabinet);
+        composite_screen_fast(
+            &mut cabinet,
+            &screen,
+            &build_screen_curve_table(),
+            WINDOW_WIDTH,
+        );
+        write_menu_snapshot(
+            &output_dir.join("home-cabinet.ppm"),
+            &cabinet,
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
+        );
+
+        render_settings(&mut fb, &cfg, 2, true, 80, 60, 0);
+        write_menu_snapshot(&output_dir.join("settings.ppm"), &fb, 256, 240);
+
+        let state = RomLibraryState::with_status(1, "READY TO IMPORT".to_string());
+        render_rom_library(&mut fb, &cfg, &state, true);
+        write_menu_snapshot(&output_dir.join("rom-library.ppm"), &fb, 256, 240);
+    }
 }
 
 #[cfg(test)]
@@ -995,32 +1092,30 @@ fn draw_horizontal_line_px(fb: &mut [u32], y: usize, x_start: usize, x_end: usiz
 
 fn draw_double_border_top(fb: &mut [u32], tile_row: usize) {
     let y_base = tile_row * 8;
-    let color = MENU_LIGHT_BLUE;
-    draw_horizontal_line_px(fb, y_base + 2, 16, 240, color);
-    draw_horizontal_line_px(fb, y_base + 4, 16, 240, color);
+    draw_horizontal_line_px(fb, y_base + 2, 16, 240, MENU_LIGHT_BLUE);
+    draw_horizontal_line_px(fb, y_base + 4, 16, 240, MENU_BORDER_DIM);
     for y in (y_base + 2)..=(y_base + 4 + 8) {
         if y < 240 {
-            fb[y * 256 + 16] = color;
-            fb[y * 256 + 18] = color;
-            fb[y * 256 + 239] = color;
-            fb[y * 256 + 237] = color;
+            fb[y * 256 + 16] = MENU_LIGHT_BLUE;
+            fb[y * 256 + 18] = MENU_BORDER_DIM;
+            fb[y * 256 + 239] = MENU_LIGHT_BLUE;
+            fb[y * 256 + 237] = MENU_BORDER_DIM;
         }
     }
 }
 
 fn draw_double_border_bottom(fb: &mut [u32], tile_row: usize) {
     let y_base = tile_row * 8;
-    let color = MENU_LIGHT_BLUE;
     for y in y_base..(y_base + 4) {
         if y < 240 {
-            fb[y * 256 + 16] = color;
-            fb[y * 256 + 18] = color;
-            fb[y * 256 + 239] = color;
-            fb[y * 256 + 237] = color;
+            fb[y * 256 + 16] = MENU_LIGHT_BLUE;
+            fb[y * 256 + 18] = MENU_BORDER_DIM;
+            fb[y * 256 + 239] = MENU_LIGHT_BLUE;
+            fb[y * 256 + 237] = MENU_BORDER_DIM;
         }
     }
-    draw_horizontal_line_px(fb, y_base + 3, 16, 240, color);
-    draw_horizontal_line_px(fb, y_base + 5, 16, 240, color);
+    draw_horizontal_line_px(fb, y_base + 3, 16, 240, MENU_BORDER_DIM);
+    draw_horizontal_line_px(fb, y_base + 5, 16, 240, MENU_LIGHT_BLUE);
 }
 
 fn draw_separator_line(fb: &mut [u32], tile_row: usize) {
@@ -1038,10 +1133,24 @@ fn draw_side_borders(fb: &mut [u32]) {
         for y in y_base..(y_base + 8) {
             if y < 240 {
                 fb[y * 256 + 16] = MENU_LIGHT_BLUE;
-                fb[y * 256 + 18] = MENU_LIGHT_BLUE;
+                fb[y * 256 + 18] = MENU_BORDER_DIM;
                 fb[y * 256 + 239] = MENU_LIGHT_BLUE;
-                fb[y * 256 + 237] = MENU_LIGHT_BLUE;
+                fb[y * 256 + 237] = MENU_BORDER_DIM;
             }
+        }
+    }
+}
+
+fn paint_menu_background(fb: &mut [u32]) {
+    fb.fill(MENU_BG);
+    for y in 8..32 {
+        for x in 19..237 {
+            fb[y * 256 + x] = MENU_PANEL;
+        }
+    }
+    for y in 192..224 {
+        for x in 19..237 {
+            fb[y * 256 + x] = MENU_PANEL;
         }
     }
 }
@@ -1066,15 +1175,30 @@ fn draw_highlight_bar(
     }
 }
 
+fn draw_menu_selection(fb: &mut [u32], tile_row: usize, x_left: usize, x_right: usize) {
+    let y_start = tile_row * 8;
+    draw_highlight_bar(fb, y_start, 8, x_left, x_right, MENU_SELECTION_BG);
+    draw_highlight_bar(
+        fb,
+        y_start + 1,
+        6,
+        x_right.saturating_sub(2).max(x_left),
+        x_right,
+        MENU_SELECTION_EDGE,
+    );
+    draw_horizontal_line_px(fb, y_start, x_left + 2, x_right, MENU_BORDER_DIM);
+    draw_horizontal_line_px(fb, y_start + 7, x_left + 2, x_right, MENU_BORDER_DIM);
+}
+
 /// Apply a fade overlay to the framebuffer for screen transitions.
-/// fade_level: 0=full brightness, 8=nearly black
+/// fade_level: 0=full brightness, larger values progressively dim the frame.
 #[inline]
 fn apply_menu_fade(fb: &mut [u32], width: usize, height: usize, fade_level: u8) {
     if fade_level == 0 {
         return;
     }
-    // fade_level 0=full brightness, 8=nearly black
-    let brightness = (255u32).saturating_sub(fade_level as u32 * 30); // 255, 225, 195... down to 15
+    // Keep navigation legible during transitions instead of briefly blacking out the CRT.
+    let brightness = (255u32).saturating_sub(fade_level as u32 * 18);
     for pixel in fb[..width * height].iter_mut() {
         let r = (((*pixel >> 16) & 0xFF) * brightness) >> 8;
         let g = (((*pixel >> 8) & 0xFF) * brightness) >> 8;
@@ -1091,9 +1215,7 @@ fn render_home_screen(
     favorites_valid: &[bool],
     recents_valid: &[bool],
 ) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
@@ -1152,7 +1274,7 @@ fn render_home_screen(
             let is_selected = menu.selected == item_index;
 
             if is_selected {
-                draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
+                draw_menu_selection(fb, row, 20, 236);
             }
 
             let color = if is_selected { MENU_WHITE } else { MENU_GOLD };
@@ -1217,7 +1339,7 @@ fn render_home_screen(
                 let is_selected = menu.selected == item_index;
 
                 if is_selected {
-                    draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
+                    draw_menu_selection(fb, row, 20, 236);
                 }
 
                 let color = if !exists {
@@ -1254,7 +1376,7 @@ fn render_home_screen(
         let row = current_row;
         let is_selected = menu.selected == item_index;
         if is_selected {
-            draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
+            draw_menu_selection(fb, row, 20, 236);
         }
         let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
         if is_selected && cursor_visible {
@@ -1270,7 +1392,7 @@ fn render_home_screen(
         let row = current_row;
         let is_selected = menu.selected == item_index;
         if is_selected {
-            draw_highlight_bar(fb, row * 8, 8, 20, 236, 0x3C3C8C);
+            draw_menu_selection(fb, row, 20, 236);
         }
         let color = if is_selected { MENU_WHITE } else { MENU_GRAY };
         if is_selected && cursor_visible {
@@ -1284,7 +1406,7 @@ fn render_home_screen(
     draw_text_centered_8x8(fb, "IN GAME: START+SEL 1s", 26, MENU_DARK_GRAY);
 
     // Bottom hint
-    draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, 0x585858);
+    draw_text_8x8(fb, "DROP .NES ON EXE OR BROWSE", 3, 27, MENU_DARK_GRAY);
 }
 
 fn render_settings(
@@ -1296,16 +1418,14 @@ fn render_settings(
     glass_intensity: u8,
     value_flash: u8,
 ) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
-    draw_text_8x8(fb, "MENU >", 3, 2, 0x666666);
-    draw_text_8x8(fb, "SETTINGS", 10, 2, 0xCCCCCC);
+    draw_text_8x8(fb, "MENU >", 3, 2, MENU_DARK_GRAY);
+    draw_text_8x8(fb, "SETTINGS", 10, 2, MENU_WHITE);
     draw_text_centered_8x8(fb, "\x11 SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
@@ -1332,6 +1452,9 @@ fn render_settings(
     let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
     for (i, (item, &row)) in settings_items.iter().zip(setting_rows.iter()).enumerate() {
+        if i == selected {
+            draw_menu_selection(fb, row, 28, 232);
+        }
         let is_flashing = i == selected && value_flash > 0;
         let color = if is_flashing {
             MENU_GOLD
@@ -1358,31 +1481,29 @@ fn render_rom_library(
     state: &RomLibraryState,
     cursor_visible: bool,
 ) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
-    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 2, 0x666666);
-    draw_text_8x8(fb, "ROMS", 19, 2, 0xCCCCCC);
+    draw_text_8x8(fb, "MENU > SETTINGS >", 3, 2, MENU_DARK_GRAY);
+    draw_text_8x8(fb, "ROMS", 21, 2, MENU_WHITE);
     draw_text_centered_8x8(fb, "\x11 ROM LIBRARY \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
     draw_text_centered_8x8(fb, "DEFAULT LIBRARY ROOT", 7, MENU_GRAY);
-    let default_root = truncate_path_display(&default_rom_library_dir(), 28);
+    let default_root = truncate_path_display(&default_rom_library_dir(), 26);
     draw_text_centered_8x8(fb, &default_root, 8, MENU_GOLD);
 
     let active_root = cfg
         .rom_directory
         .as_deref()
         .map(Path::new)
-        .map(|path| truncate_path_display(path, 22))
+        .map(|path| truncate_path_display(path, 19))
         .unwrap_or_else(|| "NOT SET".to_string());
-    draw_text_8x8(fb, "ACTIVE:", 2, 10, MENU_DARK_GRAY);
-    draw_text_8x8(fb, &active_root, 10, 10, MENU_GRAY);
+    draw_text_8x8(fb, "ACTIVE:", 3, 10, MENU_DARK_GRAY);
+    draw_text_8x8(fb, &active_root, 11, 10, MENU_GRAY);
 
     let items = [
         "IMPORT FOLDER: COPY >",
@@ -1392,6 +1513,9 @@ fn render_rom_library(
     ];
     let rows = [13, 15, 17, 19];
     for (index, (item, row)) in items.iter().zip(rows).enumerate() {
+        if index == state.selected {
+            draw_menu_selection(fb, row, 28, 232);
+        }
         let color = if index == state.selected {
             MENU_WHITE
         } else {
@@ -1420,16 +1544,14 @@ fn render_crt_settings(
     cursor_visible: bool,
     value_flash: u8,
 ) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
-    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 2, 0x666666);
-    draw_text_8x8(fb, "CRT", 19, 2, 0xCCCCCC);
+    draw_text_8x8(fb, "MENU > SETTINGS >", 3, 2, MENU_DARK_GRAY);
+    draw_text_8x8(fb, "CRT", 21, 2, MENU_WHITE);
     draw_text_centered_8x8(fb, "\x11 CRT SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
@@ -1457,6 +1579,9 @@ fn render_crt_settings(
     let rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
     for (i, ((label, value), &row)) in items.iter().zip(rows.iter()).enumerate() {
+        if i == selected {
+            draw_menu_selection(fb, row, 20, 236);
+        }
         let is_flashing = i == selected && value_flash > 0;
         let color = if is_flashing {
             MENU_GOLD
@@ -1489,17 +1614,15 @@ fn format_slider_bar(value: u8) -> String {
 }
 
 fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visible: bool) {
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
     draw_side_borders(fb);
 
     draw_text_centered_8x8(fb, "\x11 INPUT SETTINGS \x11", 2, MENU_GOLD);
-    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 3, 0x666666);
-    draw_text_8x8(fb, "INPUT", 19, 3, 0xCCCCCC);
+    draw_text_8x8(fb, "MENU > SETTINGS >", 3, 3, MENU_DARK_GRAY);
+    draw_text_8x8(fb, "INPUT", 21, 3, MENU_WHITE);
 
     // Tab headers
     let tabs = ["KB P1", "KB P2", "PAD P1", "PAD P2"];
@@ -1545,6 +1668,9 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
 
             for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
                 let row = current_row + i;
+                if i == state.selected {
+                    draw_menu_selection(fb, row, 28, 232);
+                }
                 let color = if i == state.selected {
                     MENU_WHITE
                 } else {
@@ -1586,6 +1712,9 @@ fn render_input_settings(fb: &mut [u32], state: &InputSettingsState, cursor_visi
 
             for (i, (name, value)) in binding_names.iter().zip(binding_values.iter()).enumerate() {
                 let row = current_row + i;
+                if i == state.selected {
+                    draw_menu_selection(fb, row, 28, 232);
+                }
                 let color = if i == state.selected {
                     MENU_WHITE
                 } else {
@@ -1640,13 +1769,10 @@ fn render_file_browser(
 ) {
     const VISIBLE_ROWS: usize = 20;
     const FIRST_ROW: usize = 5;
-    const DIR_COLOR: u32 = 0x5C94FC;
-    const DIR_COLOR_SEL: u32 = 0x7CB4FC;
-    const HIGHLIGHT_BG: u32 = 0x3C3C8C;
+    const DIR_COLOR: u32 = MENU_LIGHT_BLUE;
+    const DIR_COLOR_SEL: u32 = 0x7FE3D7;
 
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
@@ -1683,8 +1809,7 @@ fn render_file_browser(
             };
 
             if is_selected {
-                // Highlight bar
-                draw_highlight_bar(fb, row * 8, 8, 20, 236, HIGHLIGHT_BG);
+                draw_menu_selection(fb, row, 20, 236);
                 if cursor_visible {
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
@@ -1816,13 +1941,10 @@ fn render_folder_picker(
 ) {
     const VISIBLE_ROWS: usize = 14;
     const FIRST_ROW: usize = 9;
-    const DIR_COLOR: u32 = 0x5C94FC;
-    const DIR_COLOR_SEL: u32 = 0x7CB4FC;
-    const HIGHLIGHT_BG: u32 = 0x3C3C8C;
+    const DIR_COLOR: u32 = MENU_LIGHT_BLUE;
+    const DIR_COLOR_SEL: u32 = 0x7FE3D7;
 
-    for pixel in fb.iter_mut() {
-        *pixel = MENU_BG;
-    }
+    paint_menu_background(fb);
 
     draw_double_border_top(fb, 1);
     draw_double_border_bottom(fb, 28);
@@ -1854,14 +1976,14 @@ fn render_folder_picker(
             let prefix = if entry.is_dir { "> " } else { "  " };
 
             if is_selected {
-                draw_highlight_bar(fb, row * 8, 8, 20, 236, HIGHLIGHT_BG);
+                draw_menu_selection(fb, row, 20, 236);
                 if cursor_visible {
                     draw_char_8x8(fb, '\x10', 2, row, MENU_WHITE);
                 }
                 let color = if entry.is_dir {
                     DIR_COLOR_SEL
                 } else {
-                    MENU_DARK_GRAY
+                    MENU_WHITE
                 };
                 draw_prefixed_name_8x8(
                     fb,
@@ -4656,7 +4778,7 @@ fn main() {
                     menu.transition_timer -= 1;
                 }
 
-                // Apply CRT filter pipeline (same as game!)
+                // Keep menu text crisp while retaining the cabinet's CRT character.
                 let dt = if barrel_distortion {
                     &distortion_table
                 } else {
@@ -4686,17 +4808,6 @@ fn main() {
                         SCREEN_H,
                         config.crt_config.phosphor_warmth as u32,
                     );
-                    // Apply chromatic aberration to crt_buffer (screen area only)
-                    if glass_intensity > 30 {
-                        apply_chromatic_aberration(
-                            &mut ca_temp,
-                            &crt_buffer,
-                            &ca_table,
-                            SCREEN_W,
-                            SCREEN_H,
-                        );
-                        std::mem::swap(&mut crt_buffer, &mut ca_temp);
-                    }
                 } else {
                     scale_simple(&menu_framebuffer, &mut crt_buffer);
                 }
@@ -4706,7 +4817,8 @@ fn main() {
                     &screen_curve_table,
                     WINDOW_WIDTH,
                 );
-                if crt_enabled && glass_intensity > 0 {
+                let menu_glass_intensity = glass_intensity.min(MENU_GLASS_INTENSITY_CAP);
+                if crt_enabled && menu_glass_intensity > 0 {
                     apply_glass_effects(
                         &mut composite_buffer,
                         &crt_buffer,
@@ -4714,7 +4826,7 @@ fn main() {
                         &glass_thickness_table,
                         &ghost_alpha_table,
                         WINDOW_WIDTH,
-                        glass_intensity,
+                        menu_glass_intensity,
                         false,
                         SCREEN_W,
                     );
@@ -7586,7 +7698,7 @@ fn main() {
                                     8,
                                     box_left * 8 + 4,
                                     box_right * 8 - 4,
-                                    0x3C3C8C,
+                                    MENU_SELECTION_BG,
                                 );
                                 // Arrow blinks
                                 if pause_cursor_visible {
@@ -7637,7 +7749,7 @@ fn main() {
                                             let x = px + dx;
                                             let y = py + dy;
                                             if y < 240 && x < 256 {
-                                                menu_framebuffer[y * 256 + x] = 0x0C0C4C;
+                                                menu_framebuffer[y * 256 + x] = MENU_PANEL;
                                             }
                                         }
                                     }
@@ -7707,7 +7819,7 @@ fn main() {
                                         8,
                                         cb_left * 8 + 4,
                                         cb_right * 8 - 4,
-                                        0x3C3C8C,
+                                        MENU_SELECTION_BG,
                                     );
                                     draw_char_8x8(
                                         &mut menu_framebuffer,
@@ -7761,7 +7873,7 @@ fn main() {
                                         let x = 48 + dx;
                                         let y = input_y * 8 + dy;
                                         if y < 240 && x < 256 {
-                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                            menu_framebuffer[y * 256 + x] = MENU_BG;
                                         }
                                     }
                                 }
@@ -7826,7 +7938,7 @@ fn main() {
                                             let x = px + dx;
                                             let y = py + dy;
                                             if y < 240 && x < 256 {
-                                                menu_framebuffer[y * 256 + x] = 0x0C0C4C;
+                                                menu_framebuffer[y * 256 + x] = MENU_PANEL;
                                             }
                                         }
                                     }
@@ -7901,7 +8013,7 @@ fn main() {
                                         8,
                                         nb_left * 8 + 4,
                                         nb_right * 8 - 4,
-                                        0x3C3C8C,
+                                        MENU_SELECTION_BG,
                                     );
                                     draw_char_8x8(
                                         &mut menu_framebuffer,
@@ -7923,7 +8035,7 @@ fn main() {
                                         let x = 64 + dx;
                                         let y = ip_y + dy;
                                         if y < 240 && x < 256 {
-                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                            menu_framebuffer[y * 256 + x] = MENU_BG;
                                         }
                                     }
                                 }
@@ -7956,7 +8068,7 @@ fn main() {
                                         let x = 88 + dx;
                                         let y = port_y + dy;
                                         if y < 240 && x < 256 {
-                                            menu_framebuffer[y * 256 + x] = 0x000030;
+                                            menu_framebuffer[y * 256 + x] = MENU_BG;
                                         }
                                     }
                                 }
