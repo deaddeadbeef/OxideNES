@@ -8,6 +8,9 @@
 - Added an in-app ROM Library settings workflow for importing a selected folder into the fixed default library with copy or symlink mode.
 - Added an in-app active-folder picker so users can designate a different ROM library root without importing files.
 
+### Changed
+- Updated `crossbeam-epoch` to `0.9.20` to address `RUSTSEC-2026-0204` in the development dependency graph.
+
 ## [0.3.50] - 2026-06-21
 
 ### Added
