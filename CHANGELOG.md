@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.52] - 2026-07-12
+
 ### Changed
 - Refreshed the in-cabinet menu palette, hierarchy, selected states, and supporting text contrast across the home screen, settings, ROM browser, folder pickers, and pause overlays.
 - Reduced glass processing and removed chromatic aberration from software menus while preserving the configured CRT treatment for gameplay.
