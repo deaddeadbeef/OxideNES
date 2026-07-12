@@ -22,6 +22,7 @@ A feature-rich NES-compatible emulator written in Rust.
 - **Achievement system** — Local achievement definitions with unlock notifications
 - **Input recording** — Record and playback with FM2 export for TAS
 - **ROM database** — CRC-based compatibility metadata with user overrides for mapper, mirroring, and battery fixes
+- **ROM library management** — Import a folder by copy or symlink, or designate an external folder as the active library root
 - **Game Genie cheats** — Enter cheat codes in the pause menu
 - **Battery save** — Automatic SRAM persistence for cartridges that use SRAM
 - **Auto-updater** — Checks GitHub Releases for new versions
@@ -55,6 +56,8 @@ cargo build --release
 ```
 
 On first launch without a configured ROM directory, OxideNES opens a folder setup screen. Select the folder that contains your legally obtained `.nes` files; files are not bundled with the emulator.
+
+After setup, open **Settings > ROM Library** to import another folder into the fixed default library or choose a different active ROM folder.
 
 ## Controls
 

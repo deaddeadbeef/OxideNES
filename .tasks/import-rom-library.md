@@ -7,11 +7,15 @@ default fixed library folder used by OxideNES.
 
 ## Expected behavior
 
-- Provide a deterministic default library location for imported ROMs.
-- Import only NES ROM files from a selected folder.
-- Support copy and symlink import modes.
-- Keep imported ROMs out of source control.
-- Preserve the existing configured `rom_directory` behavior where possible.
+- [x] Provide a deterministic default library location for imported ROMs.
+- [x] Import only NES ROM files from a selected folder.
+- [x] Support copy and symlink import modes.
+- [x] Keep imported ROMs out of source control.
+- [x] Preserve the existing configured `rom_directory` behavior where possible.
+- [x] Expose copy and symlink import from the in-app Settings menu.
+- [x] Make the fixed default library active after a successful import.
+- [x] Allow an external folder to be designated as the active library root.
+- [x] Report import success or failure in the app.
 
 ## Verification plan
 

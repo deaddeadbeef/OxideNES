@@ -44,16 +44,42 @@ impl FileBrowser {
 
     pub fn default_dir() -> PathBuf {
         let roms_dir = default_rom_library_dir();
-        let home = env::var("USERPROFILE")
-            .or_else(|_| env::var("HOME"))
-            .unwrap_or_else(|_| ".".to_string());
-        let downloads = PathBuf::from(home).join("Downloads");
+        let home = home_dir();
+        let downloads = home.join("Downloads");
         if roms_dir.is_dir() {
             roms_dir
         } else if downloads.is_dir() {
             downloads
         } else {
             PathBuf::from(".")
+        }
+    }
+
+    pub fn new_import_source(start_dir: Option<&str>) -> Self {
+        let default_library = default_rom_library_dir();
+        let configured_start = start_dir
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .filter(|path| !paths_match(path, &default_library));
+        let dir = configured_start.unwrap_or_else(|| {
+            let home = home_dir();
+            let downloads = home.join("Downloads");
+            if downloads.is_dir() {
+                downloads
+            } else if home.is_dir() {
+                home
+            } else {
+                PathBuf::from(".")
+            }
+        });
+
+        FileBrowser {
+            entries: scan_directory(&dir),
+            current_dir: dir,
+            selected: 0,
+            scroll_offset: 0,
+            error_message: None,
+            error_timer: 0,
         }
     }
 
@@ -72,6 +98,20 @@ impl FileBrowser {
                 self.error_timer = 180;
             }
         }
+    }
+}
+
+fn home_dir() -> PathBuf {
+    env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
     }
 }
 
@@ -172,6 +212,18 @@ mod tests {
         assert_eq!(browser.scroll_offset, 0);
         assert!(browser.error_message.is_none());
         assert_eq!(browser.error_timer, 0);
+        let _ = fs::remove_dir_all(&browser.current_dir);
+    }
+
+    #[test]
+    fn import_source_browser_honors_non_library_start_directory() {
+        let dir = temp_dir("import_source");
+        fs::write(dir.join("game.nes"), [0u8; 16]).unwrap();
+
+        let browser = FileBrowser::new_import_source(Some(dir.to_string_lossy().as_ref()));
+
+        assert_eq!(browser.current_dir, dir);
+        assert_eq!(browser.entries.len(), 1);
         let _ = fs::remove_dir_all(&browser.current_dir);
     }
 }

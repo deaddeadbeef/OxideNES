@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- Added an in-app ROM Library settings workflow for importing a selected folder into the fixed default library with copy or symlink mode.
+- Added an in-app active-folder picker so users can designate a different ROM library root without importing files.
+
 ## [0.3.50] - 2026-06-21
 
 ### Added

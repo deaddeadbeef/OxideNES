@@ -85,6 +85,16 @@ pub fn import_rom_folder(
     import_rom_folder_to(source_dir, default_rom_library_dir(), mode)
 }
 
+pub fn import_rom_folder_and_configure_library(
+    config: &mut EmulatorConfig,
+    source_dir: impl AsRef<Path>,
+    mode: RomImportMode,
+) -> Result<RomImportSummary, RomImportError> {
+    let summary = import_rom_folder(source_dir, mode)?;
+    point_config_at_default_library(config);
+    Ok(summary)
+}
+
 pub fn import_rom_folder_to(
     source_dir: impl AsRef<Path>,
     target_dir: impl AsRef<Path>,
@@ -112,7 +122,7 @@ pub fn import_rom_folder_to(
 
     let mut roms = Vec::new();
     let mut skipped_entries = 0;
-    for entry in fs::read_dir(source_dir).map_err(|source| RomImportError::Io {
+    for entry in fs::read_dir(&source_canonical).map_err(|source| RomImportError::Io {
         path: source_dir.to_path_buf(),
         source,
     })? {
@@ -314,5 +324,26 @@ mod tests {
             config.rom_directory.as_deref(),
             Some(default_rom_library_dir().to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn import_and_configure_preserves_existing_root_on_failure() {
+        let missing_source = temp_dir("missing_source").join("does-not-exist");
+        let mut config = EmulatorConfig {
+            rom_directory: Some("existing-library".to_string()),
+            ..EmulatorConfig::default()
+        };
+
+        let result = import_rom_folder_and_configure_library(
+            &mut config,
+            &missing_source,
+            RomImportMode::Copy,
+        );
+
+        assert!(matches!(result, Err(RomImportError::SourceNotDirectory(_))));
+        assert_eq!(config.rom_directory.as_deref(), Some("existing-library"));
+        if let Some(root) = missing_source.parent() {
+            let _ = fs::remove_dir_all(root);
+        }
     }
 }

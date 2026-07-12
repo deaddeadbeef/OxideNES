@@ -56,8 +56,22 @@ You can also launch a specific ROM directly:
 oxidenes path/to/game.nes
 ```
 
-To import a folder of legally obtained `.nes` files into OxideNES' fixed default
-library folder, run:
+To manage ROM folders inside OxideNES, open **Settings > ROM Library**. The
+screen displays the fixed default library root and the currently active root.
+Available actions are:
+
+| Action | Result |
+| --- | --- |
+| Import Folder: Copy | Copies `.nes` files from the selected source folder into the fixed default library and makes it active |
+| Import Folder: Symlink | Creates file links in the fixed default library and makes it active |
+| Choose Active Folder | Uses the selected folder directly without copying or linking its files |
+
+In either import picker, navigate with the arrow keys and Enter, use Backspace
+to move to the parent folder, and press Tab to import the current folder. Escape
+cancels the import and returns to ROM Library settings. Existing target files
+are left untouched.
+
+The equivalent command-line import is:
 
 ```bash
 oxidenes --import-roms path/to/rom-folder --import-mode copy

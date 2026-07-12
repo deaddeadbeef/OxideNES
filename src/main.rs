@@ -33,7 +33,7 @@ use oxidenes::ppu::Region;
 use oxidenes::recording::{sha256, InputRecording};
 use oxidenes::rendering::*;
 use oxidenes::rom_library::{
-    default_rom_library_dir, import_rom_folder, point_config_at_default_library, RomImportMode,
+    default_rom_library_dir, import_rom_folder_and_configure_library, RomImportMode,
 };
 use oxidenes::romdb::RomDatabase;
 use oxidenes::scripting::ScriptEngine;
@@ -604,8 +604,60 @@ enum SubMenu {
     },
     FolderSetup {
         browser: FileBrowser,
-        from_settings: bool,
+        return_to: FolderSetupReturn,
     },
+    RomLibrary(RomLibraryState),
+    RomImport {
+        browser: FileBrowser,
+        mode: RomImportMode,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum FolderSetupReturn {
+    MainMenu,
+    RomLibrary,
+}
+
+struct RomLibraryState {
+    selected: usize,
+    status_message: Option<String>,
+    status_timer: u32,
+}
+
+impl RomLibraryState {
+    fn new(selected: usize) -> Self {
+        Self {
+            selected,
+            status_message: None,
+            status_timer: 0,
+        }
+    }
+
+    fn with_status(selected: usize, status_message: String) -> Self {
+        Self {
+            selected,
+            status_message: Some(status_message),
+            status_timer: 300,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RomLibraryAction {
+    Import(RomImportMode),
+    ChooseActiveFolder,
+    Back,
+}
+
+fn rom_library_action(selected: usize) -> Option<RomLibraryAction> {
+    match selected {
+        0 => Some(RomLibraryAction::Import(RomImportMode::Copy)),
+        1 => Some(RomLibraryAction::Import(RomImportMode::Symlink)),
+        2 => Some(RomLibraryAction::ChooseActiveFolder),
+        3 => Some(RomLibraryAction::Back),
+        _ => None,
+    }
 }
 
 struct InputSettingsState {
@@ -854,6 +906,12 @@ fn selected_marquee_key(
             .get(browser.selected)
             .map(|entry| format!("folder:{}", entry.full_path.display()))
             .unwrap_or_else(|| "folder:empty".to_string()),
+        Some(SubMenu::RomImport { browser, mode }) => browser
+            .entries
+            .get(browser.selected)
+            .map(|entry| format!("import:{}:{}", mode.as_str(), entry.full_path.display()))
+            .unwrap_or_else(|| format!("import:{}:empty", mode.as_str())),
+        Some(SubMenu::RomLibrary(state)) => format!("rom-library:{}", state.selected),
         Some(SubMenu::Settings { selected, .. }) => format!("settings:{}", selected),
         Some(SubMenu::InputSettings(state)) => format!("input:{}:{}", state.tab, state.selected),
         Some(SubMenu::CrtSettings { selected, .. }) => format!("crt:{}", selected),
@@ -888,6 +946,24 @@ mod menu_text_tests {
     fn truncation_is_char_count_based() {
         assert_eq!(truncate_with_ellipsis_chars("ABCDEFGHIJ", 7), "ABCD...");
         assert_eq!(truncate_with_ellipsis_chars("ABCDE", 7), "ABCDE");
+    }
+
+    #[test]
+    fn rom_library_actions_map_copy_symlink_folder_and_back() {
+        assert_eq!(
+            rom_library_action(0),
+            Some(RomLibraryAction::Import(RomImportMode::Copy))
+        );
+        assert_eq!(
+            rom_library_action(1),
+            Some(RomLibraryAction::Import(RomImportMode::Symlink))
+        );
+        assert_eq!(
+            rom_library_action(2),
+            Some(RomLibraryAction::ChooseActiveFolder)
+        );
+        assert_eq!(rom_library_action(3), Some(RomLibraryAction::Back));
+        assert_eq!(rom_library_action(4), None);
     }
 }
 
@@ -1233,17 +1309,6 @@ fn render_settings(
     draw_text_centered_8x8(fb, "\x11 SETTINGS \x11", 4, MENU_GOLD);
     draw_separator_line(fb, 5);
 
-    let rom_folder_display = if let Some(ref dir) = cfg.rom_directory {
-        let s = dir.replace('\\', "/").to_uppercase();
-        if s.len() > 17 {
-            format!("...{}", &s[s.len() - 14..])
-        } else {
-            s
-        }
-    } else {
-        "NOT SET".to_string()
-    };
-
     let settings_items = [
         format!("CRT FILTER: {}", if cfg.crt_enabled { "ON" } else { "OFF" }),
         format!(
@@ -1262,7 +1327,7 @@ fn render_settings(
             "CHECK FOR UPDATES: {}",
             if cfg.check_for_updates { "ON" } else { "OFF" }
         ),
-        format!("ROM FOLDER: {}", rom_folder_display),
+        "ROM LIBRARY >".to_string(),
     ];
     let setting_rows = [7, 9, 11, 13, 15, 17, 19, 21, 23];
 
@@ -1285,6 +1350,67 @@ fn render_settings(
 
     draw_text_centered_8x8(fb, "ENTER/LEFT/RIGHT TO CHANGE", 26, MENU_DARK_GRAY);
     draw_text_centered_8x8(fb, "ESC TO GO BACK", 27, MENU_DARK_GRAY);
+}
+
+fn render_rom_library(
+    fb: &mut [u32],
+    cfg: &EmulatorConfig,
+    state: &RomLibraryState,
+    cursor_visible: bool,
+) {
+    for pixel in fb.iter_mut() {
+        *pixel = MENU_BG;
+    }
+
+    draw_double_border_top(fb, 1);
+    draw_double_border_bottom(fb, 28);
+    draw_side_borders(fb);
+
+    draw_text_8x8(fb, "MENU > SETTINGS >", 1, 2, 0x666666);
+    draw_text_8x8(fb, "ROMS", 19, 2, 0xCCCCCC);
+    draw_text_centered_8x8(fb, "\x11 ROM LIBRARY \x11", 4, MENU_GOLD);
+    draw_separator_line(fb, 5);
+
+    draw_text_centered_8x8(fb, "DEFAULT LIBRARY ROOT", 7, MENU_GRAY);
+    let default_root = truncate_path_display(&default_rom_library_dir(), 28);
+    draw_text_centered_8x8(fb, &default_root, 8, MENU_GOLD);
+
+    let active_root = cfg
+        .rom_directory
+        .as_deref()
+        .map(Path::new)
+        .map(|path| truncate_path_display(path, 22))
+        .unwrap_or_else(|| "NOT SET".to_string());
+    draw_text_8x8(fb, "ACTIVE:", 2, 10, MENU_DARK_GRAY);
+    draw_text_8x8(fb, &active_root, 10, 10, MENU_GRAY);
+
+    let items = [
+        "IMPORT FOLDER: COPY >",
+        "IMPORT FOLDER: SYMLINK >",
+        "CHOOSE ACTIVE FOLDER >",
+        "BACK",
+    ];
+    let rows = [13, 15, 17, 19];
+    for (index, (item, row)) in items.iter().zip(rows).enumerate() {
+        let color = if index == state.selected {
+            MENU_WHITE
+        } else {
+            MENU_GRAY
+        };
+        if index == state.selected && cursor_visible {
+            draw_char_8x8(fb, '\x10', 3, row, MENU_WHITE);
+        }
+        draw_text_8x8(fb, item, 5, row, color);
+    }
+
+    if let Some(message) = state.status_message.as_deref() {
+        let message = truncate_with_ellipsis_chars(message, 28);
+        draw_text_centered_8x8(fb, &message, 22, MENU_GOLD);
+    }
+
+    draw_separator_line(fb, 24);
+    draw_text_centered_8x8(fb, "ENTER: SELECT", 25, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, "ESC: BACK", 26, MENU_DARK_GRAY);
 }
 
 fn render_crt_settings(
@@ -1635,6 +1761,59 @@ fn render_folder_setup(
     cursor_visible: bool,
     marquee_frame: u32,
 ) {
+    render_folder_picker(
+        fb,
+        browser,
+        cursor_visible,
+        marquee_frame,
+        FolderPickerLabels {
+            heading: "WELCOME!",
+            subtitle: "SELECT YOUR ROM FOLDER",
+            navigation_hint: "A:OPEN  B:PARENT",
+            action_hint: "TAB: USE THIS FOLDER",
+        },
+    );
+}
+
+fn render_rom_import(
+    fb: &mut [u32],
+    browser: &FileBrowser,
+    mode: RomImportMode,
+    cursor_visible: bool,
+    marquee_frame: u32,
+) {
+    let subtitle = match mode {
+        RomImportMode::Copy => "IMPORT SOURCE: COPY",
+        RomImportMode::Symlink => "IMPORT SOURCE: SYMLINK",
+    };
+    render_folder_picker(
+        fb,
+        browser,
+        cursor_visible,
+        marquee_frame,
+        FolderPickerLabels {
+            heading: "ROM LIBRARY",
+            subtitle,
+            navigation_hint: "ENTER:OPEN  BKSP:PARENT",
+            action_hint: "TAB:IMPORT  ESC:CANCEL",
+        },
+    );
+}
+
+struct FolderPickerLabels<'a> {
+    heading: &'a str,
+    subtitle: &'a str,
+    navigation_hint: &'a str,
+    action_hint: &'a str,
+}
+
+fn render_folder_picker(
+    fb: &mut [u32],
+    browser: &FileBrowser,
+    cursor_visible: bool,
+    marquee_frame: u32,
+    labels: FolderPickerLabels<'_>,
+) {
     const VISIBLE_ROWS: usize = 14;
     const FIRST_ROW: usize = 9;
     const DIR_COLOR: u32 = 0x5C94FC;
@@ -1652,8 +1831,8 @@ fn render_folder_setup(
     draw_text_centered_8x8(fb, "\x11 OXIDENES \x11", 2, MENU_GOLD);
     draw_separator_line(fb, 3);
 
-    draw_text_centered_8x8(fb, "WELCOME!", 4, MENU_WHITE);
-    draw_text_centered_8x8(fb, "SELECT YOUR ROM FOLDER", 6, MENU_GRAY);
+    draw_text_centered_8x8(fb, labels.heading, 4, MENU_WHITE);
+    draw_text_centered_8x8(fb, labels.subtitle, 6, MENU_GRAY);
 
     let path_str = truncate_path_display(&browser.current_dir, 28);
     draw_text_8x8(fb, &path_str, 2, 7, MENU_GOLD);
@@ -1712,8 +1891,8 @@ fn render_folder_setup(
     }
 
     draw_separator_line(fb, 23);
-    draw_text_centered_8x8(fb, "A:OPEN  B:PARENT", 24, MENU_DARK_GRAY);
-    draw_text_centered_8x8(fb, "TAB: USE THIS FOLDER", 25, MENU_GOLD);
+    draw_text_centered_8x8(fb, labels.navigation_hint, 24, MENU_DARK_GRAY);
+    draw_text_centered_8x8(fb, labels.action_hint, 25, MENU_GOLD);
 
     // .nes file count hint
     let nes_count = browser.entries.iter().filter(|e| !e.is_dir).count();
@@ -2373,7 +2552,7 @@ fn main() {
         if let EmulatorState::Menu(ref mut menu) = emulator_state {
             menu.submenu = Some(SubMenu::FolderSetup {
                 browser: FileBrowser::new(None),
-                from_settings: false,
+                return_to: FolderSetupReturn::MainMenu,
             });
         }
     }
@@ -2934,17 +3113,15 @@ fn main() {
                                     save_config(&config);
                                 }
                                 8 => {
-                                    // Open folder setup to change ROM directory
+                                    // Open ROM library management
                                     play_menu_sound(
                                         &mut producer,
                                         MenuSound::Confirm,
                                         actual_sample_rate,
                                         audio_volume as f32 / 100.0,
                                     );
-                                    menu.submenu = Some(SubMenu::FolderSetup {
-                                        browser: FileBrowser::new(config.rom_directory.as_deref()),
-                                        from_settings: true,
-                                    });
+                                    menu.submenu =
+                                        Some(SubMenu::RomLibrary(RomLibraryState::new(0)));
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
                                     menu.transition_timer = 6;
@@ -3863,9 +4040,230 @@ fn main() {
                             }
                         }
                     }
+                    Some(SubMenu::RomLibrary(ref mut state)) => {
+                        if state.status_timer > 0 {
+                            state.status_timer -= 1;
+                            if state.status_timer == 0 {
+                                state.status_message = None;
+                            }
+                        }
+
+                        let mut selection_moved = false;
+                        if input.up && state.selected > 0 {
+                            state.selected -= 1;
+                            selection_moved = true;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                        }
+                        if input.down && state.selected < 3 {
+                            state.selected += 1;
+                            selection_moved = true;
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                        }
+                        if selection_moved && sound_cooldown == 0 {
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Cursor,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            sound_cooldown = 3;
+                        }
+
+                        let mut next_submenu = None;
+                        if input.confirm {
+                            next_submenu = match rom_library_action(state.selected) {
+                                Some(RomLibraryAction::Import(mode)) => Some(SubMenu::RomImport {
+                                    browser: FileBrowser::new_import_source(
+                                        config.rom_directory.as_deref(),
+                                    ),
+                                    mode,
+                                }),
+                                Some(RomLibraryAction::ChooseActiveFolder) => {
+                                    Some(SubMenu::FolderSetup {
+                                        browser: FileBrowser::new(config.rom_directory.as_deref()),
+                                        return_to: FolderSetupReturn::RomLibrary,
+                                    })
+                                }
+                                Some(RomLibraryAction::Back) => Some(SubMenu::Settings {
+                                    selected: 8,
+                                    value_flash: 0,
+                                }),
+                                None => None,
+                            };
+                        } else if input.back {
+                            next_submenu = Some(SubMenu::Settings {
+                                selected: 8,
+                                value_flash: 0,
+                            });
+                        }
+
+                        if let Some(next_submenu) = next_submenu {
+                            play_menu_sound(
+                                &mut producer,
+                                if input.back || state.selected == 3 {
+                                    MenuSound::Back
+                                } else {
+                                    MenuSound::Confirm
+                                },
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            menu.submenu = Some(next_submenu);
+                            menu.cursor_timer = 0;
+                            menu.cursor_visible = true;
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
+                        }
+                    }
+                    Some(SubMenu::RomImport {
+                        ref mut browser,
+                        mode,
+                    }) => {
+                        if browser.error_timer > 0 {
+                            browser.error_timer -= 1;
+                            if browser.error_timer == 0 {
+                                browser.error_message = None;
+                            }
+                        }
+
+                        let count = browser.entries.len();
+                        let mut selection_moved = false;
+                        if count > 0 {
+                            if input.up && browser.selected > 0 {
+                                browser.selected -= 1;
+                                selection_moved = true;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if browser.selected < browser.scroll_offset {
+                                    browser.scroll_offset = browser.selected;
+                                }
+                            }
+                            if input.down && browser.selected < count - 1 {
+                                browser.selected += 1;
+                                selection_moved = true;
+                                menu.cursor_timer = 0;
+                                menu.cursor_visible = true;
+                                if browser.selected >= browser.scroll_offset + 14 {
+                                    browser.scroll_offset = browser.selected.saturating_sub(13);
+                                }
+                            }
+                            if input.confirm {
+                                let entry = &browser.entries[browser.selected];
+                                if entry.is_dir {
+                                    let entry_path = entry.full_path.clone();
+                                    browser.navigate_to(&entry_path);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                }
+                            }
+                        }
+                        if selection_moved && sound_cooldown == 0 {
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Cursor,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            sound_cooldown = 3;
+                        }
+
+                        let mut import_source = None;
+                        let mut cancel_import = false;
+                        if input.select {
+                            import_source = Some(browser.current_dir.clone());
+                        } else if input.back {
+                            cancel_import = true;
+                        } else if input.backspace {
+                            if let Some(parent) =
+                                browser.current_dir.parent().map(Path::to_path_buf)
+                            {
+                                if !parent.as_os_str().is_empty() {
+                                    browser.navigate_to(&parent);
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Back,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                    menu.cursor_timer = 0;
+                                    menu.cursor_visible = true;
+                                }
+                            }
+                        }
+
+                        if let Some(source_dir) = import_source {
+                            match import_rom_folder_and_configure_library(
+                                &mut config,
+                                &source_dir,
+                                mode,
+                            ) {
+                                Ok(summary) => {
+                                    save_config(&config);
+                                    let verb = match mode {
+                                        RomImportMode::Copy => "COPIED",
+                                        RomImportMode::Symlink => "LINKED",
+                                    };
+                                    let skipped =
+                                        summary.skipped_existing + summary.skipped_entries;
+                                    let message = format!(
+                                        "{} {} ROMS, {} SKIPPED",
+                                        verb, summary.imported, skipped
+                                    );
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Confirm,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                    menu.submenu = Some(SubMenu::RomLibrary(
+                                        RomLibraryState::with_status(0, message),
+                                    ));
+                                    menu.transition_timer = 6;
+                                    menu.transition_out = false;
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "ROM import failed for {}: {}",
+                                        source_dir.display(),
+                                        error
+                                    );
+                                    browser.error_message = Some("IMPORT FAILED".to_string());
+                                    browser.error_timer = 300;
+                                    play_menu_sound(
+                                        &mut producer,
+                                        MenuSound::Error,
+                                        actual_sample_rate,
+                                        audio_volume as f32 / 100.0,
+                                    );
+                                }
+                            }
+                        } else if cancel_import {
+                            play_menu_sound(
+                                &mut producer,
+                                MenuSound::Back,
+                                actual_sample_rate,
+                                audio_volume as f32 / 100.0,
+                            );
+                            menu.submenu =
+                                Some(SubMenu::RomLibrary(RomLibraryState::new(match mode {
+                                    RomImportMode::Copy => 0,
+                                    RomImportMode::Symlink => 1,
+                                })));
+                            menu.transition_timer = 6;
+                            menu.transition_out = false;
+                        }
+                    }
                     Some(SubMenu::FolderSetup {
                         ref mut browser,
-                        from_settings,
+                        return_to,
                     }) => {
                         // Update error timer
                         if browser.error_timer > 0 {
@@ -3931,7 +4329,7 @@ fn main() {
                         }
 
                         // Determine transition action (extract data before releasing borrow)
-                        let mut folder_action: u8 = 0; // 0=none, 1=select folder, 2=back to settings
+                        let mut folder_action: u8 = 0; // 0=none, 1=select folder, 2=back
                         let mut selected_dir = String::new();
 
                         if input.select {
@@ -3950,16 +4348,16 @@ fn main() {
                                     browser.navigate_to(&parent);
                                     menu.cursor_timer = 0;
                                     menu.cursor_visible = true;
-                                } else if from_settings {
+                                } else if !matches!(return_to, FolderSetupReturn::MainMenu) {
                                     folder_action = 2;
                                 }
-                            } else if from_settings {
+                            } else if !matches!(return_to, FolderSetupReturn::MainMenu) {
                                 folder_action = 2;
                             }
                         }
 
                         // Apply transitions (borrow released by match arm end via early extraction)
-                        let fs_from_settings = from_settings;
+                        let folder_return = return_to;
                         if folder_action == 1 {
                             config.rom_directory = Some(selected_dir);
                             save_config(&config);
@@ -3969,14 +4367,15 @@ fn main() {
                                 actual_sample_rate,
                                 audio_volume as f32 / 100.0,
                             );
-                            if fs_from_settings {
-                                menu.submenu = Some(SubMenu::Settings {
-                                    selected: 8,
-                                    value_flash: 0,
-                                });
-                            } else {
-                                menu.submenu = None;
-                            }
+                            menu.submenu = match folder_return {
+                                FolderSetupReturn::MainMenu => None,
+                                FolderSetupReturn::RomLibrary => {
+                                    Some(SubMenu::RomLibrary(RomLibraryState::with_status(
+                                        2,
+                                        "ACTIVE FOLDER UPDATED".to_string(),
+                                    )))
+                                }
+                            };
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             menu.transition_timer = 6;
@@ -3988,10 +4387,12 @@ fn main() {
                                 actual_sample_rate,
                                 audio_volume as f32 / 100.0,
                             );
-                            menu.submenu = Some(SubMenu::Settings {
-                                selected: 8,
-                                value_flash: 0,
-                            });
+                            menu.submenu = match folder_return {
+                                FolderSetupReturn::MainMenu => None,
+                                FolderSetupReturn::RomLibrary => {
+                                    Some(SubMenu::RomLibrary(RomLibraryState::new(2)))
+                                }
+                            };
                             menu.cursor_timer = 0;
                             menu.cursor_visible = true;
                             menu.transition_timer = 6;
@@ -4221,6 +4622,23 @@ fn main() {
                         if *value_flash > 0 {
                             *value_flash -= 1;
                         }
+                    }
+                    Some(SubMenu::RomLibrary(ref state)) => {
+                        render_rom_library(
+                            &mut menu_framebuffer,
+                            &config,
+                            state,
+                            menu.cursor_visible,
+                        );
+                    }
+                    Some(SubMenu::RomImport { ref browser, mode }) => {
+                        render_rom_import(
+                            &mut menu_framebuffer,
+                            browser,
+                            mode,
+                            menu.cursor_visible,
+                            menu.marquee_frame,
+                        );
                     }
                     Some(SubMenu::FolderSetup { ref browser, .. }) => {
                         render_folder_setup(
@@ -8302,16 +8720,15 @@ fn run_rom_import_command(args: &[String]) -> ! {
         RomImportMode::Copy
     };
 
-    match import_rom_folder(source_dir, mode) {
+    let mut config = load_config();
+    match import_rom_folder_and_configure_library(&mut config, source_dir, mode) {
         Ok(summary) => {
-            let mut config = load_config();
-            let default_dir = point_config_at_default_library(&mut config);
             save_config(&config);
             println!(
                 "Imported {} NES ROM(s) with {} mode into {}",
                 summary.imported,
                 summary.mode.as_str(),
-                default_dir.display()
+                summary.target_dir.display()
             );
             if summary.skipped_existing > 0 {
                 println!(
